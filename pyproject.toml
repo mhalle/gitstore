@@ -15,5 +15,8 @@ dev = [
     "pytest>=8.0",
 ]
 
+[tool.hatch.build.targets.wheel]
+packages = ["src/gitstore"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
