@@ -1,0 +1,213 @@
+"""Low-level tree manipulation for gitstore.
+
+Provides recursive tree rebuild and path-based read helpers
+on top of pygit2's TreeBuilder.
+"""
+
+from __future__ import annotations
+
+from collections import defaultdict
+from typing import Iterator
+
+import pygit2
+
+
+GIT_FILEMODE_TREE = 0o040000
+GIT_FILEMODE_BLOB = 0o100644
+GIT_OBJECT_TREE = pygit2.GIT_OBJECT_TREE
+
+
+def _normalize_path(path: str) -> str:
+    """Normalize a path: strip leading/trailing slashes, reject bad segments."""
+    path = path.strip("/")
+    if not path:
+        raise ValueError("Path must not be empty")
+    segments = path.split("/")
+    for seg in segments:
+        if not seg:
+            raise ValueError(f"Empty segment in path: {path!r}")
+        if seg in (".", ".."):
+            raise ValueError(f"Invalid path segment: {seg!r}")
+    return "/".join(segments)
+
+
+def rebuild_tree(
+    repo: pygit2.Repository,
+    base_tree_oid: pygit2.Oid | None,
+    writes: dict[str, bytes],
+    removes: set[str],
+) -> pygit2.Oid:
+    """Rebuild a tree with writes and removes applied.
+
+    Only the ancestor chain from changed leaves to root is rebuilt.
+    Sibling subtrees are shared by hash reference.
+
+    Args:
+        repo: The pygit2 repository.
+        base_tree_oid: OID of the existing tree (or None for empty).
+        writes: Mapping of normalized path → blob data.
+        removes: Set of normalized paths to remove.
+
+    Returns:
+        OID of the new root tree.
+    """
+    # Group changes by first path segment
+    sub_writes: dict[str, dict[str, bytes]] = defaultdict(dict)
+    leaf_writes: dict[str, bytes] = {}
+    sub_removes: dict[str, set[str]] = defaultdict(set)
+    leaf_removes: set[str] = set()
+
+    for path, data in writes.items():
+        parts = path.split("/", 1)
+        if len(parts) == 1:
+            leaf_writes[parts[0]] = data
+        else:
+            sub_writes[parts[0]][parts[1]] = data
+
+    for path in removes:
+        parts = path.split("/", 1)
+        if len(parts) == 1:
+            leaf_removes.add(parts[0])
+        else:
+            sub_removes[parts[0]].add(parts[1])
+
+    # Seed TreeBuilder from existing tree
+    if base_tree_oid is not None:
+        tb = repo.TreeBuilder(repo[base_tree_oid])
+    else:
+        tb = repo.TreeBuilder()
+
+    # Collect existing subtree entries for dirs we need to recurse into
+    existing_subtrees: dict[str, pygit2.Oid] = {}
+    if base_tree_oid is not None:
+        tree = repo[base_tree_oid]
+        for entry in tree:
+            if entry.filemode == GIT_FILEMODE_TREE:
+                existing_subtrees[entry.name] = entry.id
+
+    # Apply leaf writes (may overwrite existing tree entries)
+    for name, data in leaf_writes.items():
+        blob_oid = repo.create_blob(data)
+        tb.insert(name, blob_oid, GIT_FILEMODE_BLOB)
+
+    # Apply leaf removes (silently ignore missing — callers check existence)
+    for name in leaf_removes:
+        try:
+            tb.remove(name)
+        except pygit2.GitError:
+            pass
+
+    # Recurse into subtrees
+    all_subdirs = set(sub_writes.keys()) | set(sub_removes.keys())
+    for subdir in all_subdirs:
+        existing_oid = existing_subtrees.get(subdir)
+        # Check if there's a non-tree entry at this name that we need to replace
+        if existing_oid is None and base_tree_oid is not None:
+            tree = repo[base_tree_oid]
+            try:
+                entry = tree[subdir]
+                if entry.filemode != GIT_FILEMODE_TREE:
+                    # Remove the blob entry so we can replace with a tree
+                    tb.remove(subdir)
+            except KeyError:
+                pass
+
+        new_subtree_oid = rebuild_tree(
+            repo,
+            existing_oid,
+            sub_writes.get(subdir, {}),
+            sub_removes.get(subdir, set()),
+        )
+
+        # Prune empty directories
+        new_subtree = repo[new_subtree_oid]
+        if len(new_subtree) == 0:
+            try:
+                tb.remove(subdir)
+            except pygit2.GitError:
+                pass
+        else:
+            tb.insert(subdir, new_subtree_oid, GIT_FILEMODE_TREE)
+
+    return tb.write()
+
+
+def _walk_to(
+    repo: pygit2.Repository, tree_oid: pygit2.Oid, path: str
+) -> pygit2.Object:
+    """Walk tree to the object at the given path."""
+    segments = path.split("/")
+    obj = repo[tree_oid]
+    for i, seg in enumerate(segments):
+        if obj.type != GIT_OBJECT_TREE:
+            partial = "/".join(segments[: i])
+            raise NotADirectoryError(partial)
+        try:
+            entry = obj[seg]
+        except KeyError:
+            raise FileNotFoundError(path)
+        obj = repo[entry.id]
+    return obj
+
+
+def read_blob_at_path(
+    repo: pygit2.Repository, tree_oid: pygit2.Oid, path: str
+) -> bytes:
+    """Read a blob at the given path in the tree."""
+    path = _normalize_path(path)
+    obj = _walk_to(repo, tree_oid, path)
+    if obj.type == GIT_OBJECT_TREE:
+        raise IsADirectoryError(path)
+    return obj.data
+
+
+def list_tree_at_path(
+    repo: pygit2.Repository, tree_oid: pygit2.Oid, path: str | None = None
+) -> list[str]:
+    """List entries at the given path (or root if path is None)."""
+    if path is None or path.strip("/") == "":
+        tree = repo[tree_oid]
+    else:
+        path = _normalize_path(path)
+        obj = _walk_to(repo, tree_oid, path)
+        if obj.type != GIT_OBJECT_TREE:
+            raise NotADirectoryError(path)
+        tree = obj
+    return [entry.name for entry in tree]
+
+
+def walk_tree(
+    repo: pygit2.Repository,
+    tree_oid: pygit2.Oid,
+    prefix: str = "",
+) -> Iterator[tuple[str, list[str], list[str]]]:
+    """Walk the tree recursively, yielding (dirpath, dirnames, filenames)."""
+    tree = repo[tree_oid]
+    dirs: list[str] = []
+    files: list[str] = []
+    dir_oids: list[tuple[str, pygit2.Oid]] = []
+
+    for entry in tree:
+        if entry.filemode == GIT_FILEMODE_TREE:
+            dirs.append(entry.name)
+            dir_oids.append((entry.name, entry.id))
+        else:
+            files.append(entry.name)
+
+    yield (prefix, dirs, files)
+
+    for name, oid in dir_oids:
+        child_prefix = f"{prefix}/{name}" if prefix else name
+        yield from walk_tree(repo, oid, child_prefix)
+
+
+def exists_at_path(
+    repo: pygit2.Repository, tree_oid: pygit2.Oid, path: str
+) -> bool:
+    """Check if a path exists in the tree."""
+    path = _normalize_path(path)
+    try:
+        _walk_to(repo, tree_oid, path)
+        return True
+    except (FileNotFoundError, NotADirectoryError):
+        return False
