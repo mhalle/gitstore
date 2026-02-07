@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Iterator
 
+from .exceptions import StaleSnapshotError
 from .tree import (
     _normalize_path,
     read_blob_at_path,
@@ -34,6 +36,12 @@ class FS:
     @property
     def _writable(self) -> bool:
         return self._branch is not None
+
+    def __repr__(self) -> str:
+        short = str(self._commit_oid)[:7]
+        if self._branch:
+            return f"FS(branch={self._branch!r}, commit={short})"
+        return f"FS(commit={short})"
 
     @property
     def hash(self) -> str:
@@ -69,11 +77,11 @@ class FS:
     def exists(self, path: str) -> bool:
         return exists_at_path(self._store._repo, self._tree_oid, path)
 
-    def open(self, path: str, mode: str = "r"):
-        if mode == "r":
+    def open(self, path: str, mode: str = "rb"):
+        if mode == "rb":
             from ._fileobj import ReadableFile
             return ReadableFile(self.read(path))
-        elif mode == "w":
+        elif mode == "wb":
             if not self._writable:
                 raise PermissionError("Cannot write to a read-only snapshot")
             from ._fileobj import WritableFile
@@ -94,6 +102,12 @@ class FS:
 
         repo = self._store._repo
         sig = self._store._signature
+
+        ref = repo.references[f"refs/heads/{self._branch}"]
+        if ref.resolve().target != self._commit_oid:
+            raise StaleSnapshotError(
+                f"Branch {self._branch!r} has advanced since this snapshot"
+            )
 
         new_tree_oid = rebuild_tree(repo, self._tree_oid, writes, removes)
         new_commit_oid = repo.create_commit(
@@ -119,6 +133,18 @@ class FS:
     def batch(self):
         from .batch import Batch
         return Batch(self)
+
+    # --- Dump ---
+
+    def dump(self, path: str | Path) -> None:
+        """Write the tree contents to a directory on the filesystem."""
+        path = Path(path)
+        for dirpath, dirnames, filenames in self.walk():
+            dir_on_disk = path / dirpath if dirpath else path
+            dir_on_disk.mkdir(parents=True, exist_ok=True)
+            for filename in filenames:
+                store_path = f"{dirpath}/{filename}" if dirpath else filename
+                (dir_on_disk / filename).write_bytes(self.read(store_path))
 
     # --- History ---
 

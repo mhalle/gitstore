@@ -34,9 +34,9 @@ class Batch:
         self._removes.add(path)
         self._ops.append(f"Remove {path}")
 
-    def open(self, path: str, mode: str = "w"):
-        if mode != "w":
-            raise ValueError(f"Batch open only supports 'w' mode, got {mode!r}")
+    def open(self, path: str, mode: str = "wb"):
+        if mode != "wb":
+            raise ValueError(f"Batch open only supports 'wb' mode, got {mode!r}")
         from ._fileobj import BatchWritableFile
         return BatchWritableFile(self, path)
 

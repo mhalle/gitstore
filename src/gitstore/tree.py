@@ -103,7 +103,6 @@ def rebuild_tree(
         existing_oid = existing_subtrees.get(subdir)
         # Check if there's a non-tree entry at this name that we need to replace
         if existing_oid is None and base_tree_oid is not None:
-            tree = repo[base_tree_oid]
             try:
                 entry = tree[subdir]
                 if entry.filemode != GIT_FILEMODE_TREE:

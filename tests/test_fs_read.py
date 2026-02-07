@@ -65,6 +65,11 @@ class TestWalk:
         assert result[0][0] == "src"
         assert sorted(result[0][2]) == ["main.py"]
 
+    def test_walk_on_file_raises(self, repo_with_files):
+        _, fs = repo_with_files
+        with pytest.raises(NotADirectoryError):
+            list(fs.walk("hello.txt"))
+
 
 class TestExists:
     def test_exists_file(self, repo_with_files):
@@ -78,6 +83,32 @@ class TestExists:
     def test_not_exists(self, repo_with_files):
         _, fs = repo_with_files
         assert not fs.exists("nope.txt")
+
+
+class TestDump:
+    def test_dump_creates_files(self, repo_with_files, tmp_path):
+        _, fs = repo_with_files
+        out = tmp_path / "out"
+        fs.dump(out)
+        assert (out / "hello.txt").read_bytes() == b"Hello!"
+        assert (out / "src" / "main.py").read_bytes() == b"print('hi')"
+        assert (out / "src" / "lib" / "util.py").read_bytes() == b"# util"
+
+    def test_dump_empty_tree(self, tmp_path):
+        repo = GitStore.open(tmp_path / "test.git", create="main")
+        fs = repo.branches["main"]
+        out = tmp_path / "out"
+        fs.dump(out)
+        assert out.is_dir()
+        assert list(out.iterdir()) == []
+
+    def test_dump_overwrites_existing(self, repo_with_files, tmp_path):
+        _, fs = repo_with_files
+        out = tmp_path / "out"
+        out.mkdir()
+        (out / "hello.txt").write_bytes(b"old")
+        fs.dump(out)
+        assert (out / "hello.txt").read_bytes() == b"Hello!"
 
 
 class TestProperties:

@@ -75,6 +75,12 @@ class TestBatch:
     def test_batch_open(self, repo_fs):
         _, fs = repo_fs
         with fs.batch() as b:
-            with b.open("via_file.txt", "w") as f:
+            with b.open("via_file.txt", "wb") as f:
                 f.write(b"file data")
         assert b.fs.read("via_file.txt") == b"file data"
+
+    def test_invalid_batch_open_mode(self, repo_fs):
+        _, fs = repo_fs
+        with fs.batch() as b:
+            with pytest.raises(ValueError):
+                b.open("x.txt", "rb")

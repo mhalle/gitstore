@@ -2,7 +2,7 @@
 
 import pytest
 
-from gitstore import GitStore
+from gitstore import GitStore, StaleSnapshotError
 
 
 @pytest.fixture
@@ -70,3 +70,28 @@ class TestRemove:
         repo.tags["v1"] = fs
         with pytest.raises(PermissionError):
             repo.tags["v1"].remove("x.txt")
+
+
+class TestStaleSnapshot:
+    def test_stale_write_raises(self, repo_fs):
+        _, fs = repo_fs
+        # Advance the branch behind fs's back
+        fs.write("first.txt", b"first")
+        with pytest.raises(StaleSnapshotError):
+            fs.write("second.txt", b"second")
+
+    def test_stale_remove_raises(self, repo_fs):
+        _, fs = repo_fs
+        fs2 = fs.write("a.txt", b"a")
+        # fs2 is now stale because branch advanced past fs
+        fs2.write("b.txt", b"b")
+        with pytest.raises(StaleSnapshotError):
+            fs2.remove("a.txt")
+
+    def test_stale_batch_raises(self, repo_fs):
+        _, fs = repo_fs
+        # Advance the branch behind fs's back
+        fs.write("first.txt", b"first")
+        with pytest.raises(StaleSnapshotError):
+            with fs.batch() as b:
+                b.write("second.txt", b"second")

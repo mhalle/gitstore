@@ -16,19 +16,19 @@ def repo_fs(tmp_path):
 class TestReadableFile:
     def test_read_context_manager(self, repo_fs):
         _, fs = repo_fs
-        with fs.open("hello.txt", "r") as f:
+        with fs.open("hello.txt", "rb") as f:
             data = f.read()
         assert data == b"Hello World"
 
     def test_read_partial(self, repo_fs):
         _, fs = repo_fs
-        with fs.open("hello.txt", "r") as f:
+        with fs.open("hello.txt", "rb") as f:
             assert f.read(5) == b"Hello"
             assert f.read(6) == b" World"
 
     def test_seek_tell(self, repo_fs):
         _, fs = repo_fs
-        with fs.open("hello.txt", "r") as f:
+        with fs.open("hello.txt", "rb") as f:
             f.seek(6)
             assert f.tell() == 6
             assert f.read() == b"World"
@@ -36,20 +36,20 @@ class TestReadableFile:
     def test_read_missing_raises(self, repo_fs):
         _, fs = repo_fs
         with pytest.raises(FileNotFoundError):
-            fs.open("nope.txt", "r")
+            fs.open("nope.txt", "rb")
 
 
 class TestWritableFile:
     def test_write_context_manager(self, repo_fs):
         _, fs = repo_fs
-        with fs.open("new.txt", "w") as f:
+        with fs.open("new.txt", "wb") as f:
             f.write(b"New content")
         assert f.fs is not None
         assert f.fs.read("new.txt") == b"New content"
 
     def test_fs_attribute(self, repo_fs):
         _, fs = repo_fs
-        with fs.open("x.txt", "w") as f:
+        with fs.open("x.txt", "wb") as f:
             f.write(b"x")
         new_fs = f.fs
         assert new_fs.exists("x.txt")
@@ -58,7 +58,7 @@ class TestWritableFile:
     def test_exception_no_commit(self, repo_fs):
         _, fs = repo_fs
         try:
-            with fs.open("fail.txt", "w") as f:
+            with fs.open("fail.txt", "wb") as f:
                 f.write(b"data")
                 raise RuntimeError("oops")
         except RuntimeError:
@@ -71,4 +71,9 @@ class TestWritableFile:
         repo.tags["v1"] = fs
         tag_fs = repo.tags["v1"]
         with pytest.raises(PermissionError):
-            tag_fs.open("x.txt", "w")
+            tag_fs.open("x.txt", "wb")
+
+    def test_invalid_open_mode(self, repo_fs):
+        _, fs = repo_fs
+        with pytest.raises(ValueError):
+            fs.open("hello.txt", "a")

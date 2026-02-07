@@ -17,6 +17,9 @@ class GitStore:
         self.branches = RefDict(self, "refs/heads/")
         self.tags = RefDict(self, "refs/tags/")
 
+    def __repr__(self) -> str:
+        return f"GitStore({self._repo.path!r})"
+
     @classmethod
     def open(
         cls,
@@ -74,6 +77,10 @@ class RefDict:
     def _is_tags(self) -> bool:
         return self._prefix == "refs/tags/"
 
+    def __repr__(self) -> str:
+        kind = "tags" if self._is_tags else "branches"
+        return f"RefDict({kind!r}, len={len(self)})"
+
     def _ref_name(self, name: str) -> str:
         return f"{self._prefix}{name}"
 
@@ -102,6 +109,8 @@ class RefDict:
         ref_name = self._ref_name(name)
 
         if ref_name in repo.references:
+            if self._is_tags:
+                raise KeyError(f"Tag {name!r} already exists")
             repo.references[ref_name].set_target(fs._commit_oid)
         else:
             repo.references.create(ref_name, fs._commit_oid)

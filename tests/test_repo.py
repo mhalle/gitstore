@@ -108,3 +108,15 @@ class TestRefDictTags:
         repo.tags["v1"] = repo.branches["main"]
         repo.tags["v2"] = repo.branches["main"]
         assert sorted(repo.tags) == ["v1", "v2"]
+
+    def test_tag_overwrite_raises(self, tmp_path):
+        repo = GitStore.open(tmp_path / "test.git", create="main")
+        fs = repo.branches["main"]
+        repo.tags["v1"] = fs
+        with pytest.raises(KeyError):
+            repo.tags["v1"] = fs
+
+    def test_invalid_type_in_setitem(self, tmp_path):
+        repo = GitStore.open(tmp_path / "test.git", create="main")
+        with pytest.raises(TypeError):
+            repo.branches["x"] = "string"
