@@ -20,21 +20,29 @@ class Batch:
         self._writes: dict[str, bytes] = {}
         self._removes: set[str] = set()
         self._ops: list[str] = []
+        self._closed = False
         self.fs: FS | None = None
 
+    def _check_open(self) -> None:
+        if self._closed:
+            raise RuntimeError("Batch is closed")
+
     def write(self, path: str, data: bytes) -> None:
+        self._check_open()
         path = _normalize_path(path)
         self._removes.discard(path)
         self._writes[path] = data
         self._ops.append(f"Write {path}")
 
     def remove(self, path: str) -> None:
+        self._check_open()
         path = _normalize_path(path)
         self._writes.pop(path, None)
         self._removes.add(path)
         self._ops.append(f"Remove {path}")
 
     def open(self, path: str, mode: str = "wb"):
+        self._check_open()
         if mode != "wb":
             raise ValueError(f"Batch open only supports 'wb' mode, got {mode!r}")
         from ._fileobj import BatchWritableFile
@@ -44,6 +52,7 @@ class Batch:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        self._closed = True
         if exc_type is not None:
             return False
 

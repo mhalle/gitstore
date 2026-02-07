@@ -120,3 +120,14 @@ class TestRefDictTags:
         repo = GitStore.open(tmp_path / "test.git", create="main")
         with pytest.raises(TypeError):
             repo.branches["x"] = "string"
+
+    def test_cross_repo_assign_raises(self, tmp_path):
+        repo_a = GitStore.open(tmp_path / "a.git", create="main")
+        repo_b = GitStore.open(tmp_path / "b.git", create="main")
+        fs_a = repo_a.branches["main"]
+        with pytest.raises(ValueError):
+            repo_b.branches["imported"] = fs_a
+
+    def test_create_false_raises(self, tmp_path):
+        with pytest.raises(ValueError):
+            GitStore.open(tmp_path / "test.git", create=False)

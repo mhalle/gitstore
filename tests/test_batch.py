@@ -84,3 +84,24 @@ class TestBatch:
         with fs.batch() as b:
             with pytest.raises(ValueError):
                 b.open("x.txt", "rb")
+
+    def test_write_after_exit_raises(self, repo_fs):
+        _, fs = repo_fs
+        with fs.batch() as b:
+            b.write("a.txt", b"data")
+        with pytest.raises(RuntimeError):
+            b.write("b.txt", b"too late")
+
+    def test_remove_after_exit_raises(self, repo_fs):
+        _, fs = repo_fs
+        with fs.batch() as b:
+            pass
+        with pytest.raises(RuntimeError):
+            b.remove("a.txt")
+
+    def test_open_after_exit_raises(self, repo_fs):
+        _, fs = repo_fs
+        with fs.batch() as b:
+            pass
+        with pytest.raises(RuntimeError):
+            b.open("x.txt")

@@ -19,6 +19,10 @@ class TestNormalizePath:
     def test_strips_slashes(self):
         assert _normalize_path("/foo/bar/") == "foo/bar"
 
+    def test_normalizes_backslashes(self):
+        assert _normalize_path("foo\\bar\\baz") == "foo/bar/baz"
+        assert _normalize_path("\\foo\\bar\\") == "foo/bar"
+
     def test_rejects_empty(self):
         with pytest.raises(ValueError):
             _normalize_path("")

@@ -19,7 +19,7 @@ GIT_OBJECT_TREE = pygit2.GIT_OBJECT_TREE
 
 def _normalize_path(path: str) -> str:
     """Normalize a path: strip leading/trailing slashes, reject bad segments."""
-    path = path.strip("/")
+    path = path.replace("\\", "/").strip("/")
     if not path:
         raise ValueError("Path must not be empty")
     segments = path.split("/")

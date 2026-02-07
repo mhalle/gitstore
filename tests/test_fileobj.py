@@ -77,3 +77,28 @@ class TestWritableFile:
         _, fs = repo_fs
         with pytest.raises(ValueError):
             fs.open("hello.txt", "a")
+
+    def test_close_commits(self, repo_fs):
+        _, fs = repo_fs
+        f = fs.open("closed.txt", "wb")
+        f.write(b"via close")
+        f.close()
+        assert f.fs is not None
+        assert f.fs.read("closed.txt") == b"via close"
+
+    def test_write_after_close_raises(self, repo_fs):
+        _, fs = repo_fs
+        f = fs.open("closed.txt", "wb")
+        f.write(b"data")
+        f.close()
+        with pytest.raises(ValueError):
+            f.write(b"more")
+
+    def test_double_close_is_idempotent(self, repo_fs):
+        _, fs = repo_fs
+        f = fs.open("closed.txt", "wb")
+        f.write(b"data")
+        f.close()
+        first_hash = f.fs.hash
+        f.close()  # should not commit again
+        assert f.fs.hash == first_hash

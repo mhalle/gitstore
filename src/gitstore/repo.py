@@ -35,10 +35,14 @@ class GitStore:
             create: None to open existing (fail if missing),
                     True to create bare repo with no branch,
                     str to create bare repo + bootstrap branch with that name.
+                    False is invalid and raises ValueError.
             author: Default author name for commits.
             email: Default author email for commits.
         """
         path = Path(path)
+
+        if create is False:
+            raise ValueError("create=False is not supported; use create=None to open")
 
         if create is not None:
             if path.exists():
@@ -104,6 +108,8 @@ class RefDict:
 
         if not isinstance(fs, FS):
             raise TypeError(f"Expected FS, got {type(fs).__name__}")
+        if fs._store is not self._store:
+            raise ValueError("FS belongs to a different GitStore")
 
         repo = self._store._repo
         ref_name = self._ref_name(name)

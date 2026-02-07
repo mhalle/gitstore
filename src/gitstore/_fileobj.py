@@ -39,18 +39,27 @@ class WritableFile:
         self._fs = fs
         self._path = path
         self._buf = io.BytesIO()
-        self._committed = False
+        self._closed = False
         self.fs: FS | None = None
 
     def write(self, data: bytes) -> int:
+        if self._closed:
+            raise ValueError("I/O operation on closed file.")
         return self._buf.write(data)
+
+    def close(self) -> None:
+        if not self._closed:
+            self.fs = self._fs.write(self._path, self._buf.getvalue())
+            self._closed = True
 
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         if exc_type is None:
-            self.fs = self._fs.write(self._path, self._buf.getvalue())
+            self.close()
+        else:
+            self._closed = True
         return False
 
 
@@ -61,14 +70,24 @@ class BatchWritableFile:
         self._batch = batch
         self._path = path
         self._buf = io.BytesIO()
+        self._closed = False
 
     def write(self, data: bytes) -> int:
+        if self._closed:
+            raise ValueError("I/O operation on closed file.")
         return self._buf.write(data)
+
+    def close(self) -> None:
+        if not self._closed:
+            self._batch.write(self._path, self._buf.getvalue())
+            self._closed = True
 
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         if exc_type is None:
-            self._batch.write(self._path, self._buf.getvalue())
+            self.close()
+        else:
+            self._closed = True
         return False
