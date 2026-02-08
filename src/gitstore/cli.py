@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 import click
+import pygit2
 
 from .exceptions import StaleSnapshotError
 from .repo import GitStore
@@ -56,7 +57,6 @@ def _resolve_ref(store: GitStore, ref_str: str):
         return store.tags[ref_str]
     # Try as commit hash
     try:
-        import pygit2
         repo = store._repo
         obj = repo.get(ref_str)
         if obj is not None:
@@ -66,6 +66,8 @@ def _resolve_ref(store: GitStore, ref_str: str):
                 )
             from .fs import FS
             return FS(store, obj.id, branch=None)
+    except click.ClickException:
+        raise
     except (ValueError, KeyError):
         pass
     raise click.ClickException(f"Unknown ref: {ref_str}")
@@ -170,6 +172,7 @@ def cp(ctx, src, dest, branch, message):
             raise click.ClickException(
                 "Branch modified concurrently — retry"
             )
+        click.echo(f"Copied {local.name} -> :{repo_dest}")
     else:
         # Repo → disk
         src_path = _normalize_repo_path(src_path)
@@ -189,6 +192,7 @@ def cp(ctx, src, dest, branch, message):
             local_dest.write_bytes(data)
         except OSError as exc:
             raise click.ClickException(f"Cannot write {local_dest}: {exc}")
+        click.echo(f"Copied :{src_path} -> {local_dest}")
 
 
 # ---------------------------------------------------------------------------
@@ -223,6 +227,8 @@ def cptree(ctx, src, dest, branch, message):
 
     if not src_is_repo:
         # Disk → repo
+        if dest_path:
+            dest_path = _normalize_repo_path(dest_path)
         local = Path(src_path)
         if not local.is_dir():
             raise click.ClickException(
@@ -251,6 +257,7 @@ def cptree(ctx, src, dest, branch, message):
             raise click.ClickException(
                 "Branch modified concurrently — retry"
             )
+        click.echo(f"Copied {len(writes)} file(s) -> :{dest_path or '/'}")
     else:
         # Repo → disk
         local_dest = Path(dest_path)
@@ -271,8 +278,6 @@ def cptree(ctx, src, dest, branch, message):
                     # Strip the src_path prefix to get relative path
                     if src_path and store_path.startswith(src_path + "/"):
                         rel = store_path[len(src_path) + 1:]
-                    elif src_path and store_path == src_path:
-                        rel = store_path
                     else:
                         rel = store_path
                     out = local_dest / rel
@@ -289,6 +294,7 @@ def cptree(ctx, src, dest, branch, message):
             raise click.ClickException(
                 f"{src_path} is not a directory in the repo"
             )
+        click.echo(f"Copied :{src_path or '/'} -> {local_dest}")
 
 
 # ---------------------------------------------------------------------------
@@ -397,6 +403,7 @@ def rm(ctx, path, branch, message):
         raise click.ClickException(
             "Branch modified concurrently — retry"
         )
+    click.echo(f"Removed :{repo_path}")
 
 
 # ---------------------------------------------------------------------------
@@ -465,10 +472,7 @@ def branch_create(ctx, name, from_ref, at_path):
     if name in store.branches:
         raise click.ClickException(f"Branch already exists: {name}")
 
-    try:
-        source_fs = _resolve_with_at(store, from_ref, at_path)
-    except click.ClickException:
-        raise
+    source_fs = _resolve_with_at(store, from_ref, at_path)
 
     from .fs import FS
     new_fs = FS(store, source_fs._commit_oid, branch=name)
@@ -487,9 +491,6 @@ def branch_delete(ctx, name):
     except KeyError:
         raise click.ClickException(f"Branch not found: {name}")
     click.echo(f"Deleted branch {name}")
-
-
-main.add_command(branch)
 
 
 # ---------------------------------------------------------------------------
@@ -526,10 +527,7 @@ def tag_create(ctx, name, from_ref, at_path):
     if name in store.tags:
         raise click.ClickException(f"Tag already exists: {name}")
 
-    try:
-        source_fs = _resolve_with_at(store, from_ref, at_path)
-    except click.ClickException:
-        raise
+    source_fs = _resolve_with_at(store, from_ref, at_path)
 
     from .fs import FS
     new_fs = FS(store, source_fs._commit_oid, branch=None)
@@ -548,6 +546,3 @@ def tag_delete(ctx, name):
     except KeyError:
         raise click.ClickException(f"Tag not found: {name}")
     click.echo(f"Deleted tag {name}")
-
-
-main.add_command(tag)

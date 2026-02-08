@@ -1,7 +1,5 @@
 """Tests for the gitstore CLI."""
 
-import os
-
 import pytest
 from click.testing import CliRunner
 
@@ -36,16 +34,19 @@ def initialized_repo(tmp_path, runner):
 def repo_with_files(tmp_path, runner):
     """Repo with hello.txt and data/data.bin on 'main'."""
     p = str(tmp_path / "test.git")
-    runner.invoke(main, [p, "init", "--branch", "main"])
+    r = runner.invoke(main, [p, "init", "--branch", "main"])
+    assert r.exit_code == 0, r.output
 
     hello = tmp_path / "hello.txt"
     hello.write_text("hello world\n")
-    runner.invoke(main, [p, "cp", str(hello), ":hello.txt"])
+    r = runner.invoke(main, [p, "cp", str(hello), ":hello.txt"])
+    assert r.exit_code == 0, r.output
 
     data_dir = tmp_path / "datadir"
     data_dir.mkdir()
     (data_dir / "data.bin").write_bytes(b"\x00\x01\x02")
-    runner.invoke(main, [p, "cptree", str(data_dir), ":data"])
+    r = runner.invoke(main, [p, "cptree", str(data_dir), ":data"])
+    assert r.exit_code == 0, r.output
 
     return p
 
@@ -203,6 +204,16 @@ class TestCptree:
         assert result.exit_code == 0
         result = runner.invoke(main, [initialized_repo, "ls", ":dir"])
         assert "f.txt" in result.output
+
+    def test_disk_to_repo_root(self, runner, initialized_repo, tmp_path):
+        """cptree ./dir : should import files at the repo root."""
+        src = tmp_path / "rootsrc"
+        src.mkdir()
+        (src / "r.txt").write_text("root file")
+        result = runner.invoke(main, [initialized_repo, "cptree", str(src), ":"])
+        assert result.exit_code == 0, result.output
+        result = runner.invoke(main, [initialized_repo, "ls"])
+        assert "r.txt" in result.output
 
     def test_empty_dir_error(self, runner, initialized_repo, tmp_path):
         src = tmp_path / "empty"
