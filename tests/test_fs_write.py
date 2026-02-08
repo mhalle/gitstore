@@ -182,5 +182,10 @@ class TestWriteFrom:
 
     def test_write_from_missing_file(self, repo_fs):
         _, fs = repo_fs
-        with pytest.raises((OSError, KeyError)):
+        with pytest.raises(FileNotFoundError):
             fs.write_from("x.txt", "/nonexistent/path/file.txt")
+
+    def test_write_from_directory_raises(self, repo_fs, tmp_path):
+        _, fs = repo_fs
+        with pytest.raises(IsADirectoryError):
+            fs.write_from("x.txt", str(tmp_path))

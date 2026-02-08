@@ -197,9 +197,15 @@ class TestBatch:
 
     def test_write_from_missing_file(self, repo_fs):
         _, fs = repo_fs
-        with pytest.raises((OSError, KeyError)):
+        with pytest.raises(FileNotFoundError):
             with fs.batch() as b:
                 b.write_from("x.txt", "/nonexistent/path/file.txt")
+
+    def test_write_from_directory_raises(self, repo_fs, tmp_path):
+        _, fs = repo_fs
+        with pytest.raises(IsADirectoryError):
+            with fs.batch() as b:
+                b.write_from("x.txt", str(tmp_path))
 
     def test_batch_mode_parameter(self, repo_fs):
         _, fs = repo_fs

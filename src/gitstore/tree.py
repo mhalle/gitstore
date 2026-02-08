@@ -21,8 +21,14 @@ GIT_OBJECT_TREE = pygit2.GIT_OBJECT_TREE
 
 
 def _mode_from_disk(local_path: str) -> int:
-    """Return git filemode based on the file's executable bit."""
+    """Return git filemode based on the file's executable bit.
+
+    Also validates the path — raises FileNotFoundError, PermissionError,
+    or IsADirectoryError before any blob is created.
+    """
     st = os.stat(local_path)
+    if stat.S_ISDIR(st.st_mode):
+        raise IsADirectoryError(local_path)
     if st.st_mode & stat.S_IXUSR:
         return GIT_FILEMODE_BLOB_EXECUTABLE
     return GIT_FILEMODE_BLOB

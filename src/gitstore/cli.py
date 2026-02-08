@@ -132,14 +132,6 @@ def _resolve_snapshot(fs, at_path: str | None, match_pattern: str | None, before
     return fs
 
 
-def _commit_writes(fs, writes, message):
-    """Commit *writes* with a user-friendly StaleSnapshotError message."""
-    try:
-        fs._commit_changes(writes, set(), message or "")
-    except StaleSnapshotError:
-        raise click.ClickException("Branch modified concurrently — retry")
-
-
 def _resolve_ref(store: GitStore, ref_str: str):
     """Try branches, then tags, then commit hash."""
     if ref_str in store.branches:
@@ -297,19 +289,16 @@ def cp(ctx, args, branch, ref, message, mode):
         # Disk → repo
         if multi:
             dest_path = _normalize_repo_path(dest_path) if dest_path else ""
-        writes: dict[str, bytes | tuple[bytes, int]] = {}
+        # Validate all sources before creating any blobs
+        locals_and_targets: list[tuple[Path, str]] = []
         for _is_repo, src_path in parsed_sources:
             local = Path(src_path)
             if local.is_dir():
                 raise click.ClickException(
                     f"{src_path} is a directory — use cptree for directories"
                 )
-            try:
-                data = local.read_bytes()
-            except FileNotFoundError:
+            if not local.exists():
                 raise click.ClickException(f"Local file not found: {src_path}")
-            except OSError as exc:
-                raise click.ClickException(f"Cannot read {src_path}: {exc}")
             if dest_path:
                 if multi:
                     repo_file = _normalize_repo_path(f"{dest_path}/{local.name}")
@@ -318,9 +307,14 @@ def cp(ctx, args, branch, ref, message, mode):
             else:
                 # Bare ":" — copy to root, keep original filename
                 repo_file = _normalize_repo_path(local.name)
-            writes[repo_file] = (data, filemode) if filemode else data
-        _commit_writes(fs, writes, message)
-        for repo_file in writes:
+            locals_and_targets.append((local, repo_file))
+        try:
+            with fs.batch(message=message) as b:
+                for local, repo_file in locals_and_targets:
+                    b.write_from(repo_file, local, mode=filemode)
+        except StaleSnapshotError:
+            raise click.ClickException("Branch modified concurrently — retry")
+        for _local, repo_file in locals_and_targets:
             _status(ctx, f"Copied -> :{repo_file}")
     else:
         # Repo → disk
@@ -398,24 +392,28 @@ def cptree(ctx, src, dest, branch, ref, message):
             raise click.ClickException(
                 f"{src_path} is not a directory"
             )
-        writes: dict[str, bytes] = {}
-        for dirpath, _dirnames, filenames in os.walk(local):
-            for fname in filenames:
-                full = Path(dirpath) / fname
-                rel = full.relative_to(local)
-                repo_file = f"{dest_path}/{rel}" if dest_path else str(rel)
-                repo_file = repo_file.replace(os.sep, "/")
-                repo_file = _normalize_repo_path(repo_file)
-                try:
-                    writes[repo_file] = full.read_bytes()
-                except OSError as exc:
-                    raise click.ClickException(f"Cannot read {full}: {exc}")
-        if not writes:
-            raise click.ClickException(
-                f"No files found in directory: {src_path}"
-            )
-        _commit_writes(fs, writes, message)
-        _status(ctx, f"Copied {len(writes)} file(s) -> :{dest_path or '/'}")
+        count = 0
+        try:
+            with fs.batch(message=message) as b:
+                for dirpath, _dirnames, filenames in os.walk(local):
+                    for fname in filenames:
+                        full = Path(dirpath) / fname
+                        rel = full.relative_to(local)
+                        repo_file = f"{dest_path}/{rel}" if dest_path else str(rel)
+                        repo_file = repo_file.replace(os.sep, "/")
+                        repo_file = _normalize_repo_path(repo_file)
+                        try:
+                            b.write_from(repo_file, full)
+                        except (KeyError, OSError) as exc:
+                            raise click.ClickException(f"Cannot read {full}: {exc}")
+                        count += 1
+                if count == 0:
+                    raise click.ClickException(
+                        f"No files found in directory: {src_path}"
+                    )
+        except StaleSnapshotError:
+            raise click.ClickException("Branch modified concurrently — retry")
+        _status(ctx, f"Copied {count} file(s) -> :{dest_path or '/'}")
     else:
         # Repo → disk
         local_dest = Path(dest_path)
@@ -799,24 +797,24 @@ def unzip_cmd(ctx, filename, branch, message):
     store = _open_store(_require_repo(ctx))
     fs = _get_branch_fs(store, branch)
 
-    writes: dict[str, bytes | tuple[bytes, int]] = {}
-    with zipfile.ZipFile(filename, "r") as zf:
-        for info in zf.infolist():
-            if info.is_dir():
-                continue
-            repo_path = _normalize_repo_path(info.filename)
-            data = zf.read(info.filename)
-            unix_mode = info.external_attr >> 16
-            if unix_mode & 0o111:
-                writes[repo_path] = (data, GIT_FILEMODE_BLOB_EXECUTABLE)
-            else:
-                writes[repo_path] = data
-
-    if not writes:
-        raise click.ClickException("Zip file contains no files")
-
-    _commit_writes(fs, writes, message)
-    _status(ctx, f"Imported {len(writes)} file(s) from {filename}")
+    count = 0
+    try:
+        with fs.batch(message=message) as b:
+            with zipfile.ZipFile(filename, "r") as zf:
+                for info in zf.infolist():
+                    if info.is_dir():
+                        continue
+                    repo_path = _normalize_repo_path(info.filename)
+                    data = zf.read(info.filename)
+                    unix_mode = info.external_attr >> 16
+                    fm = GIT_FILEMODE_BLOB_EXECUTABLE if unix_mode & 0o111 else None
+                    b.write(repo_path, data, mode=fm)
+                    count += 1
+            if count == 0:
+                raise click.ClickException("Zip file contains no files")
+    except StaleSnapshotError:
+        raise click.ClickException("Branch modified concurrently — retry")
+    _status(ctx, f"Imported {count} file(s) from {filename}")
 
 
 # ---------------------------------------------------------------------------
@@ -917,20 +915,20 @@ def untar_cmd(ctx, filename, branch, message):
     store = _open_store(_require_repo(ctx))
     fs = _get_branch_fs(store, branch)
 
-    writes: dict[str, bytes | tuple[bytes, int]] = {}
-    with tf:
-        for member in tf:
-            if not member.isfile():
-                continue
-            repo_path = _normalize_repo_path(member.name)
-            data = tf.extractfile(member).read()
-            if member.mode & 0o111:
-                writes[repo_path] = (data, GIT_FILEMODE_BLOB_EXECUTABLE)
-            else:
-                writes[repo_path] = data
-
-    if not writes:
-        raise click.ClickException("Tar archive contains no files")
-
-    _commit_writes(fs, writes, message)
-    _status(ctx, f"Imported {len(writes)} file(s) from {filename}")
+    count = 0
+    try:
+        with fs.batch(message=message) as b:
+            with tf:
+                for member in tf:
+                    if not member.isfile():
+                        continue
+                    repo_path = _normalize_repo_path(member.name)
+                    data = tf.extractfile(member).read()
+                    fm = GIT_FILEMODE_BLOB_EXECUTABLE if member.mode & 0o111 else None
+                    b.write(repo_path, data, mode=fm)
+                    count += 1
+            if count == 0:
+                raise click.ClickException("Tar archive contains no files")
+    except StaleSnapshotError:
+        raise click.ClickException("Branch modified concurrently — retry")
+    _status(ctx, f"Imported {count} file(s) from {filename}")

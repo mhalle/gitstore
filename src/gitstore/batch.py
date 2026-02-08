@@ -45,9 +45,10 @@ class Batch:
         path = _normalize_path(path)
         local_path = os.fspath(local_path)
         self._removes.discard(path)
-        blob_oid = self._repo.create_blob_fromdisk(local_path)
+        detected_mode = _mode_from_disk(local_path)
         if mode is None:
-            mode = _mode_from_disk(local_path)
+            mode = detected_mode
+        blob_oid = self._repo.create_blob_fromdisk(local_path)
         self._writes[path] = (blob_oid, mode) if mode != GIT_FILEMODE_BLOB else blob_oid
         self._ops.append(f"Write {path}")
 
