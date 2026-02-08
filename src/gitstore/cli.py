@@ -196,8 +196,7 @@ def cp(ctx, args, branch, message):
                 # Bare ":" — copy to root, keep original filename
                 repo_file = _normalize_repo_path(local.name)
             writes[repo_file] = data
-        names = ", ".join(Path(p).name for _, p in parsed_sources)
-        msg = message or f"Copy {names}"
+        msg = message or ""
         try:
             fs._commit_changes(writes, set(), msg)
         except StaleSnapshotError:
@@ -290,7 +289,7 @@ def cptree(ctx, src, dest, branch, message):
             raise click.ClickException(
                 f"No files found in directory: {src_path}"
             )
-        msg = message or f"Copy tree {local.name} to {dest_path or '/'}"
+        msg = message or ""
         try:
             fs._commit_changes(writes, set(), msg)
         except StaleSnapshotError:
@@ -436,7 +435,7 @@ def rm(ctx, path, branch, message):
     if not fs.exists(repo_path):
         raise click.ClickException(f"File not found: {repo_path}")
 
-    msg = message or f"Remove {repo_path}"
+    msg = message or ""
     try:
         fs._commit_changes({}, {repo_path}, msg)
     except StaleSnapshotError:
