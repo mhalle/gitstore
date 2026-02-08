@@ -40,7 +40,7 @@ print(fs.message)  # 'Write hello.txt'
 
 **`GitStore`** opens or creates a bare repository. It exposes `branches` and `tags` as [`MutableMapping`](https://docs.python.org/3/library/collections.abc.html#collections.abc.MutableMapping) objects (supporting `.get`, `.keys`, `.values`, `.items`, etc.).
 
-**`FS`** is an immutable snapshot of a committed tree. Reading methods (`read`, `ls`, `walk`, `exists`, `open`) never mutate state. Writing methods (`write`, `remove`, `batch`) return a *new* `FS` pointing at the new commit — the original `FS` is unchanged.
+**`FS`** is an immutable snapshot of a committed tree. Reading methods (`read`, `ls`, `walk`, `exists`, `open`) never mutate state. Writing methods (`write`, `write_from`, `remove`, `batch`) return a *new* `FS` pointing at the new commit — the original `FS` is unchanged.
 
 Snapshots obtained from **branches** are writable. Snapshots obtained from **tags** are read-only.
 
@@ -92,7 +92,7 @@ for name, snapshot in repo.branches.items():
 
 ### Paths
 
-All path arguments throughout the API (`read`, `write`, `remove`, `ls`, `walk`, `exists`, `open`, `batch.write`, `batch.remove`, `batch.open`) accept `str` or any `os.PathLike` (e.g. `pathlib.PurePosixPath`). Paths use forward slashes as separators.
+All path arguments throughout the API (`read`, `write`, `write_from`, `remove`, `ls`, `walk`, `exists`, `open`, `batch.write`, `batch.write_from`, `batch.remove`, `batch.open`) accept `str` or any `os.PathLike` (e.g. `pathlib.PurePosixPath`). Paths use forward slashes as separators.
 
 ### Reading
 
@@ -287,9 +287,9 @@ except StaleSnapshotError:
 
 | Exception | When |
 |-----------|------|
-| `FileNotFoundError` | `read`/`remove` on a missing path; opening a missing repo |
+| `FileNotFoundError` | `read`/`remove` on a missing path; `write_from` with a missing local file; opening a missing repo |
 | `FileExistsError` | Creating a repo at a path that already exists |
-| `IsADirectoryError` | `read` on a directory path |
+| `IsADirectoryError` | `read` on a directory path; `write_from` with a directory as local path; `remove` on a directory |
 | `NotADirectoryError` | `ls`/`walk` on a file path |
 | `PermissionError` | Writing to a tag snapshot |
 | `KeyError` | Accessing a missing branch/tag; overwriting an existing tag |
@@ -416,7 +416,7 @@ gitstore tar archive.tar --hash abc1234...
 gitstore cp :file.txt local.txt --hash abc1234...
 ```
 
-Write commands (`cp`, `cptree`, `rm`, `unzip`, `untar`) accept `-m` for custom commit messages. Use `-b` on any command to target a branch other than `main`. Read commands (`cat`, `ls`, `cp`, `cptree`, `zip`, `tar`, `log`) accept `--hash` to read from any branch, tag, or full commit hash. `log`, `zip`, and `tar` accept `--before` with an ISO 8601 date or datetime to filter to commits on or before that point in time. `cp` accepts `--mode 644` or `--mode 755` to set file permissions. Pass `-v` before the command for status messages on stderr. `zip` and `tar` accept `-` as FILENAME to write to stdout; `untar` defaults to stdin when no filename is given.
+Write commands (`cp`, `cptree`, `rm`, `unzip`, `untar`) accept `-m` for custom commit messages. Use `-b` on any command to target a branch other than `main`. Read commands (`cat`, `ls`, `cp`, `cptree`, `zip`, `tar`, `log`) accept `--hash` to read from any branch, tag, or full commit hash. `log`, `zip`, and `tar` accept `--before` with an ISO 8601 date or datetime to filter to commits on or before that point in time. `cp` accepts `--mode 644` or `--mode 755` to set file permissions; `cptree` auto-detects executable permissions from disk. Pass `-v` before the command for status messages on stderr. `zip` and `tar` accept `-` as FILENAME to write to stdout; `untar` defaults to stdin when no filename is given.
 
 ## Development
 
