@@ -349,11 +349,16 @@ gitstore log --format jsonl               # one JSON object per line
 gitstore branch                           # list
 gitstore branch create dev                # empty orphan branch
 gitstore branch create dev --from main    # fork from existing ref
+gitstore branch create dev --from main --path config.json  # fork from commit that last changed a file
+gitstore branch create dev --from main --match "deploy*"   # fork from commit matching message
+gitstore branch create dev --from main --before 2024-06-01 # fork from commit as of a date
 gitstore branch delete dev
 
 # Manage tags
 gitstore tag create v1.0 main
-gitstore tag create v1.0-fix main --path bugfix.py  # tag the commit that last changed bugfix.py
+gitstore tag create v1.0-fix main --path bugfix.py         # tag the commit that last changed bugfix.py
+gitstore tag create v1.0 main --match "deploy*"            # tag the latest deploy commit
+gitstore tag create v1.0 main --before 2024-06-01          # tag the state as of a date
 gitstore tag delete v1.0
 
 # Export repo contents to a zip file
