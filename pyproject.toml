@@ -9,16 +9,19 @@ requires-python = ">=3.10"
 license = "Apache-2.0"
 dependencies = [
     "pygit2>=1.14.0",
-    "click>=8.0",
 ]
 
 [project.optional-dependencies]
+cli = [
+    "click>=8.0",
+]
 dev = [
     "pytest>=8.0",
+    "gitstore[cli]",
 ]
 
 [project.scripts]
-gitstore = "gitstore.cli:main"
+gitstore = "gitstore._cli_entry:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/gitstore"]

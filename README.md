@@ -7,10 +7,11 @@ Built on [pygit2](https://www.pygit2.org/), gitstore gives you Git's content-add
 ## Installation
 
 ```
-pip install gitstore
+pip install gitstore          # library only
+pip install gitstore[cli]     # library + CLI
 ```
 
-Requires Python 3.10+ and pygit2 >= 1.14.
+Requires Python 3.10+ and pygit2 >= 1.14. The CLI extra adds [click](https://click.palletsprojects.com/).
 
 ## Quick start
 
