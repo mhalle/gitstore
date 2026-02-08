@@ -43,6 +43,18 @@ class TestWrite:
         latest = repo.branches["main"]
         assert latest.hash == fs2.hash
 
+    def test_write_custom_message(self, repo_fs):
+        _, fs = repo_fs
+        fs2 = fs.write("a.txt", b"a", message="custom msg")
+        assert fs2.message == "custom msg"
+
+    def test_write_with_mode(self, repo_fs):
+        from gitstore.tree import GIT_FILEMODE_BLOB_EXECUTABLE
+        _, fs = repo_fs
+        fs2 = fs.write("run.sh", b"#!/bin/sh", mode=GIT_FILEMODE_BLOB_EXECUTABLE)
+        tree = fs2._store._repo[fs2._tree_oid]
+        assert tree["run.sh"].filemode == GIT_FILEMODE_BLOB_EXECUTABLE
+
     def test_write_on_tag_raises(self, tmp_path):
         repo = GitStore.open(tmp_path / "test.git", create="main")
         fs = repo.branches["main"]
@@ -81,15 +93,14 @@ class TestRemove:
 class TestLog:
     def test_filemode_only_change_detected(self, repo_fs):
         """log(at=path) should detect filemode-only changes (no content change)."""
+        from gitstore.tree import GIT_FILEMODE_BLOB_EXECUTABLE
         _, fs = repo_fs
         # Write a file with default mode (644)
         fs2 = fs.write("script.sh", b"#!/bin/sh\necho hi")
         # Re-write with same content but executable mode (755)
-        from gitstore.tree import GIT_FILEMODE_BLOB_EXECUTABLE
-        fs3 = fs2._commit_changes(
-            {"script.sh": (b"#!/bin/sh\necho hi", GIT_FILEMODE_BLOB_EXECUTABLE)},
-            set(),
-            "Make executable",
+        fs3 = fs2.write(
+            "script.sh", b"#!/bin/sh\necho hi",
+            mode=GIT_FILEMODE_BLOB_EXECUTABLE, message="Make executable",
         )
         # log --at script.sh should see both commits (content write + mode change)
         entries = list(fs3.log(at="script.sh"))

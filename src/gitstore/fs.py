@@ -112,7 +112,7 @@ class FS:
 
     def _commit_changes(
         self,
-        writes: dict[str, bytes],
+        writes: dict[str, bytes | tuple[bytes, int]],
         removes: set[str],
         message: str,
     ) -> FS:
@@ -146,9 +146,17 @@ class FS:
 
         return FS(self._store, new_commit_oid, branch=self._branch)
 
-    def write(self, path: str | os.PathLike[str], data: bytes) -> FS:
+    def write(
+        self,
+        path: str | os.PathLike[str],
+        data: bytes,
+        *,
+        message: str | None = None,
+        mode: int | None = None,
+    ) -> FS:
         path = _normalize_path(path)
-        return self._commit_changes({path: data}, set(), f"Write {path}")
+        value: bytes | tuple[bytes, int] = (data, mode) if mode is not None else data
+        return self._commit_changes({path: value}, set(), message or f"Write {path}")
 
     def remove(self, path: str | os.PathLike[str], *, message: str | None = None) -> FS:
         path = _normalize_path(path)

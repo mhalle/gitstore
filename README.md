@@ -127,6 +127,8 @@ Every write auto-commits and returns a new snapshot:
 ```python
 fs = fs.write("config.json", b'{"key": "value"}')
 fs = fs.write("data/nested/file.bin", b"\x00\x01\x02")  # directories created automatically
+fs = fs.write("script.sh", b"#!/bin/sh\n", mode=0o100755)  # executable
+fs = fs.write("config.json", b"{}", message="Reset config")  # custom commit message
 
 fs = fs.remove("old-file.txt")  # raises FileNotFoundError if missing
 ```
