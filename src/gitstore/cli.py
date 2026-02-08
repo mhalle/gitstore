@@ -12,7 +12,7 @@ import pygit2
 
 from .exceptions import StaleSnapshotError
 from .repo import GitStore
-from .tree import _normalize_path
+from .tree import GIT_FILEMODE_BLOB, GIT_FILEMODE_BLOB_EXECUTABLE, _normalize_path
 
 
 # ---------------------------------------------------------------------------
@@ -127,8 +127,10 @@ def init(ctx, branch):
 @click.argument("args", nargs=-1, required=True)
 @click.option("--branch", "-b", default="main", help="Branch to operate on.")
 @click.option("-m", "message", default=None, help="Commit message.")
+@click.option("--mode", type=click.Choice(["644", "755"]), default=None,
+              help="File mode (default: 644).")
 @click.pass_context
-def cp(ctx, args, branch, message):
+def cp(ctx, args, branch, message, mode):
     """Copy files between disk and repo.
 
     The last argument is the destination; all preceding arguments are sources.
@@ -170,11 +172,14 @@ def cp(ctx, args, branch, message):
     store = _open_store(ctx.obj["repo_path"])
     fs = _get_branch_fs(store, branch)
 
+    filemode = (GIT_FILEMODE_BLOB_EXECUTABLE if mode == "755"
+                else GIT_FILEMODE_BLOB) if mode else None
+
     if not src_is_repo:
         # Disk → repo
         if multi:
             dest_path = _normalize_repo_path(dest_path) if dest_path else ""
-        writes: dict[str, bytes] = {}
+        writes: dict[str, bytes | tuple[bytes, int]] = {}
         for _is_repo, src_path in parsed_sources:
             local = Path(src_path)
             if local.is_dir():
@@ -195,7 +200,7 @@ def cp(ctx, args, branch, message):
             else:
                 # Bare ":" — copy to root, keep original filename
                 repo_file = _normalize_repo_path(local.name)
-            writes[repo_file] = data
+            writes[repo_file] = (data, filemode) if filemode else data
         msg = message or ""
         try:
             fs._commit_changes(writes, set(), msg)

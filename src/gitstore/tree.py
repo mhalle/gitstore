@@ -15,6 +15,7 @@ import pygit2
 
 GIT_FILEMODE_TREE = 0o040000
 GIT_FILEMODE_BLOB = 0o100644
+GIT_FILEMODE_BLOB_EXECUTABLE = 0o100755
 GIT_OBJECT_TREE = pygit2.GIT_OBJECT_TREE
 
 
@@ -46,7 +47,7 @@ def _normalize_path(path: str | os.PathLike[str]) -> str:
 def rebuild_tree(
     repo: pygit2.Repository,
     base_tree_oid: pygit2.Oid | None,
-    writes: dict[str, bytes],
+    writes: dict[str, bytes | tuple[bytes, int]],
     removes: set[str],
 ) -> pygit2.Oid:
     """Rebuild a tree with writes and removes applied.
@@ -57,15 +58,15 @@ def rebuild_tree(
     Args:
         repo: The pygit2 repository.
         base_tree_oid: OID of the existing tree (or None for empty).
-        writes: Mapping of normalized path → blob data.
+        writes: Mapping of normalized path → blob data or (data, filemode).
         removes: Set of normalized paths to remove.
 
     Returns:
         OID of the new root tree.
     """
     # Group changes by first path segment
-    sub_writes: dict[str, dict[str, bytes]] = defaultdict(dict)
-    leaf_writes: dict[str, bytes] = {}
+    sub_writes: dict[str, dict[str, bytes | tuple[bytes, int]]] = defaultdict(dict)
+    leaf_writes: dict[str, bytes | tuple[bytes, int]] = {}
     sub_removes: dict[str, set[str]] = defaultdict(set)
     leaf_removes: set[str] = set()
 
@@ -98,9 +99,13 @@ def rebuild_tree(
                 existing_subtrees[entry.name] = entry.id
 
     # Apply leaf writes (may overwrite existing tree entries)
-    for name, data in leaf_writes.items():
+    for name, value in leaf_writes.items():
+        if isinstance(value, tuple):
+            data, mode = value
+        else:
+            data, mode = value, GIT_FILEMODE_BLOB
         blob_oid = repo.create_blob(data)
-        tb.insert(name, blob_oid, GIT_FILEMODE_BLOB)
+        tb.insert(name, blob_oid, mode)
 
     # Apply leaf removes (silently ignore missing — callers check existence)
     for name in leaf_removes:

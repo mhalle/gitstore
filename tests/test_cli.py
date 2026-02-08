@@ -125,6 +125,49 @@ class TestCp:
         result = runner.invoke(main, [initialized_repo, "log"])
         assert "my custom msg" in result.output
 
+    def test_mode_755(self, runner, initialized_repo, tmp_path):
+        f = tmp_path / "script.sh"
+        f.write_text("#!/bin/sh\necho hi")
+        result = runner.invoke(main, [
+            initialized_repo, "cp", str(f), ":script.sh", "--mode", "755"
+        ])
+        assert result.exit_code == 0, result.output
+        # Verify mode via library
+        from gitstore import GitStore
+        store = GitStore.open(initialized_repo)
+        fs = store.branches["main"]
+        tree = store._repo[fs._tree_oid]
+        entry = tree["script.sh"]
+        assert entry.filemode == 0o100755
+
+    def test_mode_644_explicit(self, runner, initialized_repo, tmp_path):
+        f = tmp_path / "plain.txt"
+        f.write_text("text")
+        result = runner.invoke(main, [
+            initialized_repo, "cp", str(f), ":plain.txt", "--mode", "644"
+        ])
+        assert result.exit_code == 0, result.output
+        from gitstore import GitStore
+        store = GitStore.open(initialized_repo)
+        fs = store.branches["main"]
+        tree = store._repo[fs._tree_oid]
+        entry = tree["plain.txt"]
+        assert entry.filemode == 0o100644
+
+    def test_mode_default_is_644(self, runner, initialized_repo, tmp_path):
+        f = tmp_path / "default.txt"
+        f.write_text("text")
+        result = runner.invoke(main, [
+            initialized_repo, "cp", str(f), ":default.txt"
+        ])
+        assert result.exit_code == 0, result.output
+        from gitstore import GitStore
+        store = GitStore.open(initialized_repo)
+        fs = store.branches["main"]
+        tree = store._repo[fs._tree_oid]
+        entry = tree["default.txt"]
+        assert entry.filemode == 0o100644
+
     def test_missing_local_file(self, runner, initialized_repo):
         result = runner.invoke(main, [initialized_repo, "cp", "/nonexistent", ":dest.txt"])
         assert result.exit_code != 0
