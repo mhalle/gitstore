@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -452,8 +453,11 @@ def rm(ctx, path, branch, message):
 @main.command()
 @click.argument("path", required=False, default=None)
 @click.option("--branch", "-b", default="main", help="Branch to show log for.")
+@click.option("--format", "fmt", default="text",
+              type=click.Choice(["text", "json", "jsonl"]),
+              help="Output format.")
 @click.pass_context
-def log(ctx, path, branch):
+def log(ctx, path, branch, fmt):
     """Show commit log, optionally filtered by PATH.
 
     PATH (if given) must be a repo path prefixed with ':'.
@@ -473,8 +477,27 @@ def log(ctx, path, branch):
         else:
             repo_path = None  # bare ":" means no filter
 
-    for entry in fs.log(repo_path):
-        click.echo(f"{entry.hash[:7]}  {entry.time.isoformat()}  {entry.message}")
+    entries = list(fs.log(repo_path))
+
+    if fmt == "json":
+        click.echo(json.dumps([_log_entry_dict(e) for e in entries], indent=2))
+    elif fmt == "jsonl":
+        for entry in entries:
+            click.echo(json.dumps(_log_entry_dict(entry)))
+    else:
+        for entry in entries:
+            click.echo(f"{entry.hash[:7]}  {entry.time.isoformat()}  {entry.message}")
+
+
+def _log_entry_dict(entry) -> dict:
+    return {
+        "hash": entry.hash,
+        "message": entry.message,
+        "time": entry.time.isoformat(),
+        "author_name": entry.author_name,
+        "author_email": entry.author_email,
+        "branch": entry.branch,
+    }
 
 
 # ---------------------------------------------------------------------------

@@ -376,6 +376,32 @@ class TestLog:
         assert result.exit_code == 0
         assert result.output.strip() == ""
 
+    def test_json_format(self, runner, repo_with_files):
+        import json
+        result = runner.invoke(main, [repo_with_files, "log", "--format", "json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert isinstance(data, list)
+        assert len(data) >= 3
+        entry = data[0]
+        assert "hash" in entry
+        assert "message" in entry
+        assert "time" in entry
+        assert "author_name" in entry
+        assert "author_email" in entry
+        assert len(entry["hash"]) == 40
+
+    def test_jsonl_format(self, runner, repo_with_files):
+        import json
+        result = runner.invoke(main, [repo_with_files, "log", "--format", "jsonl"])
+        assert result.exit_code == 0
+        lines = result.output.strip().split("\n")
+        assert len(lines) >= 3
+        for line in lines:
+            entry = json.loads(line)
+            assert "hash" in entry
+            assert "message" in entry
+
 
 # ---------------------------------------------------------------------------
 # TestBranch
