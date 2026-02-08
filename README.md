@@ -274,6 +274,10 @@ gitstore /path/to/repo.git init
 gitstore /path/to/repo.git cp local-file.txt :remote-file.txt
 gitstore /path/to/repo.git cp :remote-file.txt local-copy.txt
 
+# Multiple sources (last arg is destination directory)
+gitstore /path/to/repo.git cp file1.txt file2.txt :dir
+gitstore /path/to/repo.git cp :a.txt :b.txt ./local-dir
+
 # Copy directory trees
 gitstore /path/to/repo.git cptree ./local-dir :repo-dir
 gitstore /path/to/repo.git cptree :repo-dir ./local-dir

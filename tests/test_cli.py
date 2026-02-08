@@ -149,6 +149,61 @@ class TestCp:
         assert result.exit_code != 0
         assert "cptree" in result.output.lower()
 
+    def test_multi_disk_to_repo(self, runner, initialized_repo, tmp_path):
+        f1 = tmp_path / "a.txt"
+        f2 = tmp_path / "b.txt"
+        f1.write_text("aaa")
+        f2.write_text("bbb")
+        result = runner.invoke(main, [
+            initialized_repo, "cp", str(f1), str(f2), ":stuff"
+        ])
+        assert result.exit_code == 0, result.output
+        result = runner.invoke(main, [initialized_repo, "ls", ":stuff"])
+        assert "a.txt" in result.output
+        assert "b.txt" in result.output
+
+    def test_multi_repo_to_disk(self, runner, repo_with_files, tmp_path):
+        # Add a second file
+        f = tmp_path / "second.txt"
+        f.write_text("second")
+        runner.invoke(main, [repo_with_files, "cp", str(f), ":second.txt"])
+
+        dest = tmp_path / "out"
+        dest.mkdir()
+        result = runner.invoke(main, [
+            repo_with_files, "cp", ":hello.txt", ":second.txt", str(dest)
+        ])
+        assert result.exit_code == 0, result.output
+        assert (dest / "hello.txt").read_text() == "hello world\n"
+        assert (dest / "second.txt").read_text() == "second"
+
+    def test_multi_repo_to_disk_creates_dir(self, runner, repo_with_files, tmp_path):
+        f = tmp_path / "second.txt"
+        f.write_text("second")
+        runner.invoke(main, [repo_with_files, "cp", str(f), ":second.txt"])
+
+        dest = tmp_path / "newdir"
+        result = runner.invoke(main, [
+            repo_with_files, "cp", ":hello.txt", ":second.txt", str(dest)
+        ])
+        assert result.exit_code == 0, result.output
+        assert (dest / "hello.txt").exists()
+        assert (dest / "second.txt").exists()
+
+    def test_multi_mixed_types_error(self, runner, initialized_repo, tmp_path):
+        f = tmp_path / "a.txt"
+        f.write_text("a")
+        result = runner.invoke(main, [
+            initialized_repo, "cp", str(f), ":repo.txt", ":dest"
+        ])
+        assert result.exit_code != 0
+        assert "same type" in result.output.lower()
+
+    def test_single_arg_error(self, runner, initialized_repo):
+        result = runner.invoke(main, [initialized_repo, "cp", ":only"])
+        assert result.exit_code != 0
+        assert "at least two" in result.output.lower()
+
     def test_custom_branch(self, runner, initialized_repo, tmp_path):
         # Create a dev branch
         runner.invoke(main, [initialized_repo, "branch", "create", "dev", "main"])

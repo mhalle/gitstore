@@ -123,73 +123,112 @@ def init(ctx, branch):
 # ---------------------------------------------------------------------------
 
 @main.command()
-@click.argument("src")
-@click.argument("dest")
+@click.argument("args", nargs=-1, required=True)
 @click.option("--branch", "-b", default="main", help="Branch to operate on.")
 @click.option("-m", "message", default=None, help="Commit message.")
 @click.pass_context
-def cp(ctx, src, dest, branch, message):
-    """Copy a single file between disk and repo.
+def cp(ctx, args, branch, message):
+    """Copy files between disk and repo.
+
+    The last argument is the destination; all preceding arguments are sources.
+    Sources must all be the same type (all repo or all local), and the
+    destination must be the opposite type.  With multiple sources the
+    destination must be a directory.
 
     Prefix repo-side paths with ':'.
     """
-    src_is_repo, src_path = _parse_repo_path(src)
-    dest_is_repo, dest_path = _parse_repo_path(dest)
+    if len(args) < 2:
+        raise click.ClickException("cp requires at least two arguments (SRC... DEST)")
 
+    raw_sources = args[:-1]
+    raw_dest = args[-1]
+
+    # Parse all paths
+    parsed_sources = [_parse_repo_path(s) for s in raw_sources]
+    dest_is_repo, dest_path = _parse_repo_path(raw_dest)
+
+    # Validate: all sources must be the same type
+    src_is_repo = parsed_sources[0][0]
+    if any(p[0] != src_is_repo for p in parsed_sources):
+        raise click.ClickException(
+            "All source paths must be the same type (all repo or all local)"
+        )
+
+    # Source and dest must be opposite types
     if src_is_repo == dest_is_repo:
         if src_is_repo:
             raise click.ClickException(
-                "Both SRC and DEST are repo paths — one must be a local path"
+                "Both sources and DEST are repo paths — one side must be local"
             )
         raise click.ClickException(
-            "Neither SRC nor DEST is a repo path — prefix repo paths with ':'"
+            "Neither sources nor DEST is a repo path — prefix repo paths with ':'"
         )
+
+    multi = len(parsed_sources) > 1
 
     store = _open_store(ctx.obj["repo_path"])
     fs = _get_branch_fs(store, branch)
 
     if not src_is_repo:
         # Disk → repo
-        local = Path(src_path)
-        if local.is_dir():
-            raise click.ClickException(
-                f"{src_path} is a directory — use cptree for directories"
-            )
+        if multi:
+            dest_path = _normalize_repo_path(dest_path) if dest_path else ""
+        writes: dict[str, bytes] = {}
+        for _is_repo, src_path in parsed_sources:
+            local = Path(src_path)
+            if local.is_dir():
+                raise click.ClickException(
+                    f"{src_path} is a directory — use cptree for directories"
+                )
+            try:
+                data = local.read_bytes()
+            except FileNotFoundError:
+                raise click.ClickException(f"Local file not found: {src_path}")
+            except OSError as exc:
+                raise click.ClickException(f"Cannot read {src_path}: {exc}")
+            if multi:
+                repo_file = f"{dest_path}/{local.name}" if dest_path else local.name
+                repo_file = _normalize_repo_path(repo_file)
+            else:
+                repo_file = _normalize_repo_path(dest_path)
+            writes[repo_file] = data
+        names = ", ".join(Path(p).name for _, p in parsed_sources)
+        msg = message or f"Copy {names}"
         try:
-            data = local.read_bytes()
-        except FileNotFoundError:
-            raise click.ClickException(f"Local file not found: {src_path}")
-        except OSError as exc:
-            raise click.ClickException(f"Cannot read {src_path}: {exc}")
-        repo_dest = _normalize_repo_path(dest_path)
-        msg = message or f"Copy {local.name} to {repo_dest}"
-        try:
-            fs._commit_changes({repo_dest: data}, set(), msg)
+            fs._commit_changes(writes, set(), msg)
         except StaleSnapshotError:
             raise click.ClickException(
                 "Branch modified concurrently — retry"
             )
-        click.echo(f"Copied {local.name} -> :{repo_dest}")
+        for repo_file in writes:
+            click.echo(f"Copied -> :{repo_file}")
     else:
         # Repo → disk
-        src_path = _normalize_repo_path(src_path)
-        try:
-            data = fs.read(src_path)
-        except FileNotFoundError:
-            raise click.ClickException(f"File not found in repo: {src_path}")
-        except IsADirectoryError:
-            raise click.ClickException(
-                f"{src_path} is a directory — use cptree for directories"
-            )
         local_dest = Path(dest_path)
-        if local_dest.is_dir():
-            local_dest = local_dest / Path(src_path).name
-        try:
-            local_dest.parent.mkdir(parents=True, exist_ok=True)
-            local_dest.write_bytes(data)
-        except OSError as exc:
-            raise click.ClickException(f"Cannot write {local_dest}: {exc}")
-        click.echo(f"Copied :{src_path} -> {local_dest}")
+        if multi and not local_dest.is_dir():
+            try:
+                local_dest.mkdir(parents=True, exist_ok=True)
+            except OSError as exc:
+                raise click.ClickException(f"Cannot create directory {local_dest}: {exc}")
+        for _is_repo, src_path in parsed_sources:
+            src_path = _normalize_repo_path(src_path)
+            try:
+                data = fs.read(src_path)
+            except FileNotFoundError:
+                raise click.ClickException(f"File not found in repo: {src_path}")
+            except IsADirectoryError:
+                raise click.ClickException(
+                    f"{src_path} is a directory — use cptree for directories"
+                )
+            out = local_dest
+            if local_dest.is_dir():
+                out = local_dest / Path(src_path).name
+            try:
+                out.parent.mkdir(parents=True, exist_ok=True)
+                out.write_bytes(data)
+            except OSError as exc:
+                raise click.ClickException(f"Cannot write {out}: {exc}")
+            click.echo(f"Copied :{src_path} -> {out}")
 
 
 # ---------------------------------------------------------------------------
