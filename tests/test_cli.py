@@ -1279,6 +1279,181 @@ class TestUntar:
 # TestHash
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# TestBefore
+# ---------------------------------------------------------------------------
+
+class TestBefore:
+    """Tests for the --before date filter."""
+
+    def test_log_before(self, runner, initialized_repo, tmp_path):
+        """--before excludes commits after the cutoff."""
+        import time
+        f = tmp_path / "a.txt"
+        f.write_text("v1")
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":a.txt", "-m", "first"])
+        time.sleep(1.1)
+        f.write_text("v2")
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":a.txt", "-m", "second"])
+
+        from gitstore import GitStore
+        store = GitStore.open(initialized_repo)
+        fs = store.branches["main"]
+        entries = list(fs.log())
+        # cutoff = time of "first" commit (second entry, since log is newest-first)
+        cutoff = entries[1].time
+
+        result = runner.invoke(main, [
+            "log", "--repo", initialized_repo,
+            "--before", cutoff.isoformat()
+        ])
+        assert result.exit_code == 0
+        lines = result.output.strip().split("\n")
+        assert "second" not in result.output
+        assert "first" in result.output
+
+    def test_log_before_date_only(self, runner, repo_with_files):
+        """Date-only --before: 2099-01-01 includes all; 2000-01-01 includes none."""
+        result = runner.invoke(main, [
+            "log", "--repo", repo_with_files, "--before", "2099-01-01"
+        ])
+        assert result.exit_code == 0
+        all_lines = result.output.strip().split("\n")
+        assert len(all_lines) >= 3  # init + hello.txt + data
+
+        result = runner.invoke(main, [
+            "log", "--repo", repo_with_files, "--before", "2000-01-01"
+        ])
+        assert result.exit_code == 0
+        assert result.output.strip() == ""
+
+    def test_log_before_with_path(self, runner, initialized_repo, tmp_path):
+        """--before and --path combined."""
+        import time
+        f = tmp_path / "a.txt"
+        f.write_text("v1")
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":a.txt", "-m", "add a"])
+
+        from gitstore import GitStore
+        store = GitStore.open(initialized_repo)
+        fs = store.branches["main"]
+        cutoff = fs.time  # time of "add a" commit
+
+        time.sleep(1.1)
+        f.write_text("v2")
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":a.txt", "-m", "update a"])
+
+        result = runner.invoke(main, [
+            "log", "--repo", initialized_repo,
+            "--path", "a.txt", "--before", cutoff.isoformat()
+        ])
+        assert result.exit_code == 0
+        lines = result.output.strip().split("\n")
+        assert len(lines) == 1
+        assert "add a" in lines[0]
+
+    def test_log_before_with_match(self, runner, initialized_repo, tmp_path):
+        """--before and --match combined."""
+        import time
+        f = tmp_path / "a.txt"
+        f.write_text("v1")
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":a.txt", "-m", "deploy v1"])
+
+        from gitstore import GitStore
+        store = GitStore.open(initialized_repo)
+        fs = store.branches["main"]
+        cutoff = fs.time
+
+        time.sleep(1.1)
+        f.write_text("v2")
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":a.txt", "-m", "deploy v2"])
+
+        result = runner.invoke(main, [
+            "log", "--repo", initialized_repo,
+            "--match", "deploy*", "--before", cutoff.isoformat()
+        ])
+        assert result.exit_code == 0
+        lines = result.output.strip().split("\n")
+        assert len(lines) == 1
+        assert "deploy v1" in lines[0]
+
+    def test_zip_before(self, runner, initialized_repo, tmp_path):
+        """--before exports the correct snapshot."""
+        import time
+        f = tmp_path / "a.txt"
+        f.write_text("v1")
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":a.txt", "-m", "add a"])
+
+        from gitstore import GitStore
+        store = GitStore.open(initialized_repo)
+        fs = store.branches["main"]
+        cutoff = fs.time
+
+        time.sleep(1.1)
+        f2 = tmp_path / "b.txt"
+        f2.write_text("b")
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f2), ":b.txt", "-m", "add b"])
+
+        out = str(tmp_path / "archive.zip")
+        result = runner.invoke(main, [
+            "zip", "--repo", initialized_repo, out, "--before", cutoff.isoformat()
+        ])
+        assert result.exit_code == 0, result.output
+        with zipfile.ZipFile(out, "r") as zf:
+            names = zf.namelist()
+            assert "a.txt" in names
+            assert "b.txt" not in names
+
+    def test_tar_before(self, runner, initialized_repo, tmp_path):
+        """--before exports the correct snapshot."""
+        import tarfile
+        import time
+        f = tmp_path / "a.txt"
+        f.write_text("v1")
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":a.txt", "-m", "add a"])
+
+        from gitstore import GitStore
+        store = GitStore.open(initialized_repo)
+        fs = store.branches["main"]
+        cutoff = fs.time
+
+        time.sleep(1.1)
+        f2 = tmp_path / "b.txt"
+        f2.write_text("b")
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f2), ":b.txt", "-m", "add b"])
+
+        out = str(tmp_path / "archive.tar")
+        result = runner.invoke(main, [
+            "tar", "--repo", initialized_repo, out, "--before", cutoff.isoformat()
+        ])
+        assert result.exit_code == 0, result.output
+        with tarfile.open(out, "r") as tf:
+            names = tf.getnames()
+            assert "a.txt" in names
+            assert "b.txt" not in names
+
+    def test_before_invalid_date(self, runner, repo_with_files, tmp_path):
+        """Invalid --before value produces a clear error."""
+        result = runner.invoke(main, [
+            "log", "--repo", repo_with_files, "--before", "not-a-date"
+        ])
+        assert result.exit_code != 0
+        assert "Invalid date" in result.output
+
+    def test_before_no_matching_commits(self, runner, repo_with_files, tmp_path):
+        """--before with a very old date produces error for zip/tar."""
+        out = str(tmp_path / "archive.zip")
+        result = runner.invoke(main, [
+            "zip", "--repo", repo_with_files, out, "--before", "2000-01-01"
+        ])
+        assert result.exit_code != 0
+        assert "No matching commits" in result.output
+
+
+# ---------------------------------------------------------------------------
+# TestHash
+# ---------------------------------------------------------------------------
+
 class TestHash:
     """Tests for the --hash option on read commands."""
 

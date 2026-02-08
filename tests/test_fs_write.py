@@ -103,7 +103,7 @@ class TestLog:
             mode=GIT_FILEMODE_BLOB_EXECUTABLE, message="Make executable",
         )
         # log --at script.sh should see both commits (content write + mode change)
-        entries = list(fs3.log(at="script.sh"))
+        entries = list(fs3.log(path="script.sh"))
         messages = [e.message for e in entries]
         assert "Make executable" in messages
         assert "Write script.sh" in messages

@@ -201,16 +201,24 @@ class FS:
         *,
         at: str | os.PathLike[str] | None = None,
         match: str | None = None,
+        before: datetime | None = None,
     ) -> Iterator[FS]:
-        # Support both positional `path` and keyword `at` (same thing).
-        filter_path = at if at is not None else path
+        # `path` is the primary parameter (positional or keyword).
+        # `at` is a deprecated alias kept for backward compatibility.
+        filter_path = path if path is not None else at
         if filter_path is not None:
             filter_path = _normalize_path(filter_path)
         repo = self._store._repo
         if match is not None:
             from fnmatch import fnmatch as _fnmatch
+        past_cutoff = False
         current: FS | None = self
         while current is not None:
+            if not past_cutoff and before is not None:
+                if current.time > before:
+                    current = current.parent
+                    continue
+                past_cutoff = True
             if filter_path is not None:
                 from .tree import _entry_at_path
                 current_entry = _entry_at_path(repo, current._tree_oid, filter_path)

@@ -210,15 +210,21 @@ for snapshot in fs.log("path/to/file.txt"):
     print(snapshot.hash, snapshot.message)
 
 # Same thing using the keyword form
-for snapshot in fs.log(at="path/to/file.txt"):
+for snapshot in fs.log(path="path/to/file.txt"):
     print(snapshot.hash, snapshot.message)
 
 # Filter by commit message (supports * and ? wildcards)
 for snapshot in fs.log(match="deploy*"):
     print(snapshot.hash, snapshot.message)
 
-# Combine both filters (AND)
-for snapshot in fs.log(at="config.json", match="fix*"):
+# Only commits on or before a date
+from datetime import datetime, timezone
+cutoff = datetime(2024, 6, 1, tzinfo=timezone.utc)
+for snapshot in fs.log(before=cutoff):
+    print(snapshot.hash, snapshot.message)
+
+# Combine filters (AND)
+for snapshot in fs.log(path="config.json", match="fix*"):
     print(snapshot.hash, snapshot.message)
 ```
 
@@ -334,6 +340,8 @@ gitstore log
 gitstore log --path file.txt                # commits that changed this file
 gitstore log --match "deploy*"            # commits matching message pattern
 gitstore log --path file.txt --match "fix*" # both filters (AND)
+gitstore log --before 2024-06-01          # commits on or before this date
+gitstore log --before 2024-06-01T14:30:00 # date-time (ISO 8601)
 gitstore log --format json                # JSON array
 gitstore log --format jsonl               # one JSON object per line
 
@@ -352,6 +360,7 @@ gitstore tag delete v1.0
 gitstore zip archive.zip
 gitstore zip archive.zip --path file.txt    # snapshot where file.txt last changed
 gitstore zip archive.zip --match "v1*"    # snapshot matching message pattern
+gitstore zip archive.zip --before 2024-06-01  # snapshot as of a date
 
 # Import a zip file into the repo
 gitstore unzip archive.zip
@@ -363,6 +372,7 @@ gitstore tar archive.tar
 gitstore tar archive.tar.gz                # auto-compress based on extension
 gitstore tar - | gzip > archive.tar.gz     # or pipe to gzip
 gitstore tar archive.tar --path file.txt     # snapshot where file.txt last changed
+gitstore tar archive.tar --before 2024-06-01 # snapshot as of a date
 
 # Import a tar archive into the repo
 gitstore untar archive.tar.gz              # auto-detects compression
@@ -388,7 +398,7 @@ gitstore tar archive.tar --hash abc1234...
 gitstore cp :file.txt local.txt --hash abc1234...
 ```
 
-Write commands (`cp`, `cptree`, `rm`, `unzip`, `untar`) accept `-m` for custom commit messages. Use `-b` on any command to target a branch other than `main`. Read commands (`cat`, `ls`, `cp`, `cptree`, `zip`, `tar`, `log`) accept `--hash` to read from any branch, tag, or full commit hash. `cp` accepts `--mode 644` or `--mode 755` to set file permissions. Pass `-v` before the command for status messages on stderr. `zip` and `tar` accept `-` as FILENAME to write to stdout; `untar` defaults to stdin when no filename is given.
+Write commands (`cp`, `cptree`, `rm`, `unzip`, `untar`) accept `-m` for custom commit messages. Use `-b` on any command to target a branch other than `main`. Read commands (`cat`, `ls`, `cp`, `cptree`, `zip`, `tar`, `log`) accept `--hash` to read from any branch, tag, or full commit hash. `log`, `zip`, and `tar` accept `--before` with an ISO 8601 date or datetime to filter to commits on or before that point in time. `cp` accepts `--mode 644` or `--mode 755` to set file permissions. Pass `-v` before the command for status messages on stderr. `zip` and `tar` accept `-` as FILENAME to write to stdout; `untar` defaults to stdin when no filename is given.
 
 ## Development
 

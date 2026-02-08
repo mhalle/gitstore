@@ -93,7 +93,7 @@ class TestLog:
         fs = fs.write("a.txt", b"a1")
         fs = fs.write("b.txt", b"b1")
         fs = fs.write("a.txt", b"a2")
-        commits = list(fs.log(at="a.txt"))
+        commits = list(fs.log(path="a.txt"))
         assert len(commits) == 2
 
     def test_log_match(self, tmp_path):
@@ -123,12 +123,12 @@ class TestLog:
         # at="a.txt" gives 2 commits, match narrows to the one with "b" not in message
         # Actually both a.txt commits have "Write a.txt" — let's use a different approach
         # Use at + match where match filters out the Initialize commit
-        commits_at = list(fs.log(at="a.txt"))
+        commits_at = list(fs.log(path="a.txt"))
         assert len(commits_at) == 2
-        commits_both = list(fs.log(at="a.txt", match="*a.txt"))
+        commits_both = list(fs.log(path="a.txt", match="*a.txt"))
         assert len(commits_both) == 2
         # Now filter for something that won't match
-        commits_none = list(fs.log(at="a.txt", match="*b.txt"))
+        commits_none = list(fs.log(path="a.txt", match="*b.txt"))
         assert len(commits_none) == 0
 
 

@@ -104,11 +104,29 @@ def _normalize_at_path(at_path: str | None) -> str | None:
     return _normalize_repo_path(_strip_colon(at_path))
 
 
-def _resolve_snapshot(fs, at_path: str | None, match_pattern: str | None):
-    """Narrow *fs* to the first commit matching --path / --match filters."""
+def _parse_before(value: str | None):
+    """Parse a --before value into a timezone-aware datetime, or None."""
+    if value is None:
+        return None
+    from datetime import datetime, timezone
+    try:
+        dt = datetime.fromisoformat(value)
+    except ValueError:
+        raise click.ClickException(
+            f"Invalid date: {value} (use ISO 8601, e.g. 2024-01-15 or 2024-01-15T14:30:00)"
+        )
+    if "T" not in value and "t" not in value:
+        dt = dt.replace(hour=23, minute=59, second=59, microsecond=999999)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def _resolve_snapshot(fs, at_path: str | None, match_pattern: str | None, before=None):
+    """Narrow *fs* to the first commit matching --path / --match / --before filters."""
     at_path = _normalize_at_path(at_path)
-    if at_path is not None or match_pattern is not None:
-        for entry in fs.log(at=at_path, match=match_pattern):
+    if at_path is not None or match_pattern is not None or before is not None:
+        for entry in fs.log(path=at_path, match=match_pattern, before=before):
             return entry
         raise click.ClickException("No matching commits found")
     return fs
@@ -547,20 +565,22 @@ def rm(ctx, path, branch, message):
 @click.option("--path", "at_path", default=None, help="Filter to commits that changed this path.")
 @click.option("--at", "deprecated_at", default=None, hidden=True)
 @click.option("--match", "match_pattern", default=None, help="Filter by message (supports * and ? wildcards).")
+@click.option("--before", "before", default=None, help="Only commits on or before this date (ISO 8601).")
 @click.option("--branch", "-b", default="main", help="Branch to show log for.")
 @click.option("--hash", "ref", default=None, help="Branch, tag, or commit hash to start from.")
 @click.option("--format", "fmt", default="text",
               type=click.Choice(["text", "json", "jsonl"]),
               help="Output format.")
 @click.pass_context
-def log(ctx, at_path, deprecated_at, match_pattern, branch, ref, fmt):
+def log(ctx, at_path, deprecated_at, match_pattern, before, branch, ref, fmt):
     """Show commit log, optionally filtered by path and/or message pattern."""
     at_path = at_path or deprecated_at
     store = _open_store(_require_repo(ctx))
     fs = _get_fs(store, branch, ref)
 
+    before = _parse_before(before)
     at_path = _normalize_at_path(at_path)
-    entries = list(fs.log(at=at_path, match=match_pattern))
+    entries = list(fs.log(path=at_path, match=match_pattern, before=before))
 
     if fmt == "json":
         click.echo(json.dumps([_log_entry_dict(e) for e in entries], indent=2))
@@ -727,15 +747,17 @@ def tag_delete(ctx, name):
 @click.option("--path", "at_path", default=None, help="Filter to commits that changed this path.")
 @click.option("--at", "deprecated_at", default=None, hidden=True)
 @click.option("--match", "match_pattern", default=None, help="Filter by message (supports * and ? wildcards).")
+@click.option("--before", "before", default=None, help="Only commits on or before this date (ISO 8601).")
 @click.pass_context
-def zip_cmd(ctx, filename, branch, ref, at_path, deprecated_at, match_pattern):
+def zip_cmd(ctx, filename, branch, ref, at_path, deprecated_at, match_pattern, before):
     """Export repo contents to a zip file.
 
     FILENAME is the output zip path on disk.  Use '-' to write to stdout.
     """
     at_path = at_path or deprecated_at
+    before = _parse_before(before)
     store = _open_store(_require_repo(ctx))
-    fs = _resolve_snapshot(_get_fs(store, branch, ref), at_path, match_pattern)
+    fs = _resolve_snapshot(_get_fs(store, branch, ref), at_path, match_pattern, before)
 
     to_stdout = filename == "-"
     dest = io.BytesIO() if to_stdout else filename
@@ -814,18 +836,20 @@ def unzip_cmd(ctx, filename, branch, message):
 @click.option("--path", "at_path", default=None, help="Filter to commits that changed this path.")
 @click.option("--at", "deprecated_at", default=None, hidden=True)
 @click.option("--match", "match_pattern", default=None, help="Filter by message (supports * and ? wildcards).")
+@click.option("--before", "before", default=None, help="Only commits on or before this date (ISO 8601).")
 @click.pass_context
-def tar_cmd(ctx, filename, branch, ref, at_path, deprecated_at, match_pattern):
+def tar_cmd(ctx, filename, branch, ref, at_path, deprecated_at, match_pattern, before):
     """Export repo contents to a tar archive.
 
     FILENAME is the output tar path on disk.  Use '-' to write to stdout.
     Compression is auto-detected from the filename extension (.tar.gz, .tar.bz2, .tar.xz).
     """
     at_path = at_path or deprecated_at
+    before = _parse_before(before)
     import tarfile
 
     store = _open_store(_require_repo(ctx))
-    fs = _resolve_snapshot(_get_fs(store, branch, ref), at_path, match_pattern)
+    fs = _resolve_snapshot(_get_fs(store, branch, ref), at_path, match_pattern, before)
 
     to_stdout = filename == "-"
     mode = "w:"
