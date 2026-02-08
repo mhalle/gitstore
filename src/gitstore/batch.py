@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 import pygit2
 
-from .tree import GIT_FILEMODE_BLOB, GIT_FILEMODE_BLOB_EXECUTABLE, GIT_OBJECT_TREE, _mode_from_disk, _normalize_path, _walk_to, exists_at_path
+from .tree import GIT_FILEMODE_BLOB, GIT_FILEMODE_BLOB_EXECUTABLE, GIT_FILEMODE_LINK, GIT_OBJECT_TREE, _mode_from_disk, _normalize_path, _walk_to, exists_at_path
 
 if TYPE_CHECKING:
     from .fs import FS
@@ -51,6 +51,14 @@ class Batch:
         blob_oid = self._repo.create_blob_fromdisk(local_path)
         self._writes[path] = (blob_oid, mode) if mode != GIT_FILEMODE_BLOB else blob_oid
         self._ops.append(f"Write {path}")
+
+    def write_symlink(self, path: str | os.PathLike[str], target: str) -> None:
+        self._check_open()
+        path = _normalize_path(path)
+        self._removes.discard(path)
+        blob_oid = self._repo.create_blob(target.encode())
+        self._writes[path] = (blob_oid, GIT_FILEMODE_LINK)
+        self._ops.append(f"Symlink {path} -> {target}")
 
     def remove(self, path: str | os.PathLike[str]) -> None:
         self._check_open()

@@ -13,6 +13,7 @@ from ._lock import repo_lock
 from .exceptions import StaleSnapshotError
 from .tree import (
     GIT_FILEMODE_BLOB,
+    GIT_FILEMODE_LINK,
     GIT_OBJECT_TREE,
     _is_root_path,
     _mode_from_disk,
@@ -100,6 +101,18 @@ class FS:
     def exists(self, path: str | os.PathLike[str]) -> bool:
         return exists_at_path(self._store._repo, self._tree_oid, path)
 
+    def readlink(self, path: str | os.PathLike[str]) -> str:
+        """Read the target of a symlink."""
+        from .tree import _entry_at_path
+        path = _normalize_path(path)
+        entry = _entry_at_path(self._store._repo, self._tree_oid, path)
+        if entry is None:
+            raise FileNotFoundError(path)
+        _oid, filemode = entry
+        if filemode != GIT_FILEMODE_LINK:
+            raise ValueError(f"Not a symlink: {path}")
+        return self._store._repo[_oid].data.decode()
+
     def open(self, path: str | os.PathLike[str], mode: str = "rb"):
         if mode == "rb":
             from ._fileobj import ReadableFile
@@ -179,6 +192,20 @@ class FS:
         blob_oid = repo.create_blob_fromdisk(local_path)
         value: pygit2.Oid | tuple[pygit2.Oid, int] = (blob_oid, mode) if mode != GIT_FILEMODE_BLOB else blob_oid
         return self._commit_changes({path: value}, set(), message or f"Write {path}")
+
+    def write_symlink(
+        self,
+        path: str | os.PathLike[str],
+        target: str,
+        *,
+        message: str | None = None,
+    ) -> FS:
+        path = _normalize_path(path)
+        data = target.encode()
+        return self._commit_changes(
+            {path: (data, GIT_FILEMODE_LINK)}, set(),
+            message or f"Symlink {path} -> {target}",
+        )
 
     def remove(self, path: str | os.PathLike[str], *, message: str | None = None) -> FS:
         path = _normalize_path(path)

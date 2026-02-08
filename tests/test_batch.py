@@ -7,7 +7,7 @@ import pygit2
 import pytest
 
 from gitstore import GitStore, StaleSnapshotError
-from gitstore.tree import GIT_FILEMODE_BLOB_EXECUTABLE
+from gitstore.tree import GIT_FILEMODE_BLOB_EXECUTABLE, GIT_FILEMODE_LINK
 
 
 @pytest.fixture
@@ -225,3 +225,31 @@ class TestBatch:
                     assert isinstance(value[0], pygit2.Oid)
                 else:
                     assert isinstance(value, pygit2.Oid)
+
+    def test_write_symlink_basic(self, repo_fs):
+        _, fs = repo_fs
+        with fs.batch() as b:
+            b.write_symlink("link.txt", "a.txt")
+        assert b.fs.readlink("link.txt") == "a.txt"
+
+    def test_write_symlink_filemode(self, repo_fs):
+        _, fs = repo_fs
+        with fs.batch() as b:
+            b.write_symlink("link.txt", "a.txt")
+        tree = b.fs._store._repo[b.fs._tree_oid]
+        assert tree["link.txt"].filemode == GIT_FILEMODE_LINK
+
+    def test_write_symlink_with_other_ops(self, repo_fs):
+        _, fs = repo_fs
+        with fs.batch() as b:
+            b.write("target.txt", b"content")
+            b.write_symlink("link.txt", "target.txt")
+        assert b.fs.read("target.txt") == b"content"
+        assert b.fs.readlink("link.txt") == "target.txt"
+
+    def test_write_symlink_after_exit_raises(self, repo_fs):
+        _, fs = repo_fs
+        with fs.batch() as b:
+            pass
+        with pytest.raises(RuntimeError):
+            b.write_symlink("link.txt", "target.txt")

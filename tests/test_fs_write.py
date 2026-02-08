@@ -5,7 +5,7 @@ import stat
 import pytest
 
 from gitstore import GitStore, StaleSnapshotError
-from gitstore.tree import GIT_FILEMODE_BLOB_EXECUTABLE
+from gitstore.tree import GIT_FILEMODE_BLOB_EXECUTABLE, GIT_FILEMODE_LINK
 
 
 @pytest.fixture
@@ -189,3 +189,62 @@ class TestWriteFrom:
         _, fs = repo_fs
         with pytest.raises(IsADirectoryError):
             fs.write_from("x.txt", str(tmp_path))
+
+
+class TestSymlink:
+    def test_write_symlink_basic(self, repo_fs):
+        _, fs = repo_fs
+        fs2 = fs.write_symlink("link.txt", "target.txt")
+        assert fs2.readlink("link.txt") == "target.txt"
+
+    def test_write_symlink_filemode(self, repo_fs):
+        _, fs = repo_fs
+        fs2 = fs.write_symlink("link.txt", "target.txt")
+        tree = fs2._store._repo[fs2._tree_oid]
+        assert tree["link.txt"].filemode == GIT_FILEMODE_LINK
+
+    def test_write_symlink_nested_target(self, repo_fs):
+        _, fs = repo_fs
+        fs2 = fs.write_symlink("shortcut", "a/b/c.txt")
+        assert fs2.readlink("shortcut") == "a/b/c.txt"
+
+    def test_write_symlink_custom_message(self, repo_fs):
+        _, fs = repo_fs
+        fs2 = fs.write_symlink("link.txt", "target.txt", message="add link")
+        assert fs2.message == "add link"
+
+    def test_write_symlink_default_message(self, repo_fs):
+        _, fs = repo_fs
+        fs2 = fs.write_symlink("link.txt", "target.txt")
+        assert fs2.message == "Symlink link.txt -> target.txt"
+
+    def test_write_symlink_on_tag_raises(self, tmp_path):
+        repo = GitStore.open(tmp_path / "test.git", create="main")
+        fs = repo.branches["main"]
+        repo.tags["v1"] = fs
+        tag_fs = repo.tags["v1"]
+        with pytest.raises(PermissionError):
+            tag_fs.write_symlink("link.txt", "target.txt")
+
+    def test_readlink_missing_raises(self, repo_fs):
+        _, fs = repo_fs
+        with pytest.raises(FileNotFoundError):
+            fs.readlink("nonexistent")
+
+    def test_readlink_on_regular_file_raises(self, repo_fs):
+        _, fs = repo_fs
+        fs2 = fs.write("regular.txt", b"data")
+        with pytest.raises(ValueError):
+            fs2.readlink("regular.txt")
+
+    def test_read_returns_symlink_target_bytes(self, repo_fs):
+        """read() on a symlink returns the raw target as bytes."""
+        _, fs = repo_fs
+        fs2 = fs.write_symlink("link.txt", "target.txt")
+        assert fs2.read("link.txt") == b"target.txt"
+
+    def test_remove_symlink(self, repo_fs):
+        _, fs = repo_fs
+        fs2 = fs.write_symlink("link.txt", "target.txt")
+        fs3 = fs2.remove("link.txt")
+        assert not fs3.exists("link.txt")
