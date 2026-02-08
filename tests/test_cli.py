@@ -798,6 +798,22 @@ class TestZip:
         assert "hello.txt" in names
         assert zf.read("hello.txt") == b"hello world\n"
 
+    def test_zip_preserves_executable(self, runner, initialized_repo, tmp_path):
+        f = tmp_path / "run.sh"
+        f.write_text("#!/bin/sh\necho hi")
+        result = runner.invoke(main, [
+            initialized_repo, "cp", str(f), ":run.sh", "--mode", "755"
+        ])
+        assert result.exit_code == 0, result.output
+
+        out = str(tmp_path / "archive.zip")
+        result = runner.invoke(main, [initialized_repo, "zip", out])
+        assert result.exit_code == 0, result.output
+        with zipfile.ZipFile(out, "r") as zf:
+            info = zf.getinfo("run.sh")
+            unix_mode = info.external_attr >> 16
+            assert unix_mode & 0o111  # executable bit set
+
     def test_zip_no_match_error(self, runner, repo_with_files, tmp_path):
         out = str(tmp_path / "archive.zip")
         result = runner.invoke(main, [repo_with_files, "zip", out, "--match", "zzz-no-match*"])
@@ -853,6 +869,47 @@ class TestUnzip:
         assert "deep.txt" in result.output
         result = runner.invoke(main, [initialized_repo, "cat", ":dir/sub/deep.txt"])
         assert "nested content" in result.output
+
+    def test_unzip_preserves_executable(self, runner, initialized_repo, tmp_path):
+        zpath = str(tmp_path / "import.zip")
+        with zipfile.ZipFile(zpath, "w") as zf:
+            info = zipfile.ZipInfo("script.sh")
+            info.external_attr = 0o100755 << 16
+            zf.writestr(info, "#!/bin/sh\necho hi")
+        result = runner.invoke(main, [initialized_repo, "unzip", zpath])
+        assert result.exit_code == 0, result.output
+
+        from gitstore import GitStore
+        store = GitStore.open(initialized_repo)
+        fs = store.branches["main"]
+        tree = store._repo[fs._tree_oid]
+        assert tree["script.sh"].filemode == 0o100755
+
+    def test_unzip_roundtrip_permissions(self, runner, initialized_repo, tmp_path):
+        """Zip then unzip preserves executable bit."""
+        f = tmp_path / "run.sh"
+        f.write_text("#!/bin/sh")
+        runner.invoke(main, [initialized_repo, "cp", str(f), ":run.sh", "--mode", "755"])
+        f2 = tmp_path / "data.txt"
+        f2.write_text("plain")
+        runner.invoke(main, [initialized_repo, "cp", str(f2), ":data.txt"])
+
+        # Zip it
+        archive = str(tmp_path / "archive.zip")
+        runner.invoke(main, [initialized_repo, "zip", archive])
+
+        # Import into a fresh repo
+        p2 = str(tmp_path / "repo2.git")
+        runner.invoke(main, [p2, "init"])
+        result = runner.invoke(main, [p2, "unzip", archive])
+        assert result.exit_code == 0, result.output
+
+        from gitstore import GitStore
+        store = GitStore.open(p2)
+        fs = store.branches["main"]
+        tree = store._repo[fs._tree_oid]
+        assert tree["run.sh"].filemode == 0o100755
+        assert tree["data.txt"].filemode == 0o100644
 
     def test_unzip_invalid_zip(self, runner, initialized_repo, tmp_path):
         bad = tmp_path / "notazip.bin"

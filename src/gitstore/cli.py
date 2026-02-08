@@ -642,12 +642,22 @@ def zip_cmd(ctx, filename, branch, at_path, match_pattern):
 
     to_stdout = filename == "-"
     dest = io.BytesIO() if to_stdout else filename
+    repo = fs._store._repo
+    root_tree = repo[fs._tree_oid]
     count = 0
     with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as zf:
         for dirpath, _dirs, files in fs.walk():
+            # Get the tree object for this directory
+            tree = root_tree
+            if dirpath:
+                for seg in dirpath.split("/"):
+                    tree = repo[tree[seg].id]
             for fname in files:
                 repo_path = f"{dirpath}/{fname}" if dirpath else fname
-                zf.writestr(repo_path, fs.read(repo_path))
+                info = zipfile.ZipInfo(repo_path)
+                info.compress_type = zipfile.ZIP_DEFLATED
+                info.external_attr = tree[fname].filemode << 16
+                zf.writestr(info, fs.read(repo_path))
                 count += 1
     if to_stdout:
         click.get_binary_stream("stdout").write(dest.getvalue())
@@ -674,13 +684,18 @@ def unzip_cmd(ctx, filename, branch, message):
     store = _open_store(ctx.obj["repo_path"])
     fs = _get_branch_fs(store, branch)
 
-    writes: dict[str, bytes] = {}
+    writes: dict[str, bytes | tuple[bytes, int]] = {}
     with zipfile.ZipFile(filename, "r") as zf:
         for info in zf.infolist():
             if info.is_dir():
                 continue
             repo_path = _normalize_repo_path(info.filename)
-            writes[repo_path] = zf.read(info.filename)
+            data = zf.read(info.filename)
+            unix_mode = info.external_attr >> 16
+            if unix_mode & 0o111:
+                writes[repo_path] = (data, GIT_FILEMODE_BLOB_EXECUTABLE)
+            else:
+                writes[repo_path] = data
 
     if not writes:
         raise click.ClickException("Zip file contains no files")
