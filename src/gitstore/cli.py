@@ -159,6 +159,39 @@ def init(ctx, branch):
 
 
 # ---------------------------------------------------------------------------
+# destroy
+# ---------------------------------------------------------------------------
+
+@main.command()
+@_repo_option
+@click.option("-f", "--force", is_flag=True, help="Required to destroy a non-empty repo.")
+@click.pass_context
+def destroy(ctx, force):
+    """Remove a bare git repository.
+
+    Requires -f if the repo contains any branches or tags.
+    """
+    repo_path = _require_repo(ctx)
+    try:
+        store = GitStore.open(repo_path)
+    except FileNotFoundError:
+        raise click.ClickException(f"Repository not found: {repo_path}")
+
+    if not force:
+        has_data = len(store.tags) > 0 or any(
+            fs.ls() for fs in store.branches.values()
+        )
+        if has_data:
+            raise click.ClickException(
+                "Repository is not empty. Use -f to destroy."
+            )
+
+    import shutil
+    shutil.rmtree(repo_path)
+    _status(ctx, f"Destroyed {repo_path}")
+
+
+# ---------------------------------------------------------------------------
 # cp
 # ---------------------------------------------------------------------------
 
@@ -729,6 +762,131 @@ def unzip_cmd(ctx, filename, branch, message):
 
     if not writes:
         raise click.ClickException("Zip file contains no files")
+
+    msg = message or ""
+    try:
+        fs._commit_changes(writes, set(), msg)
+    except StaleSnapshotError:
+        raise click.ClickException("Branch modified concurrently — retry")
+    _status(ctx, f"Imported {len(writes)} file(s) from {filename}")
+
+
+# ---------------------------------------------------------------------------
+# tar
+# ---------------------------------------------------------------------------
+
+@main.command("tar")
+@_repo_option
+@click.argument("filename", type=click.Path())
+@click.option("--branch", "-b", default="main", help="Branch to export from.")
+@click.option("--at", "at_path", default=None, help="Filter to commits that changed this path.")
+@click.option("--match", "match_pattern", default=None, help="Filter by message (supports * and ? wildcards).")
+@click.pass_context
+def tar_cmd(ctx, filename, branch, at_path, match_pattern):
+    """Export repo contents to a tar archive.
+
+    FILENAME is the output tar path on disk.  Use '-' to write to stdout.
+    Compression is auto-detected from the filename extension (.tar.gz, .tar.bz2, .tar.xz).
+    """
+    import tarfile
+
+    store = _open_store(_require_repo(ctx))
+    fs = _get_branch_fs(store, branch)
+
+    if at_path is not None:
+        at_path = _normalize_repo_path(_strip_colon(at_path))
+    if at_path is not None or match_pattern is not None:
+        for entry in fs.log(at=at_path, match=match_pattern):
+            fs = entry
+            break
+        else:
+            raise click.ClickException("No matching commits found")
+
+    to_stdout = filename == "-"
+    mode = "w:"
+    if not to_stdout:
+        lower = filename.lower()
+        if lower.endswith((".tar.gz", ".tgz")):
+            mode = "w:gz"
+        elif lower.endswith((".tar.bz2", ".tbz2")):
+            mode = "w:bz2"
+        elif lower.endswith((".tar.xz", ".txz")):
+            mode = "w:xz"
+
+    dest = io.BytesIO() if to_stdout else filename
+    repo = fs._store._repo
+    root_tree = repo[fs._tree_oid]
+    count = 0
+    with tarfile.open(fileobj=dest, mode=mode) if to_stdout else tarfile.open(dest, mode=mode) as tf:
+        for dirpath, _dirs, files in fs.walk():
+            tree = root_tree
+            if dirpath:
+                for seg in dirpath.split("/"):
+                    tree = repo[tree[seg].id]
+            for fname in files:
+                repo_path = f"{dirpath}/{fname}" if dirpath else fname
+                data = fs.read(repo_path)
+                info = tarfile.TarInfo(name=repo_path)
+                info.size = len(data)
+                info.mode = tree[fname].filemode & 0o7777
+                tf.addfile(info, io.BytesIO(data))
+                count += 1
+    if to_stdout:
+        click.get_binary_stream("stdout").write(dest.getvalue())
+    _status(ctx, f"Wrote {count} file(s) to {filename}")
+
+
+# ---------------------------------------------------------------------------
+# untar
+# ---------------------------------------------------------------------------
+
+@main.command("untar")
+@_repo_option
+@click.argument("filename", type=click.Path(), default="-")
+@click.option("--branch", "-b", default="main", help="Branch to import into.")
+@click.option("-m", "message", default=None, help="Commit message.")
+@click.pass_context
+def untar_cmd(ctx, filename, branch, message):
+    """Import a tar archive into the repo.
+
+    FILENAME is the path to the tar file on disk.  Use '-' to read from stdin
+    (the default).  Compression is auto-detected.
+    """
+    import tarfile
+
+    from_stdin = filename == "-"
+
+    if from_stdin:
+        source = click.get_binary_stream("stdin")
+        try:
+            tf = tarfile.open(fileobj=source, mode="r|*")
+        except tarfile.TarError as exc:
+            raise click.ClickException(f"Not a valid tar archive: {exc}")
+    else:
+        if not os.path.exists(filename):
+            raise click.ClickException(f"File not found: {filename}")
+        try:
+            tf = tarfile.open(filename, mode="r:*")
+        except tarfile.TarError as exc:
+            raise click.ClickException(f"Not a valid tar archive: {exc}")
+
+    store = _open_store(_require_repo(ctx))
+    fs = _get_branch_fs(store, branch)
+
+    writes: dict[str, bytes | tuple[bytes, int]] = {}
+    with tf:
+        for member in tf:
+            if not member.isfile():
+                continue
+            repo_path = _normalize_repo_path(member.name)
+            data = tf.extractfile(member).read()
+            if member.mode & 0o111:
+                writes[repo_path] = (data, GIT_FILEMODE_BLOB_EXECUTABLE)
+            else:
+                writes[repo_path] = data
+
+    if not writes:
+        raise click.ClickException("Tar archive contains no files")
 
     msg = message or ""
     try:

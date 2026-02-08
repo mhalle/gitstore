@@ -301,6 +301,10 @@ gitstore -r /path/to/repo.git ls
 # Create a repo
 gitstore init --repo /path/to/repo.git
 
+# Destroy a repo
+gitstore destroy                          # fails if repo has data
+gitstore destroy -f                       # force-remove non-empty repo
+
 # Copy files in and out
 gitstore cp local-file.txt :remote-file.txt
 gitstore cp :remote-file.txt local-copy.txt
@@ -353,9 +357,21 @@ gitstore zip archive.zip --match "v1*"    # snapshot matching message pattern
 gitstore unzip archive.zip
 gitstore unzip archive.zip -m "Import data"
 gitstore unzip archive.zip -b dev
+
+# Export repo contents to a tar archive
+gitstore tar archive.tar
+gitstore tar archive.tar.gz                # auto-compress based on extension
+gitstore tar - | gzip > archive.tar.gz     # or pipe to gzip
+gitstore tar archive.tar --at file.txt     # snapshot where file.txt last changed
+
+# Import a tar archive into the repo
+gitstore untar archive.tar.gz              # auto-detects compression
+gitstore untar                             # reads from stdin (default)
+cat archive.tar.gz | gitstore untar        # equivalent
+gitstore untar archive.tar -m "Import data"
 ```
 
-Write commands (`cp`, `cptree`, `rm`, `unzip`) accept `-m` for custom commit messages. Use `-b` on any command to target a branch other than `main`. `cp` accepts `--mode 644` or `--mode 755` to set file permissions. Pass `-v` before the command for status messages on stderr. `zip` accepts `-` as FILENAME to write to stdout.
+Write commands (`cp`, `cptree`, `rm`, `unzip`, `untar`) accept `-m` for custom commit messages. Use `-b` on any command to target a branch other than `main`. `cp` accepts `--mode 644` or `--mode 755` to set file permissions. Pass `-v` before the command for status messages on stderr. `zip` and `tar` accept `-` as FILENAME to write to stdout; `untar` defaults to stdin when no filename is given.
 
 ## Development
 

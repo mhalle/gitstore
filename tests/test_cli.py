@@ -78,6 +78,37 @@ class TestInit:
 
 
 # ---------------------------------------------------------------------------
+# TestDestroy
+# ---------------------------------------------------------------------------
+
+class TestDestroy:
+    def test_destroy_empty(self, runner, initialized_repo):
+        result = runner.invoke(main, ["destroy", "--repo", initialized_repo])
+        assert result.exit_code == 0
+        import os
+        assert not os.path.exists(initialized_repo)
+
+    def test_destroy_nonempty_requires_force(self, runner, repo_with_files):
+        result = runner.invoke(main, ["destroy", "--repo", repo_with_files])
+        assert result.exit_code != 0
+        assert "not empty" in result.output.lower()
+        import os
+        assert os.path.exists(repo_with_files)
+
+    def test_destroy_nonempty_with_force(self, runner, repo_with_files):
+        result = runner.invoke(main, ["destroy", "--repo", repo_with_files, "-f"])
+        assert result.exit_code == 0
+        import os
+        assert not os.path.exists(repo_with_files)
+
+    def test_destroy_missing_repo(self, runner, tmp_path):
+        bad_path = str(tmp_path / "nope.git")
+        result = runner.invoke(main, ["destroy", "--repo", bad_path])
+        assert result.exit_code != 0
+        assert "not found" in result.output.lower()
+
+
+# ---------------------------------------------------------------------------
 # TestCp
 # ---------------------------------------------------------------------------
 
@@ -983,3 +1014,262 @@ class TestUnzip:
         result = runner.invoke(main, ["unzip", "--repo", initialized_repo, zpath])
         assert result.exit_code != 0
         assert "no files" in result.output.lower()
+
+
+# ---------------------------------------------------------------------------
+# TestTar
+# ---------------------------------------------------------------------------
+
+class TestTar:
+    def test_tar_basic(self, runner, repo_with_files, tmp_path):
+        out = str(tmp_path / "archive.tar")
+        result = runner.invoke(main, ["tar", "--repo", repo_with_files, out])
+        assert result.exit_code == 0, result.output
+        import tarfile
+        with tarfile.open(out, "r") as tf:
+            names = tf.getnames()
+            assert "hello.txt" in names
+            assert "data/data.bin" in names
+
+    def test_tar_contents(self, runner, repo_with_files, tmp_path):
+        out = str(tmp_path / "archive.tar")
+        result = runner.invoke(main, ["tar", "--repo", repo_with_files, out])
+        assert result.exit_code == 0, result.output
+        import tarfile
+        with tarfile.open(out, "r") as tf:
+            assert tf.extractfile("hello.txt").read() == b"hello world\n"
+            assert tf.extractfile("data/data.bin").read() == b"\x00\x01\x02"
+
+    def test_tar_gz(self, runner, repo_with_files, tmp_path):
+        out = str(tmp_path / "archive.tar.gz")
+        result = runner.invoke(main, ["tar", "--repo", repo_with_files, out])
+        assert result.exit_code == 0, result.output
+        import gzip
+        with open(out, "rb") as f:
+            # gzip magic bytes
+            assert f.read(2) == b"\x1f\x8b"
+        import tarfile
+        with tarfile.open(out, "r:gz") as tf:
+            names = tf.getnames()
+            assert "hello.txt" in names
+
+    def test_tar_with_at(self, runner, initialized_repo, tmp_path):
+        f = tmp_path / "a.txt"
+        f.write_text("v1")
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":a.txt", "-m", "add a"])
+        f2 = tmp_path / "b.txt"
+        f2.write_text("b")
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f2), ":b.txt", "-m", "add b"])
+
+        out = str(tmp_path / "archive.tar")
+        result = runner.invoke(main, ["tar", "--repo", initialized_repo, out, "--at", "a.txt"])
+        assert result.exit_code == 0, result.output
+        import tarfile
+        with tarfile.open(out, "r") as tf:
+            names = tf.getnames()
+            assert "a.txt" in names
+            assert "b.txt" not in names
+
+    def test_tar_with_match(self, runner, initialized_repo, tmp_path):
+        f = tmp_path / "a.txt"
+        f.write_text("v1")
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":a.txt", "-m", "deploy v1"])
+        f.write_text("v2")
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":a.txt", "-m", "fix bug"])
+
+        out = str(tmp_path / "archive.tar")
+        result = runner.invoke(main, ["tar", "--repo", initialized_repo, out, "--match", "deploy*"])
+        assert result.exit_code == 0, result.output
+        import tarfile
+        with tarfile.open(out, "r") as tf:
+            assert tf.extractfile("a.txt").read() == b"v1"
+
+    def test_tar_stdout(self, runner, repo_with_files):
+        result = runner.invoke(main, ["tar", "--repo", repo_with_files, "-"])
+        assert result.exit_code == 0, result.output
+        import tarfile
+        tf = tarfile.open(fileobj=io.BytesIO(result.output_bytes), mode="r:")
+        names = tf.getnames()
+        assert "hello.txt" in names
+        assert tf.extractfile("hello.txt").read() == b"hello world\n"
+        tf.close()
+
+    def test_tar_preserves_executable(self, runner, initialized_repo, tmp_path):
+        f = tmp_path / "run.sh"
+        f.write_text("#!/bin/sh\necho hi")
+        result = runner.invoke(main, [
+            "cp", "--repo", initialized_repo, str(f), ":run.sh", "--mode", "755"
+        ])
+        assert result.exit_code == 0, result.output
+
+        out = str(tmp_path / "archive.tar")
+        result = runner.invoke(main, ["tar", "--repo", initialized_repo, out])
+        assert result.exit_code == 0, result.output
+        import tarfile
+        with tarfile.open(out, "r") as tf:
+            info = tf.getmember("run.sh")
+            assert info.mode & 0o111  # executable bit set
+
+    def test_tar_no_match_error(self, runner, repo_with_files, tmp_path):
+        out = str(tmp_path / "archive.tar")
+        result = runner.invoke(main, ["tar", "--repo", repo_with_files, out, "--match", "zzz-no-match*"])
+        assert result.exit_code != 0
+        assert "No matching commits" in result.output
+
+
+# ---------------------------------------------------------------------------
+# TestUntar
+# ---------------------------------------------------------------------------
+
+class TestUntar:
+    def test_untar_basic(self, runner, initialized_repo, tmp_path):
+        import tarfile
+        tpath = str(tmp_path / "import.tar")
+        with tarfile.open(tpath, "w") as tf:
+            data = b"hello"
+            info = tarfile.TarInfo(name="file1.txt")
+            info.size = len(data)
+            tf.addfile(info, io.BytesIO(data))
+            data2 = b"world"
+            info2 = tarfile.TarInfo(name="file2.txt")
+            info2.size = len(data2)
+            tf.addfile(info2, io.BytesIO(data2))
+        result = runner.invoke(main, ["untar", "--repo", initialized_repo, tpath])
+        assert result.exit_code == 0, result.output
+        result = runner.invoke(main, ["ls", "--repo", initialized_repo])
+        assert "file1.txt" in result.output
+        assert "file2.txt" in result.output
+
+    def test_untar_contents(self, runner, initialized_repo, tmp_path):
+        import tarfile
+        tpath = str(tmp_path / "import.tar")
+        with tarfile.open(tpath, "w") as tf:
+            data = b"hi there"
+            info = tarfile.TarInfo(name="greet.txt")
+            info.size = len(data)
+            tf.addfile(info, io.BytesIO(data))
+        runner.invoke(main, ["untar", "--repo", initialized_repo, tpath])
+
+        result = runner.invoke(main, ["cat", "--repo", initialized_repo, ":greet.txt"])
+        assert result.exit_code == 0
+        assert "hi there" in result.output
+
+    def test_untar_custom_message(self, runner, initialized_repo, tmp_path):
+        import tarfile
+        tpath = str(tmp_path / "import.tar")
+        with tarfile.open(tpath, "w") as tf:
+            data = b"data"
+            info = tarfile.TarInfo(name="msg.txt")
+            info.size = len(data)
+            tf.addfile(info, io.BytesIO(data))
+        result = runner.invoke(main, ["untar", "--repo", initialized_repo, tpath, "-m", "bulk import"])
+        assert result.exit_code == 0
+
+        result = runner.invoke(main, ["log", "--repo", initialized_repo])
+        assert "bulk import" in result.output
+
+    def test_untar_nested(self, runner, initialized_repo, tmp_path):
+        import tarfile
+        tpath = str(tmp_path / "import.tar")
+        with tarfile.open(tpath, "w") as tf:
+            data = b"nested content"
+            info = tarfile.TarInfo(name="dir/sub/deep.txt")
+            info.size = len(data)
+            tf.addfile(info, io.BytesIO(data))
+            data2 = b"top level"
+            info2 = tarfile.TarInfo(name="top.txt")
+            info2.size = len(data2)
+            tf.addfile(info2, io.BytesIO(data2))
+        result = runner.invoke(main, ["untar", "--repo", initialized_repo, tpath])
+        assert result.exit_code == 0, result.output
+
+        result = runner.invoke(main, ["ls", "--repo", initialized_repo, ":dir/sub"])
+        assert "deep.txt" in result.output
+        result = runner.invoke(main, ["cat", "--repo", initialized_repo, ":dir/sub/deep.txt"])
+        assert "nested content" in result.output
+
+    def test_untar_preserves_executable(self, runner, initialized_repo, tmp_path):
+        import tarfile
+        tpath = str(tmp_path / "import.tar")
+        with tarfile.open(tpath, "w") as tf:
+            data = b"#!/bin/sh\necho hi"
+            info = tarfile.TarInfo(name="script.sh")
+            info.size = len(data)
+            info.mode = 0o755
+            tf.addfile(info, io.BytesIO(data))
+        result = runner.invoke(main, ["untar", "--repo", initialized_repo, tpath])
+        assert result.exit_code == 0, result.output
+
+        from gitstore import GitStore
+        store = GitStore.open(initialized_repo)
+        fs = store.branches["main"]
+        tree = store._repo[fs._tree_oid]
+        assert tree["script.sh"].filemode == 0o100755
+
+    def test_untar_roundtrip_permissions(self, runner, initialized_repo, tmp_path):
+        """Tar then untar preserves executable bit."""
+        f = tmp_path / "run.sh"
+        f.write_text("#!/bin/sh")
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":run.sh", "--mode", "755"])
+        f2 = tmp_path / "data.txt"
+        f2.write_text("plain")
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f2), ":data.txt"])
+
+        # Tar it
+        archive = str(tmp_path / "archive.tar")
+        runner.invoke(main, ["tar", "--repo", initialized_repo, archive])
+
+        # Import into a fresh repo
+        p2 = str(tmp_path / "repo2.git")
+        runner.invoke(main, ["init", "--repo", p2])
+        result = runner.invoke(main, ["untar", "--repo", p2, archive])
+        assert result.exit_code == 0, result.output
+
+        from gitstore import GitStore
+        store = GitStore.open(p2)
+        fs = store.branches["main"]
+        tree = store._repo[fs._tree_oid]
+        assert tree["run.sh"].filemode == 0o100755
+        assert tree["data.txt"].filemode == 0o100644
+
+    def test_untar_invalid_archive(self, runner, initialized_repo, tmp_path):
+        bad = tmp_path / "notatar.bin"
+        bad.write_bytes(b"this is not a tar")
+        result = runner.invoke(main, ["untar", "--repo", initialized_repo, str(bad)])
+        assert result.exit_code != 0
+        assert "Not a valid tar" in result.output
+
+    def test_untar_empty_archive(self, runner, initialized_repo, tmp_path):
+        import tarfile
+        tpath = str(tmp_path / "empty.tar")
+        with tarfile.open(tpath, "w") as tf:
+            pass  # no files
+        result = runner.invoke(main, ["untar", "--repo", initialized_repo, tpath])
+        assert result.exit_code != 0
+        assert "no files" in result.output.lower()
+
+    def test_untar_stdin(self, runner, initialized_repo, tmp_path):
+        import tarfile
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w:") as tf:
+            data = b"from stdin"
+            info = tarfile.TarInfo(name="piped.txt")
+            info.size = len(data)
+            tf.addfile(info, io.BytesIO(data))
+        result = runner.invoke(main, ["untar", "--repo", initialized_repo, "-"], input=buf.getvalue())
+        assert result.exit_code == 0, result.output
+        result = runner.invoke(main, ["cat", "--repo", initialized_repo, ":piped.txt"])
+        assert "from stdin" in result.output
+
+    def test_untar_gz(self, runner, initialized_repo, tmp_path):
+        import tarfile
+        tpath = str(tmp_path / "import.tar.gz")
+        with tarfile.open(tpath, "w:gz") as tf:
+            data = b"compressed"
+            info = tarfile.TarInfo(name="comp.txt")
+            info.size = len(data)
+            tf.addfile(info, io.BytesIO(data))
+        result = runner.invoke(main, ["untar", "--repo", initialized_repo, tpath])
+        assert result.exit_code == 0, result.output
+        result = runner.invoke(main, ["cat", "--repo", initialized_repo, ":comp.txt"])
+        assert "compressed" in result.output
