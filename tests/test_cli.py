@@ -356,6 +356,136 @@ class TestCptree:
 
 
 # ---------------------------------------------------------------------------
+# TestSymlinks (cp and cptree)
+# ---------------------------------------------------------------------------
+
+class TestSymlinks:
+    def test_cp_repo_to_disk_symlink(self, runner, initialized_repo, tmp_path):
+        """cp repo→disk creates a symlink on disk for symlink entries."""
+        import os
+        from gitstore import GitStore
+        store = GitStore.open(initialized_repo)
+        fs = store.branches["main"]
+        fs = fs.write("target.txt", b"content")
+        fs.write_symlink("link.txt", "target.txt")
+
+        dest = tmp_path / "out_link.txt"
+        result = runner.invoke(main, ["cp", "--repo", initialized_repo, ":link.txt", str(dest)])
+        assert result.exit_code == 0, result.output
+        assert dest.is_symlink()
+        assert os.readlink(dest) == "target.txt"
+
+    def test_cptree_disk_to_repo_preserves_symlinks(self, runner, initialized_repo, tmp_path):
+        """cptree disk→repo preserves file symlinks by default."""
+        import os
+        from gitstore import GitStore
+        from gitstore.tree import GIT_FILEMODE_LINK
+
+        src = tmp_path / "treesrc"
+        src.mkdir()
+        (src / "real.txt").write_text("hello")
+        os.symlink("real.txt", src / "link.txt")
+
+        result = runner.invoke(main, ["cptree", "--repo", initialized_repo, str(src), ":stuff"])
+        assert result.exit_code == 0, result.output
+
+        store = GitStore.open(initialized_repo)
+        fs = store.branches["main"]
+        assert fs.readlink("stuff/link.txt") == "real.txt"
+        from gitstore.tree import _entry_at_path
+        entry = _entry_at_path(store._repo, fs._tree_oid, "stuff/link.txt")
+        assert entry is not None
+        assert entry[1] == GIT_FILEMODE_LINK
+
+    def test_cptree_disk_to_repo_symlink_to_dir(self, runner, initialized_repo, tmp_path):
+        """cptree disk→repo preserves symlinked directories as symlink entries."""
+        import os
+        from gitstore import GitStore
+        from gitstore.tree import GIT_FILEMODE_LINK
+
+        src = tmp_path / "treesrc"
+        src.mkdir()
+        real_dir = src / "real_dir"
+        real_dir.mkdir()
+        (real_dir / "file.txt").write_text("inside")
+        os.symlink("real_dir", src / "link_dir")
+
+        result = runner.invoke(main, ["cptree", "--repo", initialized_repo, str(src), ":stuff"])
+        assert result.exit_code == 0, result.output
+
+        store = GitStore.open(initialized_repo)
+        fs = store.branches["main"]
+        assert fs.readlink("stuff/link_dir") == "real_dir"
+        from gitstore.tree import _entry_at_path
+        entry = _entry_at_path(store._repo, fs._tree_oid, "stuff/link_dir")
+        assert entry is not None
+        assert entry[1] == GIT_FILEMODE_LINK
+
+    def test_cptree_disk_to_repo_follow_symlinks(self, runner, initialized_repo, tmp_path):
+        """cptree --follow-symlinks dereferences symlinks."""
+        import os
+        from gitstore import GitStore
+        from gitstore.tree import GIT_FILEMODE_LINK
+
+        src = tmp_path / "treesrc"
+        src.mkdir()
+        (src / "real.txt").write_text("hello")
+        os.symlink("real.txt", src / "link.txt")
+
+        result = runner.invoke(main, [
+            "cptree", "--repo", initialized_repo, str(src), ":stuff", "--follow-symlinks"
+        ])
+        assert result.exit_code == 0, result.output
+
+        store = GitStore.open(initialized_repo)
+        fs = store.branches["main"]
+        # Should be a regular file, not a symlink
+        assert fs.read("stuff/link.txt") == b"hello"
+        from gitstore.tree import _entry_at_path
+        entry = _entry_at_path(store._repo, fs._tree_oid, "stuff/link.txt")
+        assert entry is not None
+        assert entry[1] != GIT_FILEMODE_LINK
+
+    def test_cptree_repo_to_disk_symlink(self, runner, initialized_repo, tmp_path):
+        """cptree repo→disk creates symlinks on disk for symlink entries."""
+        import os
+        from gitstore import GitStore
+        store = GitStore.open(initialized_repo)
+        fs = store.branches["main"]
+        fs = fs.write("dir/target.txt", b"content")
+        fs.write_symlink("dir/link.txt", "target.txt")
+
+        dest = tmp_path / "export"
+        result = runner.invoke(main, ["cptree", "--repo", initialized_repo, ":dir", str(dest)])
+        assert result.exit_code == 0, result.output
+        assert (dest / "link.txt").is_symlink()
+        assert os.readlink(dest / "link.txt") == "target.txt"
+
+    def test_cptree_roundtrip_symlinks(self, runner, initialized_repo, tmp_path):
+        """cptree disk→repo then repo→disk preserves symlinks."""
+        import os
+        from gitstore import GitStore
+
+        # Create disk tree with symlinks
+        src = tmp_path / "treesrc"
+        src.mkdir()
+        (src / "real.txt").write_text("hello")
+        os.symlink("real.txt", src / "link.txt")
+
+        # Disk → repo
+        result = runner.invoke(main, ["cptree", "--repo", initialized_repo, str(src), ":rt"])
+        assert result.exit_code == 0, result.output
+
+        # Repo → disk
+        dest = tmp_path / "export"
+        result = runner.invoke(main, ["cptree", "--repo", initialized_repo, ":rt", str(dest)])
+        assert result.exit_code == 0, result.output
+        assert (dest / "link.txt").is_symlink()
+        assert os.readlink(dest / "link.txt") == "real.txt"
+        assert (dest / "real.txt").read_text() == "hello"
+
+
+# ---------------------------------------------------------------------------
 # TestLs
 # ---------------------------------------------------------------------------
 
@@ -909,6 +1039,38 @@ class TestZip:
         assert result.exit_code != 0
         assert "No matching commits" in result.output
 
+    def test_zip_preserves_symlink(self, runner, initialized_repo, tmp_path):
+        """Symlinks in the repo are exported as symlinks in the zip."""
+        from gitstore import GitStore
+        store = GitStore.open(initialized_repo)
+        fs = store.branches["main"]
+        fs = fs.write("target.txt", b"content")
+        fs.write_symlink("link.txt", "target.txt")
+
+        out = str(tmp_path / "archive.zip")
+        result = runner.invoke(main, ["zip", "--repo", initialized_repo, out])
+        assert result.exit_code == 0, result.output
+        with zipfile.ZipFile(out, "r") as zf:
+            info = zf.getinfo("link.txt")
+            unix_mode = info.external_attr >> 16
+            assert (unix_mode & 0o170000) == 0o120000
+            assert zf.read("link.txt") == b"target.txt"
+
+    def test_zip_create_system_unix(self, runner, initialized_repo, tmp_path):
+        """Zip entries have create_system=3 (Unix) for correct external_attr."""
+        from gitstore import GitStore
+        store = GitStore.open(initialized_repo)
+        fs = store.branches["main"]
+        fs = fs.write("file.txt", b"data")
+        fs.write_symlink("link.txt", "file.txt")
+
+        out = str(tmp_path / "archive.zip")
+        result = runner.invoke(main, ["zip", "--repo", initialized_repo, out])
+        assert result.exit_code == 0, result.output
+        with zipfile.ZipFile(out, "r") as zf:
+            for info in zf.infolist():
+                assert info.create_system == 3, f"{info.filename}: create_system={info.create_system}"
+
 
 # ---------------------------------------------------------------------------
 # TestUnzip
@@ -1015,6 +1177,64 @@ class TestUnzip:
         assert result.exit_code != 0
         assert "no files" in result.output.lower()
 
+    def test_unzip_imports_symlink(self, runner, initialized_repo, tmp_path):
+        """Symlinks in a zip are imported as symlinks in the repo."""
+        zpath = str(tmp_path / "import.zip")
+        with zipfile.ZipFile(zpath, "w") as zf:
+            zf.writestr("target.txt", "content")
+            info = zipfile.ZipInfo("link.txt")
+            info.external_attr = 0o120000 << 16
+            zf.writestr(info, "target.txt")
+        result = runner.invoke(main, ["unzip", "--repo", initialized_repo, zpath])
+        assert result.exit_code == 0, result.output
+
+        from gitstore import GitStore
+        from gitstore.tree import GIT_FILEMODE_LINK
+        store = GitStore.open(initialized_repo)
+        fs = store.branches["main"]
+        tree = store._repo[fs._tree_oid]
+        assert tree["link.txt"].filemode == GIT_FILEMODE_LINK
+        assert fs.readlink("link.txt") == "target.txt"
+
+    def test_unzip_roundtrip_symlinks(self, runner, initialized_repo, tmp_path):
+        """Zip then unzip preserves symlinks."""
+        from gitstore import GitStore
+        from gitstore.tree import GIT_FILEMODE_LINK
+        store = GitStore.open(initialized_repo)
+        fs = store.branches["main"]
+        fs = fs.write("target.txt", b"content")
+        fs.write_symlink("link.txt", "target.txt")
+
+        # Zip it
+        archive = str(tmp_path / "archive.zip")
+        runner.invoke(main, ["zip", "--repo", initialized_repo, archive])
+
+        # Import into a fresh repo
+        p2 = str(tmp_path / "repo2.git")
+        runner.invoke(main, ["init", "--repo", p2])
+        result = runner.invoke(main, ["unzip", "--repo", p2, archive])
+        assert result.exit_code == 0, result.output
+
+        store2 = GitStore.open(p2)
+        fs2 = store2.branches["main"]
+        assert fs2.readlink("link.txt") == "target.txt"
+        tree = store2._repo[fs2._tree_oid]
+        assert tree["link.txt"].filemode == GIT_FILEMODE_LINK
+        assert tree["target.txt"].filemode == 0o100644
+
+    def test_unzip_leading_dot_slash(self, runner, initialized_repo, tmp_path):
+        """Zip entries with leading ./ are accepted and normalized."""
+        zpath = str(tmp_path / "import.zip")
+        with zipfile.ZipFile(zpath, "w") as zf:
+            zf.writestr("./dir/file.txt", "hello")
+            zf.writestr("./top.txt", "top")
+        result = runner.invoke(main, ["unzip", "--repo", initialized_repo, zpath])
+        assert result.exit_code == 0, result.output
+        result = runner.invoke(main, ["cat", "--repo", initialized_repo, ":dir/file.txt"])
+        assert "hello" in result.output
+        result = runner.invoke(main, ["cat", "--repo", initialized_repo, ":top.txt"])
+        assert "top" in result.output
+
 
 # ---------------------------------------------------------------------------
 # TestTar
@@ -1115,6 +1335,23 @@ class TestTar:
         result = runner.invoke(main, ["tar", "--repo", repo_with_files, out, "--match", "zzz-no-match*"])
         assert result.exit_code != 0
         assert "No matching commits" in result.output
+
+    def test_tar_preserves_symlink(self, runner, initialized_repo, tmp_path):
+        """Symlinks in the repo are exported as symlinks in the tar."""
+        import tarfile
+        from gitstore import GitStore
+        store = GitStore.open(initialized_repo)
+        fs = store.branches["main"]
+        fs = fs.write("target.txt", b"content")
+        fs.write_symlink("link.txt", "target.txt")
+
+        out = str(tmp_path / "archive.tar")
+        result = runner.invoke(main, ["tar", "--repo", initialized_repo, out])
+        assert result.exit_code == 0, result.output
+        with tarfile.open(out, "r") as tf:
+            member = tf.getmember("link.txt")
+            assert member.issym()
+            assert member.linkname == "target.txt"
 
 
 # ---------------------------------------------------------------------------
@@ -1273,6 +1510,196 @@ class TestUntar:
         assert result.exit_code == 0, result.output
         result = runner.invoke(main, ["cat", "--repo", initialized_repo, ":comp.txt"])
         assert "compressed" in result.output
+
+    def test_untar_imports_symlink(self, runner, initialized_repo, tmp_path):
+        """Symlinks in a tar are imported as symlinks in the repo."""
+        import tarfile
+        tpath = str(tmp_path / "import.tar")
+        with tarfile.open(tpath, "w") as tf:
+            # regular file
+            data = b"content"
+            info = tarfile.TarInfo(name="target.txt")
+            info.size = len(data)
+            tf.addfile(info, io.BytesIO(data))
+            # symlink
+            info = tarfile.TarInfo(name="link.txt")
+            info.type = tarfile.SYMTYPE
+            info.linkname = "target.txt"
+            tf.addfile(info)
+        result = runner.invoke(main, ["untar", "--repo", initialized_repo, tpath])
+        assert result.exit_code == 0, result.output
+
+        from gitstore import GitStore
+        from gitstore.tree import GIT_FILEMODE_LINK
+        store = GitStore.open(initialized_repo)
+        fs = store.branches["main"]
+        tree = store._repo[fs._tree_oid]
+        assert tree["link.txt"].filemode == GIT_FILEMODE_LINK
+        assert fs.readlink("link.txt") == "target.txt"
+
+    def test_untar_roundtrip_symlinks(self, runner, initialized_repo, tmp_path):
+        """Tar then untar preserves symlinks."""
+        import tarfile
+        from gitstore import GitStore
+        from gitstore.tree import GIT_FILEMODE_LINK
+        store = GitStore.open(initialized_repo)
+        fs = store.branches["main"]
+        fs = fs.write("target.txt", b"content")
+        fs.write_symlink("link.txt", "target.txt")
+
+        # Tar it
+        archive = str(tmp_path / "archive.tar")
+        runner.invoke(main, ["tar", "--repo", initialized_repo, archive])
+
+        # Import into a fresh repo
+        p2 = str(tmp_path / "repo2.git")
+        runner.invoke(main, ["init", "--repo", p2])
+        result = runner.invoke(main, ["untar", "--repo", p2, archive])
+        assert result.exit_code == 0, result.output
+
+        store2 = GitStore.open(p2)
+        fs2 = store2.branches["main"]
+        assert fs2.readlink("link.txt") == "target.txt"
+        tree = store2._repo[fs2._tree_oid]
+        assert tree["link.txt"].filemode == GIT_FILEMODE_LINK
+        assert tree["target.txt"].filemode == 0o100644
+
+    def test_untar_leading_dot_slash(self, runner, initialized_repo, tmp_path):
+        """Tar entries with leading ./ are accepted and normalized."""
+        import tarfile
+        tpath = str(tmp_path / "import.tar")
+        with tarfile.open(tpath, "w") as tf:
+            data = b"hello"
+            info = tarfile.TarInfo(name="./dir/file.txt")
+            info.size = len(data)
+            tf.addfile(info, io.BytesIO(data))
+            data2 = b"top"
+            info2 = tarfile.TarInfo(name="./top.txt")
+            info2.size = len(data2)
+            tf.addfile(info2, io.BytesIO(data2))
+        result = runner.invoke(main, ["untar", "--repo", initialized_repo, tpath])
+        assert result.exit_code == 0, result.output
+        result = runner.invoke(main, ["cat", "--repo", initialized_repo, ":dir/file.txt"])
+        assert "hello" in result.output
+        result = runner.invoke(main, ["cat", "--repo", initialized_repo, ":top.txt"])
+        assert "top" in result.output
+
+    def test_untar_hard_link(self, runner, initialized_repo, tmp_path):
+        """Hard links in tar are materialized as regular files."""
+        import tarfile
+        tpath = str(tmp_path / "import.tar")
+        with tarfile.open(tpath, "w") as tf:
+            data = b"shared content"
+            info = tarfile.TarInfo(name="original.txt")
+            info.size = len(data)
+            tf.addfile(info, io.BytesIO(data))
+            # Hard link pointing to original.txt
+            link_info = tarfile.TarInfo(name="hardlink.txt")
+            link_info.type = tarfile.LNKTYPE
+            link_info.linkname = "original.txt"
+            tf.addfile(link_info)
+        result = runner.invoke(main, ["untar", "--repo", initialized_repo, tpath])
+        assert result.exit_code == 0, result.output
+        result = runner.invoke(main, ["cat", "--repo", initialized_repo, ":hardlink.txt"])
+        assert result.exit_code == 0
+        assert "shared content" in result.output
+
+    def test_untar_hard_link_preserves_exec_from_target(self, runner, initialized_repo, tmp_path):
+        """Hard link inherits executable bit from the original target member."""
+        import tarfile
+        tpath = str(tmp_path / "import.tar")
+        with tarfile.open(tpath, "w") as tf:
+            data = b"#!/bin/sh\necho hi"
+            info = tarfile.TarInfo(name="script.sh")
+            info.size = len(data)
+            info.mode = 0o755
+            tf.addfile(info, io.BytesIO(data))
+            # Hard link with mode=0 (common in real tars)
+            link_info = tarfile.TarInfo(name="link.sh")
+            link_info.type = tarfile.LNKTYPE
+            link_info.linkname = "script.sh"
+            link_info.mode = 0
+            tf.addfile(link_info)
+        result = runner.invoke(main, ["untar", "--repo", initialized_repo, tpath])
+        assert result.exit_code == 0, result.output
+        from gitstore import GitStore
+        store = GitStore.open(initialized_repo)
+        fs = store.branches["main"]
+        tree = store._repo[fs._tree_oid]
+        assert tree["link.sh"].filemode == 0o100755
+
+    def test_untar_hard_link_stdin_skip_warning(self, runner, initialized_repo, tmp_path):
+        """Hard links that can't be resolved in streaming mode are skipped with a warning."""
+        import tarfile
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w:") as tf:
+            # Hard link BEFORE the target — unresolvable in streaming mode
+            link_info = tarfile.TarInfo(name="link.txt")
+            link_info.type = tarfile.LNKTYPE
+            link_info.linkname = "original.txt"
+            tf.addfile(link_info)
+            data = b"content"
+            info = tarfile.TarInfo(name="original.txt")
+            info.size = len(data)
+            tf.addfile(info, io.BytesIO(data))
+        result = runner.invoke(main, ["untar", "--repo", initialized_repo, "-"], input=buf.getvalue())
+        assert result.exit_code == 0, result.output
+        # The regular file should be imported
+        result2 = runner.invoke(main, ["cat", "--repo", initialized_repo, ":original.txt"])
+        assert result2.exit_code == 0
+        assert "content" in result2.output
+        # The hard link should NOT exist (skipped)
+        result3 = runner.invoke(main, ["cat", "--repo", initialized_repo, ":link.txt"])
+        assert result3.exit_code != 0
+
+
+# ---------------------------------------------------------------------------
+# TestNonUtf8Symlink
+# ---------------------------------------------------------------------------
+
+class TestNonUtf8Symlink:
+    def test_zip_export_non_utf8_symlink(self, runner, initialized_repo, tmp_path):
+        """Non-UTF-8 symlink targets produce a clear error on zip export."""
+        import pygit2
+        from gitstore import GitStore
+        from gitstore.tree import GIT_FILEMODE_LINK
+        store = GitStore.open(initialized_repo)
+        fs = store.branches["main"]
+        # Write a symlink with non-UTF-8 target bytes directly via pygit2
+        repo = store._repo
+        bad_target = b"caf\xe9"  # not valid UTF-8
+        blob_oid = repo.create_blob(bad_target)
+        from gitstore.tree import rebuild_tree
+        new_tree = rebuild_tree(repo, fs._tree_oid, {"bad-link": (blob_oid, GIT_FILEMODE_LINK)}, set())
+        sig = store._signature
+        commit_oid = repo.create_commit(
+            "refs/heads/main", sig, sig, "add bad symlink", new_tree, [fs._commit_oid],
+        )
+        out = str(tmp_path / "archive.zip")
+        result = runner.invoke(main, ["zip", "--repo", initialized_repo, out])
+        assert result.exit_code != 0
+        assert "not valid UTF-8" in result.output
+
+    def test_tar_export_non_utf8_symlink(self, runner, initialized_repo, tmp_path):
+        """Non-UTF-8 symlink targets produce a clear error on tar export."""
+        import pygit2
+        from gitstore import GitStore
+        from gitstore.tree import GIT_FILEMODE_LINK
+        store = GitStore.open(initialized_repo)
+        fs = store.branches["main"]
+        repo = store._repo
+        bad_target = b"caf\xe9"
+        blob_oid = repo.create_blob(bad_target)
+        from gitstore.tree import rebuild_tree
+        new_tree = rebuild_tree(repo, fs._tree_oid, {"bad-link": (blob_oid, GIT_FILEMODE_LINK)}, set())
+        sig = store._signature
+        commit_oid = repo.create_commit(
+            "refs/heads/main", sig, sig, "add bad symlink", new_tree, [fs._commit_oid],
+        )
+        out = str(tmp_path / "archive.tar")
+        result = runner.invoke(main, ["tar", "--repo", initialized_repo, out])
+        assert result.exit_code != 0
+        assert "not valid UTF-8" in result.output
 
 
 # ---------------------------------------------------------------------------

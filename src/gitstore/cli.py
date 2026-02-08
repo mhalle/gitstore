@@ -14,7 +14,7 @@ import pygit2
 
 from .exceptions import StaleSnapshotError
 from .repo import GitStore
-from .tree import GIT_FILEMODE_BLOB, GIT_FILEMODE_BLOB_EXECUTABLE, _normalize_path
+from .tree import GIT_FILEMODE_BLOB, GIT_FILEMODE_BLOB_EXECUTABLE, GIT_FILEMODE_LINK, GIT_FILEMODE_TREE, _entry_at_path, _normalize_path
 
 
 # ---------------------------------------------------------------------------
@@ -41,6 +41,18 @@ def _normalize_repo_path(path: str) -> str:
         return _normalize_path(path)
     except ValueError as exc:
         raise click.ClickException(f"Invalid repo path: {exc}")
+
+
+def _clean_archive_path(raw: str) -> str:
+    """Clean an archive entry path for repo import.
+
+    Strips leading './' components that standard tools like ``tar -cf`` add,
+    then delegates to ``_normalize_repo_path``.
+    """
+    # Collapse leading "./" (e.g. "./dir/file.txt" → "dir/file.txt")
+    while raw.startswith("./"):
+        raw = raw[2:]
+    return _normalize_repo_path(raw)
 
 
 def _status(ctx, msg):
@@ -326,20 +338,27 @@ def cp(ctx, args, branch, ref, message, mode):
                 raise click.ClickException(f"Cannot create directory {local_dest}: {exc}")
         for _is_repo, src_path in parsed_sources:
             src_path = _normalize_repo_path(src_path)
-            try:
-                data = fs.read(src_path)
-            except FileNotFoundError:
+
+            # Check entry type (symlink, tree, or blob)
+            entry = _entry_at_path(fs._store._repo, fs._tree_oid, src_path)
+            if entry is None:
                 raise click.ClickException(f"File not found in repo: {src_path}")
-            except IsADirectoryError:
+            _oid, fm = entry
+            if fm == GIT_FILEMODE_TREE:
                 raise click.ClickException(
                     f"{src_path} is a directory — use cptree for directories"
                 )
+
             out = local_dest
             if local_dest.is_dir():
                 out = local_dest / Path(src_path).name
             try:
                 out.parent.mkdir(parents=True, exist_ok=True)
-                out.write_bytes(data)
+                if fm == GIT_FILEMODE_LINK:
+                    target = fs.readlink(src_path)
+                    out.symlink_to(target)
+                else:
+                    out.write_bytes(fs.read(src_path))
             except OSError as exc:
                 raise click.ClickException(f"Cannot write {out}: {exc}")
             _status(ctx, f"Copied :{src_path} -> {out}")
@@ -356,11 +375,15 @@ def cp(ctx, args, branch, ref, message, mode):
 @click.option("--branch", "-b", default="main", help="Branch to operate on.")
 @click.option("--hash", "ref", default=None, help="Branch, tag, or commit hash to read from.")
 @click.option("-m", "message", default=None, help="Commit message.")
+@click.option("--follow-symlinks", is_flag=True, default=False,
+              help="Follow symlinks instead of preserving them (disk→repo only).")
 @click.pass_context
-def cptree(ctx, src, dest, branch, ref, message):
+def cptree(ctx, src, dest, branch, ref, message, follow_symlinks):
     """Copy a directory tree between disk and repo.
 
     Prefix repo-side paths with ':'.
+    Symlinks are preserved by default when copying disk→repo.
+    Use --follow-symlinks to dereference them instead.
     """
     src_is_repo, src_path = _parse_repo_path(src)
     dest_is_repo, dest_path = _parse_repo_path(dest)
@@ -395,17 +418,31 @@ def cptree(ctx, src, dest, branch, ref, message):
         count = 0
         try:
             with fs.batch(message=message) as b:
-                for dirpath, _dirnames, filenames in os.walk(local):
+                for dirpath, dirnames, filenames in os.walk(local):
+                    if not follow_symlinks:
+                        # Preserve symlinked directories as symlink entries
+                        for dname in dirnames:
+                            full = Path(dirpath) / dname
+                            if full.is_symlink():
+                                rel = full.relative_to(local)
+                                repo_file = f"{dest_path}/{rel}" if dest_path else str(rel)
+                                repo_file = repo_file.replace(os.sep, "/")
+                                repo_file = _normalize_repo_path(repo_file)
+                                b.write_symlink(repo_file, os.readlink(full))
+                                count += 1
                     for fname in filenames:
                         full = Path(dirpath) / fname
                         rel = full.relative_to(local)
                         repo_file = f"{dest_path}/{rel}" if dest_path else str(rel)
                         repo_file = repo_file.replace(os.sep, "/")
                         repo_file = _normalize_repo_path(repo_file)
-                        try:
-                            b.write_from(repo_file, full)
-                        except (KeyError, OSError) as exc:
-                            raise click.ClickException(f"Cannot read {full}: {exc}")
+                        if not follow_symlinks and full.is_symlink():
+                            b.write_symlink(repo_file, os.readlink(full))
+                        else:
+                            try:
+                                b.write_from(repo_file, full)
+                            except (KeyError, OSError) as exc:
+                                raise click.ClickException(f"Cannot read {full}: {exc}")
                         count += 1
                 if count == 0:
                     raise click.ClickException(
@@ -439,7 +476,13 @@ def cptree(ctx, src, dest, branch, ref, message):
                     out = local_dest / rel
                     try:
                         out.parent.mkdir(parents=True, exist_ok=True)
-                        out.write_bytes(fs.read(store_path))
+                        # Check if symlink
+                        entry = _entry_at_path(fs._store._repo, fs._tree_oid, store_path)
+                        if entry and entry[1] == GIT_FILEMODE_LINK:
+                            target = fs.readlink(store_path)
+                            out.symlink_to(target)
+                        else:
+                            out.write_bytes(fs.read(store_path))
                     except OSError as exc:
                         raise click.ClickException(f"Cannot write {out}: {exc}")
         except FileNotFoundError:
@@ -766,10 +809,23 @@ def zip_cmd(ctx, filename, branch, ref, at_path, deprecated_at, match_pattern, b
                     tree = repo[tree[seg].id]
             for fname in files:
                 repo_path = f"{dirpath}/{fname}" if dirpath else fname
+                entry = tree[fname]
                 info = zipfile.ZipInfo(repo_path)
                 info.compress_type = zipfile.ZIP_DEFLATED
-                info.external_attr = tree[fname].filemode << 16
-                zf.writestr(info, fs.read(repo_path))
+                info.create_system = 3  # Unix — needed for external_attr interpretation
+                if entry.filemode == GIT_FILEMODE_LINK:
+                    info.external_attr = 0o120000 << 16
+                    raw = fs.read(repo_path)
+                    try:
+                        raw.decode()
+                    except UnicodeDecodeError:
+                        raise click.ClickException(
+                            f"Symlink target for {repo_path} is not valid UTF-8"
+                        )
+                    zf.writestr(info, raw)
+                else:
+                    info.external_attr = entry.filemode << 16
+                    zf.writestr(info, fs.read(repo_path))
                 count += 1
     if to_stdout:
         click.get_binary_stream("stdout").write(dest.getvalue())
@@ -804,17 +860,24 @@ def unzip_cmd(ctx, filename, branch, message):
                 for info in zf.infolist():
                     if info.is_dir():
                         continue
-                    repo_path = _normalize_repo_path(info.filename)
-                    data = zf.read(info.filename)
+                    repo_path = _clean_archive_path(info.filename)
                     unix_mode = info.external_attr >> 16
-                    fm = GIT_FILEMODE_BLOB_EXECUTABLE if unix_mode & 0o111 else None
-                    b.write(repo_path, data, mode=fm)
+                    if (unix_mode & 0o170000) == 0o120000:
+                        target = zf.read(info.filename).decode()
+                        b.write_symlink(repo_path, target)
+                    else:
+                        data = zf.read(info.filename)
+                        fm = GIT_FILEMODE_BLOB_EXECUTABLE if unix_mode & 0o111 else None
+                        b.write(repo_path, data, mode=fm)
                     count += 1
             if count == 0:
                 raise click.ClickException("Zip file contains no files")
     except StaleSnapshotError:
         raise click.ClickException("Branch modified concurrently — retry")
-    _status(ctx, f"Imported {count} file(s) from {filename}")
+    msg = f"Imported {count} file(s) from {filename}"
+    if skipped:
+        msg += f" ({skipped} hard link(s) skipped)"
+    _status(ctx, msg)
 
 
 # ---------------------------------------------------------------------------
@@ -867,11 +930,24 @@ def tar_cmd(ctx, filename, branch, ref, at_path, deprecated_at, match_pattern, b
                     tree = repo[tree[seg].id]
             for fname in files:
                 repo_path = f"{dirpath}/{fname}" if dirpath else fname
-                data = fs.read(repo_path)
-                info = tarfile.TarInfo(name=repo_path)
-                info.size = len(data)
-                info.mode = tree[fname].filemode & 0o7777
-                tf.addfile(info, io.BytesIO(data))
+                entry = tree[fname]
+                if entry.filemode == GIT_FILEMODE_LINK:
+                    info = tarfile.TarInfo(name=repo_path)
+                    info.type = tarfile.SYMTYPE
+                    raw = fs.read(repo_path)
+                    try:
+                        info.linkname = raw.decode()
+                    except UnicodeDecodeError:
+                        raise click.ClickException(
+                            f"Symlink target for {repo_path} is not valid UTF-8"
+                        )
+                    tf.addfile(info)
+                else:
+                    data = fs.read(repo_path)
+                    info = tarfile.TarInfo(name=repo_path)
+                    info.size = len(data)
+                    info.mode = entry.filemode & 0o7777
+                    tf.addfile(info, io.BytesIO(data))
                 count += 1
     if to_stdout:
         click.get_binary_stream("stdout").write(dest.getvalue())
@@ -916,17 +992,47 @@ def untar_cmd(ctx, filename, branch, message):
     fs = _get_branch_fs(store, branch)
 
     count = 0
+    skipped = 0
+    # Track member info for hard-link permission lookup
+    member_info: dict[str, int] = {}  # name -> mode
     try:
         with fs.batch(message=message) as b:
             with tf:
                 for member in tf:
-                    if not member.isfile():
-                        continue
-                    repo_path = _normalize_repo_path(member.name)
-                    data = tf.extractfile(member).read()
-                    fm = GIT_FILEMODE_BLOB_EXECUTABLE if member.mode & 0o111 else None
-                    b.write(repo_path, data, mode=fm)
-                    count += 1
+                    if member.issym():
+                        repo_path = _clean_archive_path(member.name)
+                        b.write_symlink(repo_path, member.linkname)
+                        count += 1
+                    elif member.islnk():
+                        # Hard link — materialize as a copy of the target
+                        repo_path = _clean_archive_path(member.name)
+                        try:
+                            target = tf.extractfile(member)
+                        except Exception:
+                            target = None
+                        if target is None:
+                            # Streaming mode can't seek back to the target
+                            click.echo(
+                                f"Warning: skipping hard link (unresolvable in "
+                                f"streaming mode): {member.name} -> {member.linkname}",
+                                err=True,
+                            )
+                            skipped += 1
+                            continue
+                        data = target.read()
+                        # Prefer the original target's mode when available
+                        target_name = _clean_archive_path(member.linkname)
+                        target_mode = member_info.get(target_name, member.mode)
+                        fm = GIT_FILEMODE_BLOB_EXECUTABLE if target_mode & 0o111 else None
+                        b.write(repo_path, data, mode=fm)
+                        count += 1
+                    elif member.isfile():
+                        repo_path = _clean_archive_path(member.name)
+                        member_info[repo_path] = member.mode
+                        data = tf.extractfile(member).read()
+                        fm = GIT_FILEMODE_BLOB_EXECUTABLE if member.mode & 0o111 else None
+                        b.write(repo_path, data, mode=fm)
+                        count += 1
             if count == 0:
                 raise click.ClickException("Tar archive contains no files")
     except StaleSnapshotError:

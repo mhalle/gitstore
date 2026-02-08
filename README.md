@@ -336,8 +336,9 @@ gitstore cp :a.txt :b.txt ./local-dir
 # Set file mode
 gitstore cp script.sh :script.sh --mode 755
 
-# Copy directory trees
+# Copy directory trees (symlinks preserved by default)
 gitstore cptree ./local-dir :repo-dir
+gitstore cptree ./local-dir :repo-dir --follow-symlinks  # dereference symlinks
 gitstore cptree :repo-dir ./local-dir
 
 # Browse contents
@@ -416,7 +417,7 @@ gitstore tar archive.tar --hash abc1234...
 gitstore cp :file.txt local.txt --hash abc1234...
 ```
 
-Write commands (`cp`, `cptree`, `rm`, `unzip`, `untar`) accept `-m` for custom commit messages. Use `-b` on any command to target a branch other than `main`. Read commands (`cat`, `ls`, `cp`, `cptree`, `zip`, `tar`, `log`) accept `--hash` to read from any branch, tag, or full commit hash. `log`, `zip`, and `tar` accept `--before` with an ISO 8601 date or datetime to filter to commits on or before that point in time. `cp` accepts `--mode 644` or `--mode 755` to set file permissions; `cptree` auto-detects executable permissions from disk. Pass `-v` before the command for status messages on stderr. `zip` and `tar` accept `-` as FILENAME to write to stdout; `untar` defaults to stdin when no filename is given.
+Write commands (`cp`, `cptree`, `rm`, `unzip`, `untar`) accept `-m` for custom commit messages. Use `-b` on any command to target a branch other than `main`. Read commands (`cat`, `ls`, `cp`, `cptree`, `zip`, `tar`, `log`) accept `--hash` to read from any branch, tag, or full commit hash. `log`, `zip`, and `tar` accept `--before` with an ISO 8601 date or datetime to filter to commits on or before that point in time. `cp` accepts `--mode 644` or `--mode 755` to set file permissions; `cptree` auto-detects executable permissions from disk. `cptree` preserves symlinks by default when copying disk→repo; pass `--follow-symlinks` to dereference them instead. When copying repo→disk, `cp` and `cptree` recreate symlink entries as symlinks on disk. Pass `-v` before the command for status messages on stderr. `zip` and `tar` accept `-` as FILENAME to write to stdout; `untar` defaults to stdin when no filename is given.
 
 ## Development
 
