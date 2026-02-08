@@ -38,6 +38,22 @@ class TestReadableFile:
         with pytest.raises(FileNotFoundError):
             fs.open("nope.txt", "rb")
 
+    def test_readable_properties(self, repo_fs):
+        _, fs = repo_fs
+        with fs.open("hello.txt", "rb") as f:
+            assert f.readable()
+            assert not f.writable()
+            assert f.seekable()
+            assert not f.closed
+        assert f.closed
+
+    def test_read_after_close_raises(self, repo_fs):
+        _, fs = repo_fs
+        f = fs.open("hello.txt", "rb")
+        f.close()
+        with pytest.raises(ValueError):
+            f.read()
+
 
 class TestWritableFile:
     def test_write_context_manager(self, repo_fs):
@@ -102,3 +118,13 @@ class TestWritableFile:
         first_hash = f.fs.hash
         f.close()  # should not commit again
         assert f.fs.hash == first_hash
+
+    def test_writable_properties(self, repo_fs):
+        _, fs = repo_fs
+        f = fs.open("new.txt", "wb")
+        assert not f.readable()
+        assert f.writable()
+        assert not f.seekable()
+        assert not f.closed
+        f.close()
+        assert f.closed

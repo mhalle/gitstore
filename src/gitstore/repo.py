@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import os
+from collections.abc import Iterator, MutableMapping
 from pathlib import Path
-from typing import Iterator
 
 import pygit2
 
@@ -25,6 +26,8 @@ class GitStore:
         cls,
         path: str | Path,
         create: str | bool | None = None,
+        *,
+        branch: str | None = None,
         author: str = "gitstore",
         email: str = "gitstore@localhost",
     ) -> GitStore:
@@ -33,9 +36,11 @@ class GitStore:
         Args:
             path: Path to the bare repository.
             create: None to open existing (fail if missing),
-                    True to create bare repo with no branch,
+                    True to create bare repo (optionally with branch),
                     str to create bare repo + bootstrap branch with that name.
                     False is invalid and raises ValueError.
+            branch: Name of the initial branch to create. Requires create=True.
+                    Shorthand for ``create="main"`` is ``create=True, branch="main"``.
             author: Default author name for commits.
             email: Default author email for commits.
         """
@@ -43,6 +48,13 @@ class GitStore:
 
         if create is False:
             raise ValueError("create=False is not supported; use create=None to open")
+
+        if branch is not None:
+            if isinstance(create, str):
+                raise ValueError("Cannot pass both create=<str> and branch=<str>")
+            if create is None:
+                raise ValueError("branch= requires create=True")
+            create = branch
 
         if create is not None:
             if path.exists():
@@ -70,7 +82,7 @@ class GitStore:
             return cls(repo, author, email)
 
 
-class RefDict:
+class RefDict(MutableMapping):
     """Dict-like access to branches or tags."""
 
     def __init__(self, store: GitStore, prefix: str):
@@ -104,31 +116,41 @@ class RefDict:
             return FS(self._store, commit_oid, branch=name)
 
     def __setitem__(self, name: str, fs):
+        from ._lock import repo_lock
         from .fs import FS
 
         if not isinstance(fs, FS):
             raise TypeError(f"Expected FS, got {type(fs).__name__}")
-        if fs._store is not self._store:
-            raise ValueError("FS belongs to a different GitStore")
+        try:
+            same = os.path.samefile(fs._store._repo.path, self._store._repo.path)
+        except OSError:
+            same = False
+        if not same:
+            raise ValueError("FS belongs to a different repository")
 
         repo = self._store._repo
         ref_name = self._ref_name(name)
 
-        if ref_name in repo.references:
-            if self._is_tags:
-                raise KeyError(f"Tag {name!r} already exists")
-            repo.references[ref_name].set_target(fs._commit_oid)
-        else:
-            repo.references.create(ref_name, fs._commit_oid)
+        with repo_lock(repo.path):
+            if ref_name in repo.references:
+                if self._is_tags:
+                    raise KeyError(f"Tag {name!r} already exists")
+                repo.references[ref_name].set_target(fs._commit_oid)
+            else:
+                repo.references.create(ref_name, fs._commit_oid)
 
     def __delitem__(self, name: str):
+        from ._lock import repo_lock
+
         repo = self._store._repo
         ref_name = self._ref_name(name)
-        try:
-            repo.references[ref_name]
-        except KeyError:
-            raise KeyError(name)
-        repo.references.delete(ref_name)
+
+        with repo_lock(repo.path):
+            try:
+                repo.references[ref_name]
+            except KeyError:
+                raise KeyError(name)
+            repo.references.delete(ref_name)
 
     def __contains__(self, name: str) -> bool:
         ref_name = self._ref_name(name)

@@ -1,5 +1,7 @@
 """Tests for FS read operations."""
 
+from pathlib import PurePosixPath
+
 import pytest
 
 from gitstore import GitStore
@@ -109,6 +111,40 @@ class TestDump:
         (out / "hello.txt").write_bytes(b"old")
         fs.dump(out)
         assert (out / "hello.txt").read_bytes() == b"Hello!"
+
+
+class TestPathLikeSupport:
+    def test_read_with_path(self, repo_with_files):
+        _, fs = repo_with_files
+        assert fs.read(PurePosixPath("hello.txt")) == b"Hello!"
+
+    def test_write_with_path(self, repo_with_files):
+        _, fs = repo_with_files
+        fs2 = fs.write(PurePosixPath("new.txt"), b"data")
+        assert fs2.read("new.txt") == b"data"
+
+    def test_exists_with_path(self, repo_with_files):
+        _, fs = repo_with_files
+        assert fs.exists(PurePosixPath("src/main.py"))
+
+    def test_ls_with_path(self, repo_with_files):
+        _, fs = repo_with_files
+        assert "main.py" in fs.ls(PurePosixPath("src"))
+
+    def test_walk_with_path(self, repo_with_files):
+        _, fs = repo_with_files
+        entries = list(fs.walk(PurePosixPath("src")))
+        assert len(entries) > 0
+
+    def test_remove_with_path(self, repo_with_files):
+        _, fs = repo_with_files
+        fs2 = fs.remove(PurePosixPath("hello.txt"))
+        assert not fs2.exists("hello.txt")
+
+    def test_open_with_path(self, repo_with_files):
+        _, fs = repo_with_files
+        with fs.open(PurePosixPath("hello.txt"), "rb") as f:
+            assert f.read() == b"Hello!"
 
 
 class TestProperties:

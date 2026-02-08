@@ -128,6 +128,69 @@ class TestRefDictTags:
         with pytest.raises(ValueError):
             repo_b.branches["imported"] = fs_a
 
+    def test_same_path_assign_allowed(self, tmp_path):
+        repo_a = GitStore.open(tmp_path / "test.git", create="main")
+        fs = repo_a.branches["main"]
+        repo_b = GitStore.open(tmp_path / "test.git")
+        repo_b.tags["v1"] = fs  # same repo path, different instance — should work
+        assert "v1" in repo_b.tags
+
+    def test_symlink_path_assign_allowed(self, tmp_path):
+        repo_a = GitStore.open(tmp_path / "real.git", create="main")
+        fs = repo_a.branches["main"]
+        link = tmp_path / "link.git"
+        try:
+            link.symlink_to(tmp_path / "real.git")
+        except OSError:
+            pytest.skip("symlink not supported")
+        repo_b = GitStore.open(link)
+        repo_b.tags["v1"] = fs  # symlink to same repo — should work
+        assert "v1" in repo_b.tags
+
     def test_create_false_raises(self, tmp_path):
         with pytest.raises(ValueError):
             GitStore.open(tmp_path / "test.git", create=False)
+
+
+class TestBranchKeyword:
+    def test_create_with_branch_kwarg(self, tmp_path):
+        repo = GitStore.open(tmp_path / "test.git", create=True, branch="main")
+        assert "main" in repo.branches
+
+    def test_branch_without_create_raises(self, tmp_path):
+        with pytest.raises(ValueError):
+            GitStore.open(tmp_path / "test.git", branch="main")
+
+    def test_branch_and_create_str_raises(self, tmp_path):
+        with pytest.raises(ValueError):
+            GitStore.open(tmp_path / "test.git", create="main", branch="dev")
+
+
+class TestRefDictMapping:
+    def test_get_existing(self, tmp_path):
+        repo = GitStore.open(tmp_path / "test.git", create="main")
+        fs = repo.branches.get("main")
+        assert fs is not None
+        assert fs.branch == "main"
+
+    def test_get_missing_default(self, tmp_path):
+        repo = GitStore.open(tmp_path / "test.git", create="main")
+        assert repo.branches.get("nope") is None
+        assert repo.branches.get("nope", 42) == 42
+
+    def test_keys(self, tmp_path):
+        repo = GitStore.open(tmp_path / "test.git", create="main")
+        assert list(repo.branches.keys()) == ["main"]
+
+    def test_values(self, tmp_path):
+        repo = GitStore.open(tmp_path / "test.git", create="main")
+        vals = list(repo.branches.values())
+        assert len(vals) == 1
+        assert vals[0].branch == "main"
+
+    def test_items(self, tmp_path):
+        repo = GitStore.open(tmp_path / "test.git", create="main")
+        items = list(repo.branches.items())
+        assert len(items) == 1
+        assert items[0][0] == "main"
+        assert items[0][1].branch == "main"

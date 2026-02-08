@@ -36,7 +36,9 @@ print(fs.message)  # 'Write hello.txt'
 
 ## Core concepts
 
-**`GitStore`** opens or creates a bare Git repository. It exposes `branches` and `tags` as dict-like objects.
+**Bare repository.** gitstore uses a *bare* Git repository — one that contains only Git's internal object database, with no working directory or checked-out files. You won't see your stored files by browsing the repo directory; all data lives inside Git's content-addressable object store and is accessed exclusively through the gitstore API. This is by design: it avoids filesystem conflicts, keeps the storage compact, and lets Git handle deduplication and integrity.
+
+**`GitStore`** opens or creates a bare repository. It exposes `branches` and `tags` as [`MutableMapping`](https://docs.python.org/3/library/collections.abc.html#collections.abc.MutableMapping) objects (supporting `.get`, `.keys`, `.values`, `.items`, etc.).
 
 **`FS`** is an immutable snapshot of a committed tree. Reading methods (`read`, `ls`, `walk`, `exists`, `open`) never mutate state. Writing methods (`write`, `remove`, `batch`) return a *new* `FS` pointing at the new commit — the original `FS` is unchanged.
 
@@ -49,6 +51,9 @@ Snapshots obtained from **branches** are writable. Snapshots obtained from **tag
 ```python
 # Create new repo with an initial branch
 repo = GitStore.open("data.git", create="main")
+
+# Equivalent — separate create and branch args
+repo = GitStore.open("data.git", create=True, branch="main")
 
 # Create empty repo (no branches)
 repo = GitStore.open("data.git", create=True)
@@ -78,12 +83,24 @@ for name in repo.branches:
 
 print(len(repo.tags))
 print("main" in repo.branches)    # True
+
+# Full MutableMapping interface — .get, .keys, .values, .items, etc.
+fs = repo.branches.get("main")              # returns None if missing
+for name, snapshot in repo.branches.items():
+    print(name, snapshot.hash)
 ```
+
+### Paths
+
+All path arguments throughout the API (`read`, `write`, `remove`, `ls`, `walk`, `exists`, `open`, `batch.write`, `batch.remove`, `batch.open`) accept `str` or any `os.PathLike` (e.g. `pathlib.PurePosixPath`). Paths use forward slashes as separators.
 
 ### Reading
 
 ```python
+from pathlib import PurePosixPath
+
 data = fs.read("path/to/file.bin")           # bytes
+data = fs.read(PurePosixPath("path/to/file.bin"))  # PathLike works too
 entries = fs.ls()                             # root listing
 entries = fs.ls("src")                        # subdirectory listing
 exists = fs.exists("path/to/file.bin")        # bool
@@ -154,16 +171,20 @@ assert b.fs is None  # no commit was made
 
 ### File-like objects
 
+File objects support `closed`, `readable()`, `writable()`, and `seekable()` for compatibility with code that checks standard file properties.
+
 ```python
-# Reading
+# Reading — supports read, seek, tell, close
 with fs.open("data.bin", "rb") as f:
     chunk = f.read(1024)
     f.seek(0)
     pos = f.tell()
+    assert f.readable() and f.seekable()
 
-# Writing (commits on context manager exit)
+# Writing (commits on context manager exit) — or call close() explicitly
 with fs.open("output.bin", "wb") as f:
     f.write(b"some data")
+    assert f.writable()
 new_fs = f.fs
 ```
 
@@ -197,21 +218,25 @@ fs.message   # str — commit message
 
 ## Concurrency safety
 
-gitstore detects stale writes. If a branch advances after you obtain a snapshot (e.g. another process or another `FS` wrote to it), attempting to write from the stale snapshot raises `StaleSnapshotError`:
+gitstore uses an advisory file lock (`gitstore.lock` in the repo directory) to make the stale-snapshot check and ref update atomic on a single machine. If a branch advances after you obtain a snapshot, attempting to write from the stale snapshot raises `StaleSnapshotError`:
 
 ```python
 from gitstore import StaleSnapshotError
 
 fs = repo.branches["main"]
-fs.write("a.txt", b"a")         # advances the branch
+_ = fs.write("a.txt", b"a")     # advances the branch (returns new FS)
 
 try:
-    fs.write("b.txt", b"b")     # fs is now stale
+    fs.write("b.txt", b"b")     # fs is now stale — branch moved past it
 except StaleSnapshotError:
     fs = repo.branches["main"]  # re-fetch and retry
 ```
 
-This prevents silent data loss from concurrent writes.
+**Guarantees and limitations:**
+
+- Single-machine, multi-process writes to the same branch are serialized by the file lock and will never silently lose commits.
+- When a stale write is rejected, the commit object is created but unreferenced. These dangling objects are harmless and will be cleaned up by `git gc`.
+- Cross-machine coordination (e.g. NFS-mounted repos) is not supported — file locks are not reliable over network filesystems.
 
 ## Error handling
 
@@ -225,6 +250,7 @@ This prevents silent data loss from concurrent writes.
 | `KeyError` | Accessing a missing branch/tag; overwriting an existing tag |
 | `ValueError` | Invalid path (`..`, empty segments); unsupported open mode |
 | `TypeError` | Assigning a non-`FS` value to a branch or tag |
+| `RuntimeError` | Writing/removing on a closed `Batch` |
 | `StaleSnapshotError` | Writing from a snapshot whose branch has moved forward |
 
 ## Development

@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Iterator
 
+from ._lock import repo_lock
 from .exceptions import StaleSnapshotError
 from .tree import (
+    _is_root_path,
     _normalize_path,
     read_blob_at_path,
     list_tree_at_path,
@@ -57,14 +60,14 @@ class FS:
 
     # --- Read operations ---
 
-    def read(self, path: str) -> bytes:
+    def read(self, path: str | os.PathLike[str]) -> bytes:
         return read_blob_at_path(self._store._repo, self._tree_oid, path)
 
-    def ls(self, path: str | None = None) -> list[str]:
+    def ls(self, path: str | os.PathLike[str] | None = None) -> list[str]:
         return list_tree_at_path(self._store._repo, self._tree_oid, path)
 
-    def walk(self, path: str | None = None) -> Iterator[tuple[str, list[str], list[str]]]:
-        if path is None or path.strip("/") == "":
+    def walk(self, path: str | os.PathLike[str] | None = None) -> Iterator[tuple[str, list[str], list[str]]]:
+        if path is None or _is_root_path(path):
             yield from walk_tree(self._store._repo, self._tree_oid)
         else:
             from .tree import _walk_to, GIT_OBJECT_TREE
@@ -74,10 +77,10 @@ class FS:
                 raise NotADirectoryError(path)
             yield from walk_tree(self._store._repo, obj.id, path)
 
-    def exists(self, path: str) -> bool:
+    def exists(self, path: str | os.PathLike[str]) -> bool:
         return exists_at_path(self._store._repo, self._tree_oid, path)
 
-    def open(self, path: str, mode: str = "rb"):
+    def open(self, path: str | os.PathLike[str], mode: str = "rb"):
         if mode == "rb":
             from ._fileobj import ReadableFile
             return ReadableFile(self.read(path))
@@ -103,28 +106,35 @@ class FS:
         repo = self._store._repo
         sig = self._store._signature
 
-        ref = repo.references[f"refs/heads/{self._branch}"]
-        if ref.resolve().target != self._commit_oid:
-            raise StaleSnapshotError(
-                f"Branch {self._branch!r} has advanced since this snapshot"
-            )
-
         new_tree_oid = rebuild_tree(repo, self._tree_oid, writes, removes)
+
+        # Create commit object without moving the ref
         new_commit_oid = repo.create_commit(
-            f"refs/heads/{self._branch}",
+            None,
             sig,
             sig,
             message,
             new_tree_oid,
             [self._commit_oid],
         )
+
+        # Atomic check-and-update under file lock
+        ref_name = f"refs/heads/{self._branch}"
+        with repo_lock(repo.path):
+            ref = repo.references[ref_name]
+            if ref.resolve().target != self._commit_oid:
+                raise StaleSnapshotError(
+                    f"Branch {self._branch!r} has advanced since this snapshot"
+                )
+            ref.set_target(new_commit_oid)
+
         return FS(self._store, new_commit_oid, branch=self._branch)
 
-    def write(self, path: str, data: bytes) -> FS:
+    def write(self, path: str | os.PathLike[str], data: bytes) -> FS:
         path = _normalize_path(path)
         return self._commit_changes({path: data}, set(), f"Write {path}")
 
-    def remove(self, path: str) -> FS:
+    def remove(self, path: str | os.PathLike[str]) -> FS:
         path = _normalize_path(path)
         if not self.exists(path):
             raise FileNotFoundError(path)

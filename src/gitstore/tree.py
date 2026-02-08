@@ -6,6 +6,7 @@ on top of pygit2's TreeBuilder.
 
 from __future__ import annotations
 
+import os
 from collections import defaultdict
 from typing import Iterator
 
@@ -17,9 +18,20 @@ GIT_FILEMODE_BLOB = 0o100644
 GIT_OBJECT_TREE = pygit2.GIT_OBJECT_TREE
 
 
-def _normalize_path(path: str) -> str:
+def _is_root_path(path: str | os.PathLike[str]) -> bool:
+    """Return True if path represents the root (empty or only slashes)."""
+    p = os.fspath(path)
+    if os.name == "nt":
+        p = p.replace("\\", "/")
+    return p.strip("/") == ""
+
+
+def _normalize_path(path: str | os.PathLike[str]) -> str:
     """Normalize a path: strip leading/trailing slashes, reject bad segments."""
-    path = path.replace("\\", "/").strip("/")
+    path = os.fspath(path)
+    if os.name == "nt":
+        path = path.replace("\\", "/")
+    path = path.strip("/")
     if not path:
         raise ValueError("Path must not be empty")
     segments = path.split("/")
@@ -150,7 +162,7 @@ def _walk_to(
 
 
 def read_blob_at_path(
-    repo: pygit2.Repository, tree_oid: pygit2.Oid, path: str
+    repo: pygit2.Repository, tree_oid: pygit2.Oid, path: str | os.PathLike[str]
 ) -> bytes:
     """Read a blob at the given path in the tree."""
     path = _normalize_path(path)
@@ -161,10 +173,10 @@ def read_blob_at_path(
 
 
 def list_tree_at_path(
-    repo: pygit2.Repository, tree_oid: pygit2.Oid, path: str | None = None
+    repo: pygit2.Repository, tree_oid: pygit2.Oid, path: str | os.PathLike[str] | None = None
 ) -> list[str]:
     """List entries at the given path (or root if path is None)."""
-    if path is None or path.strip("/") == "":
+    if path is None or _is_root_path(path):
         tree = repo[tree_oid]
     else:
         path = _normalize_path(path)
@@ -201,7 +213,7 @@ def walk_tree(
 
 
 def exists_at_path(
-    repo: pygit2.Repository, tree_oid: pygit2.Oid, path: str
+    repo: pygit2.Repository, tree_oid: pygit2.Oid, path: str | os.PathLike[str]
 ) -> bool:
     """Check if a path exists in the tree."""
     path = _normalize_path(path)

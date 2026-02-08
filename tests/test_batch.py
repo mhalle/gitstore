@@ -2,7 +2,7 @@
 
 import pytest
 
-from gitstore import GitStore
+from gitstore import GitStore, StaleSnapshotError
 
 
 @pytest.fixture
@@ -105,3 +105,22 @@ class TestBatch:
             pass
         with pytest.raises(RuntimeError):
             b.open("x.txt")
+
+    def test_batch_file_close_outside_context(self, repo_fs):
+        _, fs = repo_fs
+        with fs.batch() as b:
+            f = b.open("via_close.txt", "wb")
+            f.write(b"closed data")
+            f.close()
+        assert b.fs.read("via_close.txt") == b"closed data"
+
+    def test_stale_batch_retryable(self, repo_fs):
+        repo, fs = repo_fs
+        # Advance branch behind fs's back
+        fs.write("first.txt", b"first")
+        with pytest.raises(StaleSnapshotError):
+            with fs.batch() as b:
+                b.write("second.txt", b"second")
+        # Batch should not be closed — we can refetch and retry
+        assert b.fs is None
+        assert not b._closed

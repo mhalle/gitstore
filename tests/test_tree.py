@@ -1,5 +1,8 @@
 """Tests for gitstore.tree module."""
 
+import os
+from pathlib import PurePosixPath
+
 import pytest
 
 from gitstore.tree import (
@@ -19,6 +22,7 @@ class TestNormalizePath:
     def test_strips_slashes(self):
         assert _normalize_path("/foo/bar/") == "foo/bar"
 
+    @pytest.mark.skipif(os.name != "nt", reason="backslash normalization is Windows-only")
     def test_normalizes_backslashes(self):
         assert _normalize_path("foo\\bar\\baz") == "foo/bar/baz"
         assert _normalize_path("\\foo\\bar\\") == "foo/bar"
@@ -144,6 +148,19 @@ class TestReadHelpers:
         assert exists_at_path(bare_repo, oid, "a/b.txt")
         assert exists_at_path(bare_repo, oid, "a")
         assert not exists_at_path(bare_repo, oid, "nope")
+
+    def test_read_blob_pathlike(self, bare_repo):
+        oid = rebuild_tree(bare_repo, None, {"d/f.txt": b"data"}, set())
+        assert read_blob_at_path(bare_repo, oid, PurePosixPath("d/f.txt")) == b"data"
+
+    def test_exists_pathlike(self, bare_repo):
+        oid = rebuild_tree(bare_repo, None, {"a/b.txt": b"x"}, set())
+        assert exists_at_path(bare_repo, oid, PurePosixPath("a/b.txt"))
+        assert not exists_at_path(bare_repo, oid, PurePosixPath("nope"))
+
+    def test_list_pathlike(self, bare_repo):
+        oid = rebuild_tree(bare_repo, None, {"d/x.txt": b"x"}, set())
+        assert list_tree_at_path(bare_repo, oid, PurePosixPath("d")) == ["x.txt"]
 
 
 class TestWalkTree:
