@@ -28,7 +28,7 @@ def repo_path(tmp_path):
 def initialized_repo(tmp_path, runner):
     """Create a repo with a 'main' branch and return its path."""
     p = str(tmp_path / "test.git")
-    result = runner.invoke(main, [p, "init", "--branch", "main"])
+    result = runner.invoke(main, ["init", "--repo", p, "--branch", "main"])
     assert result.exit_code == 0, result.output
     return p
 
@@ -37,18 +37,18 @@ def initialized_repo(tmp_path, runner):
 def repo_with_files(tmp_path, runner):
     """Repo with hello.txt and data/data.bin on 'main'."""
     p = str(tmp_path / "test.git")
-    r = runner.invoke(main, [p, "init", "--branch", "main"])
+    r = runner.invoke(main, ["init", "--repo", p, "--branch", "main"])
     assert r.exit_code == 0, r.output
 
     hello = tmp_path / "hello.txt"
     hello.write_text("hello world\n")
-    r = runner.invoke(main, [p, "cp", str(hello), ":hello.txt"])
+    r = runner.invoke(main, ["cp", "--repo", p, str(hello), ":hello.txt"])
     assert r.exit_code == 0, r.output
 
     data_dir = tmp_path / "datadir"
     data_dir.mkdir()
     (data_dir / "data.bin").write_bytes(b"\x00\x01\x02")
-    r = runner.invoke(main, [p, "cptree", str(data_dir), ":data"])
+    r = runner.invoke(main, ["cptree", "--repo", p, str(data_dir), ":data"])
     assert r.exit_code == 0, r.output
 
     return p
@@ -60,19 +60,19 @@ def repo_with_files(tmp_path, runner):
 
 class TestInit:
     def test_creates_repo(self, runner, repo_path):
-        result = runner.invoke(main, [repo_path, "init"])
+        result = runner.invoke(main, ["init", "--repo", repo_path])
         assert result.exit_code == 0
-        result = runner.invoke(main, [repo_path, "branch", "list"])
+        result = runner.invoke(main, ["branch", "--repo", repo_path, "list"])
         assert "main" in result.output
 
     def test_creates_repo_with_custom_branch(self, runner, repo_path):
-        result = runner.invoke(main, [repo_path, "init", "--branch", "trunk"])
+        result = runner.invoke(main, ["init", "--repo", repo_path, "--branch", "trunk"])
         assert result.exit_code == 0
-        result = runner.invoke(main, [repo_path, "branch", "list"])
+        result = runner.invoke(main, ["branch", "--repo", repo_path, "list"])
         assert "trunk" in result.output
 
     def test_already_exists_error(self, runner, initialized_repo):
-        result = runner.invoke(main, [initialized_repo, "init"])
+        result = runner.invoke(main, ["init", "--repo", initialized_repo])
         assert result.exit_code != 0
         assert "already exists" in result.output
 
@@ -85,52 +85,52 @@ class TestCp:
     def test_disk_to_repo(self, runner, initialized_repo, tmp_path):
         f = tmp_path / "file.txt"
         f.write_text("content")
-        result = runner.invoke(main, [initialized_repo, "cp", str(f), ":file.txt"])
+        result = runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":file.txt"])
         assert result.exit_code == 0, result.output
 
         # Verify via ls
-        result = runner.invoke(main, [initialized_repo, "ls"])
+        result = runner.invoke(main, ["ls", "--repo", initialized_repo])
         assert "file.txt" in result.output
 
     def test_repo_to_disk(self, runner, repo_with_files, tmp_path):
         dest = tmp_path / "out.txt"
-        result = runner.invoke(main, [repo_with_files, "cp", ":hello.txt", str(dest)])
+        result = runner.invoke(main, ["cp", "--repo", repo_with_files, ":hello.txt", str(dest)])
         assert result.exit_code == 0
         assert dest.read_text() == "hello world\n"
 
     def test_repo_to_disk_directory_dest(self, runner, repo_with_files, tmp_path):
         dest_dir = tmp_path / "outdir"
         dest_dir.mkdir()
-        result = runner.invoke(main, [repo_with_files, "cp", ":hello.txt", str(dest_dir)])
+        result = runner.invoke(main, ["cp", "--repo", repo_with_files, ":hello.txt", str(dest_dir)])
         assert result.exit_code == 0
         assert (dest_dir / "hello.txt").read_text() == "hello world\n"
 
     def test_no_colon_error(self, runner, initialized_repo, tmp_path):
         f = tmp_path / "file.txt"
         f.write_text("x")
-        result = runner.invoke(main, [initialized_repo, "cp", str(f), "no_colon"])
+        result = runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), "no_colon"])
         assert result.exit_code != 0
         assert "repo path" in result.output.lower() or "':'" in result.output
 
     def test_both_colon_error(self, runner, initialized_repo):
-        result = runner.invoke(main, [initialized_repo, "cp", ":a", ":b"])
+        result = runner.invoke(main, ["cp", "--repo", initialized_repo, ":a", ":b"])
         assert result.exit_code != 0
         assert "local path" in result.output.lower() or "Both" in result.output
 
     def test_custom_message(self, runner, initialized_repo, tmp_path):
         f = tmp_path / "msg.txt"
         f.write_text("data")
-        result = runner.invoke(main, [initialized_repo, "cp", str(f), ":msg.txt", "-m", "my custom msg"])
+        result = runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":msg.txt", "-m", "my custom msg"])
         assert result.exit_code == 0
 
-        result = runner.invoke(main, [initialized_repo, "log"])
+        result = runner.invoke(main, ["log", "--repo", initialized_repo])
         assert "my custom msg" in result.output
 
     def test_mode_755(self, runner, initialized_repo, tmp_path):
         f = tmp_path / "script.sh"
         f.write_text("#!/bin/sh\necho hi")
         result = runner.invoke(main, [
-            initialized_repo, "cp", str(f), ":script.sh", "--mode", "755"
+            "cp", "--repo", initialized_repo, str(f), ":script.sh", "--mode", "755"
         ])
         assert result.exit_code == 0, result.output
         # Verify mode via library
@@ -145,7 +145,7 @@ class TestCp:
         f = tmp_path / "plain.txt"
         f.write_text("text")
         result = runner.invoke(main, [
-            initialized_repo, "cp", str(f), ":plain.txt", "--mode", "644"
+            "cp", "--repo", initialized_repo, str(f), ":plain.txt", "--mode", "644"
         ])
         assert result.exit_code == 0, result.output
         from gitstore import GitStore
@@ -159,7 +159,7 @@ class TestCp:
         f = tmp_path / "default.txt"
         f.write_text("text")
         result = runner.invoke(main, [
-            initialized_repo, "cp", str(f), ":default.txt"
+            "cp", "--repo", initialized_repo, str(f), ":default.txt"
         ])
         assert result.exit_code == 0, result.output
         from gitstore import GitStore
@@ -170,26 +170,26 @@ class TestCp:
         assert entry.filemode == 0o100644
 
     def test_missing_local_file(self, runner, initialized_repo):
-        result = runner.invoke(main, [initialized_repo, "cp", "/nonexistent", ":dest.txt"])
+        result = runner.invoke(main, ["cp", "--repo", initialized_repo, "/nonexistent", ":dest.txt"])
         assert result.exit_code != 0
         assert "not found" in result.output.lower()
 
     def test_missing_repo_file(self, runner, initialized_repo, tmp_path):
         dest = tmp_path / "out.txt"
-        result = runner.invoke(main, [initialized_repo, "cp", ":missing.txt", str(dest)])
+        result = runner.invoke(main, ["cp", "--repo", initialized_repo, ":missing.txt", str(dest)])
         assert result.exit_code != 0
         assert "not found" in result.output.lower()
 
     def test_directory_error_suggests_cptree(self, runner, repo_with_files, tmp_path):
         dest = tmp_path / "out"
-        result = runner.invoke(main, [repo_with_files, "cp", ":data", str(dest)])
+        result = runner.invoke(main, ["cp", "--repo", repo_with_files, ":data", str(dest)])
         assert result.exit_code != 0
         assert "cptree" in result.output.lower()
 
     def test_local_directory_error_suggests_cptree(self, runner, initialized_repo, tmp_path):
         d = tmp_path / "somedir"
         d.mkdir()
-        result = runner.invoke(main, [initialized_repo, "cp", str(d), ":dest"])
+        result = runner.invoke(main, ["cp", "--repo", initialized_repo, str(d), ":dest"])
         assert result.exit_code != 0
         assert "cptree" in result.output.lower()
 
@@ -199,10 +199,10 @@ class TestCp:
         f1.write_text("aaa")
         f2.write_text("bbb")
         result = runner.invoke(main, [
-            initialized_repo, "cp", str(f1), str(f2), ":stuff"
+            "cp", "--repo", initialized_repo, str(f1), str(f2), ":stuff"
         ])
         assert result.exit_code == 0, result.output
-        result = runner.invoke(main, [initialized_repo, "ls", ":stuff"])
+        result = runner.invoke(main, ["ls", "--repo", initialized_repo, ":stuff"])
         assert "a.txt" in result.output
         assert "b.txt" in result.output
 
@@ -210,12 +210,12 @@ class TestCp:
         # Add a second file
         f = tmp_path / "second.txt"
         f.write_text("second")
-        runner.invoke(main, [repo_with_files, "cp", str(f), ":second.txt"])
+        runner.invoke(main, ["cp", "--repo", repo_with_files, str(f), ":second.txt"])
 
         dest = tmp_path / "out"
         dest.mkdir()
         result = runner.invoke(main, [
-            repo_with_files, "cp", ":hello.txt", ":second.txt", str(dest)
+            "cp", "--repo", repo_with_files, ":hello.txt", ":second.txt", str(dest)
         ])
         assert result.exit_code == 0, result.output
         assert (dest / "hello.txt").read_text() == "hello world\n"
@@ -224,11 +224,11 @@ class TestCp:
     def test_multi_repo_to_disk_creates_dir(self, runner, repo_with_files, tmp_path):
         f = tmp_path / "second.txt"
         f.write_text("second")
-        runner.invoke(main, [repo_with_files, "cp", str(f), ":second.txt"])
+        runner.invoke(main, ["cp", "--repo", repo_with_files, str(f), ":second.txt"])
 
         dest = tmp_path / "newdir"
         result = runner.invoke(main, [
-            repo_with_files, "cp", ":hello.txt", ":second.txt", str(dest)
+            "cp", "--repo", repo_with_files, ":hello.txt", ":second.txt", str(dest)
         ])
         assert result.exit_code == 0, result.output
         assert (dest / "hello.txt").exists()
@@ -238,28 +238,28 @@ class TestCp:
         f = tmp_path / "a.txt"
         f.write_text("a")
         result = runner.invoke(main, [
-            initialized_repo, "cp", str(f), ":repo.txt", ":dest"
+            "cp", "--repo", initialized_repo, str(f), ":repo.txt", ":dest"
         ])
         assert result.exit_code != 0
         assert "same type" in result.output.lower()
 
     def test_single_arg_error(self, runner, initialized_repo):
-        result = runner.invoke(main, [initialized_repo, "cp", ":only"])
+        result = runner.invoke(main, ["cp", "--repo", initialized_repo, ":only"])
         assert result.exit_code != 0
         assert "at least two" in result.output.lower()
 
     def test_custom_branch(self, runner, initialized_repo, tmp_path):
         # Create a dev branch
-        runner.invoke(main, [initialized_repo, "branch", "create", "dev", "--from", "main"])
+        runner.invoke(main, ["branch", "--repo", initialized_repo, "create", "dev", "--from", "main"])
         f = tmp_path / "dev.txt"
         f.write_text("dev content")
-        result = runner.invoke(main, [initialized_repo, "cp", str(f), ":dev.txt", "-b", "dev"])
+        result = runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":dev.txt", "-b", "dev"])
         assert result.exit_code == 0
 
         # File should be on dev, not main
-        result = runner.invoke(main, [initialized_repo, "ls", "-b", "dev"])
+        result = runner.invoke(main, ["ls", "--repo", initialized_repo, "-b", "dev"])
         assert "dev.txt" in result.output
-        result = runner.invoke(main, [initialized_repo, "ls", "-b", "main"])
+        result = runner.invoke(main, ["ls", "--repo", initialized_repo, "-b", "main"])
         assert "dev.txt" not in result.output
 
 
@@ -276,22 +276,22 @@ class TestCptree:
         sub.mkdir()
         (sub / "b.txt").write_text("bbb")
 
-        result = runner.invoke(main, [initialized_repo, "cptree", str(src), ":stuff"])
+        result = runner.invoke(main, ["cptree", "--repo", initialized_repo, str(src), ":stuff"])
         assert result.exit_code == 0, result.output
 
-        result = runner.invoke(main, [initialized_repo, "ls", ":stuff"])
+        result = runner.invoke(main, ["ls", "--repo", initialized_repo, ":stuff"])
         assert "a.txt" in result.output
         assert "sub" in result.output
 
     def test_repo_to_disk(self, runner, repo_with_files, tmp_path):
         dest = tmp_path / "export"
-        result = runner.invoke(main, [repo_with_files, "cptree", ":data", str(dest)])
+        result = runner.invoke(main, ["cptree", "--repo", repo_with_files, ":data", str(dest)])
         assert result.exit_code == 0
         assert (dest / "data.bin").read_bytes() == b"\x00\x01\x02"
 
     def test_root_export(self, runner, repo_with_files, tmp_path):
         dest = tmp_path / "full_export"
-        result = runner.invoke(main, [repo_with_files, "cptree", ":", str(dest)])
+        result = runner.invoke(main, ["cptree", "--repo", repo_with_files, ":", str(dest)])
         assert result.exit_code == 0
         assert (dest / "hello.txt").exists()
         assert (dest / "data" / "data.bin").exists()
@@ -301,9 +301,9 @@ class TestCptree:
         src.mkdir()
         (src / "f.txt").write_text("f")
         # Trailing slash should be stripped
-        result = runner.invoke(main, [initialized_repo, "cptree", str(src), ":dir/"])
+        result = runner.invoke(main, ["cptree", "--repo", initialized_repo, str(src), ":dir/"])
         assert result.exit_code == 0
-        result = runner.invoke(main, [initialized_repo, "ls", ":dir"])
+        result = runner.invoke(main, ["ls", "--repo", initialized_repo, ":dir"])
         assert "f.txt" in result.output
 
     def test_disk_to_repo_root(self, runner, initialized_repo, tmp_path):
@@ -311,15 +311,15 @@ class TestCptree:
         src = tmp_path / "rootsrc"
         src.mkdir()
         (src / "r.txt").write_text("root file")
-        result = runner.invoke(main, [initialized_repo, "cptree", str(src), ":"])
+        result = runner.invoke(main, ["cptree", "--repo", initialized_repo, str(src), ":"])
         assert result.exit_code == 0, result.output
-        result = runner.invoke(main, [initialized_repo, "ls"])
+        result = runner.invoke(main, ["ls", "--repo", initialized_repo])
         assert "r.txt" in result.output
 
     def test_empty_dir_error(self, runner, initialized_repo, tmp_path):
         src = tmp_path / "empty"
         src.mkdir()
-        result = runner.invoke(main, [initialized_repo, "cptree", str(src), ":empty"])
+        result = runner.invoke(main, ["cptree", "--repo", initialized_repo, str(src), ":empty"])
         assert result.exit_code != 0
         assert "No files" in result.output
 
@@ -330,23 +330,23 @@ class TestCptree:
 
 class TestLs:
     def test_root(self, runner, repo_with_files):
-        result = runner.invoke(main, [repo_with_files, "ls"])
+        result = runner.invoke(main, ["ls", "--repo", repo_with_files])
         assert result.exit_code == 0
         assert "hello.txt" in result.output
         assert "data" in result.output
 
     def test_subdir(self, runner, repo_with_files):
-        result = runner.invoke(main, [repo_with_files, "ls", ":data"])
+        result = runner.invoke(main, ["ls", "--repo", repo_with_files, ":data"])
         assert result.exit_code == 0
         assert "data.bin" in result.output
 
     def test_missing_path(self, runner, repo_with_files):
-        result = runner.invoke(main, [repo_with_files, "ls", ":nonexistent"])
+        result = runner.invoke(main, ["ls", "--repo", repo_with_files, ":nonexistent"])
         assert result.exit_code != 0
         assert "not found" in result.output.lower()
 
     def test_no_colon_error(self, runner, repo_with_files):
-        result = runner.invoke(main, [repo_with_files, "ls", "no_colon"])
+        result = runner.invoke(main, ["ls", "--repo", repo_with_files, "no_colon"])
         assert result.exit_code != 0
         assert "':'" in result.output
 
@@ -357,17 +357,17 @@ class TestLs:
 
 class TestCat:
     def test_file_contents(self, runner, repo_with_files):
-        result = runner.invoke(main, [repo_with_files, "cat", ":hello.txt"])
+        result = runner.invoke(main, ["cat", "--repo", repo_with_files, ":hello.txt"])
         assert result.exit_code == 0
         assert "hello world" in result.output
 
     def test_missing_file(self, runner, repo_with_files):
-        result = runner.invoke(main, [repo_with_files, "cat", ":nope.txt"])
+        result = runner.invoke(main, ["cat", "--repo", repo_with_files, ":nope.txt"])
         assert result.exit_code != 0
         assert "not found" in result.output.lower()
 
     def test_directory_error(self, runner, repo_with_files):
-        result = runner.invoke(main, [repo_with_files, "cat", ":data"])
+        result = runner.invoke(main, ["cat", "--repo", repo_with_files, ":data"])
         assert result.exit_code != 0
         assert "directory" in result.output.lower()
 
@@ -378,27 +378,27 @@ class TestCat:
 
 class TestRm:
     def test_removes_file(self, runner, repo_with_files):
-        result = runner.invoke(main, [repo_with_files, "rm", ":hello.txt"])
+        result = runner.invoke(main, ["rm", "--repo", repo_with_files, ":hello.txt"])
         assert result.exit_code == 0
 
-        result = runner.invoke(main, [repo_with_files, "ls"])
+        result = runner.invoke(main, ["ls", "--repo", repo_with_files])
         assert "hello.txt" not in result.output
 
     def test_missing_file_error(self, runner, repo_with_files):
-        result = runner.invoke(main, [repo_with_files, "rm", ":nonexistent.txt"])
+        result = runner.invoke(main, ["rm", "--repo", repo_with_files, ":nonexistent.txt"])
         assert result.exit_code != 0
         assert "not found" in result.output.lower()
 
     def test_directory_rejected(self, runner, repo_with_files):
-        result = runner.invoke(main, [repo_with_files, "rm", ":data"])
+        result = runner.invoke(main, ["rm", "--repo", repo_with_files, ":data"])
         assert result.exit_code != 0
         assert "directory" in result.output.lower()
 
     def test_custom_message(self, runner, repo_with_files):
-        result = runner.invoke(main, [repo_with_files, "rm", ":hello.txt", "-m", "bye bye"])
+        result = runner.invoke(main, ["rm", "--repo", repo_with_files, ":hello.txt", "-m", "bye bye"])
         assert result.exit_code == 0
 
-        result = runner.invoke(main, [repo_with_files, "log"])
+        result = runner.invoke(main, ["log", "--repo", repo_with_files])
         assert "bye bye" in result.output
 
 
@@ -408,30 +408,30 @@ class TestRm:
 
 class TestLog:
     def test_all_commits(self, runner, repo_with_files):
-        result = runner.invoke(main, [repo_with_files, "log"])
+        result = runner.invoke(main, ["log", "--repo", repo_with_files])
         assert result.exit_code == 0
         lines = result.output.strip().split("\n")
         # At least: init + write hello.txt + write data tree
         assert len(lines) >= 3
 
     def test_path_filter(self, runner, repo_with_files):
-        result = runner.invoke(main, [repo_with_files, "log", "--at", "hello.txt"])
+        result = runner.invoke(main, ["log", "--repo", repo_with_files, "--at", "hello.txt"])
         assert result.exit_code == 0
         lines = result.output.strip().split("\n")
         assert len(lines) >= 1
 
     def test_nonexistent_path_empty(self, runner, repo_with_files):
-        result = runner.invoke(main, [repo_with_files, "log", "--at", "nonexistent.txt"])
+        result = runner.invoke(main, ["log", "--repo", repo_with_files, "--at", "nonexistent.txt"])
         assert result.exit_code == 0
         assert result.output.strip() == ""
 
     def test_match_exact(self, runner, initialized_repo, tmp_path):
         f = tmp_path / "a.txt"
         f.write_text("a")
-        runner.invoke(main, [initialized_repo, "cp", str(f), ":a.txt", "-m", "deploy v1"])
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":a.txt", "-m", "deploy v1"])
         f.write_text("b")
-        runner.invoke(main, [initialized_repo, "cp", str(f), ":a.txt", "-m", "fix bug"])
-        result = runner.invoke(main, [initialized_repo, "log", "--match", "deploy v1"])
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":a.txt", "-m", "fix bug"])
+        result = runner.invoke(main, ["log", "--repo", initialized_repo, "--match", "deploy v1"])
         assert result.exit_code == 0
         lines = result.output.strip().split("\n")
         assert len(lines) == 1
@@ -440,19 +440,19 @@ class TestLog:
     def test_match_wildcard(self, runner, initialized_repo, tmp_path):
         f = tmp_path / "a.txt"
         f.write_text("a")
-        runner.invoke(main, [initialized_repo, "cp", str(f), ":a.txt", "-m", "deploy v1"])
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":a.txt", "-m", "deploy v1"])
         f.write_text("b")
-        runner.invoke(main, [initialized_repo, "cp", str(f), ":a.txt", "-m", "deploy v2"])
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":a.txt", "-m", "deploy v2"])
         f.write_text("c")
-        runner.invoke(main, [initialized_repo, "cp", str(f), ":a.txt", "-m", "fix bug"])
-        result = runner.invoke(main, [initialized_repo, "log", "--match", "deploy*"])
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":a.txt", "-m", "fix bug"])
+        result = runner.invoke(main, ["log", "--repo", initialized_repo, "--match", "deploy*"])
         assert result.exit_code == 0
         lines = result.output.strip().split("\n")
         assert len(lines) == 2
         assert all("deploy" in line for line in lines)
 
     def test_match_no_results(self, runner, repo_with_files):
-        result = runner.invoke(main, [repo_with_files, "log", "--match", "zzz-no-match*"])
+        result = runner.invoke(main, ["log", "--repo", repo_with_files, "--match", "zzz-no-match*"])
         assert result.exit_code == 0
         assert result.output.strip() == ""
 
@@ -461,11 +461,11 @@ class TestLog:
         f2 = tmp_path / "b.txt"
         f1.write_text("a")
         f2.write_text("b")
-        runner.invoke(main, [initialized_repo, "cp", str(f1), ":a.txt", "-m", "deploy a"])
-        runner.invoke(main, [initialized_repo, "cp", str(f2), ":b.txt", "-m", "deploy b"])
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f1), ":a.txt", "-m", "deploy a"])
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f2), ":b.txt", "-m", "deploy b"])
         f1.write_text("a2")
-        runner.invoke(main, [initialized_repo, "cp", str(f1), ":a.txt", "-m", "fix a"])
-        result = runner.invoke(main, [initialized_repo, "log", "--at", "a.txt", "--match", "deploy*"])
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f1), ":a.txt", "-m", "fix a"])
+        result = runner.invoke(main, ["log", "--repo", initialized_repo, "--at", "a.txt", "--match", "deploy*"])
         assert result.exit_code == 0
         lines = result.output.strip().split("\n")
         assert len(lines) == 1
@@ -473,7 +473,7 @@ class TestLog:
 
     def test_json_format(self, runner, repo_with_files):
         import json
-        result = runner.invoke(main, [repo_with_files, "log", "--format", "json"])
+        result = runner.invoke(main, ["log", "--repo", repo_with_files, "--format", "json"])
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert isinstance(data, list)
@@ -488,7 +488,7 @@ class TestLog:
 
     def test_jsonl_format(self, runner, repo_with_files):
         import json
-        result = runner.invoke(main, [repo_with_files, "log", "--format", "jsonl"])
+        result = runner.invoke(main, ["log", "--repo", repo_with_files, "--format", "jsonl"])
         assert result.exit_code == 0
         lines = result.output.strip().split("\n")
         assert len(lines) >= 3
@@ -504,83 +504,83 @@ class TestLog:
 
 class TestBranch:
     def test_list_default(self, runner, initialized_repo):
-        result = runner.invoke(main, [initialized_repo, "branch"])
+        result = runner.invoke(main, ["branch", "--repo", initialized_repo])
         assert result.exit_code == 0
         assert "main" in result.output
 
     def test_list_explicit(self, runner, initialized_repo):
-        result = runner.invoke(main, [initialized_repo, "branch", "list"])
+        result = runner.invoke(main, ["branch", "--repo", initialized_repo, "list"])
         assert result.exit_code == 0
         assert "main" in result.output
 
     def test_create(self, runner, initialized_repo):
-        result = runner.invoke(main, [initialized_repo, "branch", "create", "dev", "--from", "main"])
+        result = runner.invoke(main, ["branch", "--repo", initialized_repo, "create", "dev", "--from", "main"])
         assert result.exit_code == 0
-        result = runner.invoke(main, [initialized_repo, "branch", "list"])
+        result = runner.invoke(main, ["branch", "--repo", initialized_repo, "list"])
         assert "dev" in result.output
 
     def test_duplicate_error(self, runner, initialized_repo):
-        runner.invoke(main, [initialized_repo, "branch", "create", "dup", "--from", "main"])
-        result = runner.invoke(main, [initialized_repo, "branch", "create", "dup", "--from", "main"])
+        runner.invoke(main, ["branch", "--repo", initialized_repo, "create", "dup", "--from", "main"])
+        result = runner.invoke(main, ["branch", "--repo", initialized_repo, "create", "dup", "--from", "main"])
         assert result.exit_code != 0
         assert "already exists" in result.output.lower()
 
     def test_create_from_tag(self, runner, initialized_repo):
-        runner.invoke(main, [initialized_repo, "tag", "create", "v1", "main"])
-        result = runner.invoke(main, [initialized_repo, "branch", "create", "from-tag", "--from", "v1"])
+        runner.invoke(main, ["tag", "--repo", initialized_repo, "create", "v1", "main"])
+        result = runner.invoke(main, ["branch", "--repo", initialized_repo, "create", "from-tag", "--from", "v1"])
         assert result.exit_code == 0
 
     def test_unknown_ref_error(self, runner, initialized_repo):
-        result = runner.invoke(main, [initialized_repo, "branch", "create", "bad", "--from", "nonexistent"])
+        result = runner.invoke(main, ["branch", "--repo", initialized_repo, "create", "bad", "--from", "nonexistent"])
         assert result.exit_code != 0
         assert "Unknown ref" in result.output
 
     def test_delete(self, runner, initialized_repo):
-        runner.invoke(main, [initialized_repo, "branch", "create", "todel", "--from", "main"])
-        result = runner.invoke(main, [initialized_repo, "branch", "delete", "todel"])
+        runner.invoke(main, ["branch", "--repo", initialized_repo, "create", "todel", "--from", "main"])
+        result = runner.invoke(main, ["branch", "--repo", initialized_repo, "delete", "todel"])
         assert result.exit_code == 0
-        result = runner.invoke(main, [initialized_repo, "branch", "list"])
+        result = runner.invoke(main, ["branch", "--repo", initialized_repo, "list"])
         assert "todel" not in result.output
 
     def test_delete_missing(self, runner, initialized_repo):
-        result = runner.invoke(main, [initialized_repo, "branch", "delete", "ghost"])
+        result = runner.invoke(main, ["branch", "--repo", initialized_repo, "delete", "ghost"])
         assert result.exit_code != 0
         assert "not found" in result.output.lower()
 
     def test_at_flag(self, runner, repo_with_files):
         result = runner.invoke(main, [
-            repo_with_files, "branch", "create", "at-test",
+            "branch", "--repo", repo_with_files, "create", "at-test",
             "--from", "main", "--at", "hello.txt"
         ])
         assert result.exit_code == 0
 
     def test_at_nonexistent_path(self, runner, initialized_repo):
         result = runner.invoke(main, [
-            initialized_repo, "branch", "create", "bad-at",
+            "branch", "--repo", initialized_repo, "create", "bad-at",
             "--from", "main", "--at", "nonexistent.txt"
         ])
         assert result.exit_code != 0
         assert "No commits" in result.output
 
     def test_create_empty(self, runner, initialized_repo):
-        result = runner.invoke(main, [initialized_repo, "branch", "create", "empty"])
+        result = runner.invoke(main, ["branch", "--repo", initialized_repo, "create", "empty"])
         assert result.exit_code == 0
-        result = runner.invoke(main, [initialized_repo, "branch", "list"])
+        result = runner.invoke(main, ["branch", "--repo", initialized_repo, "list"])
         assert "empty" in result.output
-        result = runner.invoke(main, [initialized_repo, "ls", "-b", "empty"])
+        result = runner.invoke(main, ["ls", "--repo", initialized_repo, "-b", "empty"])
         assert result.exit_code == 0
         assert result.output.strip() == ""
 
     def test_at_without_from_error(self, runner, initialized_repo):
         result = runner.invoke(main, [
-            initialized_repo, "branch", "create", "bad", "--at", "x.txt"
+            "branch", "--repo", initialized_repo, "create", "bad", "--at", "x.txt"
         ])
         assert result.exit_code != 0
         assert "--at requires --from" in result.output
 
     def test_at_dotdot_rejected(self, runner, initialized_repo):
         result = runner.invoke(main, [
-            initialized_repo, "branch", "create", "bad",
+            "branch", "--repo", initialized_repo, "create", "bad",
             "--from", "main", "--at", "../escape"
         ])
         assert result.exit_code != 0
@@ -593,50 +593,50 @@ class TestBranch:
 
 class TestTag:
     def test_list(self, runner, initialized_repo):
-        result = runner.invoke(main, [initialized_repo, "tag", "list"])
+        result = runner.invoke(main, ["tag", "--repo", initialized_repo, "list"])
         assert result.exit_code == 0
 
     def test_create(self, runner, initialized_repo):
-        result = runner.invoke(main, [initialized_repo, "tag", "create", "v1", "main"])
+        result = runner.invoke(main, ["tag", "--repo", initialized_repo, "create", "v1", "main"])
         assert result.exit_code == 0
-        result = runner.invoke(main, [initialized_repo, "tag", "list"])
+        result = runner.invoke(main, ["tag", "--repo", initialized_repo, "list"])
         assert "v1" in result.output
 
     def test_duplicate_error(self, runner, initialized_repo):
-        runner.invoke(main, [initialized_repo, "tag", "create", "v1", "main"])
-        result = runner.invoke(main, [initialized_repo, "tag", "create", "v1", "main"])
+        runner.invoke(main, ["tag", "--repo", initialized_repo, "create", "v1", "main"])
+        result = runner.invoke(main, ["tag", "--repo", initialized_repo, "create", "v1", "main"])
         assert result.exit_code != 0
         assert "already exists" in result.output.lower()
 
     def test_delete(self, runner, initialized_repo):
-        runner.invoke(main, [initialized_repo, "tag", "create", "v2", "main"])
-        result = runner.invoke(main, [initialized_repo, "tag", "delete", "v2"])
+        runner.invoke(main, ["tag", "--repo", initialized_repo, "create", "v2", "main"])
+        result = runner.invoke(main, ["tag", "--repo", initialized_repo, "delete", "v2"])
         assert result.exit_code == 0
-        result = runner.invoke(main, [initialized_repo, "tag", "list"])
+        result = runner.invoke(main, ["tag", "--repo", initialized_repo, "list"])
         assert "v2" not in result.output
 
     def test_delete_missing(self, runner, initialized_repo):
-        result = runner.invoke(main, [initialized_repo, "tag", "delete", "ghost"])
+        result = runner.invoke(main, ["tag", "--repo", initialized_repo, "delete", "ghost"])
         assert result.exit_code != 0
         assert "not found" in result.output.lower()
 
     def test_list_shows_all(self, runner, initialized_repo):
-        runner.invoke(main, [initialized_repo, "tag", "create", "alpha", "main"])
-        runner.invoke(main, [initialized_repo, "tag", "create", "beta", "main"])
-        result = runner.invoke(main, [initialized_repo, "tag", "list"])
+        runner.invoke(main, ["tag", "--repo", initialized_repo, "create", "alpha", "main"])
+        runner.invoke(main, ["tag", "--repo", initialized_repo, "create", "beta", "main"])
+        result = runner.invoke(main, ["tag", "--repo", initialized_repo, "list"])
         assert "alpha" in result.output
         assert "beta" in result.output
 
     def test_at_flag(self, runner, repo_with_files):
         result = runner.invoke(main, [
-            repo_with_files, "tag", "create", "v-at", "main",
+            "tag", "--repo", repo_with_files, "create", "v-at", "main",
             "--at", "hello.txt"
         ])
         assert result.exit_code == 0
 
     def test_create_from_commit_hash(self, runner, repo_with_files):
         # Get commit hash from log
-        result = runner.invoke(main, [repo_with_files, "log"])
+        result = runner.invoke(main, ["log", "--repo", repo_with_files])
         first_line = result.output.strip().split("\n")[0]
         short_hash = first_line.split()[0]
 
@@ -647,13 +647,13 @@ class TestTag:
         full_hash = fs.hash
 
         result = runner.invoke(main, [
-            repo_with_files, "tag", "create", "from-hash", full_hash
+            "tag", "--repo", repo_with_files, "create", "from-hash", full_hash
         ])
         assert result.exit_code == 0
 
     def test_default_invocation_lists(self, runner, initialized_repo):
-        runner.invoke(main, [initialized_repo, "tag", "create", "t1", "main"])
-        result = runner.invoke(main, [initialized_repo, "tag"])
+        runner.invoke(main, ["tag", "--repo", initialized_repo, "create", "t1", "main"])
+        result = runner.invoke(main, ["tag", "--repo", initialized_repo])
         assert "t1" in result.output
 
 
@@ -665,75 +665,75 @@ class TestPathNormalization:
     def test_cp_leading_slash_normalized(self, runner, initialized_repo, tmp_path):
         f = tmp_path / "norm.txt"
         f.write_text("data")
-        result = runner.invoke(main, [initialized_repo, "cp", str(f), ":/foo"])
+        result = runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":/foo"])
         assert result.exit_code == 0
-        result = runner.invoke(main, [initialized_repo, "ls"])
+        result = runner.invoke(main, ["ls", "--repo", initialized_repo])
         assert "foo" in result.output
 
     def test_cp_dotdot_rejected(self, runner, initialized_repo, tmp_path):
         f = tmp_path / "bad.txt"
         f.write_text("data")
-        result = runner.invoke(main, [initialized_repo, "cp", str(f), ":../escape"])
+        result = runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":../escape"])
         assert result.exit_code != 0
         assert "Invalid" in result.output or "invalid" in result.output.lower()
 
     def test_cp_bare_colon_copies_to_root(self, runner, initialized_repo, tmp_path):
         f = tmp_path / "rootfile.txt"
         f.write_text("data")
-        result = runner.invoke(main, [initialized_repo, "cp", str(f), ":"])
+        result = runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":"])
         assert result.exit_code == 0, result.output
-        result = runner.invoke(main, [initialized_repo, "ls"])
+        result = runner.invoke(main, ["ls", "--repo", initialized_repo])
         assert "rootfile.txt" in result.output
 
     def test_rm_leading_slash_normalized(self, runner, repo_with_files):
-        result = runner.invoke(main, [repo_with_files, "rm", ":/hello.txt"])
+        result = runner.invoke(main, ["rm", "--repo", repo_with_files, ":/hello.txt"])
         assert result.exit_code == 0
-        result = runner.invoke(main, [repo_with_files, "ls"])
+        result = runner.invoke(main, ["ls", "--repo", repo_with_files])
         assert "hello.txt" not in result.output
 
     def test_rm_dotdot_rejected(self, runner, repo_with_files):
-        result = runner.invoke(main, [repo_with_files, "rm", ":../escape"])
+        result = runner.invoke(main, ["rm", "--repo", repo_with_files, ":../escape"])
         assert result.exit_code != 0
 
     def test_cptree_repo_to_disk_leading_slash(self, runner, repo_with_files, tmp_path):
         """cptree :/data ./out should export data/* directly under ./out/."""
         dest = tmp_path / "out"
-        result = runner.invoke(main, [repo_with_files, "cptree", ":/data", str(dest)])
+        result = runner.invoke(main, ["cptree", "--repo", repo_with_files, ":/data", str(dest)])
         assert result.exit_code == 0
         # Should be out/data.bin, NOT out/data/data.bin
         assert (dest / "data.bin").exists()
         assert not (dest / "data" / "data.bin").exists()
 
     def test_ls_dotdot_rejected(self, runner, repo_with_files):
-        result = runner.invoke(main, [repo_with_files, "ls", ":../x"])
+        result = runner.invoke(main, ["ls", "--repo", repo_with_files, ":../x"])
         assert result.exit_code != 0
         assert "invalid" in result.output.lower()
 
     def test_cat_dotdot_rejected(self, runner, repo_with_files):
-        result = runner.invoke(main, [repo_with_files, "cat", ":../x"])
+        result = runner.invoke(main, ["cat", "--repo", repo_with_files, ":../x"])
         assert result.exit_code != 0
         assert "invalid" in result.output.lower()
 
     def test_cat_empty_path_rejected(self, runner, repo_with_files):
-        result = runner.invoke(main, [repo_with_files, "cat", ":"])
+        result = runner.invoke(main, ["cat", "--repo", repo_with_files, ":"])
         assert result.exit_code != 0
         assert "empty" in result.output.lower()
 
     def test_cp_repo_to_disk_dotdot_rejected(self, runner, repo_with_files, tmp_path):
         dest = tmp_path / "out.txt"
-        result = runner.invoke(main, [repo_with_files, "cp", ":../x", str(dest)])
+        result = runner.invoke(main, ["cp", "--repo", repo_with_files, ":../x", str(dest)])
         assert result.exit_code != 0
         assert "invalid" in result.output.lower()
 
     def test_at_dotdot_rejected(self, runner, repo_with_files):
-        result = runner.invoke(main, [repo_with_files, "log", "--at", "../x"])
+        result = runner.invoke(main, ["log", "--repo", repo_with_files, "--at", "../x"])
         assert result.exit_code != 0
         assert "invalid" in result.output.lower()
 
     def test_ls_bare_colon_shows_root(self, runner, repo_with_files):
         """Bare ':' in ls should list root."""
-        result_bare = runner.invoke(main, [repo_with_files, "ls", ":"])
-        result_none = runner.invoke(main, [repo_with_files, "ls"])
+        result_bare = runner.invoke(main, ["ls", "--repo", repo_with_files, ":"])
+        result_none = runner.invoke(main, ["ls", "--repo", repo_with_files])
         assert result_bare.exit_code == 0
         assert result_bare.output == result_none.output
 
@@ -748,7 +748,7 @@ class TestResolveRef:
         # Get the tree OID (not a commit)
         tree_oid = str(fs._tree_oid)
         result = runner.invoke(main, [
-            repo_with_files, "tag", "create", "bad-ref", tree_oid
+            "tag", "--repo", repo_with_files, "create", "bad-ref", tree_oid
         ])
         assert result.exit_code != 0
         assert "not a commit" in result.output.lower()
@@ -757,14 +757,25 @@ class TestResolveRef:
 class TestErrorPaths:
     def test_missing_repo(self, runner, tmp_path):
         bad_path = str(tmp_path / "nope.git")
-        result = runner.invoke(main, [bad_path, "ls"])
+        result = runner.invoke(main, ["ls", "--repo", bad_path])
         assert result.exit_code != 0
         assert "not found" in result.output.lower()
 
     def test_missing_branch(self, runner, initialized_repo):
-        result = runner.invoke(main, [initialized_repo, "ls", "-b", "nope"])
+        result = runner.invoke(main, ["ls", "--repo", initialized_repo, "-b", "nope"])
         assert result.exit_code != 0
         assert "not found" in result.output.lower()
+
+    def test_missing_repo_error(self, runner):
+        """Running a command with no --repo and no GITSTORE_REPO should fail."""
+        result = runner.invoke(main, ["ls"])
+        assert result.exit_code != 0
+        assert "GITSTORE_REPO" in result.output
+
+    def test_env_var_fallback(self, runner, initialized_repo):
+        """GITSTORE_REPO env var should work as fallback for --repo."""
+        result = runner.invoke(main, ["ls"], env={"GITSTORE_REPO": initialized_repo})
+        assert result.exit_code == 0
 
 
 # ---------------------------------------------------------------------------
@@ -774,7 +785,7 @@ class TestErrorPaths:
 class TestZip:
     def test_zip_basic(self, runner, repo_with_files, tmp_path):
         out = str(tmp_path / "archive.zip")
-        result = runner.invoke(main, [repo_with_files, "zip", out])
+        result = runner.invoke(main, ["zip", "--repo", repo_with_files, out])
         assert result.exit_code == 0, result.output
         with zipfile.ZipFile(out, "r") as zf:
             names = zf.namelist()
@@ -783,7 +794,7 @@ class TestZip:
 
     def test_zip_contents(self, runner, repo_with_files, tmp_path):
         out = str(tmp_path / "archive.zip")
-        result = runner.invoke(main, [repo_with_files, "zip", out])
+        result = runner.invoke(main, ["zip", "--repo", repo_with_files, out])
         assert result.exit_code == 0, result.output
         with zipfile.ZipFile(out, "r") as zf:
             assert zf.read("hello.txt") == b"hello world\n"
@@ -792,13 +803,13 @@ class TestZip:
     def test_zip_with_at(self, runner, initialized_repo, tmp_path):
         f = tmp_path / "a.txt"
         f.write_text("v1")
-        runner.invoke(main, [initialized_repo, "cp", str(f), ":a.txt", "-m", "add a"])
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":a.txt", "-m", "add a"])
         f2 = tmp_path / "b.txt"
         f2.write_text("b")
-        runner.invoke(main, [initialized_repo, "cp", str(f2), ":b.txt", "-m", "add b"])
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f2), ":b.txt", "-m", "add b"])
 
         out = str(tmp_path / "archive.zip")
-        result = runner.invoke(main, [initialized_repo, "zip", out, "--at", "a.txt"])
+        result = runner.invoke(main, ["zip", "--repo", initialized_repo, out, "--at", "a.txt"])
         assert result.exit_code == 0, result.output
         with zipfile.ZipFile(out, "r") as zf:
             names = zf.namelist()
@@ -809,18 +820,18 @@ class TestZip:
     def test_zip_with_match(self, runner, initialized_repo, tmp_path):
         f = tmp_path / "a.txt"
         f.write_text("v1")
-        runner.invoke(main, [initialized_repo, "cp", str(f), ":a.txt", "-m", "deploy v1"])
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":a.txt", "-m", "deploy v1"])
         f.write_text("v2")
-        runner.invoke(main, [initialized_repo, "cp", str(f), ":a.txt", "-m", "fix bug"])
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":a.txt", "-m", "fix bug"])
 
         out = str(tmp_path / "archive.zip")
-        result = runner.invoke(main, [initialized_repo, "zip", out, "--match", "deploy*"])
+        result = runner.invoke(main, ["zip", "--repo", initialized_repo, out, "--match", "deploy*"])
         assert result.exit_code == 0, result.output
         with zipfile.ZipFile(out, "r") as zf:
             assert zf.read("a.txt") == b"v1"
 
     def test_zip_stdout(self, runner, repo_with_files):
-        result = runner.invoke(main, [repo_with_files, "zip", "-"])
+        result = runner.invoke(main, ["zip", "--repo", repo_with_files, "-"])
         assert result.exit_code == 0, result.output
         zf = zipfile.ZipFile(io.BytesIO(result.output_bytes))
         names = zf.namelist()
@@ -831,12 +842,12 @@ class TestZip:
         f = tmp_path / "run.sh"
         f.write_text("#!/bin/sh\necho hi")
         result = runner.invoke(main, [
-            initialized_repo, "cp", str(f), ":run.sh", "--mode", "755"
+            "cp", "--repo", initialized_repo, str(f), ":run.sh", "--mode", "755"
         ])
         assert result.exit_code == 0, result.output
 
         out = str(tmp_path / "archive.zip")
-        result = runner.invoke(main, [initialized_repo, "zip", out])
+        result = runner.invoke(main, ["zip", "--repo", initialized_repo, out])
         assert result.exit_code == 0, result.output
         with zipfile.ZipFile(out, "r") as zf:
             info = zf.getinfo("run.sh")
@@ -845,7 +856,7 @@ class TestZip:
 
     def test_zip_no_match_error(self, runner, repo_with_files, tmp_path):
         out = str(tmp_path / "archive.zip")
-        result = runner.invoke(main, [repo_with_files, "zip", out, "--match", "zzz-no-match*"])
+        result = runner.invoke(main, ["zip", "--repo", repo_with_files, out, "--match", "zzz-no-match*"])
         assert result.exit_code != 0
         assert "No matching commits" in result.output
 
@@ -860,9 +871,9 @@ class TestUnzip:
         with zipfile.ZipFile(zpath, "w") as zf:
             zf.writestr("file1.txt", "hello")
             zf.writestr("file2.txt", "world")
-        result = runner.invoke(main, [initialized_repo, "unzip", zpath])
+        result = runner.invoke(main, ["unzip", "--repo", initialized_repo, zpath])
         assert result.exit_code == 0, result.output
-        result = runner.invoke(main, [initialized_repo, "ls"])
+        result = runner.invoke(main, ["ls", "--repo", initialized_repo])
         assert "file1.txt" in result.output
         assert "file2.txt" in result.output
 
@@ -870,9 +881,9 @@ class TestUnzip:
         zpath = str(tmp_path / "import.zip")
         with zipfile.ZipFile(zpath, "w") as zf:
             zf.writestr("greet.txt", "hi there")
-        runner.invoke(main, [initialized_repo, "unzip", zpath])
+        runner.invoke(main, ["unzip", "--repo", initialized_repo, zpath])
 
-        result = runner.invoke(main, [initialized_repo, "cat", ":greet.txt"])
+        result = runner.invoke(main, ["cat", "--repo", initialized_repo, ":greet.txt"])
         assert result.exit_code == 0
         assert "hi there" in result.output
 
@@ -880,10 +891,10 @@ class TestUnzip:
         zpath = str(tmp_path / "import.zip")
         with zipfile.ZipFile(zpath, "w") as zf:
             zf.writestr("msg.txt", "data")
-        result = runner.invoke(main, [initialized_repo, "unzip", zpath, "-m", "bulk import"])
+        result = runner.invoke(main, ["unzip", "--repo", initialized_repo, zpath, "-m", "bulk import"])
         assert result.exit_code == 0
 
-        result = runner.invoke(main, [initialized_repo, "log"])
+        result = runner.invoke(main, ["log", "--repo", initialized_repo])
         assert "bulk import" in result.output
 
     def test_unzip_nested(self, runner, initialized_repo, tmp_path):
@@ -891,12 +902,12 @@ class TestUnzip:
         with zipfile.ZipFile(zpath, "w") as zf:
             zf.writestr("dir/sub/deep.txt", "nested content")
             zf.writestr("top.txt", "top level")
-        result = runner.invoke(main, [initialized_repo, "unzip", zpath])
+        result = runner.invoke(main, ["unzip", "--repo", initialized_repo, zpath])
         assert result.exit_code == 0, result.output
 
-        result = runner.invoke(main, [initialized_repo, "ls", ":dir/sub"])
+        result = runner.invoke(main, ["ls", "--repo", initialized_repo, ":dir/sub"])
         assert "deep.txt" in result.output
-        result = runner.invoke(main, [initialized_repo, "cat", ":dir/sub/deep.txt"])
+        result = runner.invoke(main, ["cat", "--repo", initialized_repo, ":dir/sub/deep.txt"])
         assert "nested content" in result.output
 
     def test_unzip_preserves_executable(self, runner, initialized_repo, tmp_path):
@@ -905,7 +916,7 @@ class TestUnzip:
             info = zipfile.ZipInfo("script.sh")
             info.external_attr = 0o100755 << 16
             zf.writestr(info, "#!/bin/sh\necho hi")
-        result = runner.invoke(main, [initialized_repo, "unzip", zpath])
+        result = runner.invoke(main, ["unzip", "--repo", initialized_repo, zpath])
         assert result.exit_code == 0, result.output
 
         from gitstore import GitStore
@@ -918,19 +929,19 @@ class TestUnzip:
         """Zip then unzip preserves executable bit."""
         f = tmp_path / "run.sh"
         f.write_text("#!/bin/sh")
-        runner.invoke(main, [initialized_repo, "cp", str(f), ":run.sh", "--mode", "755"])
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":run.sh", "--mode", "755"])
         f2 = tmp_path / "data.txt"
         f2.write_text("plain")
-        runner.invoke(main, [initialized_repo, "cp", str(f2), ":data.txt"])
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f2), ":data.txt"])
 
         # Zip it
         archive = str(tmp_path / "archive.zip")
-        runner.invoke(main, [initialized_repo, "zip", archive])
+        runner.invoke(main, ["zip", "--repo", initialized_repo, archive])
 
         # Import into a fresh repo
         p2 = str(tmp_path / "repo2.git")
-        runner.invoke(main, [p2, "init"])
-        result = runner.invoke(main, [p2, "unzip", archive])
+        runner.invoke(main, ["init", "--repo", p2])
+        result = runner.invoke(main, ["unzip", "--repo", p2, archive])
         assert result.exit_code == 0, result.output
 
         from gitstore import GitStore
@@ -943,7 +954,7 @@ class TestUnzip:
     def test_unzip_invalid_zip(self, runner, initialized_repo, tmp_path):
         bad = tmp_path / "notazip.bin"
         bad.write_bytes(b"this is not a zip")
-        result = runner.invoke(main, [initialized_repo, "unzip", str(bad)])
+        result = runner.invoke(main, ["unzip", "--repo", initialized_repo, str(bad)])
         assert result.exit_code != 0
         assert "Not a valid zip" in result.output
 
@@ -951,6 +962,6 @@ class TestUnzip:
         zpath = str(tmp_path / "empty.zip")
         with zipfile.ZipFile(zpath, "w") as zf:
             pass  # no files
-        result = runner.invoke(main, [initialized_repo, "unzip", zpath])
+        result = runner.invoke(main, ["unzip", "--repo", initialized_repo, zpath])
         assert result.exit_code != 0
         assert "no files" in result.output.lower()

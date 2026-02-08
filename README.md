@@ -283,65 +283,76 @@ except StaleSnapshotError:
 
 gitstore includes a command-line interface for working with bare repos without writing Python. Install the package to get the `gitstore` command.
 
-Repo-side paths are prefixed with `:` (like `scp`). Use `--branch`/`-b` to select a branch (defaults to `main`).
+Specify the repository with `--repo`/`-r` or the `GITSTORE_REPO` environment variable. Repo-side paths are prefixed with `:` (like `scp`). Use `--branch`/`-b` to select a branch (defaults to `main`).
+
+```bash
+# Set once per session
+export GITSTORE_REPO=/path/to/repo.git
+gitstore init
+gitstore cp local-file.txt :remote-file.txt
+gitstore ls
+
+# Or per-command
+gitstore ls --repo /path/to/repo.git
+gitstore -r /path/to/repo.git ls
+```
 
 ```bash
 # Create a repo
-gitstore /path/to/repo.git init
+gitstore init --repo /path/to/repo.git
 
 # Copy files in and out
-gitstore /path/to/repo.git cp local-file.txt :remote-file.txt
-gitstore /path/to/repo.git cp :remote-file.txt local-copy.txt
-gitstore /path/to/repo.git cp local-file.txt :              # keep original name at root
+gitstore cp local-file.txt :remote-file.txt
+gitstore cp :remote-file.txt local-copy.txt
+gitstore cp local-file.txt :              # keep original name at root
 
 # Multiple sources (last arg is destination directory)
-gitstore /path/to/repo.git cp file1.txt file2.txt :dir
-gitstore /path/to/repo.git cp :a.txt :b.txt ./local-dir
+gitstore cp file1.txt file2.txt :dir
+gitstore cp :a.txt :b.txt ./local-dir
 
 # Set file mode
-gitstore /path/to/repo.git cp script.sh :script.sh --mode 755
+gitstore cp script.sh :script.sh --mode 755
 
 # Copy directory trees
-gitstore /path/to/repo.git cptree ./local-dir :repo-dir
-gitstore /path/to/repo.git cptree :repo-dir ./local-dir
+gitstore cptree ./local-dir :repo-dir
+gitstore cptree :repo-dir ./local-dir
 
 # Browse contents
-gitstore /path/to/repo.git ls
-gitstore /path/to/repo.git ls :subdir
-gitstore /path/to/repo.git cat :file.txt
+gitstore ls
+gitstore ls :subdir
+gitstore cat :file.txt
 
 # Remove files
-gitstore /path/to/repo.git rm :old-file.txt
+gitstore rm :old-file.txt
 
 # View commit history
-gitstore /path/to/repo.git log
-gitstore /path/to/repo.git log --at file.txt                # commits that changed this file
-gitstore /path/to/repo.git log --match "deploy*"            # commits matching message pattern
-gitstore /path/to/repo.git log --at file.txt --match "fix*" # both filters (AND)
-gitstore /path/to/repo.git log --format json                # JSON array
-gitstore /path/to/repo.git log --format jsonl               # one JSON object per line
+gitstore log
+gitstore log --at file.txt                # commits that changed this file
+gitstore log --match "deploy*"            # commits matching message pattern
+gitstore log --at file.txt --match "fix*" # both filters (AND)
+gitstore log --format json                # JSON array
+gitstore log --format jsonl               # one JSON object per line
 
 # Manage branches
-gitstore /path/to/repo.git branch                           # list
-gitstore /path/to/repo.git branch create dev                 # empty orphan branch
-gitstore /path/to/repo.git branch create dev --from main     # fork from existing ref
-gitstore /path/to/repo.git branch delete dev
+gitstore branch                           # list
+gitstore branch create dev                # empty orphan branch
+gitstore branch create dev --from main    # fork from existing ref
+gitstore branch delete dev
 
 # Manage tags
-gitstore /path/to/repo.git tag create v1.0 main
-gitstore /path/to/repo.git tag create v1.0-fix main --at bugfix.py  # tag the commit that last changed bugfix.py
-gitstore /path/to/repo.git tag delete v1.0
-```
+gitstore tag create v1.0 main
+gitstore tag create v1.0-fix main --at bugfix.py  # tag the commit that last changed bugfix.py
+gitstore tag delete v1.0
 
 # Export repo contents to a zip file
-gitstore /path/to/repo.git zip archive.zip
-gitstore /path/to/repo.git zip archive.zip --at file.txt    # snapshot where file.txt last changed
-gitstore /path/to/repo.git zip archive.zip --match "v1*"    # snapshot matching message pattern
+gitstore zip archive.zip
+gitstore zip archive.zip --at file.txt    # snapshot where file.txt last changed
+gitstore zip archive.zip --match "v1*"    # snapshot matching message pattern
 
 # Import a zip file into the repo
-gitstore /path/to/repo.git unzip archive.zip
-gitstore /path/to/repo.git unzip archive.zip -m "Import data"
-gitstore /path/to/repo.git unzip archive.zip -b dev
+gitstore unzip archive.zip
+gitstore unzip archive.zip -m "Import data"
+gitstore unzip archive.zip -b dev
 ```
 
 Write commands (`cp`, `cptree`, `rm`, `unzip`) accept `-m` for custom commit messages. Use `-b` on any command to target a branch other than `main`. `cp` accepts `--mode 644` or `--mode 755` to set file permissions. Pass `-v` before the command for status messages on stderr. `zip` accepts `-` as FILENAME to write to stdout.

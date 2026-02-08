@@ -44,6 +44,33 @@ def _status(ctx, msg):
         click.echo(msg, err=True)
 
 
+def _store_repo(ctx, param, value):
+    """Click callback: store --repo value in the context."""
+    ctx.ensure_object(dict)
+    if value is not None:
+        ctx.obj["repo_path"] = value
+    return value
+
+
+def _repo_option(f):
+    """Shared --repo/-r option decorator for all commands."""
+    return click.option(
+        "--repo", "-r", type=click.Path(), envvar="GITSTORE_REPO",
+        help="Path to bare git repository (or set GITSTORE_REPO).",
+        expose_value=False, callback=_store_repo, is_eager=True,
+    )(f)
+
+
+def _require_repo(ctx) -> str:
+    """Get the repo path from context, raising a clear error if missing."""
+    repo = ctx.obj.get("repo_path")
+    if not repo:
+        raise click.ClickException(
+            "No repository specified. Use --repo or set GITSTORE_REPO."
+        )
+    return repo
+
+
 def _open_store(repo_path: str) -> GitStore:
     try:
         return GitStore.open(repo_path)
@@ -100,16 +127,11 @@ def _resolve_with_at(store: GitStore, ref_str: str, at_path: str | None):
 # ---------------------------------------------------------------------------
 
 @click.group()
-@click.argument("repo", type=click.Path())
 @click.option("-v", "--verbose", is_flag=True, help="Verbose output on stderr.")
 @click.pass_context
-def main(ctx, repo, verbose):
-    """gitstore — a git-backed file store.
-
-    REPO is the path to a bare git repository.
-    """
+def main(ctx, verbose):
+    """gitstore — a git-backed file store."""
     ctx.ensure_object(dict)
-    ctx.obj["repo_path"] = repo
     ctx.obj["verbose"] = verbose
 
 
@@ -118,11 +140,12 @@ def main(ctx, repo, verbose):
 # ---------------------------------------------------------------------------
 
 @main.command()
+@_repo_option
 @click.option("--branch", "-b", default="main", help="Initial branch name (default: main).")
 @click.pass_context
 def init(ctx, branch):
     """Create a new bare git repository."""
-    repo_path = ctx.obj["repo_path"]
+    repo_path = _require_repo(ctx)
     try:
         GitStore.open(repo_path, create=True, branch=branch)
     except FileExistsError as exc:
@@ -135,6 +158,7 @@ def init(ctx, branch):
 # ---------------------------------------------------------------------------
 
 @main.command()
+@_repo_option
 @click.argument("args", nargs=-1, required=True)
 @click.option("--branch", "-b", default="main", help="Branch to operate on.")
 @click.option("-m", "message", default=None, help="Commit message.")
@@ -180,7 +204,7 @@ def cp(ctx, args, branch, message, mode):
 
     multi = len(parsed_sources) > 1
 
-    store = _open_store(ctx.obj["repo_path"])
+    store = _open_store(_require_repo(ctx))
     fs = _get_branch_fs(store, branch)
 
     filemode = (GIT_FILEMODE_BLOB_EXECUTABLE if mode == "755"
@@ -255,6 +279,7 @@ def cp(ctx, args, branch, message, mode):
 # ---------------------------------------------------------------------------
 
 @main.command()
+@_repo_option
 @click.argument("src")
 @click.argument("dest")
 @click.option("--branch", "-b", default="main", help="Branch to operate on.")
@@ -277,7 +302,7 @@ def cptree(ctx, src, dest, branch, message):
             "Neither SRC nor DEST is a repo path — prefix repo paths with ':'"
         )
 
-    store = _open_store(ctx.obj["repo_path"])
+    store = _open_store(_require_repo(ctx))
     fs = _get_branch_fs(store, branch)
 
     if not src_is_repo:
@@ -357,6 +382,7 @@ def cptree(ctx, src, dest, branch, message):
 # ---------------------------------------------------------------------------
 
 @main.command()
+@_repo_option
 @click.argument("path", required=False, default=None)
 @click.option("--branch", "-b", default="main", help="Branch to list.")
 @click.pass_context
@@ -365,7 +391,7 @@ def ls(ctx, path, branch):
 
     Prefix repo paths with ':'.
     """
-    store = _open_store(ctx.obj["repo_path"])
+    store = _open_store(_require_repo(ctx))
     fs = _get_branch_fs(store, branch)
 
     repo_path = None
@@ -394,6 +420,7 @@ def ls(ctx, path, branch):
 # ---------------------------------------------------------------------------
 
 @main.command()
+@_repo_option
 @click.argument("path")
 @click.option("--branch", "-b", default="main", help="Branch to read from.")
 @click.pass_context
@@ -410,7 +437,7 @@ def cat(ctx, path, branch):
 
     repo_path = _normalize_repo_path(repo_path)
 
-    store = _open_store(ctx.obj["repo_path"])
+    store = _open_store(_require_repo(ctx))
     fs = _get_branch_fs(store, branch)
 
     try:
@@ -428,6 +455,7 @@ def cat(ctx, path, branch):
 # ---------------------------------------------------------------------------
 
 @main.command()
+@_repo_option
 @click.argument("path")
 @click.option("--branch", "-b", default="main", help="Branch to remove from.")
 @click.option("-m", "message", default=None, help="Commit message.")
@@ -443,7 +471,7 @@ def rm(ctx, path, branch, message):
             "PATH must be a repo path prefixed with ':'"
         )
 
-    store = _open_store(ctx.obj["repo_path"])
+    store = _open_store(_require_repo(ctx))
     fs = _get_branch_fs(store, branch)
 
     repo_path = _normalize_repo_path(repo_path)
@@ -466,6 +494,7 @@ def rm(ctx, path, branch, message):
 # ---------------------------------------------------------------------------
 
 @main.command()
+@_repo_option
 @click.option("--at", "at_path", default=None, help="Filter to commits that changed this path.")
 @click.option("--match", "match_pattern", default=None, help="Filter by message (supports * and ? wildcards).")
 @click.option("--branch", "-b", default="main", help="Branch to show log for.")
@@ -475,7 +504,7 @@ def rm(ctx, path, branch, message):
 @click.pass_context
 def log(ctx, at_path, match_pattern, branch, fmt):
     """Show commit log, optionally filtered by path and/or message pattern."""
-    store = _open_store(ctx.obj["repo_path"])
+    store = _open_store(_require_repo(ctx))
     fs = _get_branch_fs(store, branch)
 
     if at_path is not None:
@@ -509,6 +538,7 @@ def _log_entry_dict(entry) -> dict:
 # ---------------------------------------------------------------------------
 
 @main.group(invoke_without_command=True)
+@_repo_option
 @click.pass_context
 def branch(ctx):
     """Manage branches."""
@@ -517,15 +547,17 @@ def branch(ctx):
 
 
 @branch.command("list")
+@_repo_option
 @click.pass_context
 def branch_list(ctx):
     """List all branches."""
-    store = _open_store(ctx.obj["repo_path"])
+    store = _open_store(_require_repo(ctx))
     for name in sorted(store.branches):
         click.echo(name)
 
 
 @branch.command("create")
+@_repo_option
 @click.argument("name")
 @click.option("--from", "from_ref", default=None, help="Ref to fork from.")
 @click.option("--at", "at_path", default=None,
@@ -533,7 +565,7 @@ def branch_list(ctx):
 @click.pass_context
 def branch_create(ctx, name, from_ref, at_path):
     """Create a new branch NAME, optionally forking from an existing ref."""
-    store = _open_store(ctx.obj["repo_path"])
+    store = _open_store(_require_repo(ctx))
 
     if name in store.branches:
         raise click.ClickException(f"Branch already exists: {name}")
@@ -557,11 +589,12 @@ def branch_create(ctx, name, from_ref, at_path):
 
 
 @branch.command("delete")
+@_repo_option
 @click.argument("name")
 @click.pass_context
 def branch_delete(ctx, name):
     """Delete branch NAME."""
-    store = _open_store(ctx.obj["repo_path"])
+    store = _open_store(_require_repo(ctx))
     try:
         del store.branches[name]
     except KeyError:
@@ -574,6 +607,7 @@ def branch_delete(ctx, name):
 # ---------------------------------------------------------------------------
 
 @main.group(invoke_without_command=True)
+@_repo_option
 @click.pass_context
 def tag(ctx):
     """Manage tags."""
@@ -582,15 +616,17 @@ def tag(ctx):
 
 
 @tag.command("list")
+@_repo_option
 @click.pass_context
 def tag_list(ctx):
     """List all tags."""
-    store = _open_store(ctx.obj["repo_path"])
+    store = _open_store(_require_repo(ctx))
     for name in sorted(store.tags):
         click.echo(name)
 
 
 @tag.command("create")
+@_repo_option
 @click.argument("name")
 @click.argument("from_ref", metavar="FROM")
 @click.option("--at", "at_path", default=None,
@@ -598,7 +634,7 @@ def tag_list(ctx):
 @click.pass_context
 def tag_create(ctx, name, from_ref, at_path):
     """Create a new tag NAME from FROM ref."""
-    store = _open_store(ctx.obj["repo_path"])
+    store = _open_store(_require_repo(ctx))
 
     if name in store.tags:
         raise click.ClickException(f"Tag already exists: {name}")
@@ -612,11 +648,12 @@ def tag_create(ctx, name, from_ref, at_path):
 
 
 @tag.command("delete")
+@_repo_option
 @click.argument("name")
 @click.pass_context
 def tag_delete(ctx, name):
     """Delete tag NAME."""
-    store = _open_store(ctx.obj["repo_path"])
+    store = _open_store(_require_repo(ctx))
     try:
         del store.tags[name]
     except KeyError:
@@ -629,6 +666,7 @@ def tag_delete(ctx, name):
 # ---------------------------------------------------------------------------
 
 @main.command("zip")
+@_repo_option
 @click.argument("filename", type=click.Path())
 @click.option("--branch", "-b", default="main", help="Branch to export from.")
 @click.option("--at", "at_path", default=None, help="Filter to commits that changed this path.")
@@ -639,7 +677,7 @@ def zip_cmd(ctx, filename, branch, at_path, match_pattern):
 
     FILENAME is the output zip path on disk.  Use '-' to write to stdout.
     """
-    store = _open_store(ctx.obj["repo_path"])
+    store = _open_store(_require_repo(ctx))
     fs = _get_branch_fs(store, branch)
 
     if at_path is not None:
@@ -680,6 +718,7 @@ def zip_cmd(ctx, filename, branch, at_path, match_pattern):
 # ---------------------------------------------------------------------------
 
 @main.command("unzip")
+@_repo_option
 @click.argument("filename", type=click.Path(exists=True))
 @click.option("--branch", "-b", default="main", help="Branch to import into.")
 @click.option("-m", "message", default=None, help="Commit message.")
@@ -692,7 +731,7 @@ def unzip_cmd(ctx, filename, branch, message):
     if not zipfile.is_zipfile(filename):
         raise click.ClickException(f"Not a valid zip file: {filename}")
 
-    store = _open_store(ctx.obj["repo_path"])
+    store = _open_store(_require_repo(ctx))
     fs = _get_branch_fs(store, branch)
 
     writes: dict[str, bytes | tuple[bytes, int]] = {}
