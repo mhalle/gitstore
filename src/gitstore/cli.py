@@ -164,18 +164,6 @@ def _resolve_ref(store: GitStore, ref_str: str):
     raise click.ClickException(f"Unknown ref: {ref_str}")
 
 
-def _resolve_with_at(store: GitStore, ref_str: str, at_path: str | None):
-    """Resolve ref; if --path given, find latest commit that touched that path."""
-    fs = _resolve_ref(store, ref_str)
-    if at_path is None:
-        return fs
-    at_path = _normalize_repo_path(_strip_colon(at_path))
-    for entry in fs.log(at_path):
-        return entry
-    raise click.ClickException(
-        f"No commits found that modified path: {at_path}"
-    )
-
 
 # ---------------------------------------------------------------------------
 # Main group
@@ -633,8 +621,10 @@ def branch_list(ctx):
 @click.option("--path", "at_path", default=None,
               help="Point to latest commit that modified this path.")
 @click.option("--at", "deprecated_at", default=None, hidden=True)
+@click.option("--match", "match_pattern", default=None, help="Filter by message (supports * and ? wildcards).")
+@click.option("--before", "before", default=None, help="Only commits on or before this date (ISO 8601).")
 @click.pass_context
-def branch_create(ctx, name, from_ref, at_path, deprecated_at):
+def branch_create(ctx, name, from_ref, at_path, deprecated_at, match_pattern, before):
     """Create a new branch NAME, optionally forking from an existing ref."""
     at_path = at_path or deprecated_at
     store = _open_store(_require_repo(ctx))
@@ -642,9 +632,10 @@ def branch_create(ctx, name, from_ref, at_path, deprecated_at):
     if name in store.branches:
         raise click.ClickException(f"Branch already exists: {name}")
 
+    has_filters = at_path is not None or match_pattern is not None or before is not None
     if from_ref is None:
-        if at_path is not None:
-            raise click.ClickException("--path requires --from")
+        if has_filters:
+            raise click.ClickException("--path/--match/--before require --from")
         repo = store._repo
         sig = store._signature
         tree_oid = repo.TreeBuilder().write()
@@ -653,7 +644,8 @@ def branch_create(ctx, name, from_ref, at_path, deprecated_at):
             f"Initialize {name}", tree_oid, [],
         )
     else:
-        source_fs = _resolve_with_at(store, from_ref, at_path)
+        before = _parse_before(before)
+        source_fs = _resolve_snapshot(_resolve_ref(store, from_ref), at_path, match_pattern, before)
         from .fs import FS
         new_fs = FS(store, source_fs._commit_oid, branch=name)
         store.branches[name] = new_fs
@@ -704,16 +696,19 @@ def tag_list(ctx):
 @click.option("--path", "at_path", default=None,
               help="Point to latest commit that modified this path.")
 @click.option("--at", "deprecated_at", default=None, hidden=True)
+@click.option("--match", "match_pattern", default=None, help="Filter by message (supports * and ? wildcards).")
+@click.option("--before", "before", default=None, help="Only commits on or before this date (ISO 8601).")
 @click.pass_context
-def tag_create(ctx, name, from_ref, at_path, deprecated_at):
+def tag_create(ctx, name, from_ref, at_path, deprecated_at, match_pattern, before):
     """Create a new tag NAME from FROM ref."""
     at_path = at_path or deprecated_at
+    before = _parse_before(before)
     store = _open_store(_require_repo(ctx))
 
     if name in store.tags:
         raise click.ClickException(f"Tag already exists: {name}")
 
-    source_fs = _resolve_with_at(store, from_ref, at_path)
+    source_fs = _resolve_snapshot(_resolve_ref(store, from_ref), at_path, match_pattern, before)
 
     from .fs import FS
     new_fs = FS(store, source_fs._commit_oid, branch=None)

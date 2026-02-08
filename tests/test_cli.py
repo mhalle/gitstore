@@ -609,7 +609,7 @@ class TestBranch:
             "--from", "main", "--path", "nonexistent.txt"
         ])
         assert result.exit_code != 0
-        assert "No commits" in result.output
+        assert "No matching commits" in result.output
 
     def test_create_empty(self, runner, initialized_repo):
         result = runner.invoke(main, ["branch", "--repo", initialized_repo, "create", "empty"])
@@ -625,7 +625,7 @@ class TestBranch:
             "branch", "--repo", initialized_repo, "create", "bad", "--path", "x.txt"
         ])
         assert result.exit_code != 0
-        assert "--path requires --from" in result.output
+        assert "require --from" in result.output
 
     def test_at_dotdot_rejected(self, runner, initialized_repo):
         result = runner.invoke(main, [
