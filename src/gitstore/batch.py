@@ -14,10 +14,11 @@ if TYPE_CHECKING:
 class Batch:
     """Accumulates writes and removes, commits once on exit."""
 
-    def __init__(self, fs: FS):
+    def __init__(self, fs: FS, message: str | None = None):
         if not fs._writable:
             raise PermissionError("Cannot batch on a read-only snapshot")
         self._fs = fs
+        self._message = message
         self._writes: dict[str, bytes] = {}
         self._removes: set[str] = set()
         self._ops: list[str] = []
@@ -74,7 +75,7 @@ class Batch:
             self._closed = True
             return False
 
-        message = "Batch: " + "; ".join(self._ops)
+        message = self._message or "Batch: " + "; ".join(self._ops)
         self.fs = self._fs._commit_changes(self._writes, self._removes, message)
         self._closed = True
         return False

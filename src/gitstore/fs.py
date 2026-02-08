@@ -170,9 +170,9 @@ class FS:
             raise IsADirectoryError(path)
         return self._commit_changes({}, {path}, message if message is not None else f"Remove {path}")
 
-    def batch(self):
+    def batch(self, message: str | None = None):
         from .batch import Batch
-        return Batch(self)
+        return Batch(self, message=message)
 
     # --- Dump ---
 

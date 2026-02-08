@@ -157,6 +157,11 @@ with fs.batch() as b:
         f.write(b"charlie")
 
 fs = b.fs  # new snapshot after the batch commits
+
+# Custom commit message
+with fs.batch(message="Import dataset v2") as b:
+    b.write("data.csv", csv_bytes)
+    b.write("meta.json", meta_bytes)
 ```
 
 If an exception occurs inside the batch, nothing is committed:

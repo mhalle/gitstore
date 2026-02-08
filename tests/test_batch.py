@@ -25,6 +25,13 @@ class TestBatch:
         # Should be exactly one commit ahead
         assert new_fs.parent.hash == fs.hash
 
+    def test_custom_message(self, repo_fs):
+        _, fs = repo_fs
+        with fs.batch(message="bulk upload") as b:
+            b.write("x.txt", b"x")
+            b.write("y.txt", b"y")
+        assert b.fs.message == "bulk upload"
+
     def test_write_and_remove(self, repo_fs):
         _, fs = repo_fs
         with fs.batch() as b:
