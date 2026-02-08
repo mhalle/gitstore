@@ -270,6 +270,8 @@ except StaleSnapshotError:
 - When a stale write is rejected, the commit object is created but unreferenced. These dangling objects are harmless and will be cleaned up by `git gc`.
 - Cross-machine coordination (e.g. NFS-mounted repos) is not supported — file locks are not reliable over network filesystems.
 
+**Maintenance:** gitstore repos are standard bare Git repositories. You can run `git gc /path/to/repo.git` to repack loose objects and prune unreferenced data. This is optional — Git objects are cheap and the repo will work fine without it — but it can reduce disk usage for long-lived repos with many writes.
+
 ## Error handling
 
 | Exception | When |
