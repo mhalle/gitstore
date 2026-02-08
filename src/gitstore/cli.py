@@ -90,6 +90,13 @@ def _get_branch_fs(store: GitStore, branch: str):
         raise click.ClickException(f"Branch not found: {branch}")
 
 
+def _get_fs(store: GitStore, branch: str, ref: str | None):
+    """Resolve an FS from --hash (any ref) or --branch."""
+    if ref:
+        return _resolve_ref(store, ref)
+    return _get_branch_fs(store, branch)
+
+
 def _resolve_ref(store: GitStore, ref_str: str):
     """Try branches, then tags, then commit hash."""
     if ref_str in store.branches:
@@ -199,11 +206,12 @@ def destroy(ctx, force):
 @_repo_option
 @click.argument("args", nargs=-1, required=True)
 @click.option("--branch", "-b", default="main", help="Branch to operate on.")
+@click.option("--hash", "ref", default=None, help="Branch, tag, or commit hash to read from.")
 @click.option("-m", "message", default=None, help="Commit message.")
 @click.option("--mode", type=click.Choice(["644", "755"]), default=None,
               help="File mode (default: 644).")
 @click.pass_context
-def cp(ctx, args, branch, message, mode):
+def cp(ctx, args, branch, ref, message, mode):
     """Copy files between disk and repo.
 
     The last argument is the destination; all preceding arguments are sources.
@@ -240,10 +248,16 @@ def cp(ctx, args, branch, message, mode):
             "Neither sources nor DEST is a repo path — prefix repo paths with ':'"
         )
 
+    # --hash cannot be used for disk→repo (writing)
+    if ref and not src_is_repo:
+        raise click.ClickException(
+            "Cannot write to a commit hash — use --branch for writes"
+        )
+
     multi = len(parsed_sources) > 1
 
     store = _open_store(_require_repo(ctx))
-    fs = _get_branch_fs(store, branch)
+    fs = _get_fs(store, branch, ref)
 
     filemode = (GIT_FILEMODE_BLOB_EXECUTABLE if mode == "755"
                 else GIT_FILEMODE_BLOB) if mode else None
@@ -321,9 +335,10 @@ def cp(ctx, args, branch, message, mode):
 @click.argument("src")
 @click.argument("dest")
 @click.option("--branch", "-b", default="main", help="Branch to operate on.")
+@click.option("--hash", "ref", default=None, help="Branch, tag, or commit hash to read from.")
 @click.option("-m", "message", default=None, help="Commit message.")
 @click.pass_context
-def cptree(ctx, src, dest, branch, message):
+def cptree(ctx, src, dest, branch, ref, message):
     """Copy a directory tree between disk and repo.
 
     Prefix repo-side paths with ':'.
@@ -340,8 +355,14 @@ def cptree(ctx, src, dest, branch, message):
             "Neither SRC nor DEST is a repo path — prefix repo paths with ':'"
         )
 
+    # --hash cannot be used for disk→repo (writing)
+    if ref and not src_is_repo:
+        raise click.ClickException(
+            "Cannot write to a commit hash — use --branch for writes"
+        )
+
     store = _open_store(_require_repo(ctx))
-    fs = _get_branch_fs(store, branch)
+    fs = _get_fs(store, branch, ref)
 
     if not src_is_repo:
         # Disk → repo
@@ -423,11 +444,12 @@ def cptree(ctx, src, dest, branch, message):
 @_repo_option
 @click.argument("path", required=False, default=None)
 @click.option("--branch", "-b", default="main", help="Branch to list.")
+@click.option("--hash", "ref", default=None, help="Branch, tag, or commit hash to read from.")
 @click.pass_context
-def ls(ctx, path, branch):
+def ls(ctx, path, branch, ref):
     """List files/directories at PATH (or root)."""
     store = _open_store(_require_repo(ctx))
-    fs = _get_branch_fs(store, branch)
+    fs = _get_fs(store, branch, ref)
 
     repo_path = None
     if path is not None:
@@ -454,13 +476,14 @@ def ls(ctx, path, branch):
 @_repo_option
 @click.argument("path")
 @click.option("--branch", "-b", default="main", help="Branch to read from.")
+@click.option("--hash", "ref", default=None, help="Branch, tag, or commit hash to read from.")
 @click.pass_context
-def cat(ctx, path, branch):
+def cat(ctx, path, branch, ref):
     """Print file contents to stdout."""
     repo_path = _normalize_repo_path(_strip_colon(path))
 
     store = _open_store(_require_repo(ctx))
-    fs = _get_branch_fs(store, branch)
+    fs = _get_fs(store, branch, ref)
 
     try:
         data = fs.read(repo_path)
@@ -511,14 +534,15 @@ def rm(ctx, path, branch, message):
 @click.option("--at", "at_path", default=None, help="Filter to commits that changed this path.")
 @click.option("--match", "match_pattern", default=None, help="Filter by message (supports * and ? wildcards).")
 @click.option("--branch", "-b", default="main", help="Branch to show log for.")
+@click.option("--hash", "ref", default=None, help="Branch, tag, or commit hash to start from.")
 @click.option("--format", "fmt", default="text",
               type=click.Choice(["text", "json", "jsonl"]),
               help="Output format.")
 @click.pass_context
-def log(ctx, at_path, match_pattern, branch, fmt):
+def log(ctx, at_path, match_pattern, branch, ref, fmt):
     """Show commit log, optionally filtered by path and/or message pattern."""
     store = _open_store(_require_repo(ctx))
-    fs = _get_branch_fs(store, branch)
+    fs = _get_fs(store, branch, ref)
 
     if at_path is not None:
         at_path = _normalize_repo_path(_strip_colon(at_path))
@@ -682,16 +706,17 @@ def tag_delete(ctx, name):
 @_repo_option
 @click.argument("filename", type=click.Path())
 @click.option("--branch", "-b", default="main", help="Branch to export from.")
+@click.option("--hash", "ref", default=None, help="Branch, tag, or commit hash to export from.")
 @click.option("--at", "at_path", default=None, help="Filter to commits that changed this path.")
 @click.option("--match", "match_pattern", default=None, help="Filter by message (supports * and ? wildcards).")
 @click.pass_context
-def zip_cmd(ctx, filename, branch, at_path, match_pattern):
+def zip_cmd(ctx, filename, branch, ref, at_path, match_pattern):
     """Export repo contents to a zip file.
 
     FILENAME is the output zip path on disk.  Use '-' to write to stdout.
     """
     store = _open_store(_require_repo(ctx))
-    fs = _get_branch_fs(store, branch)
+    fs = _get_fs(store, branch, ref)
 
     if at_path is not None:
         at_path = _normalize_repo_path(_strip_colon(at_path))
@@ -779,10 +804,11 @@ def unzip_cmd(ctx, filename, branch, message):
 @_repo_option
 @click.argument("filename", type=click.Path())
 @click.option("--branch", "-b", default="main", help="Branch to export from.")
+@click.option("--hash", "ref", default=None, help="Branch, tag, or commit hash to export from.")
 @click.option("--at", "at_path", default=None, help="Filter to commits that changed this path.")
 @click.option("--match", "match_pattern", default=None, help="Filter by message (supports * and ? wildcards).")
 @click.pass_context
-def tar_cmd(ctx, filename, branch, at_path, match_pattern):
+def tar_cmd(ctx, filename, branch, ref, at_path, match_pattern):
     """Export repo contents to a tar archive.
 
     FILENAME is the output tar path on disk.  Use '-' to write to stdout.
@@ -791,7 +817,7 @@ def tar_cmd(ctx, filename, branch, at_path, match_pattern):
     import tarfile
 
     store = _open_store(_require_repo(ctx))
-    fs = _get_branch_fs(store, branch)
+    fs = _get_fs(store, branch, ref)
 
     if at_path is not None:
         at_path = _normalize_repo_path(_strip_colon(at_path))

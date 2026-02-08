@@ -283,7 +283,7 @@ except StaleSnapshotError:
 
 gitstore includes a command-line interface for working with bare repos without writing Python. Install the package to get the `gitstore` command.
 
-Specify the repository with `--repo`/`-r` or the `GITSTORE_REPO` environment variable. Use `--branch`/`-b` to select a branch (defaults to `main`). For `cp` and `cptree`, prefix repo-side paths with `:` to distinguish them from local paths. For other commands (`ls`, `cat`, `rm`) the `:` prefix is optional.
+Specify the repository with `--repo`/`-r` or the `GITSTORE_REPO` environment variable. Use `--branch`/`-b` to select a branch (defaults to `main`). Use `--hash` to read from any branch, tag, or commit hash. For `cp` and `cptree`, prefix repo-side paths with `:` to distinguish them from local paths. For other commands (`ls`, `cat`, `rm`) the `:` prefix is optional.
 
 ```bash
 # Set once per session
@@ -371,7 +371,24 @@ cat archive.tar.gz | gitstore untar        # equivalent
 gitstore untar archive.tar -m "Import data"
 ```
 
-Write commands (`cp`, `cptree`, `rm`, `unzip`, `untar`) accept `-m` for custom commit messages. Use `-b` on any command to target a branch other than `main`. `cp` accepts `--mode 644` or `--mode 755` to set file permissions. Pass `-v` before the command for status messages on stderr. `zip` and `tar` accept `-` as FILENAME to write to stdout; `untar` defaults to stdin when no filename is given.
+```bash
+# Browse at a specific commit
+gitstore log --at file.txt                # find the commit hash
+gitstore cat file.txt --hash abc1234...   # read file at that commit
+gitstore ls --hash abc1234...             # list files at that commit
+
+# Works with tags too
+gitstore cat file.txt --hash v1.0
+
+# Export a snapshot at a specific commit
+gitstore zip archive.zip --hash abc1234...
+gitstore tar archive.tar --hash abc1234...
+
+# Copy from a specific commit
+gitstore cp :file.txt local.txt --hash abc1234...
+```
+
+Write commands (`cp`, `cptree`, `rm`, `unzip`, `untar`) accept `-m` for custom commit messages. Use `-b` on any command to target a branch other than `main`. Read commands (`cat`, `ls`, `cp`, `cptree`, `zip`, `tar`, `log`) accept `--hash` to read from any branch, tag, or full commit hash. `cp` accepts `--mode 644` or `--mode 755` to set file permissions. Pass `-v` before the command for status messages on stderr. `zip` and `tar` accept `-` as FILENAME to write to stdout; `untar` defaults to stdin when no filename is given.
 
 ## Development
 
