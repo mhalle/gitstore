@@ -87,6 +87,50 @@ class TestLog:
         commits = list(fs.log("nonexistent"))
         assert commits == []
 
+    def test_log_at_kwarg(self, tmp_path):
+        repo = GitStore.open(tmp_path / "test.git", create="main")
+        fs = repo.branches["main"]
+        fs = fs.write("a.txt", b"a1")
+        fs = fs.write("b.txt", b"b1")
+        fs = fs.write("a.txt", b"a2")
+        commits = list(fs.log(at="a.txt"))
+        assert len(commits) == 2
+
+    def test_log_match(self, tmp_path):
+        repo = GitStore.open(tmp_path / "test.git", create="main")
+        fs = repo.branches["main"]
+        # write() auto-generates "Write <path>" messages
+        fs = fs.write("deploy-v1.txt", b"a")   # "Write deploy-v1.txt"
+        fs = fs.write("fixbug.txt", b"b")       # "Write fixbug.txt"
+        fs = fs.write("deploy-v2.txt", b"c")   # "Write deploy-v2.txt"
+        commits = list(fs.log(match="Write deploy*"))
+        assert len(commits) == 2
+        assert all("deploy" in c.message for c in commits)
+
+    def test_log_match_no_results(self, tmp_path):
+        repo = GitStore.open(tmp_path / "test.git", create="main")
+        fs = repo.branches["main"]
+        fs = fs.write("a.txt", b"a")
+        commits = list(fs.log(match="zzz*"))
+        assert commits == []
+
+    def test_log_at_and_match(self, tmp_path):
+        repo = GitStore.open(tmp_path / "test.git", create="main")
+        fs = repo.branches["main"]
+        fs = fs.write("a.txt", b"a")    # "Write a.txt"
+        fs = fs.write("b.txt", b"b")    # "Write b.txt"
+        fs = fs.write("a.txt", b"a2")   # "Write a.txt"
+        # at="a.txt" gives 2 commits, match narrows to the one with "b" not in message
+        # Actually both a.txt commits have "Write a.txt" — let's use a different approach
+        # Use at + match where match filters out the Initialize commit
+        commits_at = list(fs.log(at="a.txt"))
+        assert len(commits_at) == 2
+        commits_both = list(fs.log(at="a.txt", match="*a.txt"))
+        assert len(commits_both) == 2
+        # Now filter for something that won't match
+        commits_none = list(fs.log(at="a.txt", match="*b.txt"))
+        assert len(commits_none) == 0
+
 
 class TestCommitMetadata:
     def test_time_is_datetime(self, tmp_path):

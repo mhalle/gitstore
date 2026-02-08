@@ -409,15 +409,61 @@ class TestLog:
         assert len(lines) >= 3
 
     def test_path_filter(self, runner, repo_with_files):
-        result = runner.invoke(main, [repo_with_files, "log", ":hello.txt"])
+        result = runner.invoke(main, [repo_with_files, "log", "--at", "hello.txt"])
         assert result.exit_code == 0
         lines = result.output.strip().split("\n")
         assert len(lines) >= 1
 
     def test_nonexistent_path_empty(self, runner, repo_with_files):
-        result = runner.invoke(main, [repo_with_files, "log", ":nonexistent.txt"])
+        result = runner.invoke(main, [repo_with_files, "log", "--at", "nonexistent.txt"])
         assert result.exit_code == 0
         assert result.output.strip() == ""
+
+    def test_match_exact(self, runner, initialized_repo, tmp_path):
+        f = tmp_path / "a.txt"
+        f.write_text("a")
+        runner.invoke(main, [initialized_repo, "cp", str(f), ":a.txt", "-m", "deploy v1"])
+        f.write_text("b")
+        runner.invoke(main, [initialized_repo, "cp", str(f), ":a.txt", "-m", "fix bug"])
+        result = runner.invoke(main, [initialized_repo, "log", "--match", "deploy v1"])
+        assert result.exit_code == 0
+        lines = result.output.strip().split("\n")
+        assert len(lines) == 1
+        assert "deploy v1" in lines[0]
+
+    def test_match_wildcard(self, runner, initialized_repo, tmp_path):
+        f = tmp_path / "a.txt"
+        f.write_text("a")
+        runner.invoke(main, [initialized_repo, "cp", str(f), ":a.txt", "-m", "deploy v1"])
+        f.write_text("b")
+        runner.invoke(main, [initialized_repo, "cp", str(f), ":a.txt", "-m", "deploy v2"])
+        f.write_text("c")
+        runner.invoke(main, [initialized_repo, "cp", str(f), ":a.txt", "-m", "fix bug"])
+        result = runner.invoke(main, [initialized_repo, "log", "--match", "deploy*"])
+        assert result.exit_code == 0
+        lines = result.output.strip().split("\n")
+        assert len(lines) == 2
+        assert all("deploy" in line for line in lines)
+
+    def test_match_no_results(self, runner, repo_with_files):
+        result = runner.invoke(main, [repo_with_files, "log", "--match", "zzz-no-match*"])
+        assert result.exit_code == 0
+        assert result.output.strip() == ""
+
+    def test_match_and_at(self, runner, initialized_repo, tmp_path):
+        f1 = tmp_path / "a.txt"
+        f2 = tmp_path / "b.txt"
+        f1.write_text("a")
+        f2.write_text("b")
+        runner.invoke(main, [initialized_repo, "cp", str(f1), ":a.txt", "-m", "deploy a"])
+        runner.invoke(main, [initialized_repo, "cp", str(f2), ":b.txt", "-m", "deploy b"])
+        f1.write_text("a2")
+        runner.invoke(main, [initialized_repo, "cp", str(f1), ":a.txt", "-m", "fix a"])
+        result = runner.invoke(main, [initialized_repo, "log", "--at", "a.txt", "--match", "deploy*"])
+        assert result.exit_code == 0
+        lines = result.output.strip().split("\n")
+        assert len(lines) == 1
+        assert "deploy a" in lines[0]
 
     def test_json_format(self, runner, repo_with_files):
         import json
@@ -648,17 +694,10 @@ class TestPathNormalization:
         assert result.exit_code != 0
         assert "invalid" in result.output.lower()
 
-    def test_log_dotdot_rejected(self, runner, repo_with_files):
-        result = runner.invoke(main, [repo_with_files, "log", ":../x"])
+    def test_at_dotdot_rejected(self, runner, repo_with_files):
+        result = runner.invoke(main, [repo_with_files, "log", "--at", "../x"])
         assert result.exit_code != 0
         assert "invalid" in result.output.lower()
-
-    def test_log_bare_colon_shows_all(self, runner, repo_with_files):
-        """Bare ':' in log should behave like no path filter."""
-        result_bare = runner.invoke(main, [repo_with_files, "log", ":"])
-        result_none = runner.invoke(main, [repo_with_files, "log"])
-        assert result_bare.exit_code == 0
-        assert result_bare.output == result_none.output
 
     def test_ls_bare_colon_shows_root(self, runner, repo_with_files):
         """Bare ':' in ls should list root."""

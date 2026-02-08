@@ -455,33 +455,22 @@ def rm(ctx, path, branch, message):
 # ---------------------------------------------------------------------------
 
 @main.command()
-@click.argument("path", required=False, default=None)
+@click.option("--at", "at_path", default=None, help="Filter to commits that changed this path.")
+@click.option("--match", "match_pattern", default=None, help="Filter by message (supports * and ? wildcards).")
 @click.option("--branch", "-b", default="main", help="Branch to show log for.")
 @click.option("--format", "fmt", default="text",
               type=click.Choice(["text", "json", "jsonl"]),
               help="Output format.")
 @click.pass_context
-def log(ctx, path, branch, fmt):
-    """Show commit log, optionally filtered by PATH.
-
-    PATH (if given) must be a repo path prefixed with ':'.
-    """
+def log(ctx, at_path, match_pattern, branch, fmt):
+    """Show commit log, optionally filtered by path and/or message pattern."""
     store = _open_store(ctx.obj["repo_path"])
     fs = _get_branch_fs(store, branch)
 
-    repo_path = None
-    if path is not None:
-        is_repo, repo_path = _parse_repo_path(path)
-        if not is_repo:
-            raise click.ClickException(
-                "PATH must be a repo path prefixed with ':'"
-            )
-        if repo_path:
-            repo_path = _normalize_repo_path(repo_path)
-        else:
-            repo_path = None  # bare ":" means no filter
+    if at_path is not None:
+        at_path = _normalize_repo_path(at_path)
 
-    entries = list(fs.log(repo_path))
+    entries = list(fs.log(at=at_path, match=match_pattern))
 
     if fmt == "json":
         click.echo(json.dumps([_log_entry_dict(e) for e in entries], indent=2))

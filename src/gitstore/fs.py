@@ -180,19 +180,32 @@ class FS:
             return None
         return FS(self._store, commit.parents[0].id, branch=self._branch)
 
-    def log(self, path: str | os.PathLike[str] | None = None) -> Iterator[FS]:
-        if path is not None:
-            path = _normalize_path(path)
+    def log(
+        self,
+        path: str | os.PathLike[str] | None = None,
+        *,
+        at: str | os.PathLike[str] | None = None,
+        match: str | None = None,
+    ) -> Iterator[FS]:
+        # Support both positional `path` and keyword `at` (same thing).
+        filter_path = at if at is not None else path
+        if filter_path is not None:
+            filter_path = _normalize_path(filter_path)
         repo = self._store._repo
+        if match is not None:
+            from fnmatch import fnmatch as _fnmatch
         current: FS | None = self
         while current is not None:
-            if path is None:
-                yield current
-            else:
+            if filter_path is not None:
                 from .tree import _blob_oid_at_path
-                current_oid = _blob_oid_at_path(repo, current._tree_oid, path)
+                current_oid = _blob_oid_at_path(repo, current._tree_oid, filter_path)
                 parent = current.parent
-                parent_oid = _blob_oid_at_path(repo, parent._tree_oid, path) if parent else None
-                if current_oid != parent_oid:
-                    yield current
+                parent_oid = _blob_oid_at_path(repo, parent._tree_oid, filter_path) if parent else None
+                if current_oid == parent_oid:
+                    current = current.parent
+                    continue
+            if match is not None and not _fnmatch(current.message, match):
+                current = current.parent
+                continue
+            yield current
             current = current.parent

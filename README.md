@@ -201,6 +201,18 @@ for snapshot in fs.log():
 # Only commits that changed a specific file
 for snapshot in fs.log("path/to/file.txt"):
     print(snapshot.hash, snapshot.message)
+
+# Same thing using the keyword form
+for snapshot in fs.log(at="path/to/file.txt"):
+    print(snapshot.hash, snapshot.message)
+
+# Filter by commit message (supports * and ? wildcards)
+for snapshot in fs.log(match="deploy*"):
+    print(snapshot.hash, snapshot.message)
+
+# Combine both filters (AND)
+for snapshot in fs.log(at="config.json", match="fix*"):
+    print(snapshot.hash, snapshot.message)
 ```
 
 ### Dump to filesystem
@@ -296,7 +308,9 @@ gitstore /path/to/repo.git rm :old-file.txt
 
 # View commit history
 gitstore /path/to/repo.git log
-gitstore /path/to/repo.git log :file.txt                   # commits that changed this file
+gitstore /path/to/repo.git log --at file.txt                # commits that changed this file
+gitstore /path/to/repo.git log --match "deploy*"            # commits matching message pattern
+gitstore /path/to/repo.git log --at file.txt --match "fix*" # both filters (AND)
 gitstore /path/to/repo.git log --format json                # JSON array
 gitstore /path/to/repo.git log --format jsonl               # one JSON object per line
 
