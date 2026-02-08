@@ -6,7 +6,7 @@ import os
 from collections.abc import Iterator, MutableMapping
 from pathlib import Path
 
-import pygit2
+from . import _compat as pygit2
 
 
 class GitStore:

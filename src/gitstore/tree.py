@@ -11,7 +11,7 @@ import stat
 from collections import defaultdict
 from typing import Iterator
 
-import pygit2
+from . import _compat as pygit2
 
 
 GIT_FILEMODE_TREE = 0o040000

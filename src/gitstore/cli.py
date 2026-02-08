@@ -10,7 +10,7 @@ import zipfile
 from pathlib import Path
 
 import click
-import pygit2
+from gitstore import _compat as pygit2
 
 from .exceptions import StaleSnapshotError
 from .repo import GitStore

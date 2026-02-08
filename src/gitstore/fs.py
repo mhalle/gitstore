@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Iterator
 
-import pygit2
+from . import _compat as pygit2
 
 from ._lock import repo_lock
 from .exceptions import StaleSnapshotError

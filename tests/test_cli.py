@@ -920,7 +920,6 @@ class TestPathNormalization:
 class TestResolveRef:
     def test_non_commit_hash_rejected(self, runner, repo_with_files):
         """Passing a tree/blob hash should produce a clear error."""
-        import pygit2
         from gitstore import GitStore
         store = GitStore.open(repo_with_files)
         fs = store.branches["main"]
@@ -1660,7 +1659,6 @@ class TestUntar:
 class TestNonUtf8Symlink:
     def test_zip_export_non_utf8_symlink(self, runner, initialized_repo, tmp_path):
         """Non-UTF-8 symlink targets produce a clear error on zip export."""
-        import pygit2
         from gitstore import GitStore
         from gitstore.tree import GIT_FILEMODE_LINK
         store = GitStore.open(initialized_repo)
@@ -1682,7 +1680,6 @@ class TestNonUtf8Symlink:
 
     def test_tar_export_non_utf8_symlink(self, runner, initialized_repo, tmp_path):
         """Non-UTF-8 symlink targets produce a clear error on tar export."""
-        import pygit2
         from gitstore import GitStore
         from gitstore.tree import GIT_FILEMODE_LINK
         store = GitStore.open(initialized_repo)

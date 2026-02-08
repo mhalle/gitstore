@@ -3,7 +3,7 @@
 import os
 import stat
 
-import pygit2
+from gitstore import _compat as pygit2
 import pytest
 
 from gitstore import GitStore, StaleSnapshotError
