@@ -447,6 +447,105 @@ class TestTag:
 # TestErrorPaths
 # ---------------------------------------------------------------------------
 
+class TestPathNormalization:
+    def test_cp_leading_slash_normalized(self, runner, initialized_repo, tmp_path):
+        f = tmp_path / "norm.txt"
+        f.write_text("data")
+        result = runner.invoke(main, [initialized_repo, "cp", str(f), ":/foo"])
+        assert result.exit_code == 0
+        result = runner.invoke(main, [initialized_repo, "ls"])
+        assert "foo" in result.output
+
+    def test_cp_dotdot_rejected(self, runner, initialized_repo, tmp_path):
+        f = tmp_path / "bad.txt"
+        f.write_text("data")
+        result = runner.invoke(main, [initialized_repo, "cp", str(f), ":../escape"])
+        assert result.exit_code != 0
+        assert "Invalid" in result.output or "invalid" in result.output.lower()
+
+    def test_cp_empty_repo_path_rejected(self, runner, initialized_repo, tmp_path):
+        f = tmp_path / "empty.txt"
+        f.write_text("data")
+        result = runner.invoke(main, [initialized_repo, "cp", str(f), ":"])
+        assert result.exit_code != 0
+        assert "empty" in result.output.lower()
+
+    def test_rm_leading_slash_normalized(self, runner, repo_with_files):
+        result = runner.invoke(main, [repo_with_files, "rm", ":/hello.txt"])
+        assert result.exit_code == 0
+        result = runner.invoke(main, [repo_with_files, "ls"])
+        assert "hello.txt" not in result.output
+
+    def test_rm_dotdot_rejected(self, runner, repo_with_files):
+        result = runner.invoke(main, [repo_with_files, "rm", ":../escape"])
+        assert result.exit_code != 0
+
+    def test_cptree_repo_to_disk_leading_slash(self, runner, repo_with_files, tmp_path):
+        """cptree :/data ./out should export data/* directly under ./out/."""
+        dest = tmp_path / "out"
+        result = runner.invoke(main, [repo_with_files, "cptree", ":/data", str(dest)])
+        assert result.exit_code == 0
+        # Should be out/data.bin, NOT out/data/data.bin
+        assert (dest / "data.bin").exists()
+        assert not (dest / "data" / "data.bin").exists()
+
+    def test_ls_dotdot_rejected(self, runner, repo_with_files):
+        result = runner.invoke(main, [repo_with_files, "ls", ":../x"])
+        assert result.exit_code != 0
+        assert "invalid" in result.output.lower()
+
+    def test_cat_dotdot_rejected(self, runner, repo_with_files):
+        result = runner.invoke(main, [repo_with_files, "cat", ":../x"])
+        assert result.exit_code != 0
+        assert "invalid" in result.output.lower()
+
+    def test_cat_empty_path_rejected(self, runner, repo_with_files):
+        result = runner.invoke(main, [repo_with_files, "cat", ":"])
+        assert result.exit_code != 0
+        assert "empty" in result.output.lower()
+
+    def test_cp_repo_to_disk_dotdot_rejected(self, runner, repo_with_files, tmp_path):
+        dest = tmp_path / "out.txt"
+        result = runner.invoke(main, [repo_with_files, "cp", ":../x", str(dest)])
+        assert result.exit_code != 0
+        assert "invalid" in result.output.lower()
+
+    def test_log_dotdot_rejected(self, runner, repo_with_files):
+        result = runner.invoke(main, [repo_with_files, "log", ":../x"])
+        assert result.exit_code != 0
+        assert "invalid" in result.output.lower()
+
+    def test_log_bare_colon_shows_all(self, runner, repo_with_files):
+        """Bare ':' in log should behave like no path filter."""
+        result_bare = runner.invoke(main, [repo_with_files, "log", ":"])
+        result_none = runner.invoke(main, [repo_with_files, "log"])
+        assert result_bare.exit_code == 0
+        assert result_bare.output == result_none.output
+
+    def test_ls_bare_colon_shows_root(self, runner, repo_with_files):
+        """Bare ':' in ls should list root."""
+        result_bare = runner.invoke(main, [repo_with_files, "ls", ":"])
+        result_none = runner.invoke(main, [repo_with_files, "ls"])
+        assert result_bare.exit_code == 0
+        assert result_bare.output == result_none.output
+
+
+class TestResolveRef:
+    def test_non_commit_hash_rejected(self, runner, repo_with_files):
+        """Passing a tree/blob hash should produce a clear error."""
+        import pygit2
+        from gitstore import GitStore
+        store = GitStore.open(repo_with_files)
+        fs = store.branches["main"]
+        # Get the tree OID (not a commit)
+        tree_oid = str(fs._tree_oid)
+        result = runner.invoke(main, [
+            repo_with_files, "tag", "create", "bad-ref", tree_oid
+        ])
+        assert result.exit_code != 0
+        assert "not a commit" in result.output.lower()
+
+
 class TestErrorPaths:
     def test_missing_repo(self, runner, tmp_path):
         bad_path = str(tmp_path / "nope.git")

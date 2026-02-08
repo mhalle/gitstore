@@ -260,6 +260,49 @@ except StaleSnapshotError:
 | `RuntimeError` | Writing/removing on a closed `Batch` |
 | `StaleSnapshotError` | Writing from a snapshot whose branch has moved forward |
 
+## CLI
+
+gitstore includes a command-line interface for working with bare repos without writing Python. Install the package to get the `gitstore` command.
+
+Repo-side paths are prefixed with `:` (like `scp`). Use `--branch`/`-b` to select a branch (defaults to `main`).
+
+```bash
+# Create a repo
+gitstore /path/to/repo.git init --branch main
+
+# Copy files in and out
+gitstore /path/to/repo.git cp local-file.txt :remote-file.txt
+gitstore /path/to/repo.git cp :remote-file.txt local-copy.txt
+
+# Copy directory trees
+gitstore /path/to/repo.git cptree ./local-dir :repo-dir
+gitstore /path/to/repo.git cptree :repo-dir ./local-dir
+
+# Browse contents
+gitstore /path/to/repo.git ls
+gitstore /path/to/repo.git ls :subdir
+gitstore /path/to/repo.git cat :file.txt
+
+# Remove files
+gitstore /path/to/repo.git rm :old-file.txt
+
+# View commit history
+gitstore /path/to/repo.git log
+gitstore /path/to/repo.git log :file.txt    # commits that changed this file
+
+# Manage branches
+gitstore /path/to/repo.git branch                        # list
+gitstore /path/to/repo.git branch create dev main         # fork
+gitstore /path/to/repo.git branch delete dev
+
+# Manage tags
+gitstore /path/to/repo.git tag create v1.0 main
+gitstore /path/to/repo.git tag create v1.0-fix main --at bugfix.py  # tag the commit that last changed bugfix.py
+gitstore /path/to/repo.git tag delete v1.0
+```
+
+Write commands (`cp`, `cptree`, `rm`) accept `-m` for custom commit messages. Use `-b` on any command to target a branch other than `main`.
+
 ## Development
 
 ```bash

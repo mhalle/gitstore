@@ -10,6 +10,7 @@ import click
 
 from .exceptions import StaleSnapshotError
 from .repo import GitStore
+from .tree import _normalize_path
 
 
 # ---------------------------------------------------------------------------
@@ -21,6 +22,16 @@ def _parse_repo_path(raw: str) -> tuple[bool, str]:
     if raw.startswith(":"):
         return True, raw[1:].rstrip("/")
     return False, raw
+
+
+def _normalize_repo_path(path: str) -> str:
+    """Normalize and validate a repo-side path via the library's _normalize_path."""
+    if not path:
+        raise click.ClickException("Repo path must not be empty")
+    try:
+        return _normalize_path(path)
+    except ValueError as exc:
+        raise click.ClickException(f"Invalid repo path: {exc}")
 
 
 def _open_store(repo_path: str) -> GitStore:
@@ -45,11 +56,16 @@ def _resolve_ref(store: GitStore, ref_str: str):
         return store.tags[ref_str]
     # Try as commit hash
     try:
+        import pygit2
         repo = store._repo
-        commit = repo.get(ref_str)
-        if commit is not None:
+        obj = repo.get(ref_str)
+        if obj is not None:
+            if obj.type != pygit2.GIT_OBJECT_COMMIT:
+                raise click.ClickException(
+                    f"Object {ref_str} is not a commit"
+                )
             from .fs import FS
-            return FS(store, commit.id, branch=None)
+            return FS(store, obj.id, branch=None)
     except (ValueError, KeyError):
         pass
     raise click.ClickException(f"Unknown ref: {ref_str}")
@@ -144,7 +160,9 @@ def cp(ctx, src, dest, branch, message):
             data = local.read_bytes()
         except FileNotFoundError:
             raise click.ClickException(f"Local file not found: {src_path}")
-        repo_dest = dest_path
+        except OSError as exc:
+            raise click.ClickException(f"Cannot read {src_path}: {exc}")
+        repo_dest = _normalize_repo_path(dest_path)
         msg = message or f"Copy {local.name} to {repo_dest}"
         try:
             fs._commit_changes({repo_dest: data}, set(), msg)
@@ -154,6 +172,7 @@ def cp(ctx, src, dest, branch, message):
             )
     else:
         # Repo → disk
+        src_path = _normalize_repo_path(src_path)
         try:
             data = fs.read(src_path)
         except FileNotFoundError:
@@ -165,8 +184,11 @@ def cp(ctx, src, dest, branch, message):
         local_dest = Path(dest_path)
         if local_dest.is_dir():
             local_dest = local_dest / Path(src_path).name
-        local_dest.parent.mkdir(parents=True, exist_ok=True)
-        local_dest.write_bytes(data)
+        try:
+            local_dest.parent.mkdir(parents=True, exist_ok=True)
+            local_dest.write_bytes(data)
+        except OSError as exc:
+            raise click.ClickException(f"Cannot write {local_dest}: {exc}")
 
 
 # ---------------------------------------------------------------------------
@@ -213,7 +235,11 @@ def cptree(ctx, src, dest, branch, message):
                 rel = full.relative_to(local)
                 repo_file = f"{dest_path}/{rel}" if dest_path else str(rel)
                 repo_file = repo_file.replace(os.sep, "/")
-                writes[repo_file] = full.read_bytes()
+                repo_file = _normalize_repo_path(repo_file)
+                try:
+                    writes[repo_file] = full.read_bytes()
+                except OSError as exc:
+                    raise click.ClickException(f"Cannot read {full}: {exc}")
         if not writes:
             raise click.ClickException(
                 f"No files found in directory: {src_path}"
@@ -228,7 +254,12 @@ def cptree(ctx, src, dest, branch, message):
     else:
         # Repo → disk
         local_dest = Path(dest_path)
-        local_dest.mkdir(parents=True, exist_ok=True)
+        try:
+            local_dest.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise click.ClickException(f"Cannot create directory {local_dest}: {exc}")
+        if src_path:
+            src_path = _normalize_repo_path(src_path)
         src_repo_path = src_path or None
         try:
             for dirpath, _dirs, files in fs.walk(src_repo_path):
@@ -245,8 +276,11 @@ def cptree(ctx, src, dest, branch, message):
                     else:
                         rel = store_path
                     out = local_dest / rel
-                    out.parent.mkdir(parents=True, exist_ok=True)
-                    out.write_bytes(fs.read(store_path))
+                    try:
+                        out.parent.mkdir(parents=True, exist_ok=True)
+                        out.write_bytes(fs.read(store_path))
+                    except OSError as exc:
+                        raise click.ClickException(f"Cannot write {out}: {exc}")
         except FileNotFoundError:
             raise click.ClickException(
                 f"Path not found in repo: {src_path}"
@@ -280,6 +314,8 @@ def ls(ctx, path, branch):
             raise click.ClickException(
                 "PATH must be a repo path prefixed with ':'"
             )
+        if repo_path:
+            repo_path = _normalize_repo_path(repo_path)
 
     try:
         entries = fs.ls(repo_path if repo_path else None)
@@ -310,6 +346,8 @@ def cat(ctx, path, branch):
         raise click.ClickException(
             "PATH must be a repo path prefixed with ':'"
         )
+
+    repo_path = _normalize_repo_path(repo_path)
 
     store = _open_store(ctx.obj["repo_path"])
     fs = _get_branch_fs(store, branch)
@@ -347,6 +385,8 @@ def rm(ctx, path, branch, message):
     store = _open_store(ctx.obj["repo_path"])
     fs = _get_branch_fs(store, branch)
 
+    repo_path = _normalize_repo_path(repo_path)
+
     if not fs.exists(repo_path):
         raise click.ClickException(f"File not found: {repo_path}")
 
@@ -382,8 +422,12 @@ def log(ctx, path, branch):
             raise click.ClickException(
                 "PATH must be a repo path prefixed with ':'"
             )
+        if repo_path:
+            repo_path = _normalize_repo_path(repo_path)
+        else:
+            repo_path = None  # bare ":" means no filter
 
-    for entry in fs.log(repo_path if repo_path else None):
+    for entry in fs.log(repo_path):
         click.echo(f"{entry.hash[:7]}  {entry.time.isoformat()}  {entry.message}")
 
 
