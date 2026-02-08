@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Iterator
 
@@ -57,6 +58,20 @@ class FS:
     @property
     def message(self) -> str:
         return self._store._repo[self._commit_oid].message.rstrip("\n")
+
+    @property
+    def time(self) -> datetime:
+        commit = self._store._repo[self._commit_oid]
+        tz = timezone(timedelta(minutes=commit.commit_time_offset))
+        return datetime.fromtimestamp(commit.commit_time, tz=tz)
+
+    @property
+    def author_name(self) -> str:
+        return self._store._repo[self._commit_oid].author.name
+
+    @property
+    def author_email(self) -> str:
+        return self._store._repo[self._commit_oid].author.email
 
     # --- Read operations ---
 
@@ -165,8 +180,19 @@ class FS:
             return None
         return FS(self._store, commit.parents[0].id, branch=self._branch)
 
-    def log(self) -> Iterator[FS]:
+    def log(self, path: str | os.PathLike[str] | None = None) -> Iterator[FS]:
+        if path is not None:
+            path = _normalize_path(path)
+        repo = self._store._repo
         current: FS | None = self
         while current is not None:
-            yield current
+            if path is None:
+                yield current
+            else:
+                from .tree import _blob_oid_at_path
+                current_oid = _blob_oid_at_path(repo, current._tree_oid, path)
+                parent = current.parent
+                parent_oid = _blob_oid_at_path(repo, parent._tree_oid, path) if parent else None
+                if current_oid != parent_oid:
+                    yield current
             current = current.parent

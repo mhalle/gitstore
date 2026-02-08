@@ -161,6 +161,16 @@ def _walk_to(
     return obj
 
 
+def _blob_oid_at_path(
+    repo: pygit2.Repository, tree_oid: pygit2.Oid, path: str
+) -> pygit2.Oid | None:
+    """Return the OID of the object at *path*, or None if missing."""
+    try:
+        return _walk_to(repo, tree_oid, path).id
+    except (FileNotFoundError, NotADirectoryError):
+        return None
+
+
 def read_blob_at_path(
     repo: pygit2.Repository, tree_oid: pygit2.Oid, path: str | os.PathLike[str]
 ) -> bytes:

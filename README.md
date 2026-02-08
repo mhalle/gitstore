@@ -197,6 +197,10 @@ parent = fs.parent       # FS or None (for the initial commit)
 # Walk the full commit log
 for snapshot in fs.log():
     print(snapshot.hash, snapshot.message)
+
+# Only commits that changed a specific file
+for snapshot in fs.log("path/to/file.txt"):
+    print(snapshot.hash, snapshot.message)
 ```
 
 ### Dump to filesystem
@@ -211,9 +215,12 @@ fs.dump("/tmp/export")
 ### Snapshot properties
 
 ```python
-fs.hash      # str — full 40-character commit SHA
-fs.branch    # str | None — branch name, or None for tags
-fs.message   # str — commit message
+fs.hash          # str — full 40-character commit SHA
+fs.branch        # str | None — branch name, or None for tags
+fs.message       # str — commit message
+fs.time          # datetime — commit timestamp (timezone-aware)
+fs.author_name   # str — commit author name
+fs.author_email  # str — commit author email
 ```
 
 ## Concurrency safety
