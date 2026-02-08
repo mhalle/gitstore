@@ -144,6 +144,211 @@ def _resolve_snapshot(fs, at_path: str | None, match_pattern: str | None, before
     return fs
 
 
+def _detect_archive_format(filename: str) -> str:
+    """Detect archive format from filename extension. Returns 'zip' or 'tar'."""
+    lower = filename.lower()
+    if lower.endswith(".zip"):
+        return "zip"
+    if any(lower.endswith(ext) for ext in (
+        ".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz",
+    )):
+        return "tar"
+    raise click.ClickException(
+        f"Cannot detect archive format from extension: {filename}\n"
+        f"Use --format zip or --format tar"
+    )
+
+
+def _do_export(ctx, fs, filename: str, fmt: str):
+    """Export *fs* contents to an archive file.
+
+    *fmt* must be ``"zip"`` or ``"tar"``.  *filename* may be ``"-"`` for stdout.
+    """
+    if fmt == "zip":
+        to_stdout = filename == "-"
+        dest = io.BytesIO() if to_stdout else filename
+        repo = fs._store._repo
+        root_tree = repo[fs._tree_oid]
+        count = 0
+        with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as zf:
+            for dirpath, _dirs, files in fs.walk():
+                tree = root_tree
+                if dirpath:
+                    for seg in dirpath.split("/"):
+                        tree = repo[tree[seg].id]
+                for fname in files:
+                    repo_path = f"{dirpath}/{fname}" if dirpath else fname
+                    entry = tree[fname]
+                    info = zipfile.ZipInfo(repo_path)
+                    info.compress_type = zipfile.ZIP_DEFLATED
+                    info.create_system = 3  # Unix
+                    if entry.filemode == GIT_FILEMODE_LINK:
+                        info.external_attr = 0o120000 << 16
+                        raw = fs.read(repo_path)
+                        try:
+                            raw.decode()
+                        except UnicodeDecodeError:
+                            raise click.ClickException(
+                                f"Symlink target for {repo_path} is not valid UTF-8"
+                            )
+                        zf.writestr(info, raw)
+                    else:
+                        info.external_attr = entry.filemode << 16
+                        zf.writestr(info, fs.read(repo_path))
+                    count += 1
+        if to_stdout:
+            click.get_binary_stream("stdout").write(dest.getvalue())
+        _status(ctx, f"Wrote {count} file(s) to {filename}")
+    else:
+        import tarfile
+
+        to_stdout = filename == "-"
+        mode = "w:"
+        if not to_stdout:
+            lower = filename.lower()
+            if lower.endswith((".tar.gz", ".tgz")):
+                mode = "w:gz"
+            elif lower.endswith((".tar.bz2", ".tbz2")):
+                mode = "w:bz2"
+            elif lower.endswith((".tar.xz", ".txz")):
+                mode = "w:xz"
+
+        dest = io.BytesIO() if to_stdout else filename
+        repo = fs._store._repo
+        root_tree = repo[fs._tree_oid]
+        count = 0
+        with tarfile.open(fileobj=dest, mode=mode) if to_stdout else tarfile.open(dest, mode=mode) as tf:
+            for dirpath, _dirs, files in fs.walk():
+                tree = root_tree
+                if dirpath:
+                    for seg in dirpath.split("/"):
+                        tree = repo[tree[seg].id]
+                for fname in files:
+                    repo_path = f"{dirpath}/{fname}" if dirpath else fname
+                    entry = tree[fname]
+                    if entry.filemode == GIT_FILEMODE_LINK:
+                        info = tarfile.TarInfo(name=repo_path)
+                        info.type = tarfile.SYMTYPE
+                        raw = fs.read(repo_path)
+                        try:
+                            info.linkname = raw.decode()
+                        except UnicodeDecodeError:
+                            raise click.ClickException(
+                                f"Symlink target for {repo_path} is not valid UTF-8"
+                            )
+                        tf.addfile(info)
+                    else:
+                        data = fs.read(repo_path)
+                        info = tarfile.TarInfo(name=repo_path)
+                        info.size = len(data)
+                        info.mode = entry.filemode & 0o7777
+                        tf.addfile(info, io.BytesIO(data))
+                    count += 1
+        if to_stdout:
+            click.get_binary_stream("stdout").write(dest.getvalue())
+        _status(ctx, f"Wrote {count} file(s) to {filename}")
+
+
+def _do_import(ctx, store, branch: str, filename: str, message: str | None, fmt: str):
+    """Import an archive into a branch.
+
+    *fmt* must be ``"zip"`` or ``"tar"``.  *filename* may be ``"-"`` for stdin.
+    """
+    fs = _get_branch_fs(store, branch)
+
+    if fmt == "zip":
+        if not zipfile.is_zipfile(filename):
+            raise click.ClickException(f"Not a valid zip file: {filename}")
+        count = 0
+        skipped = 0
+        try:
+            with fs.batch(message=message) as b:
+                with zipfile.ZipFile(filename, "r") as zf:
+                    for info in zf.infolist():
+                        if info.is_dir():
+                            continue
+                        repo_path = _clean_archive_path(info.filename)
+                        unix_mode = info.external_attr >> 16
+                        if (unix_mode & 0o170000) == 0o120000:
+                            target = zf.read(info.filename).decode()
+                            b.write_symlink(repo_path, target)
+                        else:
+                            data = zf.read(info.filename)
+                            fm = GIT_FILEMODE_BLOB_EXECUTABLE if unix_mode & 0o111 else None
+                            b.write(repo_path, data, mode=fm)
+                        count += 1
+                if count == 0:
+                    raise click.ClickException("Zip file contains no files")
+        except StaleSnapshotError:
+            raise click.ClickException("Branch modified concurrently — retry")
+        msg = f"Imported {count} file(s) from {filename}"
+        if skipped:
+            msg += f" ({skipped} hard link(s) skipped)"
+        _status(ctx, msg)
+    else:
+        import tarfile
+
+        from_stdin = filename == "-"
+
+        if from_stdin:
+            source = click.get_binary_stream("stdin")
+            try:
+                tf = tarfile.open(fileobj=source, mode="r|*")
+            except tarfile.TarError as exc:
+                raise click.ClickException(f"Not a valid tar archive: {exc}")
+        else:
+            if not os.path.exists(filename):
+                raise click.ClickException(f"File not found: {filename}")
+            try:
+                tf = tarfile.open(filename, mode="r:*")
+            except tarfile.TarError as exc:
+                raise click.ClickException(f"Not a valid tar archive: {exc}")
+
+        count = 0
+        skipped = 0
+        member_info: dict[str, int] = {}
+        try:
+            with fs.batch(message=message) as b:
+                with tf:
+                    for member in tf:
+                        if member.issym():
+                            repo_path = _clean_archive_path(member.name)
+                            b.write_symlink(repo_path, member.linkname)
+                            count += 1
+                        elif member.islnk():
+                            repo_path = _clean_archive_path(member.name)
+                            try:
+                                target = tf.extractfile(member)
+                            except Exception:
+                                target = None
+                            if target is None:
+                                click.echo(
+                                    f"Warning: skipping hard link (unresolvable in "
+                                    f"streaming mode): {member.name} -> {member.linkname}",
+                                    err=True,
+                                )
+                                skipped += 1
+                                continue
+                            data = target.read()
+                            target_name = _clean_archive_path(member.linkname)
+                            target_mode = member_info.get(target_name, member.mode)
+                            fm = GIT_FILEMODE_BLOB_EXECUTABLE if target_mode & 0o111 else None
+                            b.write(repo_path, data, mode=fm)
+                            count += 1
+                        elif member.isfile():
+                            repo_path = _clean_archive_path(member.name)
+                            member_info[repo_path] = member.mode
+                            data = tf.extractfile(member).read()
+                            fm = GIT_FILEMODE_BLOB_EXECUTABLE if member.mode & 0o111 else None
+                            b.write(repo_path, data, mode=fm)
+                            count += 1
+                if count == 0:
+                    raise click.ClickException("Tar archive contains no files")
+        except StaleSnapshotError:
+            raise click.ClickException("Branch modified concurrently — retry")
+        _status(ctx, f"Imported {count} file(s) from {filename}")
+
+
 def _resolve_ref(store: GitStore, ref_str: str):
     """Try branches, then tags, then commit hash."""
     if ref_str in store.branches:
@@ -794,42 +999,7 @@ def zip_cmd(ctx, filename, branch, ref, at_path, deprecated_at, match_pattern, b
     before = _parse_before(before)
     store = _open_store(_require_repo(ctx))
     fs = _resolve_snapshot(_get_fs(store, branch, ref), at_path, match_pattern, before)
-
-    to_stdout = filename == "-"
-    dest = io.BytesIO() if to_stdout else filename
-    repo = fs._store._repo
-    root_tree = repo[fs._tree_oid]
-    count = 0
-    with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as zf:
-        for dirpath, _dirs, files in fs.walk():
-            # Get the tree object for this directory
-            tree = root_tree
-            if dirpath:
-                for seg in dirpath.split("/"):
-                    tree = repo[tree[seg].id]
-            for fname in files:
-                repo_path = f"{dirpath}/{fname}" if dirpath else fname
-                entry = tree[fname]
-                info = zipfile.ZipInfo(repo_path)
-                info.compress_type = zipfile.ZIP_DEFLATED
-                info.create_system = 3  # Unix — needed for external_attr interpretation
-                if entry.filemode == GIT_FILEMODE_LINK:
-                    info.external_attr = 0o120000 << 16
-                    raw = fs.read(repo_path)
-                    try:
-                        raw.decode()
-                    except UnicodeDecodeError:
-                        raise click.ClickException(
-                            f"Symlink target for {repo_path} is not valid UTF-8"
-                        )
-                    zf.writestr(info, raw)
-                else:
-                    info.external_attr = entry.filemode << 16
-                    zf.writestr(info, fs.read(repo_path))
-                count += 1
-    if to_stdout:
-        click.get_binary_stream("stdout").write(dest.getvalue())
-    _status(ctx, f"Wrote {count} file(s) to {filename}")
+    _do_export(ctx, fs, filename, "zip")
 
 
 # ---------------------------------------------------------------------------
@@ -847,37 +1017,8 @@ def unzip_cmd(ctx, filename, branch, message):
 
     FILENAME is the path to the zip file on disk.
     """
-    if not zipfile.is_zipfile(filename):
-        raise click.ClickException(f"Not a valid zip file: {filename}")
-
     store = _open_store(_require_repo(ctx))
-    fs = _get_branch_fs(store, branch)
-
-    count = 0
-    try:
-        with fs.batch(message=message) as b:
-            with zipfile.ZipFile(filename, "r") as zf:
-                for info in zf.infolist():
-                    if info.is_dir():
-                        continue
-                    repo_path = _clean_archive_path(info.filename)
-                    unix_mode = info.external_attr >> 16
-                    if (unix_mode & 0o170000) == 0o120000:
-                        target = zf.read(info.filename).decode()
-                        b.write_symlink(repo_path, target)
-                    else:
-                        data = zf.read(info.filename)
-                        fm = GIT_FILEMODE_BLOB_EXECUTABLE if unix_mode & 0o111 else None
-                        b.write(repo_path, data, mode=fm)
-                    count += 1
-            if count == 0:
-                raise click.ClickException("Zip file contains no files")
-    except StaleSnapshotError:
-        raise click.ClickException("Branch modified concurrently — retry")
-    msg = f"Imported {count} file(s) from {filename}"
-    if skipped:
-        msg += f" ({skipped} hard link(s) skipped)"
-    _status(ctx, msg)
+    _do_import(ctx, store, branch, filename, message, "zip")
 
 
 # ---------------------------------------------------------------------------
@@ -902,56 +1043,9 @@ def tar_cmd(ctx, filename, branch, ref, at_path, deprecated_at, match_pattern, b
     """
     at_path = at_path or deprecated_at
     before = _parse_before(before)
-    import tarfile
-
     store = _open_store(_require_repo(ctx))
     fs = _resolve_snapshot(_get_fs(store, branch, ref), at_path, match_pattern, before)
-
-    to_stdout = filename == "-"
-    mode = "w:"
-    if not to_stdout:
-        lower = filename.lower()
-        if lower.endswith((".tar.gz", ".tgz")):
-            mode = "w:gz"
-        elif lower.endswith((".tar.bz2", ".tbz2")):
-            mode = "w:bz2"
-        elif lower.endswith((".tar.xz", ".txz")):
-            mode = "w:xz"
-
-    dest = io.BytesIO() if to_stdout else filename
-    repo = fs._store._repo
-    root_tree = repo[fs._tree_oid]
-    count = 0
-    with tarfile.open(fileobj=dest, mode=mode) if to_stdout else tarfile.open(dest, mode=mode) as tf:
-        for dirpath, _dirs, files in fs.walk():
-            tree = root_tree
-            if dirpath:
-                for seg in dirpath.split("/"):
-                    tree = repo[tree[seg].id]
-            for fname in files:
-                repo_path = f"{dirpath}/{fname}" if dirpath else fname
-                entry = tree[fname]
-                if entry.filemode == GIT_FILEMODE_LINK:
-                    info = tarfile.TarInfo(name=repo_path)
-                    info.type = tarfile.SYMTYPE
-                    raw = fs.read(repo_path)
-                    try:
-                        info.linkname = raw.decode()
-                    except UnicodeDecodeError:
-                        raise click.ClickException(
-                            f"Symlink target for {repo_path} is not valid UTF-8"
-                        )
-                    tf.addfile(info)
-                else:
-                    data = fs.read(repo_path)
-                    info = tarfile.TarInfo(name=repo_path)
-                    info.size = len(data)
-                    info.mode = entry.filemode & 0o7777
-                    tf.addfile(info, io.BytesIO(data))
-                count += 1
-    if to_stdout:
-        click.get_binary_stream("stdout").write(dest.getvalue())
-    _status(ctx, f"Wrote {count} file(s) to {filename}")
+    _do_export(ctx, fs, filename, "tar")
 
 
 # ---------------------------------------------------------------------------
@@ -970,71 +1064,62 @@ def untar_cmd(ctx, filename, branch, message):
     FILENAME is the path to the tar file on disk.  Use '-' to read from stdin
     (the default).  Compression is auto-detected.
     """
-    import tarfile
-
-    from_stdin = filename == "-"
-
-    if from_stdin:
-        source = click.get_binary_stream("stdin")
-        try:
-            tf = tarfile.open(fileobj=source, mode="r|*")
-        except tarfile.TarError as exc:
-            raise click.ClickException(f"Not a valid tar archive: {exc}")
-    else:
-        if not os.path.exists(filename):
-            raise click.ClickException(f"File not found: {filename}")
-        try:
-            tf = tarfile.open(filename, mode="r:*")
-        except tarfile.TarError as exc:
-            raise click.ClickException(f"Not a valid tar archive: {exc}")
-
     store = _open_store(_require_repo(ctx))
-    fs = _get_branch_fs(store, branch)
+    _do_import(ctx, store, branch, filename, message, "tar")
 
-    count = 0
-    skipped = 0
-    # Track member info for hard-link permission lookup
-    member_info: dict[str, int] = {}  # name -> mode
-    try:
-        with fs.batch(message=message) as b:
-            with tf:
-                for member in tf:
-                    if member.issym():
-                        repo_path = _clean_archive_path(member.name)
-                        b.write_symlink(repo_path, member.linkname)
-                        count += 1
-                    elif member.islnk():
-                        # Hard link — materialize as a copy of the target
-                        repo_path = _clean_archive_path(member.name)
-                        try:
-                            target = tf.extractfile(member)
-                        except Exception:
-                            target = None
-                        if target is None:
-                            # Streaming mode can't seek back to the target
-                            click.echo(
-                                f"Warning: skipping hard link (unresolvable in "
-                                f"streaming mode): {member.name} -> {member.linkname}",
-                                err=True,
-                            )
-                            skipped += 1
-                            continue
-                        data = target.read()
-                        # Prefer the original target's mode when available
-                        target_name = _clean_archive_path(member.linkname)
-                        target_mode = member_info.get(target_name, member.mode)
-                        fm = GIT_FILEMODE_BLOB_EXECUTABLE if target_mode & 0o111 else None
-                        b.write(repo_path, data, mode=fm)
-                        count += 1
-                    elif member.isfile():
-                        repo_path = _clean_archive_path(member.name)
-                        member_info[repo_path] = member.mode
-                        data = tf.extractfile(member).read()
-                        fm = GIT_FILEMODE_BLOB_EXECUTABLE if member.mode & 0o111 else None
-                        b.write(repo_path, data, mode=fm)
-                        count += 1
-            if count == 0:
-                raise click.ClickException("Tar archive contains no files")
-    except StaleSnapshotError:
-        raise click.ClickException("Branch modified concurrently — retry")
-    _status(ctx, f"Imported {count} file(s) from {filename}")
+
+# ---------------------------------------------------------------------------
+# archive / unarchive
+# ---------------------------------------------------------------------------
+
+@main.command("archive")
+@_repo_option
+@click.argument("filename", type=click.Path())
+@click.option("--format", "fmt", type=click.Choice(["zip", "tar"]), default=None,
+              help="Archive format (auto-detected from extension if omitted).")
+@click.option("--branch", "-b", default="main", help="Branch to export from.")
+@click.option("--hash", "ref", default=None, help="Branch, tag, or commit hash.")
+@click.option("--path", "at_path", default=None, help="Filter to commits that changed this path.")
+@click.option("--match", "match_pattern", default=None, help="Filter by message (supports * and ? wildcards).")
+@click.option("--before", "before", default=None, help="Only commits on or before this date (ISO 8601).")
+@click.pass_context
+def archive_cmd(ctx, filename, fmt, branch, ref, at_path, match_pattern, before):
+    """Export repo contents to an archive file.
+
+    Format is auto-detected from FILENAME extension (.zip, .tar, .tar.gz, etc.).
+    Use --format to override.  Use '-' for stdout (requires --format).
+    """
+    if fmt is None:
+        if filename == "-":
+            raise click.ClickException("Use --format with stdout (-)")
+        fmt = _detect_archive_format(filename)
+    before = _parse_before(before)
+    store = _open_store(_require_repo(ctx))
+    fs = _resolve_snapshot(_get_fs(store, branch, ref), at_path, match_pattern, before)
+    _do_export(ctx, fs, filename, fmt)
+
+
+@main.command("unarchive")
+@_repo_option
+@click.argument("filename", type=click.Path(), default=None, required=False)
+@click.option("--format", "fmt", type=click.Choice(["zip", "tar"]), default=None,
+              help="Archive format (auto-detected from extension if omitted).")
+@click.option("--branch", "-b", default="main", help="Branch to import into.")
+@click.option("-m", "message", default=None, help="Commit message.")
+@click.pass_context
+def unarchive_cmd(ctx, filename, fmt, branch, message):
+    """Import an archive file into the repo.
+
+    Format is auto-detected from FILENAME extension.
+    Use --format to override.  Reads stdin when FILENAME is omitted or '-'
+    (requires --format).
+    """
+    if filename is None or filename == "-":
+        filename = "-"
+        if fmt is None:
+            raise click.ClickException("Use --format when reading from stdin")
+    else:
+        if fmt is None:
+            fmt = _detect_archive_format(filename)
+    store = _open_store(_require_repo(ctx))
+    _do_import(ctx, store, branch, filename, message, fmt)
