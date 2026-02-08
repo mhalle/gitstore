@@ -106,16 +106,13 @@ def main(ctx, repo):
 # ---------------------------------------------------------------------------
 
 @main.command()
-@click.option("--branch", "-b", default=None, help="Bootstrap an initial branch.")
+@click.option("--branch", "-b", default="main", help="Initial branch name (default: main).")
 @click.pass_context
 def init(ctx, branch):
     """Create a new bare git repository."""
     repo_path = ctx.obj["repo_path"]
     try:
-        if branch:
-            GitStore.open(repo_path, create=True, branch=branch)
-        else:
-            GitStore.open(repo_path, create=True)
+        GitStore.open(repo_path, create=True, branch=branch)
     except FileExistsError as exc:
         raise click.ClickException(str(exc))
     click.echo(f"Initialized {repo_path}")

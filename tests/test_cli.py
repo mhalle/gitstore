@@ -60,13 +60,15 @@ class TestInit:
         result = runner.invoke(main, [repo_path, "init"])
         assert result.exit_code == 0
         assert "Initialized" in result.output
-
-    def test_creates_repo_with_branch(self, runner, repo_path):
-        result = runner.invoke(main, [repo_path, "init", "--branch", "main"])
-        assert result.exit_code == 0
-        # Verify branch exists
+        # Default branch is main
         result = runner.invoke(main, [repo_path, "branch", "list"])
         assert "main" in result.output
+
+    def test_creates_repo_with_custom_branch(self, runner, repo_path):
+        result = runner.invoke(main, [repo_path, "init", "--branch", "trunk"])
+        assert result.exit_code == 0
+        result = runner.invoke(main, [repo_path, "branch", "list"])
+        assert "trunk" in result.output
 
     def test_already_exists_error(self, runner, initialized_repo):
         result = runner.invoke(main, [initialized_repo, "init"])

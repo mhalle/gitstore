@@ -268,7 +268,7 @@ Repo-side paths are prefixed with `:` (like `scp`). Use `--branch`/`-b` to selec
 
 ```bash
 # Create a repo
-gitstore /path/to/repo.git init --branch main
+gitstore /path/to/repo.git init
 
 # Copy files in and out
 gitstore /path/to/repo.git cp local-file.txt :remote-file.txt
