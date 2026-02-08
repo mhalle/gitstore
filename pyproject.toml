@@ -8,12 +8,16 @@ version = "0.1.0"
 requires-python = ">=3.10"
 dependencies = [
     "pygit2>=1.14.0",
+    "click>=8.0",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
 ]
+
+[project.scripts]
+gitstore = "gitstore.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/gitstore"]
