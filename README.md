@@ -331,9 +331,9 @@ gitstore rm old-file.txt
 
 # View commit history
 gitstore log
-gitstore log --at file.txt                # commits that changed this file
+gitstore log --path file.txt                # commits that changed this file
 gitstore log --match "deploy*"            # commits matching message pattern
-gitstore log --at file.txt --match "fix*" # both filters (AND)
+gitstore log --path file.txt --match "fix*" # both filters (AND)
 gitstore log --format json                # JSON array
 gitstore log --format jsonl               # one JSON object per line
 
@@ -345,12 +345,12 @@ gitstore branch delete dev
 
 # Manage tags
 gitstore tag create v1.0 main
-gitstore tag create v1.0-fix main --at bugfix.py  # tag the commit that last changed bugfix.py
+gitstore tag create v1.0-fix main --path bugfix.py  # tag the commit that last changed bugfix.py
 gitstore tag delete v1.0
 
 # Export repo contents to a zip file
 gitstore zip archive.zip
-gitstore zip archive.zip --at file.txt    # snapshot where file.txt last changed
+gitstore zip archive.zip --path file.txt    # snapshot where file.txt last changed
 gitstore zip archive.zip --match "v1*"    # snapshot matching message pattern
 
 # Import a zip file into the repo
@@ -362,7 +362,7 @@ gitstore unzip archive.zip -b dev
 gitstore tar archive.tar
 gitstore tar archive.tar.gz                # auto-compress based on extension
 gitstore tar - | gzip > archive.tar.gz     # or pipe to gzip
-gitstore tar archive.tar --at file.txt     # snapshot where file.txt last changed
+gitstore tar archive.tar --path file.txt     # snapshot where file.txt last changed
 
 # Import a tar archive into the repo
 gitstore untar archive.tar.gz              # auto-detects compression
@@ -373,7 +373,7 @@ gitstore untar archive.tar -m "Import data"
 
 ```bash
 # Browse at a specific commit
-gitstore log --at file.txt                # find the commit hash
+gitstore log --path file.txt                # find the commit hash
 gitstore cat file.txt --hash abc1234...   # read file at that commit
 gitstore ls --hash abc1234...             # list files at that commit
 

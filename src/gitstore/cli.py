@@ -122,7 +122,7 @@ def _resolve_ref(store: GitStore, ref_str: str):
 
 
 def _resolve_with_at(store: GitStore, ref_str: str, at_path: str | None):
-    """Resolve ref; if --at given, find latest commit that touched that path."""
+    """Resolve ref; if --path given, find latest commit that touched that path."""
     fs = _resolve_ref(store, ref_str)
     if at_path is None:
         return fs
@@ -531,7 +531,8 @@ def rm(ctx, path, branch, message):
 
 @main.command()
 @_repo_option
-@click.option("--at", "at_path", default=None, help="Filter to commits that changed this path.")
+@click.option("--path", "at_path", default=None, help="Filter to commits that changed this path.")
+@click.option("--at", "deprecated_at", default=None, hidden=True)
 @click.option("--match", "match_pattern", default=None, help="Filter by message (supports * and ? wildcards).")
 @click.option("--branch", "-b", default="main", help="Branch to show log for.")
 @click.option("--hash", "ref", default=None, help="Branch, tag, or commit hash to start from.")
@@ -539,8 +540,9 @@ def rm(ctx, path, branch, message):
               type=click.Choice(["text", "json", "jsonl"]),
               help="Output format.")
 @click.pass_context
-def log(ctx, at_path, match_pattern, branch, ref, fmt):
+def log(ctx, at_path, deprecated_at, match_pattern, branch, ref, fmt):
     """Show commit log, optionally filtered by path and/or message pattern."""
+    at_path = at_path or deprecated_at
     store = _open_store(_require_repo(ctx))
     fs = _get_fs(store, branch, ref)
 
@@ -597,11 +599,13 @@ def branch_list(ctx):
 @_repo_option
 @click.argument("name")
 @click.option("--from", "from_ref", default=None, help="Ref to fork from.")
-@click.option("--at", "at_path", default=None,
+@click.option("--path", "at_path", default=None,
               help="Point to latest commit that modified this path.")
+@click.option("--at", "deprecated_at", default=None, hidden=True)
 @click.pass_context
-def branch_create(ctx, name, from_ref, at_path):
+def branch_create(ctx, name, from_ref, at_path, deprecated_at):
     """Create a new branch NAME, optionally forking from an existing ref."""
+    at_path = at_path or deprecated_at
     store = _open_store(_require_repo(ctx))
 
     if name in store.branches:
@@ -609,7 +613,7 @@ def branch_create(ctx, name, from_ref, at_path):
 
     if from_ref is None:
         if at_path is not None:
-            raise click.ClickException("--at requires --from")
+            raise click.ClickException("--path requires --from")
         repo = store._repo
         sig = store._signature
         tree_oid = repo.TreeBuilder().write()
@@ -666,11 +670,13 @@ def tag_list(ctx):
 @_repo_option
 @click.argument("name")
 @click.argument("from_ref", metavar="FROM")
-@click.option("--at", "at_path", default=None,
+@click.option("--path", "at_path", default=None,
               help="Point to latest commit that modified this path.")
+@click.option("--at", "deprecated_at", default=None, hidden=True)
 @click.pass_context
-def tag_create(ctx, name, from_ref, at_path):
+def tag_create(ctx, name, from_ref, at_path, deprecated_at):
     """Create a new tag NAME from FROM ref."""
+    at_path = at_path or deprecated_at
     store = _open_store(_require_repo(ctx))
 
     if name in store.tags:
@@ -707,14 +713,16 @@ def tag_delete(ctx, name):
 @click.argument("filename", type=click.Path())
 @click.option("--branch", "-b", default="main", help="Branch to export from.")
 @click.option("--hash", "ref", default=None, help="Branch, tag, or commit hash to export from.")
-@click.option("--at", "at_path", default=None, help="Filter to commits that changed this path.")
+@click.option("--path", "at_path", default=None, help="Filter to commits that changed this path.")
+@click.option("--at", "deprecated_at", default=None, hidden=True)
 @click.option("--match", "match_pattern", default=None, help="Filter by message (supports * and ? wildcards).")
 @click.pass_context
-def zip_cmd(ctx, filename, branch, ref, at_path, match_pattern):
+def zip_cmd(ctx, filename, branch, ref, at_path, deprecated_at, match_pattern):
     """Export repo contents to a zip file.
 
     FILENAME is the output zip path on disk.  Use '-' to write to stdout.
     """
+    at_path = at_path or deprecated_at
     store = _open_store(_require_repo(ctx))
     fs = _get_fs(store, branch, ref)
 
@@ -805,15 +813,17 @@ def unzip_cmd(ctx, filename, branch, message):
 @click.argument("filename", type=click.Path())
 @click.option("--branch", "-b", default="main", help="Branch to export from.")
 @click.option("--hash", "ref", default=None, help="Branch, tag, or commit hash to export from.")
-@click.option("--at", "at_path", default=None, help="Filter to commits that changed this path.")
+@click.option("--path", "at_path", default=None, help="Filter to commits that changed this path.")
+@click.option("--at", "deprecated_at", default=None, hidden=True)
 @click.option("--match", "match_pattern", default=None, help="Filter by message (supports * and ? wildcards).")
 @click.pass_context
-def tar_cmd(ctx, filename, branch, ref, at_path, match_pattern):
+def tar_cmd(ctx, filename, branch, ref, at_path, deprecated_at, match_pattern):
     """Export repo contents to a tar archive.
 
     FILENAME is the output tar path on disk.  Use '-' to write to stdout.
     Compression is auto-detected from the filename extension (.tar.gz, .tar.bz2, .tar.xz).
     """
+    at_path = at_path or deprecated_at
     import tarfile
 
     store = _open_store(_require_repo(ctx))

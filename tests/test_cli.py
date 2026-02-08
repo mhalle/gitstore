@@ -457,20 +457,20 @@ class TestLog:
         assert len(lines) >= 3
 
     def test_path_filter(self, runner, repo_with_files):
-        result = runner.invoke(main, ["log", "--repo", repo_with_files, "--at", "hello.txt"])
+        result = runner.invoke(main, ["log", "--repo", repo_with_files, "--path", "hello.txt"])
         assert result.exit_code == 0
         lines = result.output.strip().split("\n")
         assert len(lines) >= 1
 
     def test_at_without_colon(self, runner, repo_with_files):
-        """--at should work without a leading ':'."""
-        result = runner.invoke(main, ["log", "--repo", repo_with_files, "--at", "hello.txt"])
+        """--path should work without a leading ':'."""
+        result = runner.invoke(main, ["log", "--repo", repo_with_files, "--path", "hello.txt"])
         assert result.exit_code == 0
         lines = result.output.strip().split("\n")
         assert len(lines) >= 1
 
     def test_nonexistent_path_empty(self, runner, repo_with_files):
-        result = runner.invoke(main, ["log", "--repo", repo_with_files, "--at", "nonexistent.txt"])
+        result = runner.invoke(main, ["log", "--repo", repo_with_files, "--path", "nonexistent.txt"])
         assert result.exit_code == 0
         assert result.output.strip() == ""
 
@@ -514,7 +514,7 @@ class TestLog:
         runner.invoke(main, ["cp", "--repo", initialized_repo, str(f2), ":b.txt", "-m", "deploy b"])
         f1.write_text("a2")
         runner.invoke(main, ["cp", "--repo", initialized_repo, str(f1), ":a.txt", "-m", "fix a"])
-        result = runner.invoke(main, ["log", "--repo", initialized_repo, "--at", "a.txt", "--match", "deploy*"])
+        result = runner.invoke(main, ["log", "--repo", initialized_repo, "--path", "a.txt", "--match", "deploy*"])
         assert result.exit_code == 0
         lines = result.output.strip().split("\n")
         assert len(lines) == 1
@@ -599,14 +599,14 @@ class TestBranch:
     def test_at_flag(self, runner, repo_with_files):
         result = runner.invoke(main, [
             "branch", "--repo", repo_with_files, "create", "at-test",
-            "--from", "main", "--at", "hello.txt"
+            "--from", "main", "--path", "hello.txt"
         ])
         assert result.exit_code == 0
 
     def test_at_nonexistent_path(self, runner, initialized_repo):
         result = runner.invoke(main, [
             "branch", "--repo", initialized_repo, "create", "bad-at",
-            "--from", "main", "--at", "nonexistent.txt"
+            "--from", "main", "--path", "nonexistent.txt"
         ])
         assert result.exit_code != 0
         assert "No commits" in result.output
@@ -622,15 +622,15 @@ class TestBranch:
 
     def test_at_without_from_error(self, runner, initialized_repo):
         result = runner.invoke(main, [
-            "branch", "--repo", initialized_repo, "create", "bad", "--at", "x.txt"
+            "branch", "--repo", initialized_repo, "create", "bad", "--path", "x.txt"
         ])
         assert result.exit_code != 0
-        assert "--at requires --from" in result.output
+        assert "--path requires --from" in result.output
 
     def test_at_dotdot_rejected(self, runner, initialized_repo):
         result = runner.invoke(main, [
             "branch", "--repo", initialized_repo, "create", "bad",
-            "--from", "main", "--at", "../escape"
+            "--from", "main", "--path", "../escape"
         ])
         assert result.exit_code != 0
         assert "invalid" in result.output.lower()
@@ -679,7 +679,7 @@ class TestTag:
     def test_at_flag(self, runner, repo_with_files):
         result = runner.invoke(main, [
             "tag", "--repo", repo_with_files, "create", "v-at", "main",
-            "--at", "hello.txt"
+            "--path", "hello.txt"
         ])
         assert result.exit_code == 0
 
@@ -775,7 +775,7 @@ class TestPathNormalization:
         assert "invalid" in result.output.lower()
 
     def test_at_dotdot_rejected(self, runner, repo_with_files):
-        result = runner.invoke(main, ["log", "--repo", repo_with_files, "--at", "../x"])
+        result = runner.invoke(main, ["log", "--repo", repo_with_files, "--path", "../x"])
         assert result.exit_code != 0
         assert "invalid" in result.output.lower()
 
@@ -858,7 +858,7 @@ class TestZip:
         runner.invoke(main, ["cp", "--repo", initialized_repo, str(f2), ":b.txt", "-m", "add b"])
 
         out = str(tmp_path / "archive.zip")
-        result = runner.invoke(main, ["zip", "--repo", initialized_repo, out, "--at", "a.txt"])
+        result = runner.invoke(main, ["zip", "--repo", initialized_repo, out, "--path", "a.txt"])
         assert result.exit_code == 0, result.output
         with zipfile.ZipFile(out, "r") as zf:
             names = zf.namelist()
@@ -1062,7 +1062,7 @@ class TestTar:
         runner.invoke(main, ["cp", "--repo", initialized_repo, str(f2), ":b.txt", "-m", "add b"])
 
         out = str(tmp_path / "archive.tar")
-        result = runner.invoke(main, ["tar", "--repo", initialized_repo, out, "--at", "a.txt"])
+        result = runner.invoke(main, ["tar", "--repo", initialized_repo, out, "--path", "a.txt"])
         assert result.exit_code == 0, result.output
         import tarfile
         with tarfile.open(out, "r") as tf:
