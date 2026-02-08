@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import sys
+import zipfile
 from pathlib import Path
 
 import click
@@ -34,6 +36,12 @@ def _normalize_repo_path(path: str) -> str:
         return _normalize_path(path)
     except ValueError as exc:
         raise click.ClickException(f"Invalid repo path: {exc}")
+
+
+def _status(ctx, msg):
+    """Emit a status message to stderr when verbose mode (-v) is on."""
+    if ctx.obj.get("verbose"):
+        click.echo(msg, err=True)
 
 
 def _open_store(repo_path: str) -> GitStore:
@@ -92,14 +100,16 @@ def _resolve_with_at(store: GitStore, ref_str: str, at_path: str | None):
 
 @click.group()
 @click.argument("repo", type=click.Path())
+@click.option("-v", "--verbose", is_flag=True, help="Verbose output on stderr.")
 @click.pass_context
-def main(ctx, repo):
+def main(ctx, repo, verbose):
     """gitstore — a git-backed file store.
 
     REPO is the path to a bare git repository.
     """
     ctx.ensure_object(dict)
     ctx.obj["repo_path"] = repo
+    ctx.obj["verbose"] = verbose
 
 
 # ---------------------------------------------------------------------------
@@ -116,7 +126,7 @@ def init(ctx, branch):
         GitStore.open(repo_path, create=True, branch=branch)
     except FileExistsError as exc:
         raise click.ClickException(str(exc))
-    click.echo(f"Initialized {repo_path}")
+    _status(ctx, f"Initialized {repo_path}")
 
 
 # ---------------------------------------------------------------------------
@@ -209,7 +219,7 @@ def cp(ctx, args, branch, message, mode):
                 "Branch modified concurrently — retry"
             )
         for repo_file in writes:
-            click.echo(f"Copied -> :{repo_file}")
+            _status(ctx, f"Copied -> :{repo_file}")
     else:
         # Repo → disk
         local_dest = Path(dest_path)
@@ -236,7 +246,7 @@ def cp(ctx, args, branch, message, mode):
                 out.write_bytes(data)
             except OSError as exc:
                 raise click.ClickException(f"Cannot write {out}: {exc}")
-            click.echo(f"Copied :{src_path} -> {out}")
+            _status(ctx, f"Copied :{src_path} -> {out}")
 
 
 # ---------------------------------------------------------------------------
@@ -301,7 +311,7 @@ def cptree(ctx, src, dest, branch, message):
             raise click.ClickException(
                 "Branch modified concurrently — retry"
             )
-        click.echo(f"Copied {len(writes)} file(s) -> :{dest_path or '/'}")
+        _status(ctx, f"Copied {len(writes)} file(s) -> :{dest_path or '/'}")
     else:
         # Repo → disk
         local_dest = Path(dest_path)
@@ -338,7 +348,7 @@ def cptree(ctx, src, dest, branch, message):
             raise click.ClickException(
                 f"{src_path} is not a directory in the repo"
             )
-        click.echo(f"Copied :{src_path or '/'} -> {local_dest}")
+        _status(ctx, f"Copied :{src_path or '/'} -> {local_dest}")
 
 
 # ---------------------------------------------------------------------------
@@ -447,7 +457,7 @@ def rm(ctx, path, branch, message):
         raise click.ClickException(
             "Branch modified concurrently — retry"
         )
-    click.echo(f"Removed :{repo_path}")
+    _status(ctx, f"Removed :{repo_path}")
 
 
 # ---------------------------------------------------------------------------
@@ -532,7 +542,7 @@ def branch_create(ctx, name, from_ref, at_path):
     from .fs import FS
     new_fs = FS(store, source_fs._commit_oid, branch=name)
     store.branches[name] = new_fs
-    click.echo(f"Created branch {name}")
+    _status(ctx, f"Created branch {name}")
 
 
 @branch.command("delete")
@@ -545,7 +555,7 @@ def branch_delete(ctx, name):
         del store.branches[name]
     except KeyError:
         raise click.ClickException(f"Branch not found: {name}")
-    click.echo(f"Deleted branch {name}")
+    _status(ctx, f"Deleted branch {name}")
 
 
 # ---------------------------------------------------------------------------
@@ -587,7 +597,7 @@ def tag_create(ctx, name, from_ref, at_path):
     from .fs import FS
     new_fs = FS(store, source_fs._commit_oid, branch=None)
     store.tags[name] = new_fs
-    click.echo(f"Created tag {name}")
+    _status(ctx, f"Created tag {name}")
 
 
 @tag.command("delete")
@@ -600,4 +610,84 @@ def tag_delete(ctx, name):
         del store.tags[name]
     except KeyError:
         raise click.ClickException(f"Tag not found: {name}")
-    click.echo(f"Deleted tag {name}")
+    _status(ctx, f"Deleted tag {name}")
+
+
+# ---------------------------------------------------------------------------
+# zip
+# ---------------------------------------------------------------------------
+
+@main.command("zip")
+@click.argument("filename", type=click.Path())
+@click.option("--branch", "-b", default="main", help="Branch to export from.")
+@click.option("--at", "at_path", default=None, help="Filter to commits that changed this path.")
+@click.option("--match", "match_pattern", default=None, help="Filter by message (supports * and ? wildcards).")
+@click.pass_context
+def zip_cmd(ctx, filename, branch, at_path, match_pattern):
+    """Export repo contents to a zip file.
+
+    FILENAME is the output zip path on disk.  Use '-' to write to stdout.
+    """
+    store = _open_store(ctx.obj["repo_path"])
+    fs = _get_branch_fs(store, branch)
+
+    if at_path is not None:
+        at_path = _normalize_repo_path(at_path)
+    if at_path is not None or match_pattern is not None:
+        for entry in fs.log(at=at_path, match=match_pattern):
+            fs = entry
+            break
+        else:
+            raise click.ClickException("No matching commits found")
+
+    to_stdout = filename == "-"
+    dest = io.BytesIO() if to_stdout else filename
+    count = 0
+    with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as zf:
+        for dirpath, _dirs, files in fs.walk():
+            for fname in files:
+                repo_path = f"{dirpath}/{fname}" if dirpath else fname
+                zf.writestr(repo_path, fs.read(repo_path))
+                count += 1
+    if to_stdout:
+        click.get_binary_stream("stdout").write(dest.getvalue())
+    _status(ctx, f"Wrote {count} file(s) to {filename}")
+
+
+# ---------------------------------------------------------------------------
+# unzip
+# ---------------------------------------------------------------------------
+
+@main.command("unzip")
+@click.argument("filename", type=click.Path(exists=True))
+@click.option("--branch", "-b", default="main", help="Branch to import into.")
+@click.option("-m", "message", default=None, help="Commit message.")
+@click.pass_context
+def unzip_cmd(ctx, filename, branch, message):
+    """Import a zip file into the repo.
+
+    FILENAME is the path to the zip file on disk.
+    """
+    if not zipfile.is_zipfile(filename):
+        raise click.ClickException(f"Not a valid zip file: {filename}")
+
+    store = _open_store(ctx.obj["repo_path"])
+    fs = _get_branch_fs(store, branch)
+
+    writes: dict[str, bytes] = {}
+    with zipfile.ZipFile(filename, "r") as zf:
+        for info in zf.infolist():
+            if info.is_dir():
+                continue
+            repo_path = _normalize_repo_path(info.filename)
+            writes[repo_path] = zf.read(info.filename)
+
+    if not writes:
+        raise click.ClickException("Zip file contains no files")
+
+    msg = message or ""
+    try:
+        fs._commit_changes(writes, set(), msg)
+    except StaleSnapshotError:
+        raise click.ClickException("Branch modified concurrently — retry")
+    _status(ctx, f"Imported {len(writes)} file(s) from {filename}")

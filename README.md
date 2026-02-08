@@ -325,7 +325,18 @@ gitstore /path/to/repo.git tag create v1.0-fix main --at bugfix.py  # tag the co
 gitstore /path/to/repo.git tag delete v1.0
 ```
 
-Write commands (`cp`, `cptree`, `rm`) accept `-m` for custom commit messages. Use `-b` on any command to target a branch other than `main`. `cp` accepts `--mode 644` or `--mode 755` to set file permissions.
+# Export repo contents to a zip file
+gitstore /path/to/repo.git zip archive.zip
+gitstore /path/to/repo.git zip archive.zip --at file.txt    # snapshot where file.txt last changed
+gitstore /path/to/repo.git zip archive.zip --match "v1*"    # snapshot matching message pattern
+
+# Import a zip file into the repo
+gitstore /path/to/repo.git unzip archive.zip
+gitstore /path/to/repo.git unzip archive.zip -m "Import data"
+gitstore /path/to/repo.git unzip archive.zip -b dev
+```
+
+Write commands (`cp`, `cptree`, `rm`, `unzip`) accept `-m` for custom commit messages. Use `-b` on any command to target a branch other than `main`. `cp` accepts `--mode 644` or `--mode 755` to set file permissions. Pass `-v` before the command for status messages on stderr. `zip` accepts `-` as FILENAME to write to stdout.
 
 ## Development
 

@@ -1,5 +1,8 @@
 """Tests for the gitstore CLI."""
 
+import io
+import zipfile
+
 import pytest
 from click.testing import CliRunner
 
@@ -59,8 +62,6 @@ class TestInit:
     def test_creates_repo(self, runner, repo_path):
         result = runner.invoke(main, [repo_path, "init"])
         assert result.exit_code == 0
-        assert "Initialized" in result.output
-        # Default branch is main
         result = runner.invoke(main, [repo_path, "branch", "list"])
         assert "main" in result.output
 
@@ -510,8 +511,6 @@ class TestBranch:
     def test_create(self, runner, initialized_repo):
         result = runner.invoke(main, [initialized_repo, "branch", "create", "dev", "main"])
         assert result.exit_code == 0
-        assert "Created" in result.output
-
         result = runner.invoke(main, [initialized_repo, "branch", "list"])
         assert "dev" in result.output
 
@@ -535,7 +534,8 @@ class TestBranch:
         runner.invoke(main, [initialized_repo, "branch", "create", "todel", "main"])
         result = runner.invoke(main, [initialized_repo, "branch", "delete", "todel"])
         assert result.exit_code == 0
-        assert "Deleted" in result.output
+        result = runner.invoke(main, [initialized_repo, "branch", "list"])
+        assert "todel" not in result.output
 
     def test_delete_missing(self, runner, initialized_repo):
         result = runner.invoke(main, [initialized_repo, "branch", "delete", "ghost"])
@@ -570,7 +570,8 @@ class TestTag:
     def test_create(self, runner, initialized_repo):
         result = runner.invoke(main, [initialized_repo, "tag", "create", "v1", "main"])
         assert result.exit_code == 0
-        assert "Created" in result.output
+        result = runner.invoke(main, [initialized_repo, "tag", "list"])
+        assert "v1" in result.output
 
     def test_duplicate_error(self, runner, initialized_repo):
         runner.invoke(main, [initialized_repo, "tag", "create", "v1", "main"])
@@ -582,7 +583,8 @@ class TestTag:
         runner.invoke(main, [initialized_repo, "tag", "create", "v2", "main"])
         result = runner.invoke(main, [initialized_repo, "tag", "delete", "v2"])
         assert result.exit_code == 0
-        assert "Deleted" in result.output
+        result = runner.invoke(main, [initialized_repo, "tag", "list"])
+        assert "v2" not in result.output
 
     def test_delete_missing(self, runner, initialized_repo):
         result = runner.invoke(main, [initialized_repo, "tag", "delete", "ghost"])
@@ -734,3 +736,135 @@ class TestErrorPaths:
         result = runner.invoke(main, [initialized_repo, "ls", "-b", "nope"])
         assert result.exit_code != 0
         assert "not found" in result.output.lower()
+
+
+# ---------------------------------------------------------------------------
+# TestZip
+# ---------------------------------------------------------------------------
+
+class TestZip:
+    def test_zip_basic(self, runner, repo_with_files, tmp_path):
+        out = str(tmp_path / "archive.zip")
+        result = runner.invoke(main, [repo_with_files, "zip", out])
+        assert result.exit_code == 0, result.output
+        with zipfile.ZipFile(out, "r") as zf:
+            names = zf.namelist()
+            assert "hello.txt" in names
+            assert "data/data.bin" in names
+
+    def test_zip_contents(self, runner, repo_with_files, tmp_path):
+        out = str(tmp_path / "archive.zip")
+        result = runner.invoke(main, [repo_with_files, "zip", out])
+        assert result.exit_code == 0, result.output
+        with zipfile.ZipFile(out, "r") as zf:
+            assert zf.read("hello.txt") == b"hello world\n"
+            assert zf.read("data/data.bin") == b"\x00\x01\x02"
+
+    def test_zip_with_at(self, runner, initialized_repo, tmp_path):
+        f = tmp_path / "a.txt"
+        f.write_text("v1")
+        runner.invoke(main, [initialized_repo, "cp", str(f), ":a.txt", "-m", "add a"])
+        f2 = tmp_path / "b.txt"
+        f2.write_text("b")
+        runner.invoke(main, [initialized_repo, "cp", str(f2), ":b.txt", "-m", "add b"])
+
+        out = str(tmp_path / "archive.zip")
+        result = runner.invoke(main, [initialized_repo, "zip", out, "--at", "a.txt"])
+        assert result.exit_code == 0, result.output
+        with zipfile.ZipFile(out, "r") as zf:
+            names = zf.namelist()
+            assert "a.txt" in names
+            # b.txt was added after a.txt, so the snapshot at a.txt shouldn't have it
+            assert "b.txt" not in names
+
+    def test_zip_with_match(self, runner, initialized_repo, tmp_path):
+        f = tmp_path / "a.txt"
+        f.write_text("v1")
+        runner.invoke(main, [initialized_repo, "cp", str(f), ":a.txt", "-m", "deploy v1"])
+        f.write_text("v2")
+        runner.invoke(main, [initialized_repo, "cp", str(f), ":a.txt", "-m", "fix bug"])
+
+        out = str(tmp_path / "archive.zip")
+        result = runner.invoke(main, [initialized_repo, "zip", out, "--match", "deploy*"])
+        assert result.exit_code == 0, result.output
+        with zipfile.ZipFile(out, "r") as zf:
+            assert zf.read("a.txt") == b"v1"
+
+    def test_zip_stdout(self, runner, repo_with_files):
+        result = runner.invoke(main, [repo_with_files, "zip", "-"])
+        assert result.exit_code == 0, result.output
+        zf = zipfile.ZipFile(io.BytesIO(result.output_bytes))
+        names = zf.namelist()
+        assert "hello.txt" in names
+        assert zf.read("hello.txt") == b"hello world\n"
+
+    def test_zip_no_match_error(self, runner, repo_with_files, tmp_path):
+        out = str(tmp_path / "archive.zip")
+        result = runner.invoke(main, [repo_with_files, "zip", out, "--match", "zzz-no-match*"])
+        assert result.exit_code != 0
+        assert "No matching commits" in result.output
+
+
+# ---------------------------------------------------------------------------
+# TestUnzip
+# ---------------------------------------------------------------------------
+
+class TestUnzip:
+    def test_unzip_basic(self, runner, initialized_repo, tmp_path):
+        zpath = str(tmp_path / "import.zip")
+        with zipfile.ZipFile(zpath, "w") as zf:
+            zf.writestr("file1.txt", "hello")
+            zf.writestr("file2.txt", "world")
+        result = runner.invoke(main, [initialized_repo, "unzip", zpath])
+        assert result.exit_code == 0, result.output
+        result = runner.invoke(main, [initialized_repo, "ls"])
+        assert "file1.txt" in result.output
+        assert "file2.txt" in result.output
+
+    def test_unzip_contents(self, runner, initialized_repo, tmp_path):
+        zpath = str(tmp_path / "import.zip")
+        with zipfile.ZipFile(zpath, "w") as zf:
+            zf.writestr("greet.txt", "hi there")
+        runner.invoke(main, [initialized_repo, "unzip", zpath])
+
+        result = runner.invoke(main, [initialized_repo, "cat", ":greet.txt"])
+        assert result.exit_code == 0
+        assert "hi there" in result.output
+
+    def test_unzip_custom_message(self, runner, initialized_repo, tmp_path):
+        zpath = str(tmp_path / "import.zip")
+        with zipfile.ZipFile(zpath, "w") as zf:
+            zf.writestr("msg.txt", "data")
+        result = runner.invoke(main, [initialized_repo, "unzip", zpath, "-m", "bulk import"])
+        assert result.exit_code == 0
+
+        result = runner.invoke(main, [initialized_repo, "log"])
+        assert "bulk import" in result.output
+
+    def test_unzip_nested(self, runner, initialized_repo, tmp_path):
+        zpath = str(tmp_path / "import.zip")
+        with zipfile.ZipFile(zpath, "w") as zf:
+            zf.writestr("dir/sub/deep.txt", "nested content")
+            zf.writestr("top.txt", "top level")
+        result = runner.invoke(main, [initialized_repo, "unzip", zpath])
+        assert result.exit_code == 0, result.output
+
+        result = runner.invoke(main, [initialized_repo, "ls", ":dir/sub"])
+        assert "deep.txt" in result.output
+        result = runner.invoke(main, [initialized_repo, "cat", ":dir/sub/deep.txt"])
+        assert "nested content" in result.output
+
+    def test_unzip_invalid_zip(self, runner, initialized_repo, tmp_path):
+        bad = tmp_path / "notazip.bin"
+        bad.write_bytes(b"this is not a zip")
+        result = runner.invoke(main, [initialized_repo, "unzip", str(bad)])
+        assert result.exit_code != 0
+        assert "Not a valid zip" in result.output
+
+    def test_unzip_empty_zip(self, runner, initialized_repo, tmp_path):
+        zpath = str(tmp_path / "empty.zip")
+        with zipfile.ZipFile(zpath, "w") as zf:
+            pass  # no files
+        result = runner.invoke(main, [initialized_repo, "unzip", zpath])
+        assert result.exit_code != 0
+        assert "no files" in result.output.lower()
