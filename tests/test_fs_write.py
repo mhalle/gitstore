@@ -248,3 +248,20 @@ class TestSymlink:
         fs2 = fs.write_symlink("link.txt", "target.txt")
         fs3 = fs2.remove("link.txt")
         assert not fs3.exists("link.txt")
+
+
+class TestNoOpCommit:
+    def test_write_identical_content_no_new_commit(self, repo_fs):
+        """Writing the same data to the same path should not create a new commit."""
+        _, fs = repo_fs
+        fs2 = fs.write("a.txt", b"hello")
+        fs3 = fs2.write("a.txt", b"hello")
+        assert fs3.hash == fs2.hash
+
+    def test_write_identical_via_batch_no_new_commit(self, repo_fs):
+        """Batch-writing identical content should not create a new commit."""
+        _, fs = repo_fs
+        fs2 = fs.write("a.txt", b"hello")
+        with fs2.batch() as b:
+            b.write("a.txt", b"hello")
+        assert b.fs.hash == fs2.hash

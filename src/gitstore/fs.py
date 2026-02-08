@@ -140,6 +140,8 @@ class FS:
         sig = self._store._signature
 
         new_tree_oid = rebuild_tree(repo, self._tree_oid, writes, removes)
+        if new_tree_oid == self._tree_oid:
+            return self  # nothing changed
 
         # Create commit object without moving the ref
         new_commit_oid = repo.create_commit(

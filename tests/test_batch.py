@@ -253,3 +253,10 @@ class TestBatch:
             pass
         with pytest.raises(RuntimeError):
             b.write_symlink("link.txt", "target.txt")
+
+    def test_batch_identical_writes_no_commit(self, repo_fs):
+        """Batch-writing identical content should not create a new commit."""
+        _, fs = repo_fs
+        with fs.batch() as b:
+            b.write("a.txt", b"a")
+        assert b.fs.hash == fs.hash
