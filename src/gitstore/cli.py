@@ -448,12 +448,12 @@ def rm(ctx, path, branch, message):
 
     repo_path = _normalize_repo_path(repo_path)
 
-    if not fs.exists(repo_path):
-        raise click.ClickException(f"File not found: {repo_path}")
-
-    msg = message or ""
     try:
-        fs._commit_changes({}, {repo_path}, msg)
+        fs.remove(repo_path, message=message)
+    except FileNotFoundError:
+        raise click.ClickException(f"File not found: {repo_path}")
+    except IsADirectoryError:
+        raise click.ClickException(f"{repo_path} is a directory, not a file")
     except StaleSnapshotError:
         raise click.ClickException(
             "Branch modified concurrently — retry"

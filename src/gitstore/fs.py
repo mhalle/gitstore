@@ -10,8 +10,10 @@ from typing import TYPE_CHECKING, Iterator
 from ._lock import repo_lock
 from .exceptions import StaleSnapshotError
 from .tree import (
+    GIT_OBJECT_TREE,
     _is_root_path,
     _normalize_path,
+    _walk_to,
     read_blob_at_path,
     list_tree_at_path,
     walk_tree,
@@ -85,7 +87,6 @@ class FS:
         if path is None or _is_root_path(path):
             yield from walk_tree(self._store._repo, self._tree_oid)
         else:
-            from .tree import _walk_to, GIT_OBJECT_TREE
             path = _normalize_path(path)
             obj = _walk_to(self._store._repo, self._tree_oid, path)
             if obj.type != GIT_OBJECT_TREE:
@@ -149,11 +150,17 @@ class FS:
         path = _normalize_path(path)
         return self._commit_changes({path: data}, set(), f"Write {path}")
 
-    def remove(self, path: str | os.PathLike[str]) -> FS:
+    def remove(self, path: str | os.PathLike[str], *, message: str | None = None) -> FS:
         path = _normalize_path(path)
+        if not self._writable:
+            raise PermissionError("Cannot write to a read-only snapshot")
         if not self.exists(path):
             raise FileNotFoundError(path)
-        return self._commit_changes({}, {path}, f"Remove {path}")
+        # Reject directories — remove is for files only
+        obj = _walk_to(self._store._repo, self._tree_oid, path)
+        if obj.type == GIT_OBJECT_TREE:
+            raise IsADirectoryError(path)
+        return self._commit_changes({}, {path}, message if message is not None else f"Remove {path}")
 
     def batch(self):
         from .batch import Batch
@@ -197,11 +204,11 @@ class FS:
         current: FS | None = self
         while current is not None:
             if filter_path is not None:
-                from .tree import _blob_oid_at_path
-                current_oid = _blob_oid_at_path(repo, current._tree_oid, filter_path)
+                from .tree import _entry_at_path
+                current_entry = _entry_at_path(repo, current._tree_oid, filter_path)
                 parent = current.parent
-                parent_oid = _blob_oid_at_path(repo, parent._tree_oid, filter_path) if parent else None
-                if current_oid == parent_oid:
+                parent_entry = _entry_at_path(repo, parent._tree_oid, filter_path) if parent else None
+                if current_entry == parent_entry:
                     current = current.parent
                     continue
             if match is not None and not _fnmatch(current.message, match):

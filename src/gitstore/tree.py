@@ -166,14 +166,24 @@ def _walk_to(
     return obj
 
 
-def _blob_oid_at_path(
+def _entry_at_path(
     repo: pygit2.Repository, tree_oid: pygit2.Oid, path: str
-) -> pygit2.Oid | None:
-    """Return the OID of the object at *path*, or None if missing."""
-    try:
-        return _walk_to(repo, tree_oid, path).id
-    except (FileNotFoundError, NotADirectoryError):
-        return None
+) -> tuple[pygit2.Oid, int] | None:
+    """Return (oid, filemode) of the entry at *path*, or None if missing."""
+    segments = path.split("/")
+    tree = repo[tree_oid]
+    for i, seg in enumerate(segments):
+        if tree.type != GIT_OBJECT_TREE:
+            return None
+        try:
+            entry = tree[seg]
+        except KeyError:
+            return None
+        if i < len(segments) - 1:
+            tree = repo[entry.id]
+        else:
+            return (entry.id, entry.filemode)
+    return None
 
 
 def read_blob_at_path(

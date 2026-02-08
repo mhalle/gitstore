@@ -71,6 +71,32 @@ class TestRemove:
         with pytest.raises(PermissionError):
             repo.tags["v1"].remove("x.txt")
 
+    def test_remove_directory_raises(self, repo_fs):
+        _, fs = repo_fs
+        fs2 = fs.write("dir/file.txt", b"data")
+        with pytest.raises(IsADirectoryError):
+            fs2.remove("dir")
+
+
+class TestLog:
+    def test_filemode_only_change_detected(self, repo_fs):
+        """log(at=path) should detect filemode-only changes (no content change)."""
+        _, fs = repo_fs
+        # Write a file with default mode (644)
+        fs2 = fs.write("script.sh", b"#!/bin/sh\necho hi")
+        # Re-write with same content but executable mode (755)
+        from gitstore.tree import GIT_FILEMODE_BLOB_EXECUTABLE
+        fs3 = fs2._commit_changes(
+            {"script.sh": (b"#!/bin/sh\necho hi", GIT_FILEMODE_BLOB_EXECUTABLE)},
+            set(),
+            "Make executable",
+        )
+        # log --at script.sh should see both commits (content write + mode change)
+        entries = list(fs3.log(at="script.sh"))
+        messages = [e.message for e in entries]
+        assert "Make executable" in messages
+        assert "Write script.sh" in messages
+
 
 class TestStaleSnapshot:
     def test_stale_write_raises(self, repo_fs):

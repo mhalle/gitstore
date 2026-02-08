@@ -389,6 +389,11 @@ class TestRm:
         assert result.exit_code != 0
         assert "not found" in result.output.lower()
 
+    def test_directory_rejected(self, runner, repo_with_files):
+        result = runner.invoke(main, [repo_with_files, "rm", ":data"])
+        assert result.exit_code != 0
+        assert "directory" in result.output.lower()
+
     def test_custom_message(self, runner, repo_with_files):
         result = runner.invoke(main, [repo_with_files, "rm", ":hello.txt", "-m", "bye bye"])
         assert result.exit_code == 0

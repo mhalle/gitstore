@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING
 
-from .tree import _normalize_path
+from .tree import GIT_OBJECT_TREE, _normalize_path, _walk_to, exists_at_path
 
 if TYPE_CHECKING:
     from .fs import FS
@@ -38,8 +38,20 @@ class Batch:
     def remove(self, path: str | os.PathLike[str]) -> None:
         self._check_open()
         path = _normalize_path(path)
+        pending_write = path in self._writes
+        repo = self._fs._store._repo
+        exists_in_base = exists_at_path(repo, self._fs._tree_oid, path)
+        if not pending_write and not exists_in_base:
+            raise FileNotFoundError(path)
+        # Check for directory in the base tree — even if there's a pending
+        # write, we must not add a directory path to _removes.
+        if exists_in_base:
+            obj = _walk_to(repo, self._fs._tree_oid, path)
+            if obj.type == GIT_OBJECT_TREE:
+                raise IsADirectoryError(path)
         self._writes.pop(path, None)
-        self._removes.add(path)
+        if exists_in_base:
+            self._removes.add(path)
         self._ops.append(f"Remove {path}")
 
     def open(self, path: str | os.PathLike[str], mode: str = "wb"):

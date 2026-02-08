@@ -151,6 +151,16 @@ class TestRefDictTags:
         with pytest.raises(ValueError):
             GitStore.open(tmp_path / "test.git", create=False)
 
+    def test_non_commit_tag_raises(self, tmp_path):
+        """A tag pointing to a non-commit object should raise ValueError."""
+        repo = GitStore.open(tmp_path / "test.git", create="main")
+        # Create a lightweight tag pointing directly to a tree (not a commit)
+        fs = repo.branches["main"]
+        raw = repo._repo
+        raw.references.create("refs/tags/bad", fs._tree_oid)
+        with pytest.raises(ValueError, match="does not point to a commit"):
+            repo.tags["bad"]
+
     def test_annotated_tag(self, tmp_path):
         import pygit2
         repo = GitStore.open(tmp_path / "test.git", create="main")

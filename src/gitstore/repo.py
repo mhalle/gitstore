@@ -112,7 +112,10 @@ class RefDict(MutableMapping):
         oid = ref.resolve().target
         if self._is_tags:
             obj = repo[oid]
-            commit = obj.peel(pygit2.Commit)
+            try:
+                commit = obj.peel(pygit2.Commit)
+            except Exception:
+                raise ValueError(f"Tag {name!r} does not point to a commit")
             return FS(self._store, commit.id, branch=None)
         else:
             return FS(self._store, oid, branch=name)

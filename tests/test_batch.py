@@ -65,6 +65,14 @@ class TestBatch:
             b.remove("f.txt")
         assert not b.fs.exists("f.txt")
 
+    def test_overwrite_then_remove_existing(self, repo_fs):
+        """Overwrite an existing file in batch, then remove it — file must be gone."""
+        _, fs = repo_fs
+        with fs.batch() as b:
+            b.write("a.txt", b"overwritten")
+            b.remove("a.txt")
+        assert not b.fs.exists("a.txt")
+
     def test_remove_then_write(self, repo_fs):
         _, fs = repo_fs
         with fs.batch() as b:
@@ -113,6 +121,28 @@ class TestBatch:
             f.write(b"closed data")
             f.close()
         assert b.fs.read("via_close.txt") == b"closed data"
+
+    def test_remove_directory_raises(self, repo_fs):
+        _, fs = repo_fs
+        fs2 = fs.write("dir/file.txt", b"data")
+        with pytest.raises(IsADirectoryError):
+            with fs2.batch() as b:
+                b.remove("dir")
+
+    def test_write_over_directory_then_remove_raises(self, repo_fs):
+        """Write over a base-tree directory, then remove — must still reject."""
+        _, fs = repo_fs
+        fs2 = fs.write("dir/file.txt", b"data")
+        with pytest.raises(IsADirectoryError):
+            with fs2.batch() as b:
+                b.write("dir", b"replacing directory with file")
+                b.remove("dir")
+
+    def test_remove_missing_raises(self, repo_fs):
+        _, fs = repo_fs
+        with pytest.raises(FileNotFoundError):
+            with fs.batch() as b:
+                b.remove("nonexistent.txt")
 
     def test_stale_batch_retryable(self, repo_fs):
         repo, fs = repo_fs
