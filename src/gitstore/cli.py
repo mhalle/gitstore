@@ -527,22 +527,32 @@ def branch_list(ctx):
 
 @branch.command("create")
 @click.argument("name")
-@click.argument("from_ref", metavar="FROM")
+@click.option("--from", "from_ref", default=None, help="Ref to fork from.")
 @click.option("--at", "at_path", default=None,
               help="Point to latest commit that modified this path.")
 @click.pass_context
 def branch_create(ctx, name, from_ref, at_path):
-    """Create a new branch NAME from FROM ref."""
+    """Create a new branch NAME, optionally forking from an existing ref."""
     store = _open_store(ctx.obj["repo_path"])
 
     if name in store.branches:
         raise click.ClickException(f"Branch already exists: {name}")
 
-    source_fs = _resolve_with_at(store, from_ref, at_path)
-
-    from .fs import FS
-    new_fs = FS(store, source_fs._commit_oid, branch=name)
-    store.branches[name] = new_fs
+    if from_ref is None:
+        if at_path is not None:
+            raise click.ClickException("--at requires --from")
+        repo = store._repo
+        sig = store._signature
+        tree_oid = repo.TreeBuilder().write()
+        commit_oid = repo.create_commit(
+            f"refs/heads/{name}", sig, sig,
+            f"Initialize {name}", tree_oid, [],
+        )
+    else:
+        source_fs = _resolve_with_at(store, from_ref, at_path)
+        from .fs import FS
+        new_fs = FS(store, source_fs._commit_oid, branch=name)
+        store.branches[name] = new_fs
     _status(ctx, f"Created branch {name}")
 
 

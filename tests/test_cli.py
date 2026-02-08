@@ -250,7 +250,7 @@ class TestCp:
 
     def test_custom_branch(self, runner, initialized_repo, tmp_path):
         # Create a dev branch
-        runner.invoke(main, [initialized_repo, "branch", "create", "dev", "main"])
+        runner.invoke(main, [initialized_repo, "branch", "create", "dev", "--from", "main"])
         f = tmp_path / "dev.txt"
         f.write_text("dev content")
         result = runner.invoke(main, [initialized_repo, "cp", str(f), ":dev.txt", "-b", "dev"])
@@ -514,29 +514,29 @@ class TestBranch:
         assert "main" in result.output
 
     def test_create(self, runner, initialized_repo):
-        result = runner.invoke(main, [initialized_repo, "branch", "create", "dev", "main"])
+        result = runner.invoke(main, [initialized_repo, "branch", "create", "dev", "--from", "main"])
         assert result.exit_code == 0
         result = runner.invoke(main, [initialized_repo, "branch", "list"])
         assert "dev" in result.output
 
     def test_duplicate_error(self, runner, initialized_repo):
-        runner.invoke(main, [initialized_repo, "branch", "create", "dup", "main"])
-        result = runner.invoke(main, [initialized_repo, "branch", "create", "dup", "main"])
+        runner.invoke(main, [initialized_repo, "branch", "create", "dup", "--from", "main"])
+        result = runner.invoke(main, [initialized_repo, "branch", "create", "dup", "--from", "main"])
         assert result.exit_code != 0
         assert "already exists" in result.output.lower()
 
     def test_create_from_tag(self, runner, initialized_repo):
         runner.invoke(main, [initialized_repo, "tag", "create", "v1", "main"])
-        result = runner.invoke(main, [initialized_repo, "branch", "create", "from-tag", "v1"])
+        result = runner.invoke(main, [initialized_repo, "branch", "create", "from-tag", "--from", "v1"])
         assert result.exit_code == 0
 
     def test_unknown_ref_error(self, runner, initialized_repo):
-        result = runner.invoke(main, [initialized_repo, "branch", "create", "bad", "nonexistent"])
+        result = runner.invoke(main, [initialized_repo, "branch", "create", "bad", "--from", "nonexistent"])
         assert result.exit_code != 0
         assert "Unknown ref" in result.output
 
     def test_delete(self, runner, initialized_repo):
-        runner.invoke(main, [initialized_repo, "branch", "create", "todel", "main"])
+        runner.invoke(main, [initialized_repo, "branch", "create", "todel", "--from", "main"])
         result = runner.invoke(main, [initialized_repo, "branch", "delete", "todel"])
         assert result.exit_code == 0
         result = runner.invoke(main, [initialized_repo, "branch", "list"])
@@ -549,23 +549,39 @@ class TestBranch:
 
     def test_at_flag(self, runner, repo_with_files):
         result = runner.invoke(main, [
-            repo_with_files, "branch", "create", "at-test", "main",
-            "--at", "hello.txt"
+            repo_with_files, "branch", "create", "at-test",
+            "--from", "main", "--at", "hello.txt"
         ])
         assert result.exit_code == 0
 
     def test_at_nonexistent_path(self, runner, initialized_repo):
         result = runner.invoke(main, [
-            initialized_repo, "branch", "create", "bad-at", "main",
-            "--at", "nonexistent.txt"
+            initialized_repo, "branch", "create", "bad-at",
+            "--from", "main", "--at", "nonexistent.txt"
         ])
         assert result.exit_code != 0
         assert "No commits" in result.output
 
+    def test_create_empty(self, runner, initialized_repo):
+        result = runner.invoke(main, [initialized_repo, "branch", "create", "empty"])
+        assert result.exit_code == 0
+        result = runner.invoke(main, [initialized_repo, "branch", "list"])
+        assert "empty" in result.output
+        result = runner.invoke(main, [initialized_repo, "ls", "-b", "empty"])
+        assert result.exit_code == 0
+        assert result.output.strip() == ""
+
+    def test_at_without_from_error(self, runner, initialized_repo):
+        result = runner.invoke(main, [
+            initialized_repo, "branch", "create", "bad", "--at", "x.txt"
+        ])
+        assert result.exit_code != 0
+        assert "--at requires --from" in result.output
+
     def test_at_dotdot_rejected(self, runner, initialized_repo):
         result = runner.invoke(main, [
-            initialized_repo, "branch", "create", "bad", "main",
-            "--at", "../escape"
+            initialized_repo, "branch", "create", "bad",
+            "--from", "main", "--at", "../escape"
         ])
         assert result.exit_code != 0
         assert "invalid" in result.output.lower()

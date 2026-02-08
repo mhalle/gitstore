@@ -316,7 +316,8 @@ gitstore /path/to/repo.git log --format jsonl               # one JSON object pe
 
 # Manage branches
 gitstore /path/to/repo.git branch                           # list
-gitstore /path/to/repo.git branch create dev main            # fork
+gitstore /path/to/repo.git branch create dev                 # empty orphan branch
+gitstore /path/to/repo.git branch create dev --from main     # fork from existing ref
 gitstore /path/to/repo.git branch delete dev
 
 # Manage tags
