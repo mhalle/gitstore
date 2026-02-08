@@ -273,10 +273,14 @@ gitstore /path/to/repo.git init
 # Copy files in and out
 gitstore /path/to/repo.git cp local-file.txt :remote-file.txt
 gitstore /path/to/repo.git cp :remote-file.txt local-copy.txt
+gitstore /path/to/repo.git cp local-file.txt :              # keep original name at root
 
 # Multiple sources (last arg is destination directory)
 gitstore /path/to/repo.git cp file1.txt file2.txt :dir
 gitstore /path/to/repo.git cp :a.txt :b.txt ./local-dir
+
+# Set file mode
+gitstore /path/to/repo.git cp script.sh :script.sh --mode 755
 
 # Copy directory trees
 gitstore /path/to/repo.git cptree ./local-dir :repo-dir
@@ -292,11 +296,13 @@ gitstore /path/to/repo.git rm :old-file.txt
 
 # View commit history
 gitstore /path/to/repo.git log
-gitstore /path/to/repo.git log :file.txt    # commits that changed this file
+gitstore /path/to/repo.git log :file.txt                   # commits that changed this file
+gitstore /path/to/repo.git log --format json                # JSON array
+gitstore /path/to/repo.git log --format jsonl               # one JSON object per line
 
 # Manage branches
-gitstore /path/to/repo.git branch                        # list
-gitstore /path/to/repo.git branch create dev main         # fork
+gitstore /path/to/repo.git branch                           # list
+gitstore /path/to/repo.git branch create dev main            # fork
 gitstore /path/to/repo.git branch delete dev
 
 # Manage tags
@@ -305,7 +311,7 @@ gitstore /path/to/repo.git tag create v1.0-fix main --at bugfix.py  # tag the co
 gitstore /path/to/repo.git tag delete v1.0
 ```
 
-Write commands (`cp`, `cptree`, `rm`) accept `-m` for custom commit messages. Use `-b` on any command to target a branch other than `main`.
+Write commands (`cp`, `cptree`, `rm`) accept `-m` for custom commit messages. Use `-b` on any command to target a branch other than `main`. `cp` accepts `--mode 644` or `--mode 755` to set file permissions.
 
 ## Development
 
