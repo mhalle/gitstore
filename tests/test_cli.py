@@ -531,12 +531,13 @@ class TestPathNormalization:
         assert result.exit_code != 0
         assert "Invalid" in result.output or "invalid" in result.output.lower()
 
-    def test_cp_empty_repo_path_rejected(self, runner, initialized_repo, tmp_path):
-        f = tmp_path / "empty.txt"
+    def test_cp_bare_colon_copies_to_root(self, runner, initialized_repo, tmp_path):
+        f = tmp_path / "rootfile.txt"
         f.write_text("data")
         result = runner.invoke(main, [initialized_repo, "cp", str(f), ":"])
-        assert result.exit_code != 0
-        assert "empty" in result.output.lower()
+        assert result.exit_code == 0, result.output
+        result = runner.invoke(main, [initialized_repo, "ls"])
+        assert "rootfile.txt" in result.output
 
     def test_rm_leading_slash_normalized(self, runner, repo_with_files):
         result = runner.invoke(main, [repo_with_files, "rm", ":/hello.txt"])

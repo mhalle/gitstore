@@ -186,11 +186,14 @@ def cp(ctx, args, branch, message):
                 raise click.ClickException(f"Local file not found: {src_path}")
             except OSError as exc:
                 raise click.ClickException(f"Cannot read {src_path}: {exc}")
-            if multi:
-                repo_file = f"{dest_path}/{local.name}" if dest_path else local.name
-                repo_file = _normalize_repo_path(repo_file)
+            if dest_path:
+                if multi:
+                    repo_file = _normalize_repo_path(f"{dest_path}/{local.name}")
+                else:
+                    repo_file = _normalize_repo_path(dest_path)
             else:
-                repo_file = _normalize_repo_path(dest_path)
+                # Bare ":" — copy to root, keep original filename
+                repo_file = _normalize_repo_path(local.name)
             writes[repo_file] = data
         names = ", ".join(Path(p).name for _, p in parsed_sources)
         msg = message or f"Copy {names}"
