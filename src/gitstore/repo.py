@@ -109,11 +109,13 @@ class RefDict(MutableMapping):
             ref = repo.references[ref_name]
         except KeyError:
             raise KeyError(name)
-        commit_oid = ref.resolve().target
+        oid = ref.resolve().target
         if self._is_tags:
-            return FS(self._store, commit_oid, branch=None)
+            obj = repo[oid]
+            commit = obj.peel(pygit2.Commit)
+            return FS(self._store, commit.id, branch=None)
         else:
-            return FS(self._store, commit_oid, branch=name)
+            return FS(self._store, oid, branch=name)
 
     def __setitem__(self, name: str, fs):
         from ._lock import repo_lock

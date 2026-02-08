@@ -87,6 +87,7 @@ def _resolve_with_at(store: GitStore, ref_str: str, at_path: str | None):
     fs = _resolve_ref(store, ref_str)
     if at_path is None:
         return fs
+    at_path = _normalize_repo_path(at_path)
     for entry in fs.log(at_path):
         return entry
     raise click.ClickException(

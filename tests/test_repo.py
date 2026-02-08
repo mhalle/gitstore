@@ -151,6 +151,23 @@ class TestRefDictTags:
         with pytest.raises(ValueError):
             GitStore.open(tmp_path / "test.git", create=False)
 
+    def test_annotated_tag(self, tmp_path):
+        import pygit2
+        repo = GitStore.open(tmp_path / "test.git", create="main")
+        fs = repo.branches["main"]
+        # Create an annotated tag via pygit2
+        raw = repo._repo
+        raw.create_tag(
+            "v-annotated",
+            fs._commit_oid,
+            pygit2.GIT_OBJECT_COMMIT,
+            raw.default_signature,
+            "release tag",
+        )
+        tag_fs = repo.tags["v-annotated"]
+        assert tag_fs.hash == fs.hash
+        assert tag_fs.branch is None
+
 
 class TestBranchKeyword:
     def test_create_with_branch_kwarg(self, tmp_path):

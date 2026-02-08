@@ -557,6 +557,14 @@ class TestBranch:
         assert result.exit_code != 0
         assert "No commits" in result.output
 
+    def test_at_dotdot_rejected(self, runner, initialized_repo):
+        result = runner.invoke(main, [
+            initialized_repo, "branch", "create", "bad", "main",
+            "--at", "../escape"
+        ])
+        assert result.exit_code != 0
+        assert "invalid" in result.output.lower()
+
 
 # ---------------------------------------------------------------------------
 # TestTag
