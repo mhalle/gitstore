@@ -7,11 +7,15 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Iterator
 
+import pygit2
+
 from ._lock import repo_lock
 from .exceptions import StaleSnapshotError
 from .tree import (
+    GIT_FILEMODE_BLOB,
     GIT_OBJECT_TREE,
     _is_root_path,
+    _mode_from_disk,
     _normalize_path,
     _walk_to,
     read_blob_at_path,
@@ -112,7 +116,7 @@ class FS:
 
     def _commit_changes(
         self,
-        writes: dict[str, bytes | tuple[bytes, int]],
+        writes: dict[str, bytes | tuple[bytes, int] | pygit2.Oid | tuple[pygit2.Oid, int]],
         removes: set[str],
         message: str,
     ) -> FS:
@@ -156,6 +160,23 @@ class FS:
     ) -> FS:
         path = _normalize_path(path)
         value: bytes | tuple[bytes, int] = (data, mode) if mode is not None else data
+        return self._commit_changes({path: value}, set(), message or f"Write {path}")
+
+    def write_from(
+        self,
+        path: str | os.PathLike[str],
+        local_path: str | os.PathLike[str],
+        *,
+        message: str | None = None,
+        mode: int | None = None,
+    ) -> FS:
+        path = _normalize_path(path)
+        local_path = os.fspath(local_path)
+        repo = self._store._repo
+        blob_oid = repo.create_blob_fromdisk(local_path)
+        if mode is None:
+            mode = _mode_from_disk(local_path)
+        value: pygit2.Oid | tuple[pygit2.Oid, int] = (blob_oid, mode) if mode != GIT_FILEMODE_BLOB else blob_oid
         return self._commit_changes({path: value}, set(), message or f"Write {path}")
 
     def remove(self, path: str | os.PathLike[str], *, message: str | None = None) -> FS:

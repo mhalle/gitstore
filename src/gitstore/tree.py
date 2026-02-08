@@ -7,6 +7,7 @@ on top of pygit2's TreeBuilder.
 from __future__ import annotations
 
 import os
+import stat
 from collections import defaultdict
 from typing import Iterator
 
@@ -17,6 +18,14 @@ GIT_FILEMODE_TREE = 0o040000
 GIT_FILEMODE_BLOB = 0o100644
 GIT_FILEMODE_BLOB_EXECUTABLE = 0o100755
 GIT_OBJECT_TREE = pygit2.GIT_OBJECT_TREE
+
+
+def _mode_from_disk(local_path: str) -> int:
+    """Return git filemode based on the file's executable bit."""
+    st = os.stat(local_path)
+    if st.st_mode & stat.S_IXUSR:
+        return GIT_FILEMODE_BLOB_EXECUTABLE
+    return GIT_FILEMODE_BLOB
 
 
 def _is_root_path(path: str | os.PathLike[str]) -> bool:
@@ -47,7 +56,7 @@ def _normalize_path(path: str | os.PathLike[str]) -> str:
 def rebuild_tree(
     repo: pygit2.Repository,
     base_tree_oid: pygit2.Oid | None,
-    writes: dict[str, bytes | tuple[bytes, int]],
+    writes: dict[str, bytes | tuple[bytes, int] | pygit2.Oid | tuple[pygit2.Oid, int]],
     removes: set[str],
 ) -> pygit2.Oid:
     """Rebuild a tree with writes and removes applied.
@@ -65,8 +74,8 @@ def rebuild_tree(
         OID of the new root tree.
     """
     # Group changes by first path segment
-    sub_writes: dict[str, dict[str, bytes | tuple[bytes, int]]] = defaultdict(dict)
-    leaf_writes: dict[str, bytes | tuple[bytes, int]] = {}
+    sub_writes: dict[str, dict[str, bytes | tuple[bytes, int] | pygit2.Oid | tuple[pygit2.Oid, int]]] = defaultdict(dict)
+    leaf_writes: dict[str, bytes | tuple[bytes, int] | pygit2.Oid | tuple[pygit2.Oid, int]] = {}
     sub_removes: dict[str, set[str]] = defaultdict(set)
     leaf_removes: set[str] = set()
 
@@ -101,10 +110,13 @@ def rebuild_tree(
     # Apply leaf writes (may overwrite existing tree entries)
     for name, value in leaf_writes.items():
         if isinstance(value, tuple):
-            data, mode = value
+            data_or_oid, mode = value
         else:
-            data, mode = value, GIT_FILEMODE_BLOB
-        blob_oid = repo.create_blob(data)
+            data_or_oid, mode = value, GIT_FILEMODE_BLOB
+        if isinstance(data_or_oid, pygit2.Oid):
+            blob_oid = data_or_oid
+        else:
+            blob_oid = repo.create_blob(data_or_oid)
         tb.insert(name, blob_oid, mode)
 
     # Apply leaf removes (silently ignore missing — callers check existence)

@@ -1,8 +1,11 @@
 """Tests for FS write operations."""
 
+import stat
+
 import pytest
 
 from gitstore import GitStore, StaleSnapshotError
+from gitstore.tree import GIT_FILEMODE_BLOB_EXECUTABLE
 
 
 @pytest.fixture
@@ -132,3 +135,52 @@ class TestStaleSnapshot:
         with pytest.raises(StaleSnapshotError):
             with fs.batch() as b:
                 b.write("second.txt", b"second")
+
+
+class TestWriteFrom:
+    def test_write_from_basic(self, repo_fs, tmp_path):
+        _, fs = repo_fs
+        local = tmp_path / "data.bin"
+        local.write_bytes(b"\x00\x01\x02\x03")
+        fs2 = fs.write_from("data.bin", local)
+        assert fs2.read("data.bin") == b"\x00\x01\x02\x03"
+
+    def test_write_from_preserves_executable(self, repo_fs, tmp_path):
+        _, fs = repo_fs
+        local = tmp_path / "run.sh"
+        local.write_bytes(b"#!/bin/sh\necho hi")
+        local.chmod(local.stat().st_mode | stat.S_IXUSR)
+        fs2 = fs.write_from("run.sh", local)
+        tree = fs2._store._repo[fs2._tree_oid]
+        assert tree["run.sh"].filemode == GIT_FILEMODE_BLOB_EXECUTABLE
+
+    def test_write_from_mode_override(self, repo_fs, tmp_path):
+        _, fs = repo_fs
+        local = tmp_path / "script.sh"
+        local.write_bytes(b"#!/bin/sh")
+        # File is NOT executable on disk, but we override
+        fs2 = fs.write_from("script.sh", local, mode=GIT_FILEMODE_BLOB_EXECUTABLE)
+        tree = fs2._store._repo[fs2._tree_oid]
+        assert tree["script.sh"].filemode == GIT_FILEMODE_BLOB_EXECUTABLE
+
+    def test_write_from_custom_message(self, repo_fs, tmp_path):
+        _, fs = repo_fs
+        local = tmp_path / "file.txt"
+        local.write_bytes(b"content")
+        fs2 = fs.write_from("file.txt", local, message="Import file")
+        assert fs2.message == "Import file"
+
+    def test_write_from_on_tag_raises(self, tmp_path):
+        repo = GitStore.open(tmp_path / "test.git", create="main")
+        fs = repo.branches["main"]
+        repo.tags["v1"] = fs
+        tag_fs = repo.tags["v1"]
+        local = tmp_path / "file.txt"
+        local.write_bytes(b"data")
+        with pytest.raises(PermissionError):
+            tag_fs.write_from("file.txt", local)
+
+    def test_write_from_missing_file(self, repo_fs):
+        _, fs = repo_fs
+        with pytest.raises((OSError, KeyError)):
+            fs.write_from("x.txt", "/nonexistent/path/file.txt")

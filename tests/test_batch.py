@@ -1,8 +1,13 @@
 """Tests for batch context manager."""
 
+import os
+import stat
+
+import pygit2
 import pytest
 
 from gitstore import GitStore, StaleSnapshotError
+from gitstore.tree import GIT_FILEMODE_BLOB_EXECUTABLE
 
 
 @pytest.fixture
@@ -161,3 +166,56 @@ class TestBatch:
         # Batch should not be closed — we can refetch and retry
         assert b.fs is None
         assert not b._closed
+
+    def test_write_from_basic(self, repo_fs, tmp_path):
+        _, fs = repo_fs
+        local = tmp_path / "hello.txt"
+        local.write_bytes(b"hello from disk")
+        with fs.batch() as b:
+            b.write_from("hello.txt", local)
+        assert b.fs.read("hello.txt") == b"hello from disk"
+
+    def test_write_from_preserves_executable(self, repo_fs, tmp_path):
+        _, fs = repo_fs
+        local = tmp_path / "run.sh"
+        local.write_bytes(b"#!/bin/sh\necho hi")
+        local.chmod(local.stat().st_mode | stat.S_IXUSR)
+        with fs.batch() as b:
+            b.write_from("run.sh", local)
+        tree = b.fs._store._repo[b.fs._tree_oid]
+        assert tree["run.sh"].filemode == GIT_FILEMODE_BLOB_EXECUTABLE
+
+    def test_write_from_mode_override(self, repo_fs, tmp_path):
+        _, fs = repo_fs
+        local = tmp_path / "script.sh"
+        local.write_bytes(b"#!/bin/sh")
+        # File is NOT executable on disk, but we override
+        with fs.batch() as b:
+            b.write_from("script.sh", local, mode=GIT_FILEMODE_BLOB_EXECUTABLE)
+        tree = b.fs._store._repo[b.fs._tree_oid]
+        assert tree["script.sh"].filemode == GIT_FILEMODE_BLOB_EXECUTABLE
+
+    def test_write_from_missing_file(self, repo_fs):
+        _, fs = repo_fs
+        with pytest.raises((OSError, KeyError)):
+            with fs.batch() as b:
+                b.write_from("x.txt", "/nonexistent/path/file.txt")
+
+    def test_batch_mode_parameter(self, repo_fs):
+        _, fs = repo_fs
+        with fs.batch() as b:
+            b.write("exec.sh", b"#!/bin/sh", mode=GIT_FILEMODE_BLOB_EXECUTABLE)
+        tree = b.fs._store._repo[b.fs._tree_oid]
+        assert tree["exec.sh"].filemode == GIT_FILEMODE_BLOB_EXECUTABLE
+
+    def test_eager_blob_memory(self, repo_fs):
+        _, fs = repo_fs
+        with fs.batch() as b:
+            b.write("a.txt", b"alpha")
+            b.write("b.txt", b"bravo")
+            # Values should be OIDs, not raw bytes
+            for value in b._writes.values():
+                if isinstance(value, tuple):
+                    assert isinstance(value[0], pygit2.Oid)
+                else:
+                    assert isinstance(value, pygit2.Oid)

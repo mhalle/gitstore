@@ -5,7 +5,9 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING
 
-from .tree import GIT_OBJECT_TREE, _normalize_path, _walk_to, exists_at_path
+import pygit2
+
+from .tree import GIT_FILEMODE_BLOB, GIT_FILEMODE_BLOB_EXECUTABLE, GIT_OBJECT_TREE, _mode_from_disk, _normalize_path, _walk_to, exists_at_path
 
 if TYPE_CHECKING:
     from .fs import FS
@@ -18,8 +20,9 @@ class Batch:
         if not fs._writable:
             raise PermissionError("Cannot batch on a read-only snapshot")
         self._fs = fs
+        self._repo = fs._store._repo
         self._message = message
-        self._writes: dict[str, bytes] = {}
+        self._writes: dict[str, bytes | tuple[bytes, int] | pygit2.Oid | tuple[pygit2.Oid, int]] = {}
         self._removes: set[str] = set()
         self._ops: list[str] = []
         self._closed = False
@@ -29,11 +32,23 @@ class Batch:
         if self._closed:
             raise RuntimeError("Batch is closed")
 
-    def write(self, path: str | os.PathLike[str], data: bytes) -> None:
+    def write(self, path: str | os.PathLike[str], data: bytes, *, mode: int | None = None) -> None:
         self._check_open()
         path = _normalize_path(path)
         self._removes.discard(path)
-        self._writes[path] = data
+        blob_oid = self._repo.create_blob(data)
+        self._writes[path] = (blob_oid, mode) if mode is not None else blob_oid
+        self._ops.append(f"Write {path}")
+
+    def write_from(self, path: str | os.PathLike[str], local_path: str | os.PathLike[str], *, mode: int | None = None) -> None:
+        self._check_open()
+        path = _normalize_path(path)
+        local_path = os.fspath(local_path)
+        self._removes.discard(path)
+        blob_oid = self._repo.create_blob_fromdisk(local_path)
+        if mode is None:
+            mode = _mode_from_disk(local_path)
+        self._writes[path] = (blob_oid, mode) if mode != GIT_FILEMODE_BLOB else blob_oid
         self._ops.append(f"Write {path}")
 
     def remove(self, path: str | os.PathLike[str]) -> None:
