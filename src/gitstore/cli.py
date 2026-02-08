@@ -28,6 +28,11 @@ def _parse_repo_path(raw: str) -> tuple[bool, str]:
     return False, raw
 
 
+def _strip_colon(raw: str) -> str:
+    """Strip an optional leading ':' from a repo-side path."""
+    return raw[1:] if raw.startswith(":") else raw
+
+
 def _normalize_repo_path(path: str) -> str:
     """Normalize and validate a repo-side path via the library's _normalize_path."""
     if not path:
@@ -114,7 +119,7 @@ def _resolve_with_at(store: GitStore, ref_str: str, at_path: str | None):
     fs = _resolve_ref(store, ref_str)
     if at_path is None:
         return fs
-    at_path = _normalize_repo_path(at_path)
+    at_path = _normalize_repo_path(_strip_colon(at_path))
     for entry in fs.log(at_path):
         return entry
     raise click.ClickException(
@@ -387,20 +392,13 @@ def cptree(ctx, src, dest, branch, message):
 @click.option("--branch", "-b", default="main", help="Branch to list.")
 @click.pass_context
 def ls(ctx, path, branch):
-    """List files/directories at PATH (or root).
-
-    Prefix repo paths with ':'.
-    """
+    """List files/directories at PATH (or root)."""
     store = _open_store(_require_repo(ctx))
     fs = _get_branch_fs(store, branch)
 
     repo_path = None
     if path is not None:
-        is_repo, repo_path = _parse_repo_path(path)
-        if not is_repo:
-            raise click.ClickException(
-                "PATH must be a repo path prefixed with ':'"
-            )
+        repo_path = _strip_colon(path)
         if repo_path:
             repo_path = _normalize_repo_path(repo_path)
 
@@ -425,17 +423,8 @@ def ls(ctx, path, branch):
 @click.option("--branch", "-b", default="main", help="Branch to read from.")
 @click.pass_context
 def cat(ctx, path, branch):
-    """Print file contents to stdout.
-
-    PATH must be a repo path prefixed with ':'.
-    """
-    is_repo, repo_path = _parse_repo_path(path)
-    if not is_repo:
-        raise click.ClickException(
-            "PATH must be a repo path prefixed with ':'"
-        )
-
-    repo_path = _normalize_repo_path(repo_path)
+    """Print file contents to stdout."""
+    repo_path = _normalize_repo_path(_strip_colon(path))
 
     store = _open_store(_require_repo(ctx))
     fs = _get_branch_fs(store, branch)
@@ -461,20 +450,11 @@ def cat(ctx, path, branch):
 @click.option("-m", "message", default=None, help="Commit message.")
 @click.pass_context
 def rm(ctx, path, branch, message):
-    """Remove a file from the repo.
-
-    PATH must be a repo path prefixed with ':'.
-    """
-    is_repo, repo_path = _parse_repo_path(path)
-    if not is_repo:
-        raise click.ClickException(
-            "PATH must be a repo path prefixed with ':'"
-        )
-
+    """Remove a file from the repo."""
     store = _open_store(_require_repo(ctx))
     fs = _get_branch_fs(store, branch)
 
-    repo_path = _normalize_repo_path(repo_path)
+    repo_path = _normalize_repo_path(_strip_colon(path))
 
     try:
         fs.remove(repo_path, message=message)
@@ -508,7 +488,7 @@ def log(ctx, at_path, match_pattern, branch, fmt):
     fs = _get_branch_fs(store, branch)
 
     if at_path is not None:
-        at_path = _normalize_repo_path(at_path)
+        at_path = _normalize_repo_path(_strip_colon(at_path))
 
     entries = list(fs.log(at=at_path, match=match_pattern))
 
@@ -681,7 +661,7 @@ def zip_cmd(ctx, filename, branch, at_path, match_pattern):
     fs = _get_branch_fs(store, branch)
 
     if at_path is not None:
-        at_path = _normalize_repo_path(at_path)
+        at_path = _normalize_repo_path(_strip_colon(at_path))
     if at_path is not None or match_pattern is not None:
         for entry in fs.log(at=at_path, match=match_pattern):
             fs = entry

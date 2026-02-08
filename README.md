@@ -283,7 +283,7 @@ except StaleSnapshotError:
 
 gitstore includes a command-line interface for working with bare repos without writing Python. Install the package to get the `gitstore` command.
 
-Specify the repository with `--repo`/`-r` or the `GITSTORE_REPO` environment variable. Repo-side paths are prefixed with `:` (like `scp`). Use `--branch`/`-b` to select a branch (defaults to `main`).
+Specify the repository with `--repo`/`-r` or the `GITSTORE_REPO` environment variable. Use `--branch`/`-b` to select a branch (defaults to `main`). For `cp` and `cptree`, prefix repo-side paths with `:` to distinguish them from local paths. For other commands (`ls`, `cat`, `rm`) the `:` prefix is optional.
 
 ```bash
 # Set once per session
@@ -319,11 +319,11 @@ gitstore cptree :repo-dir ./local-dir
 
 # Browse contents
 gitstore ls
-gitstore ls :subdir
-gitstore cat :file.txt
+gitstore ls subdir
+gitstore cat file.txt
 
 # Remove files
-gitstore rm :old-file.txt
+gitstore rm old-file.txt
 
 # View commit history
 gitstore log

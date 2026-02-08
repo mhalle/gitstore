@@ -345,10 +345,10 @@ class TestLs:
         assert result.exit_code != 0
         assert "not found" in result.output.lower()
 
-    def test_no_colon_error(self, runner, repo_with_files):
-        result = runner.invoke(main, ["ls", "--repo", repo_with_files, "no_colon"])
-        assert result.exit_code != 0
-        assert "':'" in result.output
+    def test_without_colon(self, runner, repo_with_files):
+        result = runner.invoke(main, ["ls", "--repo", repo_with_files, "data"])
+        assert result.exit_code == 0
+        assert "data.bin" in result.output
 
 
 # ---------------------------------------------------------------------------
@@ -365,6 +365,11 @@ class TestCat:
         result = runner.invoke(main, ["cat", "--repo", repo_with_files, ":nope.txt"])
         assert result.exit_code != 0
         assert "not found" in result.output.lower()
+
+    def test_without_colon(self, runner, repo_with_files):
+        result = runner.invoke(main, ["cat", "--repo", repo_with_files, "hello.txt"])
+        assert result.exit_code == 0
+        assert "hello world" in result.output
 
     def test_directory_error(self, runner, repo_with_files):
         result = runner.invoke(main, ["cat", "--repo", repo_with_files, ":data"])
@@ -394,6 +399,12 @@ class TestRm:
         assert result.exit_code != 0
         assert "directory" in result.output.lower()
 
+    def test_without_colon(self, runner, repo_with_files):
+        result = runner.invoke(main, ["rm", "--repo", repo_with_files, "hello.txt"])
+        assert result.exit_code == 0
+        result = runner.invoke(main, ["ls", "--repo", repo_with_files])
+        assert "hello.txt" not in result.output
+
     def test_custom_message(self, runner, repo_with_files):
         result = runner.invoke(main, ["rm", "--repo", repo_with_files, ":hello.txt", "-m", "bye bye"])
         assert result.exit_code == 0
@@ -415,6 +426,13 @@ class TestLog:
         assert len(lines) >= 3
 
     def test_path_filter(self, runner, repo_with_files):
+        result = runner.invoke(main, ["log", "--repo", repo_with_files, "--at", "hello.txt"])
+        assert result.exit_code == 0
+        lines = result.output.strip().split("\n")
+        assert len(lines) >= 1
+
+    def test_at_without_colon(self, runner, repo_with_files):
+        """--at should work without a leading ':'."""
         result = runner.invoke(main, ["log", "--repo", repo_with_files, "--at", "hello.txt"])
         assert result.exit_code == 0
         lines = result.output.strip().split("\n")
