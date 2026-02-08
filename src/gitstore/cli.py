@@ -97,6 +97,31 @@ def _get_fs(store: GitStore, branch: str, ref: str | None):
     return _get_branch_fs(store, branch)
 
 
+def _normalize_at_path(at_path: str | None) -> str | None:
+    """Normalize a --path filter value, returning None if unset."""
+    if at_path is None:
+        return None
+    return _normalize_repo_path(_strip_colon(at_path))
+
+
+def _resolve_snapshot(fs, at_path: str | None, match_pattern: str | None):
+    """Narrow *fs* to the first commit matching --path / --match filters."""
+    at_path = _normalize_at_path(at_path)
+    if at_path is not None or match_pattern is not None:
+        for entry in fs.log(at=at_path, match=match_pattern):
+            return entry
+        raise click.ClickException("No matching commits found")
+    return fs
+
+
+def _commit_writes(fs, writes, message):
+    """Commit *writes* with a user-friendly StaleSnapshotError message."""
+    try:
+        fs._commit_changes(writes, set(), message or "")
+    except StaleSnapshotError:
+        raise click.ClickException("Branch modified concurrently — retry")
+
+
 def _resolve_ref(store: GitStore, ref_str: str):
     """Try branches, then tags, then commit hash."""
     if ref_str in store.branches:
@@ -288,13 +313,7 @@ def cp(ctx, args, branch, ref, message, mode):
                 # Bare ":" — copy to root, keep original filename
                 repo_file = _normalize_repo_path(local.name)
             writes[repo_file] = (data, filemode) if filemode else data
-        msg = message or ""
-        try:
-            fs._commit_changes(writes, set(), msg)
-        except StaleSnapshotError:
-            raise click.ClickException(
-                "Branch modified concurrently — retry"
-            )
+        _commit_writes(fs, writes, message)
         for repo_file in writes:
             _status(ctx, f"Copied -> :{repo_file}")
     else:
@@ -389,13 +408,7 @@ def cptree(ctx, src, dest, branch, ref, message):
             raise click.ClickException(
                 f"No files found in directory: {src_path}"
             )
-        msg = message or ""
-        try:
-            fs._commit_changes(writes, set(), msg)
-        except StaleSnapshotError:
-            raise click.ClickException(
-                "Branch modified concurrently — retry"
-            )
+        _commit_writes(fs, writes, message)
         _status(ctx, f"Copied {len(writes)} file(s) -> :{dest_path or '/'}")
     else:
         # Repo → disk
@@ -546,9 +559,7 @@ def log(ctx, at_path, deprecated_at, match_pattern, branch, ref, fmt):
     store = _open_store(_require_repo(ctx))
     fs = _get_fs(store, branch, ref)
 
-    if at_path is not None:
-        at_path = _normalize_repo_path(_strip_colon(at_path))
-
+    at_path = _normalize_at_path(at_path)
     entries = list(fs.log(at=at_path, match=match_pattern))
 
     if fmt == "json":
@@ -724,16 +735,7 @@ def zip_cmd(ctx, filename, branch, ref, at_path, deprecated_at, match_pattern):
     """
     at_path = at_path or deprecated_at
     store = _open_store(_require_repo(ctx))
-    fs = _get_fs(store, branch, ref)
-
-    if at_path is not None:
-        at_path = _normalize_repo_path(_strip_colon(at_path))
-    if at_path is not None or match_pattern is not None:
-        for entry in fs.log(at=at_path, match=match_pattern):
-            fs = entry
-            break
-        else:
-            raise click.ClickException("No matching commits found")
+    fs = _resolve_snapshot(_get_fs(store, branch, ref), at_path, match_pattern)
 
     to_stdout = filename == "-"
     dest = io.BytesIO() if to_stdout else filename
@@ -796,11 +798,7 @@ def unzip_cmd(ctx, filename, branch, message):
     if not writes:
         raise click.ClickException("Zip file contains no files")
 
-    msg = message or ""
-    try:
-        fs._commit_changes(writes, set(), msg)
-    except StaleSnapshotError:
-        raise click.ClickException("Branch modified concurrently — retry")
+    _commit_writes(fs, writes, message)
     _status(ctx, f"Imported {len(writes)} file(s) from {filename}")
 
 
@@ -827,16 +825,7 @@ def tar_cmd(ctx, filename, branch, ref, at_path, deprecated_at, match_pattern):
     import tarfile
 
     store = _open_store(_require_repo(ctx))
-    fs = _get_fs(store, branch, ref)
-
-    if at_path is not None:
-        at_path = _normalize_repo_path(_strip_colon(at_path))
-    if at_path is not None or match_pattern is not None:
-        for entry in fs.log(at=at_path, match=match_pattern):
-            fs = entry
-            break
-        else:
-            raise click.ClickException("No matching commits found")
+    fs = _resolve_snapshot(_get_fs(store, branch, ref), at_path, match_pattern)
 
     to_stdout = filename == "-"
     mode = "w:"
@@ -924,9 +913,5 @@ def untar_cmd(ctx, filename, branch, message):
     if not writes:
         raise click.ClickException("Tar archive contains no files")
 
-    msg = message or ""
-    try:
-        fs._commit_changes(writes, set(), msg)
-    except StaleSnapshotError:
-        raise click.ClickException("Branch modified concurrently — retry")
+    _commit_writes(fs, writes, message)
     _status(ctx, f"Imported {len(writes)} file(s) from {filename}")
