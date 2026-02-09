@@ -45,6 +45,25 @@ del repo.branches["dev"]        # delete
 "main" in repo.branches         # True
 ```
 
+#### `repo.branches.reflog(name) -> list[dict]`
+
+Read the reflog (reference log) for a branch. The reflog records every time a branch pointer moves, including commits, undos, and branch updates.
+
+**Returns:** List of reflog entries (chronologically ordered), each a dict with:
+- `old_sha` (str) - Previous commit hash
+- `new_sha` (str) - New commit hash
+- `committer` (str) - Name and email
+- `timestamp` (int) - Unix timestamp
+- `message` (str) - Reflog message
+
+**Raises:** `KeyError` (branch doesn't exist), `FileNotFoundError` (no reflog), `ValueError` (called on tags).
+
+```python
+entries = repo.branches.reflog("main")
+for entry in entries[-5:]:  # Last 5 movements
+    print(f"{entry['new_sha'][:7]}: {entry['message']}")
+```
+
 ### `repo.tags`
 
 A `MutableMapping[str, FS]` of tags. Tags are immutable -- overwriting an existing tag raises `KeyError`. Tag snapshots are read-only (`branch=None`).
@@ -227,11 +246,125 @@ for snapshot in fs.log(path="config.json", match="fix*"):
     print(snapshot.hash, snapshot.message)
 ```
 
+#### `fs.undo(steps=1) -> FS`
+
+Move the branch back N commits. Walks back through parent commits and updates the branch pointer. Automatically writes a reflog entry.
+
+**Returns:** New `FS` snapshot at the previous state.
+
+**Raises:** `PermissionError` (called on read-only tag), `ValueError` (not enough history).
+
+```python
+fs = repo.branches["main"]
+fs = fs.undo()      # Back 1 commit
+fs = fs.undo(3)     # Back 3 commits
+```
+
+#### `fs.redo(steps=1) -> FS`
+
+Move the branch forward N steps using the reflog. Reads the reflog to find where the branch was before the last N movements. Can resurrect "orphaned" commits after undo.
+
+Each redo step moves back one entry in the reflog (backwards through the log, forward in commit history).
+
+**Returns:** New `FS` snapshot at the forward position.
+
+**Raises:** `PermissionError` (called on read-only tag), `ValueError` (not enough redo history or no reflog).
+
+```python
+fs = fs.undo(2)     # Go back 2 commits
+fs = fs.redo()      # Redo 1 step (forward in reflog)
+fs = fs.redo(2)     # Redo 2 steps
+```
+
+**Note:** Undo creates one reflog entry that records the branch movement. To redo an `undo(N)`, you typically need `redo(1)`, not `redo(N)`.
+
 ### Export
 
 #### `fs.dump(path) -> None`
 
 Write the entire tree to a directory on disk. Creates directories as needed. Symlinks are recreated as symlinks.
+
+---
+
+## Working with Old Snapshots
+
+When you write to an FS, you get back a new snapshot while the old reference remains valid. Old snapshots are **read-only bookmarks** into history.
+
+### Old Snapshots Are Readable
+
+```python
+fs1 = fs.write("a.txt", b"version 1")
+fs2 = fs1.write("b.txt", b"version 2")
+fs3 = fs2.write("c.txt", b"version 3")
+
+# fs1 and fs2 remain readable
+print(fs1.read("a.txt"))           # Works!
+print(fs1.ls())                     # ["a.txt"]
+print(fs2.exists("b.txt"))          # True
+print(fs2.exists("c.txt"))          # False
+```
+
+Use cases:
+- **Compare versions** - Read old and new states side-by-side
+- **Audit changes** - See what files existed at different points
+- **Extract data** - Get specific files from history without full checkout
+
+### Old Snapshots Cannot Write
+
+Old snapshots raise `StaleSnapshotError` if you try to write from them, because the branch has moved forward:
+
+```python
+fs1 = fs.write("a.txt", b"a")
+fs2 = fs1.write("b.txt", b"b")
+
+# fs1 is now stale - the branch moved to fs2
+fs1.write("c.txt", b"c")  # StaleSnapshotError!
+```
+
+This prevents confusion about which branch state you're modifying. To continue writing, use the latest snapshot.
+
+### Resetting Branches
+
+You can reset a branch to an old snapshot (like `git reset --hard`):
+
+```python
+fs1 = fs.write("a.txt", b"a")
+fs2 = fs1.write("b.txt", b"b")
+fs3 = fs2.write("c.txt", b"c")
+
+# Reset main back to fs1
+repo.branches["main"] = fs1
+
+# Branch now points to fs1's commit
+current = repo.branches["main"]
+print(current.ls())  # ["a.txt"]
+```
+
+This updates the branch pointer but doesn't delete commits - they remain in the reflog and can be recovered with `redo()`.
+
+### Creating Branches from Old Snapshots
+
+You can create a new branch from any old snapshot (like `git checkout -b feature <commit>`):
+
+```python
+fs1 = fs.write("a.txt", b"a")
+fs2 = fs1.write("b.txt", b"b")
+fs3 = fs2.write("c.txt", b"c")
+
+# Create new branch from fs1
+repo.branches["experiment"] = fs1
+
+# Get writable snapshot from new branch
+exp = repo.branches["experiment"]
+exp = exp.write("x.txt", b"x")  # Works!
+```
+
+The new branch starts at the old snapshot's commit, and you can write from the fresh branch snapshot.
+
+**Pattern:**
+1. Keep old snapshot as read-only bookmark
+2. Use it to set branch pointers (`repo.branches[name] = old_fs`)
+3. Get fresh snapshot from branch to continue writing
 
 ---
 
