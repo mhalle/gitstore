@@ -48,7 +48,7 @@ def repo_with_files(tmp_path, runner):
     data_dir = tmp_path / "datadir"
     data_dir.mkdir()
     (data_dir / "data.bin").write_bytes(b"\x00\x01\x02")
-    r = runner.invoke(main, ["cptree", "--repo", p, str(data_dir), ":data"])
+    r = runner.invoke(main, ["cp", "--repo", p, str(data_dir) + "/", ":data"])
     assert r.exit_code == 0, r.output
 
     return p
@@ -466,15 +466,77 @@ class TestCpDryRun:
         ])
         assert result.exit_code == 0, result.output
         assert "data.bin" in result.output
+        assert "+ " in result.output  # categorized output
         assert not dest.exists()
+
+
+# ---------------------------------------------------------------------------
+# TestCpDelete
+# ---------------------------------------------------------------------------
+
+class TestCpDelete:
+    def test_delete_disk_to_repo(self, runner, repo_with_files, tmp_path):
+        """--delete removes repo files not in source."""
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "new.txt").write_text("new")
+        result = runner.invoke(main, [
+            "cp", "--repo", repo_with_files,
+            str(src) + "/", ":data", "--delete",
+        ])
+        assert result.exit_code == 0, result.output
+        # data.bin should be gone, new.txt should exist
+        result2 = runner.invoke(main, ["ls", "--repo", repo_with_files, ":data"])
+        assert "new.txt" in result2.output
+        assert "data.bin" not in result2.output
+
+    def test_delete_repo_to_disk(self, runner, repo_with_files, tmp_path):
+        """--delete removes local files not in source."""
+        dest = tmp_path / "out"
+        dest.mkdir()
+        (dest / "extra.txt").write_text("extra")
+        result = runner.invoke(main, [
+            "cp", "--repo", repo_with_files,
+            ":data/", str(dest), "--delete",
+        ])
+        assert result.exit_code == 0, result.output
+        assert (dest / "data.bin").exists()
+        assert not (dest / "extra.txt").exists()
+
+    def test_delete_single_file_error(self, runner, repo_with_files, tmp_path):
+        """--delete errors with single file source."""
+        f = tmp_path / "single.txt"
+        f.write_text("data")
+        result = runner.invoke(main, [
+            "cp", "--repo", repo_with_files,
+            str(f), ":dest", "--delete",
+        ])
+        assert result.exit_code != 0
+        assert "Cannot use --delete" in result.output
+
+    def test_delete_dry_run(self, runner, repo_with_files, tmp_path):
+        """--delete --dry-run shows categorized actions."""
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "new.txt").write_text("new")
+        result = runner.invoke(main, [
+            "cp", "--repo", repo_with_files,
+            "-n", "--delete", str(src) + "/", ":data",
+        ])
+        assert result.exit_code == 0, result.output
+        assert "+" in result.output  # add
+        assert "-" in result.output  # delete
 
 
 # ---------------------------------------------------------------------------
 # TestCptree
 # ---------------------------------------------------------------------------
 
-class TestCptree:
-    def test_disk_to_repo(self, runner, initialized_repo, tmp_path):
+class TestCpTree:
+    """Tests for cp with directory tree operations (formerly cptree)."""
+
+    def test_disk_dir_contents_to_repo(self, runner, initialized_repo, tmp_path):
+        """cp dir/ :stuff copies contents into :stuff."""
         src = tmp_path / "treesrc"
         src.mkdir()
         (src / "a.txt").write_text("aaa")
@@ -482,56 +544,43 @@ class TestCptree:
         sub.mkdir()
         (sub / "b.txt").write_text("bbb")
 
-        result = runner.invoke(main, ["cptree", "--repo", initialized_repo, str(src), ":stuff"])
+        result = runner.invoke(main, ["cp", "--repo", initialized_repo, str(src) + "/", ":stuff"])
         assert result.exit_code == 0, result.output
 
         result = runner.invoke(main, ["ls", "--repo", initialized_repo, ":stuff"])
         assert "a.txt" in result.output
         assert "sub" in result.output
 
-    def test_repo_to_disk(self, runner, repo_with_files, tmp_path):
+    def test_repo_dir_contents_to_disk(self, runner, repo_with_files, tmp_path):
+        """cp :data/ dest exports contents of :data into dest."""
         dest = tmp_path / "export"
-        result = runner.invoke(main, ["cptree", "--repo", repo_with_files, ":data", str(dest)])
+        dest.mkdir()
+        result = runner.invoke(main, ["cp", "--repo", repo_with_files, ":data/", str(dest)])
         assert result.exit_code == 0
         assert (dest / "data.bin").read_bytes() == b"\x00\x01\x02"
 
     def test_root_export(self, runner, repo_with_files, tmp_path):
+        """cp :/ dest exports everything into dest."""
         dest = tmp_path / "full_export"
-        result = runner.invoke(main, ["cptree", "--repo", repo_with_files, ":", str(dest)])
+        dest.mkdir()
+        result = runner.invoke(main, ["cp", "--repo", repo_with_files, ":/", str(dest)])
         assert result.exit_code == 0
         assert (dest / "hello.txt").exists()
         assert (dest / "data" / "data.bin").exists()
 
-    def test_trailing_slashes(self, runner, initialized_repo, tmp_path):
-        src = tmp_path / "slashsrc"
-        src.mkdir()
-        (src / "f.txt").write_text("f")
-        # Trailing slash should be stripped
-        result = runner.invoke(main, ["cptree", "--repo", initialized_repo, str(src), ":dir/"])
-        assert result.exit_code == 0
-        result = runner.invoke(main, ["ls", "--repo", initialized_repo, ":dir"])
-        assert "f.txt" in result.output
-
-    def test_disk_to_repo_root(self, runner, initialized_repo, tmp_path):
-        """cptree ./dir : should import files at the repo root."""
+    def test_disk_dir_contents_to_repo_root(self, runner, initialized_repo, tmp_path):
+        """cp dir/ : imports contents at repo root."""
         src = tmp_path / "rootsrc"
         src.mkdir()
         (src / "r.txt").write_text("root file")
-        result = runner.invoke(main, ["cptree", "--repo", initialized_repo, str(src), ":"])
+        result = runner.invoke(main, ["cp", "--repo", initialized_repo, str(src) + "/", ":"])
         assert result.exit_code == 0, result.output
         result = runner.invoke(main, ["ls", "--repo", initialized_repo])
         assert "r.txt" in result.output
 
-    def test_empty_dir_error(self, runner, initialized_repo, tmp_path):
-        src = tmp_path / "empty"
-        src.mkdir()
-        result = runner.invoke(main, ["cptree", "--repo", initialized_repo, str(src), ":empty"])
-        assert result.exit_code != 0
-        assert "No files" in result.output
-
 
 # ---------------------------------------------------------------------------
-# TestSymlinks (cp and cptree)
+# TestSymlinks
 # ---------------------------------------------------------------------------
 
 class TestSymlinks:
@@ -550,8 +599,8 @@ class TestSymlinks:
         assert dest.is_symlink()
         assert os.readlink(dest) == "target.txt"
 
-    def test_cptree_disk_to_repo_preserves_symlinks(self, runner, initialized_repo, tmp_path):
-        """cptree disk→repo preserves file symlinks by default."""
+    def test_cp_dir_disk_to_repo_preserves_symlinks(self, runner, initialized_repo, tmp_path):
+        """cp dir/ :stuff preserves file symlinks by default."""
         import os
         from gitstore import GitStore
         from gitstore.tree import GIT_FILEMODE_LINK
@@ -561,7 +610,7 @@ class TestSymlinks:
         (src / "real.txt").write_text("hello")
         os.symlink("real.txt", src / "link.txt")
 
-        result = runner.invoke(main, ["cptree", "--repo", initialized_repo, str(src), ":stuff"])
+        result = runner.invoke(main, ["cp", "--repo", initialized_repo, str(src) + "/", ":stuff"])
         assert result.exit_code == 0, result.output
 
         store = GitStore.open(initialized_repo)
@@ -572,8 +621,8 @@ class TestSymlinks:
         assert entry is not None
         assert entry[1] == GIT_FILEMODE_LINK
 
-    def test_cptree_disk_to_repo_symlink_to_dir(self, runner, initialized_repo, tmp_path):
-        """cptree disk→repo preserves symlinked directories as symlink entries."""
+    def test_cp_dir_disk_to_repo_symlink_to_dir(self, runner, initialized_repo, tmp_path):
+        """cp dir/ :stuff preserves symlinked directories as symlink entries."""
         import os
         from gitstore import GitStore
         from gitstore.tree import GIT_FILEMODE_LINK
@@ -585,7 +634,7 @@ class TestSymlinks:
         (real_dir / "file.txt").write_text("inside")
         os.symlink("real_dir", src / "link_dir")
 
-        result = runner.invoke(main, ["cptree", "--repo", initialized_repo, str(src), ":stuff"])
+        result = runner.invoke(main, ["cp", "--repo", initialized_repo, str(src) + "/", ":stuff"])
         assert result.exit_code == 0, result.output
 
         store = GitStore.open(initialized_repo)
@@ -596,8 +645,8 @@ class TestSymlinks:
         assert entry is not None
         assert entry[1] == GIT_FILEMODE_LINK
 
-    def test_cptree_disk_to_repo_follow_symlinks(self, runner, initialized_repo, tmp_path):
-        """cptree --follow-symlinks dereferences symlinks."""
+    def test_cp_dir_disk_to_repo_follow_symlinks(self, runner, initialized_repo, tmp_path):
+        """cp dir/ :stuff --follow-symlinks dereferences file symlinks."""
         import os
         from gitstore import GitStore
         from gitstore.tree import GIT_FILEMODE_LINK
@@ -608,7 +657,7 @@ class TestSymlinks:
         os.symlink("real.txt", src / "link.txt")
 
         result = runner.invoke(main, [
-            "cptree", "--repo", initialized_repo, str(src), ":stuff", "--follow-symlinks"
+            "cp", "--repo", initialized_repo, str(src) + "/", ":stuff", "--follow-symlinks"
         ])
         assert result.exit_code == 0, result.output
 
@@ -621,8 +670,8 @@ class TestSymlinks:
         assert entry is not None
         assert entry[1] != GIT_FILEMODE_LINK
 
-    def test_cptree_disk_to_repo_follow_symlinks_dir(self, runner, initialized_repo, tmp_path):
-        """cptree --follow-symlinks follows symlinked directories."""
+    def test_cp_dir_disk_to_repo_follow_symlinks_dir(self, runner, initialized_repo, tmp_path):
+        """cp dir/ :stuff --follow-symlinks follows symlinked directories."""
         import os
         from gitstore import GitStore
         from gitstore.tree import GIT_FILEMODE_LINK
@@ -636,7 +685,7 @@ class TestSymlinks:
         os.symlink("real_dir", src / "link_dir")
 
         result = runner.invoke(main, [
-            "cptree", "--repo", initialized_repo, str(src), ":stuff", "--follow-symlinks"
+            "cp", "--repo", initialized_repo, str(src) + "/", ":stuff", "--follow-symlinks"
         ])
         assert result.exit_code == 0, result.output
 
@@ -651,8 +700,8 @@ class TestSymlinks:
         assert entry is not None
         assert entry[1] != GIT_FILEMODE_LINK
 
-    def test_cptree_disk_to_repo_follow_symlinks_cycle(self, runner, initialized_repo, tmp_path):
-        """cptree --follow-symlinks handles symlink cycles without infinite loop."""
+    def test_cp_dir_disk_to_repo_follow_symlinks_cycle(self, runner, initialized_repo, tmp_path):
+        """cp dir/ :stuff --follow-symlinks handles symlink cycles without infinite loop."""
         import os
 
         src = tmp_path / "treesrc"
@@ -665,7 +714,7 @@ class TestSymlinks:
         os.symlink(str(src), subdir / "loop")
 
         result = runner.invoke(main, [
-            "cptree", "--repo", initialized_repo, str(src), ":cyc", "--follow-symlinks"
+            "cp", "--repo", initialized_repo, str(src) + "/", ":cyc", "--follow-symlinks"
         ])
         assert result.exit_code == 0, result.output
 
@@ -675,8 +724,8 @@ class TestSymlinks:
         assert fs.read("cyc/file.txt") == b"ok"
         assert fs.read("cyc/sub/inner.txt") == b"inner"
 
-    def test_cptree_repo_to_disk_symlink(self, runner, initialized_repo, tmp_path):
-        """cptree repo→disk creates symlinks on disk for symlink entries."""
+    def test_cp_dir_repo_to_disk_symlink(self, runner, initialized_repo, tmp_path):
+        """cp :dir/ dest creates symlinks on disk for symlink entries."""
         import os
         from gitstore import GitStore
         store = GitStore.open(initialized_repo)
@@ -685,15 +734,15 @@ class TestSymlinks:
         fs.write_symlink("dir/link.txt", "target.txt")
 
         dest = tmp_path / "export"
-        result = runner.invoke(main, ["cptree", "--repo", initialized_repo, ":dir", str(dest)])
+        dest.mkdir()
+        result = runner.invoke(main, ["cp", "--repo", initialized_repo, ":dir/", str(dest)])
         assert result.exit_code == 0, result.output
         assert (dest / "link.txt").is_symlink()
         assert os.readlink(dest / "link.txt") == "target.txt"
 
-    def test_cptree_roundtrip_symlinks(self, runner, initialized_repo, tmp_path):
-        """cptree disk→repo then repo→disk preserves symlinks."""
+    def test_cp_dir_roundtrip_symlinks(self, runner, initialized_repo, tmp_path):
+        """cp dir/ :rt then cp :rt/ dest preserves symlinks."""
         import os
-        from gitstore import GitStore
 
         # Create disk tree with symlinks
         src = tmp_path / "treesrc"
@@ -702,12 +751,13 @@ class TestSymlinks:
         os.symlink("real.txt", src / "link.txt")
 
         # Disk → repo
-        result = runner.invoke(main, ["cptree", "--repo", initialized_repo, str(src), ":rt"])
+        result = runner.invoke(main, ["cp", "--repo", initialized_repo, str(src) + "/", ":rt"])
         assert result.exit_code == 0, result.output
 
         # Repo → disk
         dest = tmp_path / "export"
-        result = runner.invoke(main, ["cptree", "--repo", initialized_repo, ":rt", str(dest)])
+        dest.mkdir()
+        result = runner.invoke(main, ["cp", "--repo", initialized_repo, ":rt/", str(dest)])
         assert result.exit_code == 0, result.output
         assert (dest / "link.txt").is_symlink()
         assert os.readlink(dest / "link.txt") == "real.txt"
@@ -1103,10 +1153,11 @@ class TestPathNormalization:
         result = runner.invoke(main, ["rm", "--repo", repo_with_files, ":../escape"])
         assert result.exit_code != 0
 
-    def test_cptree_repo_to_disk_leading_slash(self, runner, repo_with_files, tmp_path):
-        """cptree :/data ./out should export data/* directly under ./out/."""
+    def test_cp_dir_contents_leading_slash(self, runner, repo_with_files, tmp_path):
+        """cp :/data/ ./out should export data/* directly under ./out/."""
         dest = tmp_path / "out"
-        result = runner.invoke(main, ["cptree", "--repo", repo_with_files, ":/data", str(dest)])
+        dest.mkdir()
+        result = runner.invoke(main, ["cp", "--repo", repo_with_files, ":/data/", str(dest)])
         assert result.exit_code == 0
         # Should be out/data.bin, NOT out/data/data.bin
         assert (dest / "data.bin").exists()
@@ -2172,11 +2223,12 @@ class TestHash:
         assert result.exit_code == 0
         assert dest.read_text() == "hello world\n"
 
-    def test_cptree_repo_to_disk_by_hash(self, runner, repo_with_files, tmp_path):
+    def test_cp_dir_repo_to_disk_by_hash(self, runner, repo_with_files, tmp_path):
         commit_hash = self._get_commit_hash(repo_with_files)
         dest = tmp_path / "export"
+        dest.mkdir()
         result = runner.invoke(main, [
-            "cptree", "--repo", repo_with_files, ":data", str(dest),
+            "cp", "--repo", repo_with_files, ":data/", str(dest),
             "--hash", commit_hash
         ])
         assert result.exit_code == 0
@@ -2408,3 +2460,23 @@ class TestUnarchive:
         assert result.exit_code == 0
         result = runner.invoke(main, ["log", "--repo", initialized_repo])
         assert "bulk import" in result.output
+
+
+# ---------------------------------------------------------------------------
+# cp --ignore-errors
+# ---------------------------------------------------------------------------
+
+class TestCpIgnoreErrors:
+    def test_ignore_errors_prints_stderr(self, runner, repo_with_files, tmp_path):
+        """Bad file + --ignore-errors -> stderr output, non-zero exit."""
+        repo = repo_with_files
+        good = tmp_path / "good.txt"
+        good.write_text("good")
+        bad = str(tmp_path / "nonexistent.txt")
+        result = runner.invoke(main, [
+            "cp", "--repo", repo,
+            str(good), bad, ":dest",
+            "--ignore-errors",
+        ])
+        assert result.exit_code != 0
+        assert "ERROR" in result.output

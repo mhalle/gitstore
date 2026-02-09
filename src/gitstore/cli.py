@@ -493,9 +493,15 @@ def destroy(ctx, force):
               help="Follow symlinks instead of preserving them (disk→repo only).")
 @click.option("-n", "--dry-run", "dry_run", is_flag=True, default=False,
               help="Show what would be copied without writing.")
+@click.option("--ignore-existing", is_flag=True, default=False,
+              help="Skip files that already exist at the destination.")
+@click.option("--delete", is_flag=True, default=False,
+              help="Delete destination files not present in source (like rsync --delete).")
+@click.option("--ignore-errors", is_flag=True, default=False,
+              help="Skip files that fail and continue copying.")
 @_no_create_option
 @click.pass_context
-def cp(ctx, args, branch, ref, message, mode, follow_symlinks, dry_run, no_create):
+def cp(ctx, args, branch, ref, message, mode, follow_symlinks, dry_run, ignore_existing, delete, ignore_errors, no_create):
     """Copy files and directories between disk and repo.
 
     The last argument is the destination; all preceding arguments are sources.
@@ -571,6 +577,10 @@ def cp(ctx, args, branch, ref, message, mode, follow_symlinks, dry_run, no_creat
         is_single_file = single_file_src and os.path.isfile(src_raw)
 
         if is_single_file:
+            if delete:
+                raise click.ClickException(
+                    "Cannot use --delete with a single file source."
+                )
             # Single file: dest is the exact repo path, unless dest is an
             # existing directory — then place the file inside it.
             local = Path(src_raw)
@@ -580,6 +590,8 @@ def cp(ctx, args, branch, ref, message, mode, follow_symlinks, dry_run, no_creat
                 repo_file = dest_path
             else:
                 repo_file = _normalize_repo_path(local.name)
+            if ignore_existing and fs.exists(repo_file):
+                return
             try:
                 if dry_run:
                     click.echo(f"{local} -> :{repo_file}")
@@ -588,23 +600,40 @@ def cp(ctx, args, branch, ref, message, mode, follow_symlinks, dry_run, no_creat
                         b.write_from(repo_file, local, mode=filemode)
                     _status(ctx, f"Copied -> :{repo_file}")
             except (FileNotFoundError, OSError) as exc:
-                raise click.ClickException(str(exc))
+                if ignore_errors:
+                    click.echo(f"ERROR: {local}: {exc}", err=True)
+                    ctx.exit(1)
+                else:
+                    raise click.ClickException(str(exc))
             except StaleSnapshotError:
                 raise click.ClickException("Branch modified concurrently — retry")
         else:
             source_paths = list(raw_sources)
             try:
                 if dry_run:
-                    pairs = copy_to_repo_dry_run(fs, source_paths, dest_path)
-                    for local, repo_file in pairs:
-                        click.echo(f"{local} -> :{repo_file}")
+                    plan = copy_to_repo_dry_run(
+                        fs, source_paths, dest_path,
+                        follow_symlinks=follow_symlinks,
+                        ignore_existing=ignore_existing,
+                        delete=delete,
+                    )
+                    for action in plan.actions():
+                        prefix = {"add": "+", "update": "~", "delete": "-"}[action.action]
+                        click.echo(f"{prefix} :{dest_path}/{action.path}" if dest_path else f"{prefix} :{action.path}")
                 else:
-                    copy_to_repo(
+                    _new_fs, errs = copy_to_repo(
                         fs, source_paths, dest_path,
                         follow_symlinks=follow_symlinks,
                         message=message, mode=filemode,
+                        ignore_existing=ignore_existing,
+                        delete=delete,
+                        ignore_errors=ignore_errors,
                     )
+                    for e in errs:
+                        click.echo(f"ERROR: {e.path}: {e.error}", err=True)
                     _status(ctx, f"Copied -> :{dest_path or '/'}")
+                    if errs:
+                        ctx.exit(1)
             except (FileNotFoundError, NotADirectoryError) as exc:
                 raise click.ClickException(str(exc))
             except StaleSnapshotError:
@@ -621,6 +650,10 @@ def cp(ctx, args, branch, ref, message, mode, follow_symlinks, dry_run, no_creat
         )
 
         if is_single_repo_file:
+            if delete:
+                raise click.ClickException(
+                    "Cannot use --delete with a single file source."
+                )
             # Single file: dest is the exact local path (or into dir if dir exists)
             src_path = _normalize_repo_path(src_raw)
             if not fs.exists(src_path):
@@ -630,6 +663,8 @@ def cp(ctx, args, branch, ref, message, mode, follow_symlinks, dry_run, no_creat
                 out = local_dest / Path(src_path).name
             else:
                 out = local_dest
+            if ignore_existing and out.exists():
+                return
             if dry_run:
                 click.echo(f":{src_path} -> {out}")
             else:
@@ -642,160 +677,40 @@ def cp(ctx, args, branch, ref, message, mode, follow_symlinks, dry_run, no_creat
                     else:
                         out.write_bytes(fs.read(src_path))
                 except OSError as exc:
-                    raise click.ClickException(f"Cannot write {out}: {exc}")
-                _status(ctx, f"Copied :{src_path} -> {out}")
+                    if ignore_errors:
+                        click.echo(f"ERROR: {out}: {exc}", err=True)
+                        ctx.exit(1)
+                    else:
+                        raise click.ClickException(f"Cannot write {out}: {exc}")
+                else:
+                    _status(ctx, f"Copied :{src_path} -> {out}")
         else:
             try:
                 if dry_run:
-                    pairs = copy_from_repo_dry_run(fs, source_paths, dest_path)
-                    for repo_file, local in pairs:
-                        click.echo(f":{repo_file} -> {local}")
+                    plan = copy_from_repo_dry_run(
+                        fs, source_paths, dest_path,
+                        ignore_existing=ignore_existing,
+                        delete=delete,
+                    )
+                    for action in plan.actions():
+                        prefix = {"add": "+", "update": "~", "delete": "-"}[action.action]
+                        click.echo(f"{prefix} {os.path.join(dest_path, action.path)}")
                 else:
-                    copy_from_repo(fs, source_paths, dest_path)
+                    errs = copy_from_repo(
+                        fs, source_paths, dest_path,
+                        ignore_existing=ignore_existing,
+                        delete=delete,
+                        ignore_errors=ignore_errors,
+                    )
+                    for e in errs:
+                        click.echo(f"ERROR: {e.path}: {e.error}", err=True)
                     _status(ctx, f"Copied -> {dest_path}")
+                    if errs:
+                        ctx.exit(1)
             except (FileNotFoundError, NotADirectoryError) as exc:
                 raise click.ClickException(str(exc))
             except OSError as exc:
                 raise click.ClickException(str(exc))
-
-
-# ---------------------------------------------------------------------------
-# cptree helpers (delegated to copy module)
-# ---------------------------------------------------------------------------
-
-def _cptree_disk_to_repo(b, local, dest_path, follow_symlinks):
-    from .copy import _cptree_disk_to_repo as _impl
-    return _impl(b, local, dest_path, follow_symlinks)
-
-
-def _cptree_repo_to_disk(fs, src_path, local_dest):
-    from .copy import _cptree_repo_to_disk as _impl
-    _impl(fs, src_path, local_dest)
-
-
-# ---------------------------------------------------------------------------
-# cptree
-# ---------------------------------------------------------------------------
-
-@main.command()
-@_repo_option
-@click.argument("args", nargs=-1, required=True)
-@click.option("--branch", "-b", default="main", help="Branch to operate on.")
-@click.option("--hash", "ref", default=None, help="Branch, tag, or commit hash to read from.")
-@click.option("-m", "message", default=None, help="Commit message.")
-@click.option("--follow-symlinks", is_flag=True, default=False,
-              help="Follow symlinks instead of preserving them (disk→repo only).")
-@_no_create_option
-@click.pass_context
-def cptree(ctx, args, branch, ref, message, follow_symlinks, no_create):
-    """Copy directory trees between disk and repo.
-
-    The last argument is the destination; all preceding arguments are sources.
-    With a single source, its contents go into the destination.
-    With multiple sources, each becomes a subdirectory of the destination
-    named by its basename.
-
-    Prefix repo-side paths with ':'.
-    Symlinks are preserved by default when copying disk→repo.
-    Use --follow-symlinks to dereference them instead.
-    """
-    if len(args) < 2:
-        raise click.ClickException("cptree requires at least two arguments (SRC... DEST)")
-
-    raw_sources = args[:-1]
-    raw_dest = args[-1]
-
-    parsed_sources = [_parse_repo_path(s) for s in raw_sources]
-    dest_is_repo, dest_path = _parse_repo_path(raw_dest)
-
-    src_is_repo = parsed_sources[0][0]
-    if any(p[0] != src_is_repo for p in parsed_sources):
-        raise click.ClickException(
-            "All source paths must be the same type (all repo or all local)"
-        )
-
-    if src_is_repo == dest_is_repo:
-        if src_is_repo:
-            raise click.ClickException(
-                "Both sources and DEST are repo paths — one side must be local"
-            )
-        raise click.ClickException(
-            "Neither sources nor DEST is a repo path — prefix repo paths with ':'"
-        )
-
-    if ref and not src_is_repo:
-        raise click.ClickException(
-            "Cannot write to a commit hash — use --branch for writes"
-        )
-
-    multi = len(parsed_sources) > 1
-
-    repo_path = _require_repo(ctx)
-    if not src_is_repo and not no_create:
-        store = _open_or_create_store(repo_path, branch)
-    else:
-        store = _open_store(repo_path)
-    fs = _get_fs(store, branch, ref)
-
-    if not src_is_repo:
-        # Disk → repo
-        if dest_path:
-            dest_path = _normalize_repo_path(dest_path)
-
-        # Validate all sources are directories
-        locals_list: list[tuple[Path, str]] = []
-        for _is_repo, sp in parsed_sources:
-            local = Path(sp)
-            if not local.is_dir():
-                raise click.ClickException(f"{sp} is not a directory")
-            if multi:
-                target = f"{dest_path}/{local.name}" if dest_path else local.name
-            else:
-                target = dest_path or ""
-            locals_list.append((local, target))
-
-        total = 0
-        try:
-            with fs.batch(message=message) as b:
-                for local, target in locals_list:
-                    count = _cptree_disk_to_repo(b, local, target, follow_symlinks)
-                    if count == 0:
-                        raise click.ClickException(
-                            f"No files found in directory: {local}"
-                        )
-                    total += count
-        except StaleSnapshotError:
-            raise click.ClickException("Branch modified concurrently — retry")
-        _status(ctx, f"Copied {total} file(s) -> :{dest_path or '/'}")
-    else:
-        # Repo → disk
-        local_dest = Path(dest_path)
-        try:
-            local_dest.mkdir(parents=True, exist_ok=True)
-        except OSError as exc:
-            raise click.ClickException(f"Cannot create directory {local_dest}: {exc}")
-
-        for _is_repo, sp in parsed_sources:
-            src_path = _normalize_repo_path(sp) if sp else ""
-            if multi:
-                out_dir = local_dest / Path(sp).name
-            else:
-                out_dir = local_dest
-            try:
-                out_dir.mkdir(parents=True, exist_ok=True)
-            except OSError as exc:
-                raise click.ClickException(f"Cannot create directory {out_dir}: {exc}")
-            try:
-                _cptree_repo_to_disk(fs, src_path, out_dir)
-            except FileNotFoundError:
-                raise click.ClickException(
-                    f"Path not found in repo: {sp}"
-                )
-            except NotADirectoryError:
-                raise click.ClickException(
-                    f"{sp} is not a directory in the repo"
-                )
-            _status(ctx, f"Copied :{sp or '/'} -> {out_dir}")
 
 
 # ---------------------------------------------------------------------------
