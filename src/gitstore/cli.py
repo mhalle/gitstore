@@ -616,17 +616,23 @@ def cp(ctx, args, branch, ref, at_path, match_pattern, before, message, mode, fo
             source_paths = list(raw_sources)
             try:
                 if dry_run:
-                    plan = copy_to_repo_dry_run(
+                    report = copy_to_repo_dry_run(
                         fs, source_paths, dest_path,
                         follow_symlinks=follow_symlinks,
                         ignore_existing=ignore_existing,
                         delete=delete,
                     )
-                    for action in plan.actions():
-                        prefix = {"add": "+", "update": "~", "delete": "-"}[action.action]
-                        click.echo(f"{prefix} :{dest_path}/{action.path}" if dest_path else f"{prefix} :{action.path}")
+                    if report:
+                        for w in report.warnings:
+                            click.echo(f"WARNING: {w.path}: {w.error}", err=True)
+                        for action in report.actions():
+                            prefix = {"add": "+", "update": "~", "delete": "-"}[action.action]
+                            if dest_path and action.path:
+                                click.echo(f"{prefix} :{dest_path}/{action.path}")
+                            else:
+                                click.echo(f"{prefix} :{dest_path or ''}{action.path}")
                 else:
-                    _new_fs, errs = copy_to_repo(
+                    _new_fs, report = copy_to_repo(
                         fs, source_paths, dest_path,
                         follow_symlinks=follow_symlinks,
                         message=message, mode=filemode,
@@ -634,10 +640,13 @@ def cp(ctx, args, branch, ref, at_path, match_pattern, before, message, mode, fo
                         delete=delete,
                         ignore_errors=ignore_errors,
                     )
-                    for e in errs:
-                        click.echo(f"ERROR: {e.path}: {e.error}", err=True)
+                    if report:
+                        for w in report.warnings:
+                            click.echo(f"WARNING: {w.path}: {w.error}", err=True)
+                        for e in report.errors:
+                            click.echo(f"ERROR: {e.path}: {e.error}", err=True)
                     _status(ctx, f"Copied -> :{dest_path or '/'}")
-                    if errs:
+                    if report and report.errors:
                         ctx.exit(1)
             except (FileNotFoundError, NotADirectoryError) as exc:
                 raise click.ClickException(str(exc))
@@ -692,25 +701,31 @@ def cp(ctx, args, branch, ref, at_path, match_pattern, before, message, mode, fo
         else:
             try:
                 if dry_run:
-                    plan = copy_from_repo_dry_run(
+                    report = copy_from_repo_dry_run(
                         fs, source_paths, dest_path,
                         ignore_existing=ignore_existing,
                         delete=delete,
                     )
-                    for action in plan.actions():
-                        prefix = {"add": "+", "update": "~", "delete": "-"}[action.action]
-                        click.echo(f"{prefix} {os.path.join(dest_path, action.path)}")
+                    if report:
+                        for w in report.warnings:
+                            click.echo(f"WARNING: {w.path}: {w.error}", err=True)
+                        for action in report.actions():
+                            prefix = {"add": "+", "update": "~", "delete": "-"}[action.action]
+                            click.echo(f"{prefix} {os.path.join(dest_path, action.path)}")
                 else:
-                    errs = copy_from_repo(
+                    report = copy_from_repo(
                         fs, source_paths, dest_path,
                         ignore_existing=ignore_existing,
                         delete=delete,
                         ignore_errors=ignore_errors,
                     )
-                    for e in errs:
-                        click.echo(f"ERROR: {e.path}: {e.error}", err=True)
+                    if report:
+                        for w in report.warnings:
+                            click.echo(f"WARNING: {w.path}: {w.error}", err=True)
+                        for e in report.errors:
+                            click.echo(f"ERROR: {e.path}: {e.error}", err=True)
                     _status(ctx, f"Copied -> {dest_path}")
-                    if errs:
+                    if report and report.errors:
                         ctx.exit(1)
             except (FileNotFoundError, NotADirectoryError) as exc:
                 raise click.ClickException(str(exc))
@@ -1295,35 +1310,50 @@ def sync(ctx, args, branch, ref, at_path, match_pattern, before, message, dry_ru
     try:
         if direction == "to_repo":
             if dry_run:
-                plan = sync_to_repo_dry_run(fs, local_path, repo_dest)
-                for action in plan.actions():
-                    prefix = {"add": "+", "update": "~", "delete": "-"}[action.action]
-                    click.echo(f"{prefix} :{repo_dest}/{action.path}" if repo_dest else f"{prefix} :{action.path}")
+                report = sync_to_repo_dry_run(fs, local_path, repo_dest)
+                if report:
+                    for w in report.warnings:
+                        click.echo(f"WARNING: {w.path}: {w.error}", err=True)
+                    for action in report.actions():
+                        prefix = {"add": "+", "update": "~", "delete": "-"}[action.action]
+                        if repo_dest and action.path:
+                            click.echo(f"{prefix} :{repo_dest}/{action.path}")
+                        else:
+                            click.echo(f"{prefix} :{repo_dest or ''}{action.path}")
             else:
-                _new_fs, errs = sync_to_repo(
+                _new_fs, report = sync_to_repo(
                     fs, local_path, repo_dest,
                     message=message, ignore_errors=ignore_errors,
                 )
-                for e in errs:
-                    click.echo(f"ERROR: {e.path}: {e.error}", err=True)
+                if report:
+                    for w in report.warnings:
+                        click.echo(f"WARNING: {w.path}: {w.error}", err=True)
+                    for e in report.errors:
+                        click.echo(f"ERROR: {e.path}: {e.error}", err=True)
                 _status(ctx, f"Synced -> :{repo_dest or '/'}")
-                if errs:
+                if report and report.errors:
                     ctx.exit(1)
         else:
             if dry_run:
-                plan = sync_from_repo_dry_run(fs, repo_dest, local_path)
-                for action in plan.actions():
-                    prefix = {"add": "+", "update": "~", "delete": "-"}[action.action]
-                    click.echo(f"{prefix} {os.path.join(local_path, action.path)}")
+                report = sync_from_repo_dry_run(fs, repo_dest, local_path)
+                if report:
+                    for w in report.warnings:
+                        click.echo(f"WARNING: {w.path}: {w.error}", err=True)
+                    for action in report.actions():
+                        prefix = {"add": "+", "update": "~", "delete": "-"}[action.action]
+                        click.echo(f"{prefix} {os.path.join(local_path, action.path)}")
             else:
-                errs = sync_from_repo(
+                report = sync_from_repo(
                     fs, repo_dest, local_path,
                     ignore_errors=ignore_errors,
                 )
-                for e in errs:
-                    click.echo(f"ERROR: {e.path}: {e.error}", err=True)
+                if report:
+                    for w in report.warnings:
+                        click.echo(f"WARNING: {w.path}: {w.error}", err=True)
+                    for e in report.errors:
+                        click.echo(f"ERROR: {e.path}: {e.error}", err=True)
                 _status(ctx, f"Synced -> {local_path}")
-                if errs:
+                if report and report.errors:
                     ctx.exit(1)
     except (FileNotFoundError, NotADirectoryError) as exc:
         raise click.ClickException(str(exc))

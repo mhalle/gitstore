@@ -39,11 +39,20 @@ class CopyAction:
 
 
 @dataclass
-class CopyPlan:
-    """What a copy/sync operation would do."""
+class CopyError:
+    """A file that failed during a copy operation."""
+    path: str
+    error: str
+
+
+@dataclass
+class CopyReport:
+    """Result of a copy/sync operation (dry-run or real)."""
     add: list[str] = field(default_factory=list)
     update: list[str] = field(default_factory=list)
     delete: list[str] = field(default_factory=list)
+    errors: list[CopyError] = field(default_factory=list)
+    warnings: list[CopyError] = field(default_factory=list)
 
     @property
     def in_sync(self) -> bool:
@@ -66,16 +75,18 @@ class CopyPlan:
         return result
 
 
-@dataclass
-class CopyError:
-    """A file that failed during a copy operation."""
-    path: str
-    error: str
-
-
 # Backward-compatible aliases
+CopyPlan = CopyReport
 SyncAction = CopyAction
-SyncPlan = CopyPlan
+SyncPlan = CopyReport
+
+
+def _finalize_report(report: CopyReport) -> CopyReport | None:
+    """Return *report* if it has any content, else ``None``."""
+    if (not report.add and not report.update and not report.delete
+            and not report.errors and not report.warnings):
+        return None
+    return report
 
 
 # ---------------------------------------------------------------------------
@@ -222,15 +233,23 @@ def _expand_disk_glob(pattern: str) -> list[str]:
     if not pattern:
         return []
 
+    # Normalize platform separators to forward slashes for consistent splitting
+    pattern = pattern.replace(os.sep, "/").replace("\\", "/")
+
+    drive, rest = os.path.splitdrive(pattern)
+    if drive:
+        rest_pattern = rest.lstrip("/")
+        segments = rest_pattern.split("/") if rest_pattern else []
+        root = drive + "/"
+        return sorted(_disk_glob_walk(segments, root))
+
     # Handle absolute paths: split off the root prefix so that we walk
     # from "/" (or the drive root on Windows) as our base directory.
     if os.path.isabs(pattern):
-        # Find the root part (e.g. "/") and the rest
         root = os.sep
         rest_pattern = pattern[len(root):]
-        # Strip any leading separators left over
         rest_pattern = rest_pattern.lstrip(os.sep)
-        segments = rest_pattern.split("/")
+        segments = rest_pattern.split("/") if rest_pattern else []
         return sorted(_disk_glob_walk(segments, root))
     else:
         segments = pattern.split("/")
@@ -367,10 +386,15 @@ def _enum_disk_to_repo(
         elif mode == "dir":
             dirname = os.path.basename(local_path)
             target = f"{dest}/{dirname}" if dest else dirname
-            for rel in sorted(_walk_local_paths(local_path, follow_symlinks)):
-                full = os.path.join(local_path, rel)
-                repo_file = f"{target}/{rel}"
-                pairs.append((full, _normalize_path(repo_file)))
+            # If the source itself is a symlink to a directory and we're not
+            # following symlinks, treat it as a single symlink entry.
+            if not follow_symlinks and Path(local_path).is_symlink():
+                pairs.append((local_path, _normalize_path(target)))
+            else:
+                for rel in sorted(_walk_local_paths(local_path, follow_symlinks)):
+                    full = os.path.join(local_path, rel)
+                    repo_file = f"{target}/{rel}"
+                    pairs.append((full, _normalize_path(repo_file)))
         elif mode == "contents":
             for rel in sorted(_walk_local_paths(local_path, follow_symlinks)):
                 full = os.path.join(local_path, rel)
@@ -513,16 +537,18 @@ def copy_to_repo(
     ignore_existing: bool = False,
     delete: bool = False,
     ignore_errors: bool = False,
-) -> tuple[FS, list[CopyError]]:
-    """Copy local files/dirs/globs into the repo. Returns ``(new_fs, errors)``.
+) -> tuple[FS, CopyReport | None]:
+    """Copy local files/dirs/globs into the repo. Returns ``(new_fs, report)``.
 
     With ``delete=True``, files under *dest* that are not covered by
     *sources* are removed (rsync ``--delete`` semantics).
 
     When *ignore_errors* is ``True``, per-file errors are collected instead
     of aborting. If **all** files fail, a ``RuntimeError`` is raised.
+
+    Returns ``None`` as the report when there are no actions, errors, or warnings.
     """
-    errors: list[CopyError] = []
+    report = CopyReport()
 
     if ignore_errors:
         resolved: list[tuple[str, str]] = []
@@ -530,10 +556,11 @@ def copy_to_repo(
             try:
                 resolved.extend(_resolve_disk_sources([src]))
             except (FileNotFoundError, NotADirectoryError) as exc:
-                errors.append(CopyError(path=src, error=str(exc)))
-        if not resolved and not errors:
-            # Nothing to do, no errors — sources was empty
-            return fs, errors
+                report.errors.append(CopyError(path=src, error=str(exc)))
+        if not resolved:
+            if report.errors:
+                raise RuntimeError(f"All files failed to copy: {report.errors}")
+            return fs, _finalize_report(report)
     else:
         resolved = _resolve_disk_sources(sources)
 
@@ -549,7 +576,13 @@ def copy_to_repo(
                 rel = repo_path[len(dest) + 1:]
             else:
                 rel = repo_path
-            pair_map[rel] = local_path
+            if rel in pair_map:
+                report.warnings.append(CopyError(
+                    path=local_path,
+                    error=f"Overlapping destination '{rel}': skipping (kept earlier source)",
+                ))
+            else:
+                pair_map[rel] = local_path
 
         repo_files = _walk_repo(fs, dest)
         local_rels = set(pair_map.keys())
@@ -561,19 +594,25 @@ def copy_to_repo(
 
         update_rels: list[str] = []
         for rel in both:
-            if _local_file_oid_abs(Path(pair_map[rel])) != repo_files[rel]:
-                update_rels.append(rel)
+            try:
+                if _local_file_oid_abs(Path(pair_map[rel])) != repo_files[rel]:
+                    update_rels.append(rel)
+            except OSError as exc:
+                if not ignore_errors:
+                    raise
+                report.errors.append(CopyError(path=pair_map[rel], error=str(exc)))
+                update_rels.append(rel)  # treat as needing update
 
         if ignore_existing:
             update_rels = []
 
         write_rels = add_rels + update_rels
         if not write_rels and not delete_rels:
-            if ignore_errors and errors:
+            if ignore_errors and report.errors:
                 raise RuntimeError(
-                    f"All files failed to copy: {errors}"
+                    f"All files failed to copy: {report.errors}"
                 )
-            return fs, errors
+            return fs, _finalize_report(report)
 
         write_pairs = []
         for rel in write_rels:
@@ -585,7 +624,8 @@ def copy_to_repo(
 
         with fs.batch(message=message) as b:
             _write_files_to_repo(b, write_pairs, follow_symlinks=follow_symlinks,
-                                 mode=mode, ignore_errors=ignore_errors, errors=errors)
+                                 mode=mode, ignore_errors=ignore_errors,
+                                 errors=report.errors)
             for rel in safe_deletes:
                 full_repo_path = f"{dest}/{rel}" if dest else rel
                 try:
@@ -593,35 +633,52 @@ def copy_to_repo(
                 except OSError as exc:
                     if not ignore_errors:
                         raise
-                    errors.append(CopyError(path=full_repo_path, error=str(exc)))
+                    report.errors.append(CopyError(path=full_repo_path, error=str(exc)))
         result_fs = b.fs
 
-        if ignore_errors and errors and result_fs.hash == fs.hash:
+        if ignore_errors and report.errors and result_fs.hash == fs.hash:
             raise RuntimeError(
-                f"All files failed to copy: {errors}"
+                f"All files failed to copy: {report.errors}"
             )
-        return result_fs, errors
+
+        report.add = add_rels
+        report.update = update_rels
+        report.delete = safe_deletes
+        return result_fs, _finalize_report(report)
     else:
+        # Non-delete mode: classify written pairs as add vs update
         if ignore_existing:
             pairs = [(l, r) for l, r in pairs if not fs.exists(r)]
 
         if not pairs:
-            if ignore_errors and errors:
+            if ignore_errors and report.errors:
                 raise RuntimeError(
-                    f"All files failed to copy: {errors}"
+                    f"All files failed to copy: {report.errors}"
                 )
-            return fs, errors
+            return fs, _finalize_report(report)
+
+        # Classify before writing
+        for local_path, repo_path in pairs:
+            if dest and repo_path.startswith(dest + "/"):
+                rel = repo_path[len(dest) + 1:]
+            else:
+                rel = repo_path
+            if fs.exists(repo_path):
+                report.update.append(rel)
+            else:
+                report.add.append(rel)
 
         with fs.batch(message=message) as b:
             _write_files_to_repo(b, pairs, follow_symlinks=follow_symlinks,
-                                 mode=mode, ignore_errors=ignore_errors, errors=errors)
+                                 mode=mode, ignore_errors=ignore_errors,
+                                 errors=report.errors)
         result_fs = b.fs
 
-        if ignore_errors and errors and result_fs.hash == fs.hash:
+        if ignore_errors and report.errors and result_fs.hash == fs.hash:
             raise RuntimeError(
-                f"All files failed to copy: {errors}"
+                f"All files failed to copy: {report.errors}"
             )
-        return result_fs, errors
+        return result_fs, _finalize_report(report)
 
 
 def copy_from_repo(
@@ -632,18 +689,20 @@ def copy_from_repo(
     ignore_existing: bool = False,
     delete: bool = False,
     ignore_errors: bool = False,
-) -> list[CopyError]:
-    """Copy repo files/dirs/globs to local disk. Returns list of errors.
+) -> CopyReport | None:
+    """Copy repo files/dirs/globs to local disk. Returns a ``CopyReport`` or ``None``.
 
     With ``delete=True``, local files under *dest* that are not covered
     by *sources* are removed (rsync ``--delete`` semantics).
 
     When *ignore_errors* is ``True``, per-file errors are collected instead
     of aborting. If **all** files fail, a ``RuntimeError`` is raised.
+
+    Returns ``None`` when there are no actions, errors, or warnings.
     """
     import shutil
 
-    errors: list[CopyError] = []
+    report = CopyReport()
 
     if ignore_errors:
         resolved: list[tuple[str, str]] = []
@@ -651,9 +710,11 @@ def copy_from_repo(
             try:
                 resolved.extend(_resolve_repo_sources(fs, [src]))
             except (FileNotFoundError, NotADirectoryError) as exc:
-                errors.append(CopyError(path=src, error=str(exc)))
-        if not resolved and not errors:
-            return errors
+                report.errors.append(CopyError(path=src, error=str(exc)))
+        if not resolved:
+            if report.errors:
+                raise RuntimeError(f"All files failed to copy: {report.errors}")
+            return _finalize_report(report)
     else:
         resolved = _resolve_repo_sources(fs, sources)
 
@@ -667,12 +728,18 @@ def copy_from_repo(
         pair_map: dict[str, str] = {}
         for repo_path, local_path in pairs:
             rel = os.path.relpath(local_path, dest).replace(os.sep, "/")
-            pair_map[rel] = repo_path
+            if rel in pair_map:
+                report.warnings.append(CopyError(
+                    path=repo_path,
+                    error=f"Overlapping destination '{rel}': skipping (kept earlier source)",
+                ))
+            else:
+                pair_map[rel] = repo_path
 
+        # B2 fix: build repo_files from pair_map (deduplicated) not pairs
         repo_files = {}
-        for repo_path, _local_path in pairs:
-            rel = os.path.relpath(_local_path, dest).replace(os.sep, "/")
-            entry = _entry_at_path(fs._store._repo, fs._tree_oid, repo_path)
+        for rel, rp in pair_map.items():
+            entry = _entry_at_path(fs._store._repo, fs._tree_oid, rp)
             if entry is not None:
                 repo_files[rel] = entry[0]._sha
 
@@ -685,8 +752,14 @@ def copy_from_repo(
 
         update_rels: list[str] = []
         for rel in both:
-            if rel in repo_files and _local_file_oid(base, rel) != repo_files[rel]:
-                update_rels.append(rel)
+            try:
+                if rel in repo_files and _local_file_oid(base, rel) != repo_files[rel]:
+                    update_rels.append(rel)
+            except OSError as exc:
+                if not ignore_errors:
+                    raise
+                report.errors.append(CopyError(path=str(base / rel), error=str(exc)))
+                update_rels.append(rel)  # treat as needing update
 
         if ignore_existing:
             update_rels = []
@@ -700,7 +773,7 @@ def copy_from_repo(
             except OSError as exc:
                 if not ignore_errors:
                     raise
-                errors.append(CopyError(path=str(out), error=str(exc)))
+                report.errors.append(CopyError(path=str(out), error=str(exc)))
 
         # Clear blocking paths
         for rel in add_rels + update_rels:
@@ -718,28 +791,46 @@ def copy_from_repo(
         for rel in add_rels + update_rels:
             write_pairs.append((pair_map[rel], str(base / rel)))
 
-        _write_files_to_disk(fs, write_pairs, ignore_errors=ignore_errors, errors=errors)
+        _write_files_to_disk(fs, write_pairs, ignore_errors=ignore_errors,
+                             errors=report.errors)
         _prune_empty_dirs(base)
+
+        report.add = add_rels
+        report.update = update_rels
+        report.delete = delete_rels
     else:
         if ignore_existing:
             pairs = [(r, l) for r, l in pairs if not Path(l).exists()]
 
         if not pairs:
-            if ignore_errors and errors:
+            if ignore_errors and report.errors:
                 raise RuntimeError(
-                    f"All files failed to copy: {errors}"
+                    f"All files failed to copy: {report.errors}"
                 )
-            return errors
+            return _finalize_report(report)
 
-        _write_files_to_disk(fs, pairs, ignore_errors=ignore_errors, errors=errors)
+        # Classify as add vs update
+        for repo_path, local_path in pairs:
+            rel = os.path.relpath(local_path, dest).replace(os.sep, "/")
+            try:
+                exists = Path(local_path).exists()
+            except OSError:
+                exists = False
+            if exists:
+                report.update.append(rel)
+            else:
+                report.add.append(rel)
+
+        _write_files_to_disk(fs, pairs, ignore_errors=ignore_errors,
+                             errors=report.errors)
 
     # Safety check: if all files failed
-    if ignore_errors and errors and not pairs:
+    if ignore_errors and report.errors and not pairs:
         raise RuntimeError(
-            f"All files failed to copy: {errors}"
+            f"All files failed to copy: {report.errors}"
         )
 
-    return errors
+    return _finalize_report(report)
 
 
 def copy_to_repo_dry_run(
@@ -750,19 +841,26 @@ def copy_to_repo_dry_run(
     follow_symlinks: bool = False,
     ignore_existing: bool = False,
     delete: bool = False,
-) -> CopyPlan:
-    """Compute what copy_to_repo would do. Returns a CopyPlan."""
+) -> CopyReport | None:
+    """Compute what copy_to_repo would do. Returns a ``CopyReport`` or ``None``."""
     resolved = _resolve_disk_sources(sources)
     pairs = _enum_disk_to_repo(resolved, dest, follow_symlinks=follow_symlinks)
 
     if delete:
+        report = CopyReport()
         pair_map: dict[str, str] = {}
         for local_path, repo_path in pairs:
             if dest and repo_path.startswith(dest + "/"):
                 rel = repo_path[len(dest) + 1:]
             else:
                 rel = repo_path
-            pair_map[rel] = local_path
+            if rel in pair_map:
+                report.warnings.append(CopyError(
+                    path=local_path,
+                    error=f"Overlapping destination '{rel}': skipping (kept earlier source)",
+                ))
+            else:
+                pair_map[rel] = local_path
 
         repo_files = _walk_repo(fs, dest)
         local_rels = set(pair_map.keys())
@@ -780,7 +878,10 @@ def copy_to_repo_dry_run(
         if ignore_existing:
             update = []
 
-        return CopyPlan(add=add, update=update, delete=delete_list)
+        report.add = add
+        report.update = update
+        report.delete = delete_list
+        return _finalize_report(report)
     else:
         # Non-delete mode: classify by existence only
         add: list[str] = []
@@ -798,7 +899,7 @@ def copy_to_repo_dry_run(
         if ignore_existing:
             update = []
 
-        return CopyPlan(add=sorted(add), update=sorted(update), delete=[])
+        return _finalize_report(CopyReport(add=sorted(add), update=sorted(update)))
 
 
 def copy_from_repo_dry_run(
@@ -808,8 +909,8 @@ def copy_from_repo_dry_run(
     *,
     ignore_existing: bool = False,
     delete: bool = False,
-) -> CopyPlan:
-    """Compute what copy_from_repo would do. Returns a CopyPlan."""
+) -> CopyReport | None:
+    """Compute what copy_from_repo would do. Returns a ``CopyReport`` or ``None``."""
     resolved = _resolve_repo_sources(fs, sources)
     pairs = _enum_repo_to_disk(fs, resolved, dest)
 
@@ -840,7 +941,7 @@ def copy_from_repo_dry_run(
         if ignore_existing:
             update = []
 
-        return CopyPlan(add=add, update=update, delete=delete_list)
+        return _finalize_report(CopyReport(add=add, update=update, delete=delete_list))
     else:
         # Non-delete mode: classify by existence only
         add: list[str] = []
@@ -855,7 +956,7 @@ def copy_from_repo_dry_run(
         if ignore_existing:
             update = []
 
-        return CopyPlan(add=sorted(add), update=sorted(update), delete=[])
+        return _finalize_report(CopyReport(add=sorted(add), update=sorted(update)))
 
 
 # ---------------------------------------------------------------------------
@@ -871,8 +972,8 @@ def sync_to_repo(
     fs: FS, local_path: str, repo_path: str, *,
     message: str | None = None,
     ignore_errors: bool = False,
-) -> tuple[FS, list[CopyError]]:
-    """Make *repo_path* identical to *local_path*. Returns ``(new_fs, errors)``."""
+) -> tuple[FS, CopyReport | None]:
+    """Make *repo_path* identical to *local_path*. Returns ``(new_fs, report)``."""
     try:
         return copy_to_repo(
             fs, [_ensure_trailing_slash(local_path)], repo_path,
@@ -880,53 +981,72 @@ def sync_to_repo(
         )
     except (FileNotFoundError, NotADirectoryError):
         # Nonexistent local path → treat as empty source (delete everything)
-        return _sync_delete_all_in_repo(fs, repo_path, message=message), []
+        new_fs, delete_rels = _sync_delete_all_in_repo(fs, repo_path, message=message)
+        if not delete_rels:
+            return new_fs, None
+        return new_fs, CopyReport(delete=delete_rels)
 
 
 def _sync_delete_all_in_repo(
     fs: FS, repo_path: str, *, message: str | None = None,
-) -> FS:
-    """Delete all files under *repo_path* (used when sync source is empty)."""
+) -> tuple[FS, list[str]]:
+    """Delete all files under *repo_path* (used when sync source is empty).
+
+    Returns ``(new_fs, deleted_rels)`` where *deleted_rels* are relative
+    to *repo_path*.
+    """
     dest = _normalize_path(repo_path) if repo_path else ""
     repo_files = _walk_repo(fs, dest)
     if not repo_files:
-        return fs
+        # _walk_repo returns {} for files (not dirs) — check if dest is a file
+        if dest and fs.exists(dest) and not fs.is_dir(dest):
+            with fs.batch(message=message) as b:
+                b.remove(dest)
+            return b.fs, [""]
+        return fs, []
     with fs.batch(message=message) as b:
         for rel in sorted(repo_files):
             full = f"{dest}/{rel}" if dest else rel
             b.remove(full)
-    return b.fs
+    return b.fs, sorted(repo_files.keys())
 
 
 def sync_from_repo(
     fs: FS, repo_path: str, local_path: str, *,
     ignore_errors: bool = False,
-) -> list[CopyError]:
-    """Make *local_path* identical to *repo_path*. Returns list of errors."""
+) -> CopyReport | None:
+    """Make *local_path* identical to *repo_path*. Returns a ``CopyReport`` or ``None``."""
     try:
         sources = [_ensure_trailing_slash(repo_path)] if repo_path else [""]
         return copy_from_repo(fs, sources, local_path, delete=True,
                               ignore_errors=ignore_errors)
     except (FileNotFoundError, NotADirectoryError):
         # Nonexistent repo path → treat as empty source (delete everything local)
-        _sync_delete_all_local(local_path)
-        return []
+        delete_rels = _sync_delete_all_local(local_path)
+        if not delete_rels:
+            return None
+        return CopyReport(delete=delete_rels)
 
 
-def _sync_delete_all_local(local_path: str) -> None:
-    """Delete all files under *local_path* and prune empty dirs."""
+def _sync_delete_all_local(local_path: str) -> list[str]:
+    """Delete all files under *local_path* and prune empty dirs.
+
+    Returns sorted list of deleted relative paths.
+    """
     base = Path(local_path)
     base.mkdir(parents=True, exist_ok=True)
-    for rel in sorted(_walk_local_paths(local_path)):
+    deleted = sorted(_walk_local_paths(local_path))
+    for rel in deleted:
         out = base / rel
         if out.exists() or out.is_symlink():
             out.unlink()
     _prune_empty_dirs(base)
+    return deleted
 
 
 def sync_to_repo_dry_run(
     fs: FS, local_path: str, repo_path: str,
-) -> CopyPlan:
+) -> CopyReport | None:
     """Compute what ``sync_to_repo`` would do without writing."""
     try:
         return copy_to_repo_dry_run(
@@ -936,12 +1056,16 @@ def sync_to_repo_dry_run(
         # Nonexistent local path → everything in repo is a delete
         dest = _normalize_path(repo_path) if repo_path else ""
         repo_files = _walk_repo(fs, dest)
-        return CopyPlan(delete=sorted(repo_files.keys()))
+        if not repo_files and dest and fs.exists(dest) and not fs.is_dir(dest):
+            # B1 fix: dest is a single file — relative path within dest is ""
+            return CopyReport(delete=[""])
+        delete_list = sorted(repo_files.keys())
+        return _finalize_report(CopyReport(delete=delete_list))
 
 
 def sync_from_repo_dry_run(
     fs: FS, repo_path: str, local_path: str,
-) -> CopyPlan:
+) -> CopyReport | None:
     """Compute what ``sync_from_repo`` would do without writing."""
     try:
         sources = [_ensure_trailing_slash(repo_path)] if repo_path else [""]
@@ -949,4 +1073,4 @@ def sync_from_repo_dry_run(
     except (FileNotFoundError, NotADirectoryError):
         # Nonexistent repo path → everything local is a delete
         local_paths = _walk_local_paths(local_path)
-        return CopyPlan(delete=sorted(local_paths))
+        return _finalize_report(CopyReport(delete=sorted(local_paths)))

@@ -5,8 +5,11 @@ from pathlib import Path
 
 import pytest
 
-from gitstore import GitStore, copy_to_repo, copy_from_repo, CopyPlan
-from gitstore.copy import copy_to_repo_dry_run, copy_from_repo_dry_run
+from gitstore import GitStore, copy_to_repo, copy_from_repo, CopyPlan, CopyReport
+from gitstore.copy import (
+    copy_to_repo_dry_run, copy_from_repo_dry_run,
+    _expand_disk_glob,
+)
 
 
 @pytest.fixture
@@ -27,7 +30,7 @@ class TestCopyToRepoFile:
         _, fs, tmp_path = store_and_fs
         f = tmp_path / "hello.txt"
         f.write_text("hello")
-        new_fs, _errs = copy_to_repo(fs, [str(f)], "dest")
+        new_fs, _report = copy_to_repo(fs, [str(f)], "dest")
         assert new_fs.read("dest/hello.txt") == b"hello"
 
     def test_multiple_files(self, store_and_fs):
@@ -36,7 +39,7 @@ class TestCopyToRepoFile:
         f2 = tmp_path / "b.txt"
         f1.write_text("aaa")
         f2.write_text("bbb")
-        new_fs, _errs = copy_to_repo(fs, [str(f1), str(f2)], "out")
+        new_fs, _report = copy_to_repo(fs, [str(f1), str(f2)], "out")
         assert new_fs.read("out/a.txt") == b"aaa"
         assert new_fs.read("out/b.txt") == b"bbb"
 
@@ -53,7 +56,7 @@ class TestCopyToRepoDir:
         d.mkdir()
         (d / "x.txt").write_text("xxx")
         (d / "y.txt").write_text("yyy")
-        new_fs, _errs = copy_to_repo(fs, [str(d)], "dest")
+        new_fs, _report = copy_to_repo(fs, [str(d)], "dest")
         assert new_fs.read("dest/mydir/x.txt") == b"xxx"
         assert new_fs.read("dest/mydir/y.txt") == b"yyy"
 
@@ -62,7 +65,7 @@ class TestCopyToRepoDir:
         d = tmp_path / "mydir"
         d.mkdir()
         (d / "x.txt").write_text("xxx")
-        new_fs, _errs = copy_to_repo(fs, [str(d) + "/"], "dest")
+        new_fs, _report = copy_to_repo(fs, [str(d) + "/"], "dest")
         # Contents mode: no "mydir" prefix
         assert new_fs.read("dest/x.txt") == b"xxx"
 
@@ -76,7 +79,7 @@ class TestCopyToRepoGlob:
         (d / "b.md").write_text("bbb")
         (d / ".hidden").write_text("hid")
         glob_pattern = str(d / "*.txt")
-        new_fs, _errs = copy_to_repo(fs, [glob_pattern], "out")
+        new_fs, _report = copy_to_repo(fs, [glob_pattern], "out")
         assert new_fs.read("out/a.txt") == b"aaa"
         assert not new_fs.exists("out/b.md")
         assert not new_fs.exists("out/.hidden")
@@ -188,7 +191,7 @@ class TestMixed:
         d = tmp_path / "mdir"
         d.mkdir()
         (d / "m.txt").write_text("mmm")
-        new_fs, _errs = copy_to_repo(fs, [str(f), str(d)], "mix")
+        new_fs, _report = copy_to_repo(fs, [str(f), str(d)], "mix")
         assert new_fs.read("mix/single.txt") == b"single"
         assert new_fs.read("mix/mdir/m.txt") == b"mmm"
 
@@ -203,7 +206,7 @@ class TestIgnoreExisting:
         _, fs, tmp_path = store_and_fs
         f = tmp_path / "existing.txt"
         f.write_text("new content")
-        new_fs, _errs = copy_to_repo(fs, [str(f)], "", ignore_existing=True)
+        new_fs, _report = copy_to_repo(fs, [str(f)], "", ignore_existing=True)
         # Original content should be preserved
         assert new_fs.read("existing.txt") == b"exists"
 
@@ -221,7 +224,7 @@ class TestIgnoreExisting:
         _, fs, tmp_path = store_and_fs
         f = tmp_path / "brand_new.txt"
         f.write_text("new")
-        new_fs, _errs = copy_to_repo(fs, [str(f)], "dest", ignore_existing=True)
+        new_fs, _report = copy_to_repo(fs, [str(f)], "dest", ignore_existing=True)
         assert new_fs.read("dest/brand_new.txt") == b"new"
 
     def test_ignore_existing_new_files_still_written_from_repo(self, store_and_fs):
@@ -266,7 +269,7 @@ class TestIgnoreExisting:
         (d / "a.txt").write_text("new aaa")
         (d / "new_file.txt").write_text("new")
         # dir/a.txt already exists in repo
-        new_fs, _errs = copy_to_repo(fs, [str(d) + "/"], "dir", ignore_existing=True)
+        new_fs, _report = copy_to_repo(fs, [str(d) + "/"], "dir", ignore_existing=True)
         assert new_fs.read("dir/a.txt") == b"aaa"  # unchanged
         assert new_fs.read("dir/new_file.txt") == b"new"  # new file written
 
@@ -281,7 +284,7 @@ class TestCopyEdgeCases:
         _, fs, tmp_path = store_and_fs
         f = tmp_path / "empty.txt"
         f.write_bytes(b"")
-        new_fs, _errs = copy_to_repo(fs, [str(f)], "dest")
+        new_fs, _report = copy_to_repo(fs, [str(f)], "dest")
         assert new_fs.read("dest/empty.txt") == b""
 
     def test_empty_file_from_repo(self, store_and_fs):
@@ -299,7 +302,7 @@ class TestCopyEdgeCases:
         data = bytes(range(256))
         f = tmp_path / "bin.dat"
         f.write_bytes(data)
-        new_fs, _errs = copy_to_repo(fs, [str(f)], "dest")
+        new_fs, _report = copy_to_repo(fs, [str(f)], "dest")
         assert new_fs.read("dest/bin.dat") == data
 
     def test_binary_file_from_repo(self, store_and_fs):
@@ -318,7 +321,7 @@ class TestCopyEdgeCases:
         d.mkdir()
         (d / "café.txt").write_text("coffee")
         (d / "日本語.txt").write_text("japanese")
-        new_fs, _errs = copy_to_repo(fs, [str(d) + "/"], "dest")
+        new_fs, _report = copy_to_repo(fs, [str(d) + "/"], "dest")
         assert new_fs.read("dest/café.txt") == b"coffee"
         assert new_fs.read("dest/日本語.txt") == b"japanese"
 
@@ -330,7 +333,7 @@ class TestCopyEdgeCases:
         sub = d / "sub dir"
         sub.mkdir()
         (sub / "inner.txt").write_text("nested")
-        new_fs, _errs = copy_to_repo(fs, [str(d) + "/"], "dest")
+        new_fs, _report = copy_to_repo(fs, [str(d) + "/"], "dest")
         assert new_fs.read("dest/my file.txt") == b"spaces"
         assert new_fs.read("dest/sub dir/inner.txt") == b"nested"
 
@@ -341,7 +344,7 @@ class TestCopyEdgeCases:
         (d / "file#1.txt").write_text("hash")
         (d / "file@2.txt").write_text("at")
         (d / "a=b.txt").write_text("equals")
-        new_fs, _errs = copy_to_repo(fs, [str(d) + "/"], "dest")
+        new_fs, _report = copy_to_repo(fs, [str(d) + "/"], "dest")
         assert new_fs.read("dest/file#1.txt") == b"hash"
         assert new_fs.read("dest/file@2.txt") == b"at"
         assert new_fs.read("dest/a=b.txt") == b"equals"
@@ -352,7 +355,7 @@ class TestCopyEdgeCases:
         deep = d / "a" / "b" / "c" / "d" / "e"
         deep.mkdir(parents=True)
         (deep / "f.txt").write_text("deep")
-        new_fs, _errs = copy_to_repo(fs, [str(d) + "/"], "dest")
+        new_fs, _report = copy_to_repo(fs, [str(d) + "/"], "dest")
         assert new_fs.read("dest/a/b/c/d/e/f.txt") == b"deep"
 
 
@@ -371,7 +374,7 @@ class TestCopySymlinks:
         (real / "file.txt").write_text("inside")
         (d / "link_dir").symlink_to("real_dir")
 
-        new_fs, _errs = copy_to_repo(fs, [str(d) + "/"], "dest")
+        new_fs, _report = copy_to_repo(fs, [str(d) + "/"], "dest")
         assert new_fs.readlink("dest/link_dir") == "real_dir"
         assert new_fs.read("dest/real_dir/file.txt") == b"inside"
 
@@ -382,7 +385,7 @@ class TestCopySymlinks:
         (d / "target.txt").write_text("content")
         (d / "link.txt").symlink_to("target.txt")
 
-        new_fs, _errs = copy_to_repo(fs, [str(d) + "/"], "dest")
+        new_fs, _report = copy_to_repo(fs, [str(d) + "/"], "dest")
         assert new_fs.readlink("dest/link.txt") == "target.txt"
 
     def test_dangling_symlink_to_repo(self, store_and_fs):
@@ -391,7 +394,7 @@ class TestCopySymlinks:
         d = tmp_path / "dangle"
         d.mkdir()
         (d / "broken").symlink_to("nonexistent_target")
-        new_fs, _errs = copy_to_repo(fs, [str(d) + "/"], "dest")
+        new_fs, _report = copy_to_repo(fs, [str(d) + "/"], "dest")
         assert new_fs.readlink("dest/broken") == "nonexistent_target"
 
     def test_absolute_symlink_target(self, store_and_fs):
@@ -399,7 +402,7 @@ class TestCopySymlinks:
         d = tmp_path / "abslink"
         d.mkdir()
         (d / "abs_link").symlink_to("/usr/bin/env")
-        new_fs, _errs = copy_to_repo(fs, [str(d) + "/"], "dest")
+        new_fs, _report = copy_to_repo(fs, [str(d) + "/"], "dest")
         assert new_fs.readlink("dest/abs_link") == "/usr/bin/env"
 
     def test_relative_symlink_with_dotdot(self, store_and_fs):
@@ -407,7 +410,7 @@ class TestCopySymlinks:
         d = tmp_path / "rellink"
         (d / "sub").mkdir(parents=True)
         (d / "sub" / "uplink").symlink_to("../sibling/file")
-        new_fs, _errs = copy_to_repo(fs, [str(d) + "/"], "dest")
+        new_fs, _report = copy_to_repo(fs, [str(d) + "/"], "dest")
         assert new_fs.readlink("dest/sub/uplink") == "../sibling/file"
 
     def test_symlink_from_repo_to_disk(self, store_and_fs):
@@ -435,7 +438,7 @@ class TestDelete:
         d.mkdir()
         (d / "a.txt").write_text("new aaa")
         # b.txt and .dotfile not in source → should be deleted
-        new_fs, _errs = copy_to_repo(fs, [str(d) + "/"], "dir", delete=True)
+        new_fs, _report = copy_to_repo(fs, [str(d) + "/"], "dir", delete=True)
         assert new_fs.read("dir/a.txt") == b"new aaa"
         assert not new_fs.exists("dir/b.txt")
         assert not new_fs.exists("dir/.dotfile")
@@ -460,7 +463,7 @@ class TestDelete:
         (d / "b.txt").write_bytes(b"bbb")
         (d / ".dotfile").write_bytes(b"dot")
         # All content matches repo → should be no-op
-        new_fs, _errs = copy_to_repo(fs, [str(d) + "/"], "dir", delete=True)
+        new_fs, _report = copy_to_repo(fs, [str(d) + "/"], "dir", delete=True)
         assert new_fs.hash == fs.hash  # no new commit
 
     def test_delete_with_ignore_existing(self, store_and_fs):
@@ -473,7 +476,7 @@ class TestDelete:
         d.mkdir()
         (d / "keep.txt").write_bytes(b"keep")
         (d / "change.txt").write_text("new")
-        new_fs, _errs = copy_to_repo(
+        new_fs, _report = copy_to_repo(
             fs, [str(d) + "/"], "data",
             delete=True, ignore_existing=True,
         )
@@ -510,7 +513,7 @@ class TestDelete:
         d.mkdir()
         # Replace "dir" structure with completely different content
         (d / "new.txt").write_text("new")
-        new_fs, _errs = copy_to_repo(fs, [str(d) + "/"], "dir", delete=True)
+        new_fs, _report = copy_to_repo(fs, [str(d) + "/"], "dir", delete=True)
         assert new_fs.read("dir/new.txt") == b"new"
         assert not new_fs.exists("dir/a.txt")
         assert not new_fs.exists("dir/b.txt")
@@ -550,12 +553,12 @@ class TestIgnoreErrors:
         good = tmp_path / "good.txt"
         good.write_text("good")
         bad = str(tmp_path / "nonexistent.txt")
-        new_fs, errs = copy_to_repo(
+        new_fs, report = copy_to_repo(
             fs, [str(good), bad], "dest", ignore_errors=True,
         )
         assert new_fs.read("dest/good.txt") == b"good"
-        assert len(errs) == 1
-        assert "nonexistent" in errs[0].path
+        assert len(report.errors) == 1
+        assert "nonexistent" in report.errors[0].path
 
     def test_ignore_errors_unreadable_file_continues(self, store_and_fs):
         """chmod 000 a file; others still copied to repo."""
@@ -567,12 +570,12 @@ class TestIgnoreErrors:
         bad.write_text("secret")
         bad.chmod(0o000)
         try:
-            new_fs, errs = copy_to_repo(
+            new_fs, report = copy_to_repo(
                 fs, [str(d) + "/"], "dest", ignore_errors=True,
             )
             assert new_fs.read("dest/ok.txt") == b"ok"
-            assert len(errs) == 1
-            assert "nope.txt" in errs[0].path
+            assert len(report.errors) == 1
+            assert "nope.txt" in report.errors[0].path
         finally:
             bad.chmod(0o644)
 
@@ -591,15 +594,16 @@ class TestIgnoreErrors:
         with pytest.raises(FileNotFoundError):
             copy_to_repo(fs, [str(tmp_path / "nope.txt")], "dest")
 
-    def test_ignore_errors_success_empty_errors(self, store_and_fs):
-        """All succeed -> errors == []."""
+    def test_ignore_errors_success_no_errors(self, store_and_fs):
+        """All succeed -> report has no errors."""
         _, fs, tmp_path = store_and_fs
         f = tmp_path / "ok.txt"
         f.write_text("ok")
-        new_fs, errs = copy_to_repo(
+        new_fs, report = copy_to_repo(
             fs, [str(f)], "dest", ignore_errors=True,
         )
-        assert errs == []
+        assert report is not None
+        assert report.errors == []
         assert new_fs.read("dest/ok.txt") == b"ok"
 
     def test_ignore_errors_from_repo_write_fail(self, store_and_fs):
@@ -609,10 +613,11 @@ class TestIgnoreErrors:
         out.mkdir()
         out.chmod(0o444)
         try:
-            errs = copy_from_repo(
+            report = copy_from_repo(
                 fs, ["existing.txt"], str(out), ignore_errors=True,
             )
-            assert len(errs) >= 1
+            assert report is not None
+            assert len(report.errors) >= 1
         finally:
             out.chmod(0o755)
 
@@ -636,13 +641,312 @@ class TestIgnoreErrors:
         (sub / "locked.txt").write_text("locked")
         sub.chmod(0o555)
         try:
-            errs = copy_from_repo(
+            report = copy_from_repo(
                 fs, ["existing.txt"], str(out),
                 delete=True, ignore_errors=True,
             )
+            assert report is not None
             # The locked file should appear in errors
-            assert any("locked" in e.path for e in errs)
+            assert any("locked" in e.path for e in report.errors)
             # The good file should still be written
             assert (out / "existing.txt").read_text() == "exists"
         finally:
             sub.chmod(0o755)
+
+
+# ---------------------------------------------------------------------------
+# Fix 2: ignore_errors + delete + all fail should not delete destination
+# ---------------------------------------------------------------------------
+
+class TestIgnoreErrorsDeleteAllFail:
+    def test_copy_to_repo_ignore_errors_delete_all_fail_no_delete(self, store_and_fs):
+        """All sources invalid with ignore_errors=True, delete=True → raises,
+        destination unchanged."""
+        _, fs, tmp_path = store_and_fs
+        with pytest.raises(RuntimeError, match="All files failed"):
+            copy_to_repo(
+                fs,
+                [str(tmp_path / "nope1"), str(tmp_path / "nope2")],
+                "dir",
+                ignore_errors=True,
+                delete=True,
+            )
+        # Original repo content untouched
+        assert fs.read("dir/a.txt") == b"aaa"
+        assert fs.read("dir/b.txt") == b"bbb"
+
+    def test_copy_from_repo_ignore_errors_delete_all_fail_no_delete(self, store_and_fs):
+        """All repo sources invalid with ignore_errors=True, delete=True → raises,
+        local files unchanged."""
+        _, fs, tmp_path = store_and_fs
+        out = tmp_path / "output"
+        out.mkdir()
+        (out / "precious.txt").write_text("precious")
+        with pytest.raises(RuntimeError, match="All files failed"):
+            copy_from_repo(
+                fs,
+                ["nonexistent1", "nonexistent2"],
+                str(out),
+                ignore_errors=True,
+                delete=True,
+            )
+        # Local file untouched
+        assert (out / "precious.txt").read_text() == "precious"
+
+
+# ---------------------------------------------------------------------------
+# Fix 3: Hash computation not covered by ignore_errors
+# ---------------------------------------------------------------------------
+
+class TestHashUnreadableIgnoreErrors:
+    def test_copy_to_repo_delete_hash_unreadable_ignore_errors(self, store_and_fs):
+        """Unreadable local file during hash comparison with ignore_errors=True
+        completes with error recorded."""
+        _, fs, tmp_path = store_and_fs
+        d = tmp_path / "src"
+        d.mkdir()
+        (d / "a.txt").write_bytes(b"new aaa")  # different content → real update
+        (d / "b.txt").write_bytes(b"bbb")
+        bad = d / ".dotfile"
+        bad.write_bytes(b"dot")
+        bad.chmod(0o000)
+        try:
+            new_fs, report = copy_to_repo(
+                fs, [str(d) + "/"], "dir",
+                delete=True, ignore_errors=True,
+            )
+            assert report is not None
+            # The unreadable file should appear in errors
+            assert any(".dotfile" in e.path for e in report.errors)
+            # Other files should be synced
+            assert new_fs.read("dir/a.txt") == b"new aaa"
+        finally:
+            bad.chmod(0o644)
+
+    def test_copy_from_repo_delete_hash_unreadable_ignore_errors(self, store_and_fs):
+        """Unreadable local file during hash in copy_from_repo with ignore_errors
+        completes with error recorded."""
+        _, fs, tmp_path = store_and_fs
+        out = tmp_path / "output"
+        out.mkdir()
+        existing = out / "existing.txt"
+        existing.write_bytes(b"exists")
+        existing.chmod(0o000)
+        try:
+            report = copy_from_repo(
+                fs, ["existing.txt"], str(out),
+                delete=True, ignore_errors=True,
+            )
+            assert report is not None
+            # The unreadable file should appear in errors
+            assert any("existing.txt" in e.path for e in report.errors)
+        finally:
+            existing.chmod(0o644)
+
+
+# ---------------------------------------------------------------------------
+# Fix 4: follow_symlinks=False doesn't handle source dir symlink
+# ---------------------------------------------------------------------------
+
+class TestSourceDirSymlinkNoFollow:
+    def test_copy_to_repo_source_is_dir_symlink_no_follow(self, store_and_fs):
+        """Source is a symlink to a directory; with follow_symlinks=False,
+        the repo gets a symlink entry, not the directory contents."""
+        _, fs, tmp_path = store_and_fs
+        real_dir = tmp_path / "real_dir"
+        real_dir.mkdir()
+        (real_dir / "file.txt").write_text("inside")
+
+        link = tmp_path / "link_to_dir"
+        link.symlink_to(str(real_dir))
+
+        new_fs, _report = copy_to_repo(
+            fs, [str(link)], "dest", follow_symlinks=False,
+        )
+        # Should be stored as a symlink, not as directory contents
+        assert new_fs.readlink("dest/link_to_dir") == str(real_dir)
+        assert not new_fs.exists("dest/link_to_dir/file.txt")
+
+
+# ---------------------------------------------------------------------------
+# Fix 5: Disk globbing cross-platform
+# ---------------------------------------------------------------------------
+
+class TestExpandDiskGlobCrossPlatform:
+    def test_expand_disk_glob_with_backslash_patterns(self, tmp_path):
+        """_expand_disk_glob normalizes os.sep in patterns."""
+        d = tmp_path / "globtest"
+        d.mkdir()
+        (d / "a.txt").write_text("a")
+        (d / "b.txt").write_text("b")
+
+        # Use forward-slash pattern (always works)
+        result = _expand_disk_glob(str(d) + "/*.txt")
+        assert len(result) == 2
+
+        # Simulate what would happen with os.sep-based pattern
+        pattern = os.path.join(str(d), "*.txt")
+        result2 = _expand_disk_glob(pattern)
+        assert len(result2) == 2
+        assert sorted(result) == sorted(result2)
+
+
+# ---------------------------------------------------------------------------
+# Fix 6: Overlapping sources warns
+# ---------------------------------------------------------------------------
+
+class TestOverlappingSources:
+    def test_copy_to_repo_overlapping_sources_warns(self, store_and_fs):
+        """Two sources resolve to same dest; first wins, warning in warnings."""
+        _, fs, tmp_path = store_and_fs
+        # Create two different files with the same basename
+        d1 = tmp_path / "dir1"
+        d1.mkdir()
+        (d1 / "same.txt").write_text("first")
+
+        d2 = tmp_path / "dir2"
+        d2.mkdir()
+        (d2 / "same.txt").write_text("second")
+
+        new_fs, report = copy_to_repo(
+            fs,
+            [str(d1 / "same.txt"), str(d2 / "same.txt")],
+            "dest",
+            delete=True,
+        )
+        # First source wins
+        assert new_fs.read("dest/same.txt") == b"first"
+        # Overlap warning in warnings (not errors)
+        assert report is not None
+        assert any("Overlapping" in w.error for w in report.warnings)
+        assert report.errors == []
+
+    def test_copy_from_repo_overlapping_sources_warns(self, store_and_fs):
+        """Overlapping sources in from_repo go to warnings, not errors."""
+        _, fs, tmp_path = store_and_fs
+        fs = fs.write("dir/a.txt", b"aaa")
+        fs = fs.write("other/a.txt", b"other")
+        out = tmp_path / "output"
+        out.mkdir()
+        # dir/ and other/ both have a.txt → overlapping destination
+        report = copy_from_repo(
+            fs, ["dir/", "other/"], str(out), delete=True,
+        )
+        assert report is not None
+        assert any("Overlapping" in w.error for w in report.warnings)
+        assert report.errors == []
+
+    def test_copy_to_repo_dry_run_overlapping_sources_warns(self, store_and_fs):
+        """Dry run with overlapping sources puts warnings in report.warnings."""
+        _, fs, tmp_path = store_and_fs
+        d1 = tmp_path / "dir1"
+        d1.mkdir()
+        (d1 / "same.txt").write_text("first")
+        d2 = tmp_path / "dir2"
+        d2.mkdir()
+        (d2 / "same.txt").write_text("second")
+        report = copy_to_repo_dry_run(
+            fs,
+            [str(d1 / "same.txt"), str(d2 / "same.txt")],
+            "dest",
+            delete=True,
+        )
+        assert report is not None
+        assert any("Overlapping" in w.error for w in report.warnings)
+
+
+# ---------------------------------------------------------------------------
+# Fix B2: repo_files built from pair_map not pairs
+# ---------------------------------------------------------------------------
+
+class TestCopyFromRepoDuplicateSources:
+    def test_copy_from_repo_delete_duplicate_sources_consistent(self, store_and_fs):
+        """Overlapping repo sources: hash comparison uses the correct (first) source."""
+        _, fs, tmp_path = store_and_fs
+        # Two repo files mapping to the same local relative path
+        fs = fs.write("dir/shared.txt", b"from_dir")
+        fs = fs.write("other/shared.txt", b"from_other")
+        out = tmp_path / "output"
+        out.mkdir()
+        # Pre-populate with content matching "dir/shared.txt"
+        (out / "shared.txt").write_bytes(b"from_dir")
+
+        # dir/ is listed first → pair_map["shared.txt"] = "dir/shared.txt"
+        report = copy_from_repo(
+            fs, ["dir/", "other/"], str(out), delete=True,
+        )
+        assert report is not None
+        # "shared.txt" should NOT be in update (content matches first source)
+        assert "shared.txt" not in report.update
+        # The overlap warning should be present
+        assert any("Overlapping" in w.error for w in report.warnings)
+
+
+# ---------------------------------------------------------------------------
+# Fix B3: Contents-mode symlinked dir follows symlink
+# ---------------------------------------------------------------------------
+
+class TestContentsModeSymlinkedDir:
+    def test_copy_to_repo_contents_mode_symlinked_dir_follows(self, store_and_fs):
+        """Contents mode ('symlink_dir/') follows symlink to walk dir contents."""
+        _, fs, tmp_path = store_and_fs
+        real_dir = tmp_path / "real_dir"
+        real_dir.mkdir()
+        (real_dir / "file.txt").write_text("inside")
+        (real_dir / "sub").mkdir()
+        (real_dir / "sub" / "nested.txt").write_text("nested")
+
+        link = tmp_path / "link_to_dir"
+        link.symlink_to(str(real_dir))
+
+        # Contents mode: trailing slash → walk contents, even though base is a symlink
+        new_fs, _report = copy_to_repo(
+            fs, [str(link) + "/"], "dest", follow_symlinks=False,
+        )
+        assert new_fs.read("dest/file.txt") == b"inside"
+        assert new_fs.read("dest/sub/nested.txt") == b"nested"
+
+    def test_copy_to_repo_dir_mode_symlink_still_preserved(self, store_and_fs):
+        """Dir mode (no trailing slash) still preserves symlink when not following."""
+        _, fs, tmp_path = store_and_fs
+        real_dir = tmp_path / "real_dir"
+        real_dir.mkdir()
+        (real_dir / "file.txt").write_text("inside")
+
+        link = tmp_path / "link_to_dir"
+        link.symlink_to(str(real_dir))
+
+        # Dir mode (no trailing slash): symlink stored as symlink entry
+        new_fs, _report = copy_to_repo(
+            fs, [str(link)], "dest", follow_symlinks=False,
+        )
+        assert new_fs.readlink("dest/link_to_dir") == str(real_dir)
+
+
+# ---------------------------------------------------------------------------
+# CopyReport: return None when empty
+# ---------------------------------------------------------------------------
+
+class TestCopyReportNone:
+    def test_copy_to_repo_returns_none_when_no_changes(self, store_and_fs):
+        """copy_to_repo returns None report when already in sync."""
+        _, fs, tmp_path = store_and_fs
+        d = tmp_path / "src"
+        d.mkdir()
+        (d / "a.txt").write_bytes(b"aaa")
+        (d / "b.txt").write_bytes(b"bbb")
+        (d / ".dotfile").write_bytes(b"dot")
+        new_fs, report = copy_to_repo(fs, [str(d) + "/"], "dir", delete=True)
+        assert report is None
+        assert new_fs.hash == fs.hash
+
+    def test_copy_to_repo_dry_run_returns_none_when_in_sync(self, store_and_fs):
+        """copy_to_repo_dry_run returns None when already in sync."""
+        _, fs, tmp_path = store_and_fs
+        d = tmp_path / "src"
+        d.mkdir()
+        (d / "a.txt").write_bytes(b"aaa")
+        (d / "b.txt").write_bytes(b"bbb")
+        (d / ".dotfile").write_bytes(b"dot")
+        report = copy_to_repo_dry_run(fs, [str(d) + "/"], "dir", delete=True)
+        assert report is None
