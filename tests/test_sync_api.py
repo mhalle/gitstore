@@ -1,0 +1,137 @@
+"""Tests for the GitStore backup/restore API (store.backup / store.restore)."""
+
+import pytest
+from dulwich.repo import Repo as DulwichRepo
+
+from gitstore import GitStore, SyncDiff, RefChange
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def store(tmp_path):
+    """A GitStore with a 'main' branch and one commit."""
+    p = str(tmp_path / "src.git")
+    s = GitStore.open(p, create="main")
+    fs = s.branches["main"]
+    with fs.batch(message="add hello") as b:
+        b.write("hello.txt", b"hello world\n")
+    return s
+
+
+@pytest.fixture
+def remote(tmp_path):
+    """An empty bare dulwich repo suitable as a push/fetch target."""
+    p = str(tmp_path / "remote.git")
+    DulwichRepo.init_bare(p, mkdir=True)
+    return p
+
+
+def _get_refs(repo_path):
+    """Return {ref_str: sha_str} excluding HEAD."""
+    repo = DulwichRepo(repo_path)
+    return {
+        ref.decode(): sha.decode()
+        for ref, sha in repo.get_refs().items()
+        if ref != b"HEAD"
+    }
+
+
+# ---------------------------------------------------------------------------
+# TestBackupAPI
+# ---------------------------------------------------------------------------
+
+class TestBackupAPI:
+    def test_backup_returns_sync_diff(self, store, remote):
+        diff = store.backup(remote)
+        assert isinstance(diff, SyncDiff)
+        assert len(diff.create) > 0
+        assert diff.total > 0
+
+    def test_dry_run_does_not_modify_remote(self, store, remote):
+        diff = store.backup(remote, dry_run=True)
+        assert diff.total > 0
+        # Remote should still be empty
+        assert _get_refs(remote) == {}
+
+    def test_backup_mirrors_refs(self, store, remote):
+        store.backup(remote)
+        local = _get_refs(store._repo.path.rstrip("/"))
+        assert local == _get_refs(remote)
+
+    def test_backup_then_in_sync(self, store, remote):
+        store.backup(remote)
+        diff = store.backup(remote, dry_run=True)
+        assert diff.in_sync
+
+    def test_backup_with_tag(self, store, remote):
+        # Create a tag
+        fs = store.branches["main"]
+        store.tags["v1"] = fs
+        store.backup(remote)
+        remote_refs = _get_refs(remote)
+        assert any("refs/tags/v1" in r for r in remote_refs)
+
+
+# ---------------------------------------------------------------------------
+# TestRestoreAPI
+# ---------------------------------------------------------------------------
+
+class TestRestoreAPI:
+    def test_restore_returns_sync_diff(self, store, remote):
+        store.backup(remote)
+        # Modify local
+        fs = store.branches["main"]
+        with fs.batch(message="add new") as b:
+            b.write("new.txt", b"new\n")
+        diff = store.restore(remote)
+        assert isinstance(diff, SyncDiff)
+
+    def test_dry_run_does_not_modify_local(self, store, remote):
+        store.backup(remote)
+        fs = store.branches["main"]
+        with fs.batch(message="add new") as b:
+            b.write("new.txt", b"new\n")
+        refs_before = _get_refs(store._repo.path.rstrip("/"))
+        diff = store.restore(remote, dry_run=True)
+        assert diff.total > 0
+        refs_after = _get_refs(store._repo.path.rstrip("/"))
+        assert refs_after == refs_before
+
+    def test_restore_reverts_changes(self, store, remote):
+        store.backup(remote)
+        original = _get_refs(store._repo.path.rstrip("/"))
+        # Modify local
+        fs = store.branches["main"]
+        with fs.batch(message="add new") as b:
+            b.write("new.txt", b"new\n")
+        store.restore(remote)
+        assert _get_refs(store._repo.path.rstrip("/")) == original
+
+
+# ---------------------------------------------------------------------------
+# TestSyncDiffStructure
+# ---------------------------------------------------------------------------
+
+class TestSyncDiffStructure:
+    def test_empty_diff_is_in_sync(self):
+        diff = SyncDiff()
+        assert diff.in_sync
+        assert diff.total == 0
+
+    def test_ref_change_fields(self):
+        c = RefChange(ref="refs/heads/main", src_sha="abc1234", dest_sha=None)
+        assert c.ref == "refs/heads/main"
+        assert c.src_sha == "abc1234"
+        assert c.dest_sha is None
+
+    def test_total_counts_all_categories(self):
+        diff = SyncDiff(
+            create=[RefChange(ref="a", src_sha="1")],
+            update=[RefChange(ref="b", src_sha="2", dest_sha="3")],
+            delete=[RefChange(ref="c", dest_sha="4"), RefChange(ref="d", dest_sha="5")],
+        )
+        assert diff.total == 4
+        assert not diff.in_sync

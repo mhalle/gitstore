@@ -8,10 +8,13 @@ from __future__ import annotations
 
 import time as _time
 
+from dulwich.client import get_transport_and_path as _get_transport_and_path
 from dulwich.objects import Blob as _DBlob
 from dulwich.objects import Commit as _DCommit
 from dulwich.objects import Tag as _DTag
 from dulwich.objects import Tree as _DTree
+from dulwich.porcelain import ls_remote as _ls_remote
+from dulwich.protocol import ZERO_SHA as _ZERO_SHA
 from dulwich.repo import Repo as _DRepo
 
 # ---------------------------------------------------------------------------
@@ -402,6 +405,94 @@ class Repository:
     def object_store(self):
         """Direct access to dulwich object_store (for tests)."""
         return self._repo.object_store
+
+    # -- transport helpers --------------------------------------------------
+
+    def diff_refs(self, url, direction):
+        """Compare local and remote refs.
+
+        *direction* is ``"push"`` (local->remote) or ``"pull"`` (remote->local).
+        Returns ``{"create": [...], "update": [...], "delete": [...],
+        "src": {ref: sha}, "dest": {ref: sha}}`` with bytes keys.
+        """
+        remote_result = _ls_remote(url)
+        refs_dict = remote_result.refs if hasattr(remote_result, "refs") else remote_result
+        remote_refs = {
+            ref: sha
+            for ref, sha in refs_dict.items()
+            if ref != b"HEAD" and not ref.endswith(b"^{}")
+        }
+
+        local_refs = {
+            ref: sha
+            for ref, sha in self._repo.get_refs().items()
+            if ref != b"HEAD"
+        }
+
+        if direction == "push":
+            src, dest = local_refs, remote_refs
+        else:
+            src, dest = remote_refs, local_refs
+
+        create, update, delete = [], [], []
+        for ref, sha in src.items():
+            if ref not in dest:
+                create.append(ref)
+            elif dest[ref] != sha:
+                update.append(ref)
+        for ref in dest:
+            if ref not in src:
+                delete.append(ref)
+
+        return {"create": create, "update": update, "delete": delete,
+                "src": src, "dest": dest}
+
+    def mirror_push(self, url, *, progress=None):
+        """Push all local refs to *url*, mirroring (force + delete stale)."""
+        client, path = _get_transport_and_path(url)
+        local_refs = {
+            ref: sha
+            for ref, sha in self._repo.get_refs().items()
+            if ref != b"HEAD"
+        }
+
+        def update_refs(remote_refs):
+            new_refs = {}
+            for ref, sha in local_refs.items():
+                new_refs[ref] = sha
+            for ref in remote_refs:
+                if ref not in local_refs and ref != b"HEAD":
+                    new_refs[ref] = _ZERO_SHA
+            return new_refs
+
+        def gen_pack(have, want, *, ofs_delta=False, progress=progress):
+            return self._repo.object_store.generate_pack_data(
+                have, want, ofs_delta=ofs_delta, progress=progress,
+            )
+
+        return client.send_pack(path, update_refs, gen_pack, progress=progress)
+
+    def mirror_fetch(self, url, *, progress=None):
+        """Fetch all remote refs from *url*, mirroring (force + delete stale)."""
+        client, path = _get_transport_and_path(url)
+        result = client.fetch(path, self._repo, progress=progress)
+
+        remote_refs = {
+            ref: sha
+            for ref, sha in result.refs.items()
+            if ref != b"HEAD" and not ref.endswith(b"^{}")
+        }
+
+        # Set all remote refs locally
+        for ref, sha in remote_refs.items():
+            self._repo.refs[ref] = sha
+
+        # Delete local refs not on remote
+        for ref in list(self._repo.refs.allkeys()):
+            if ref != b"HEAD" and ref not in remote_refs:
+                self._repo.refs.remove_if_equals(ref, self._repo.refs[ref])
+
+        return result
 
 
 # ---------------------------------------------------------------------------
