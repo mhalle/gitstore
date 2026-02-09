@@ -157,9 +157,16 @@ class RefDict(MutableMapping):
             if ref_name in repo.references:
                 if self._is_tags:
                     raise KeyError(f"Tag {name!r} already exists")
-                repo.references[ref_name].set_target(fs._commit_oid)
+                # Get commit message for reflog
+                commit = repo[fs._commit_oid]
+                msg_str = commit.message.splitlines()[0] if commit.message else ""
+                msg = f"branch: set to {msg_str}".encode()
+                repo.references[ref_name].set_target(fs._commit_oid, message=msg)
             else:
-                repo.references.create(ref_name, fs._commit_oid)
+                commit = repo[fs._commit_oid]
+                msg_str = commit.message.splitlines()[0] if commit.message else ""
+                msg = f"branch: Created from {msg_str}".encode()
+                repo.references.create(ref_name, fs._commit_oid, message=msg)
 
     def __delitem__(self, name: str):
         from ._lock import repo_lock
@@ -186,3 +193,59 @@ class RefDict(MutableMapping):
 
     def __len__(self) -> int:
         return sum(1 for _ in self)
+
+    def reflog(self, name: str) -> list[dict]:
+        """Read reflog entries for a branch.
+
+        Args:
+            name: Branch name (e.g., "main")
+
+        Returns:
+            List of reflog entries, each a dict with:
+                - old_sha: Previous commit hash
+                - new_sha: New commit hash
+                - committer: Name and email
+                - timestamp: Unix timestamp
+                - message: Reflog message
+
+        Raises:
+            KeyError: If branch doesn't exist
+            FileNotFoundError: If no reflog exists
+
+        Example:
+            >>> entries = repo.branches.reflog("main")
+            >>> for e in entries:
+            ...     print(f"{e['message']}: {e['new_sha'][:7]}")
+        """
+        import os
+        from dulwich import reflog as dreflog
+
+        if self._is_tags:
+            raise ValueError("Tags do not have reflog")
+
+        # Verify branch exists
+        ref_name = self._ref_name(name)
+        if ref_name not in self._store._repo.references:
+            raise KeyError(name)
+
+        # Read reflog file
+        reflog_path = os.path.join(
+            self._store._repo.path,
+            "logs", "refs", "heads", name
+        )
+
+        if not os.path.exists(reflog_path):
+            raise FileNotFoundError(f"No reflog found for branch {name!r}")
+
+        # Parse reflog entries
+        with open(reflog_path, 'rb') as f:
+            entries = []
+            for entry in dreflog.read_reflog(f):
+                entries.append({
+                    'old_sha': entry.old_sha.decode(),
+                    'new_sha': entry.new_sha.decode(),
+                    'committer': entry.committer.decode(),
+                    'timestamp': entry.timestamp,
+                    'message': entry.message.decode(),
+                })
+            return entries

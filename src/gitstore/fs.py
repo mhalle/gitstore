@@ -272,7 +272,8 @@ class FS:
                 raise StaleSnapshotError(
                     f"Branch {self._branch!r} has advanced since this snapshot"
                 )
-            ref.set_target(new_commit_oid)
+            # Pass commit message to reflog
+            ref.set_target(new_commit_oid, message=f"commit: {final_message}".encode())
 
         new_fs = FS(self._store, new_commit_oid, branch=self._branch)
         new_fs._report = report
@@ -367,6 +368,130 @@ class FS:
         if not commit.parents:
             return None
         return FS(self._store, commit.parents[0].id, branch=self._branch)
+
+    def undo(self, steps: int = 1) -> FS:
+        """Move branch back N commits.
+
+        Walks back through parent commits and updates the branch pointer.
+        Automatically writes a reflog entry.
+
+        Args:
+            steps: Number of commits to undo (default 1)
+
+        Returns:
+            New FS snapshot at the parent commit
+
+        Raises:
+            PermissionError: If called on read-only snapshot (tag)
+            ValueError: If not enough history exists
+
+        Example:
+            >>> fs = repo.branches["main"]
+            >>> fs = fs.undo()  # Go back 1 commit
+            >>> fs = fs.undo(3)  # Go back 3 commits
+        """
+        if not self._writable:
+            raise PermissionError("Cannot undo on a read-only snapshot")
+
+        # Walk back N parents
+        current = self
+        for i in range(steps):
+            if current.parent is None:
+                raise ValueError(
+                    f"Cannot undo {steps} steps - only {i} commit(s) in history"
+                )
+            current = current.parent
+
+        # Update the branch (this writes reflog automatically)
+        self._store.branches[self._branch] = current
+
+        return current
+
+    def redo(self, steps: int = 1) -> FS:
+        """Move branch forward N steps using reflog.
+
+        Reads the reflog to find where the branch was before the last N movements.
+        This can resurrect "orphaned" commits after undo.
+
+        The reflog tracks all branch movements chronologically. Each redo step
+        moves back one entry in the reflog (backwards in time through the log,
+        but forward in commit history).
+
+        Args:
+            steps: Number of reflog entries to go back (default 1)
+
+        Returns:
+            New FS snapshot at the target position
+
+        Raises:
+            PermissionError: If called on read-only snapshot (tag)
+            ValueError: If not enough redo history exists
+
+        Example:
+            >>> fs = fs.undo(2)  # Creates 1 reflog entry moving back 2 commits
+            >>> fs = fs.redo()   # Go back 1 reflog entry (to before the undo)
+        """
+        if not self._writable:
+            raise PermissionError("Cannot redo on a read-only snapshot")
+
+        # Read reflog for this branch
+        from dulwich import reflog as dreflog
+        import os
+
+        reflog_path = os.path.join(
+            self._store._repo.path,
+            "logs", "refs", "heads", self._branch
+        )
+
+        if not os.path.exists(reflog_path):
+            raise ValueError(f"No reflog found for branch {self._branch!r}")
+
+        # Read all reflog entries
+        with open(reflog_path, 'rb') as f:
+            entries = list(dreflog.read_reflog(f))
+
+        if len(entries) == 0:
+            raise ValueError("Reflog is empty")
+
+        # Find current position in reflog (search backwards to get most recent)
+        current_sha = self._commit_oid.raw if hasattr(self._commit_oid, 'raw') else self._commit_oid
+        current_index = None
+
+        for i in range(len(entries) - 1, -1, -1):
+            if entries[i].new_sha == current_sha:
+                current_index = i
+                break
+
+        if current_index is None:
+            raise ValueError(
+                f"Cannot redo - current commit not in reflog (you may have a stale snapshot)"
+            )
+
+        # To redo, we want to go to where the branch was N steps ago
+        # Each step back in the reflog shows us old_sha (where it was before that movement)
+        # So we walk back N steps, taking the old_sha at each step
+        target_sha = current_sha
+        index = current_index
+
+        for step in range(steps):
+            if index < 0:
+                raise ValueError(
+                    f"Cannot redo {steps} steps - only {step} step(s) available"
+                )
+
+            # Get where the branch was before this reflog entry
+            target_sha = entries[index].old_sha
+
+            # Move back one reflog entry
+            index -= 1
+
+        # Create FS at target and update branch
+        from . import _compat as pygit2
+        target_oid = pygit2.Oid(target_sha)
+        target_fs = FS(self._store, target_oid, branch=self._branch)
+        self._store.branches[self._branch] = target_fs
+
+        return target_fs
 
     def log(
         self,

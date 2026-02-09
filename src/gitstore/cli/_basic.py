@@ -214,3 +214,168 @@ def log(ctx, at_path, deprecated_at, match_pattern, before, branch, ref, fmt):
     else:
         for entry in entries:
             click.echo(f"{entry.hash[:7]}  {entry.time.isoformat()}  {entry.message}")
+
+
+# ---------------------------------------------------------------------------
+# undo
+# ---------------------------------------------------------------------------
+
+@main.command()
+@_repo_option
+@click.option("--branch", "-b", default="main", help="Branch to undo (default: main).")
+@click.argument("steps", type=int, default=1, required=False)
+@click.pass_context
+def undo(ctx, branch, steps):
+    """Move branch back N commits (default 1).
+
+    Walks back through parent commits and updates the branch pointer.
+    Creates a reflog entry so you can redo later.
+
+    Examples:
+        gitstore --repo data.git undo       # Back 1 commit
+        gitstore --repo data.git undo 3     # Back 3 commits
+        gitstore --repo data.git undo -b dev 2  # Undo 2 on 'dev' branch
+    """
+    repo_path = _require_repo(ctx)
+
+    try:
+        repo = GitStore.open(repo_path)
+        fs = repo.branches[branch]
+
+        # Perform undo
+        new_fs = fs.undo(steps)
+
+        # Show what happened
+        if steps == 1:
+            click.echo(f"Undid 1 commit on '{branch}'")
+        else:
+            click.echo(f"Undid {steps} commits on '{branch}'")
+        click.echo(f"Branch now at: {new_fs.hash[:7]} - {new_fs.message}")
+
+    except KeyError:
+        raise click.ClickException(f"Branch {branch!r} not found")
+    except ValueError as e:
+        raise click.ClickException(str(e))
+    except PermissionError as e:
+        raise click.ClickException(str(e))
+
+
+# ---------------------------------------------------------------------------
+# redo
+# ---------------------------------------------------------------------------
+
+@main.command()
+@_repo_option
+@click.option("--branch", "-b", default="main", help="Branch to redo (default: main).")
+@click.argument("steps", type=int, default=1, required=False)
+@click.pass_context
+def redo(ctx, branch, steps):
+    """Move branch forward N steps in reflog (default 1).
+
+    Uses the reflog to find where the branch was in the future and moves
+    there. Can resurrect commits after undo or divergence.
+
+    Examples:
+        gitstore --repo data.git redo       # Forward 1 step
+        gitstore --repo data.git redo 2     # Forward 2 steps
+        gitstore --repo data.git redo -b dev  # Redo on 'dev' branch
+    """
+    repo_path = _require_repo(ctx)
+
+    try:
+        repo = GitStore.open(repo_path)
+        fs = repo.branches[branch]
+
+        # Perform redo
+        new_fs = fs.redo(steps)
+
+        # Show what happened
+        if steps == 1:
+            click.echo(f"Redid 1 step on '{branch}'")
+        else:
+            click.echo(f"Redid {steps} steps on '{branch}'")
+        click.echo(f"Branch now at: {new_fs.hash[:7]} - {new_fs.message}")
+
+    except KeyError:
+        raise click.ClickException(f"Branch {branch!r} not found")
+    except ValueError as e:
+        raise click.ClickException(str(e))
+    except PermissionError as e:
+        raise click.ClickException(str(e))
+    except FileNotFoundError as e:
+        raise click.ClickException(str(e))
+
+
+# ---------------------------------------------------------------------------
+# reflog
+# ---------------------------------------------------------------------------
+
+@main.command()
+@_repo_option
+@click.option("--branch", "-b", default="main", help="Branch to show reflog for (default: main).")
+@click.option("-n", "--limit", type=int, help="Limit number of entries shown.")
+@click.option("--format", "fmt", default="text",
+              type=click.Choice(["text", "json", "jsonl"]),
+              help="Output format.")
+@click.pass_context
+def reflog(ctx, branch, limit, fmt):
+    """Show reflog entries for a branch.
+
+    The reflog shows chronological history of where the branch pointer
+    has been, including undos and branch updates. This is different from
+    'log' which shows the commit tree.
+
+    Examples:
+        gitstore --repo data.git reflog              # Show all entries (text)
+        gitstore --repo data.git reflog -n 10        # Show last 10
+        gitstore --repo data.git reflog -b dev       # Show for 'dev' branch
+        gitstore --repo data.git reflog --format json   # JSON output
+        gitstore --repo data.git reflog --format jsonl  # JSON Lines output
+    """
+    repo_path = _require_repo(ctx)
+
+    try:
+        repo = GitStore.open(repo_path)
+        entries = repo.branches.reflog(branch)
+
+        # Apply limit if specified
+        if limit:
+            entries = entries[-limit:]
+
+        # Handle empty reflog
+        if not entries:
+            if fmt == "json":
+                click.echo("[]")
+            elif fmt == "jsonl":
+                pass  # No output for empty
+            else:
+                click.echo(f"No reflog entries for branch '{branch}'")
+            return
+
+        # Output in requested format
+        if fmt == "json":
+            click.echo(json.dumps(entries, indent=2))
+        elif fmt == "jsonl":
+            for entry in entries:
+                click.echo(json.dumps(entry))
+        else:
+            # Text format (default)
+            import datetime
+            click.echo(f"Reflog for branch '{branch}' ({len(entries)} entries):\n")
+
+            for i, entry in enumerate(entries):
+                new = entry['new_sha'][:7]
+                msg = entry['message']
+
+                # Format timestamp
+                ts = datetime.datetime.fromtimestamp(entry['timestamp'])
+                time_str = ts.strftime("%Y-%m-%d %H:%M:%S")
+
+                click.echo(f"  [{i}] {new} ({time_str})")
+                click.echo(f"      {msg}")
+                click.echo()
+
+    except KeyError:
+        raise click.ClickException(f"Branch {branch!r} not found")
+    except FileNotFoundError as e:
+        raise click.ClickException(str(e))

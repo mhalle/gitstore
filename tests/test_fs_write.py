@@ -265,3 +265,277 @@ class TestNoOpCommit:
         with fs2.batch() as b:
             b.write("a.txt", b"hello")
         assert b.fs.hash == fs2.hash
+
+
+class TestUndo:
+    def test_undo_single_step(self, repo_fs):
+        """Undo should go back 1 commit."""
+        _, fs = repo_fs
+        fs1 = fs.write("a.txt", b"a")
+        fs2 = fs1.write("b.txt", b"b")
+
+        fs_back = fs2.undo()
+        assert fs_back.hash == fs1.hash
+        assert fs_back.exists("a.txt")
+        assert not fs_back.exists("b.txt")
+
+    def test_undo_multiple_steps(self, repo_fs):
+        """Undo should go back N commits."""
+        _, fs = repo_fs
+        fs1 = fs.write("a.txt", b"a")
+        fs2 = fs1.write("b.txt", b"b")
+        fs3 = fs2.write("c.txt", b"c")
+
+        fs_back = fs3.undo(2)
+        assert fs_back.hash == fs1.hash
+        assert fs_back.exists("a.txt")
+        assert not fs_back.exists("b.txt")
+        assert not fs_back.exists("c.txt")
+
+    def test_undo_updates_branch(self, repo_fs):
+        """Undo should update the branch pointer."""
+        repo, fs = repo_fs
+        fs1 = fs.write("a.txt", b"a")
+        fs2 = fs1.write("b.txt", b"b")
+
+        fs_back = fs2.undo()
+        latest = repo.branches["main"]
+        assert latest.hash == fs_back.hash
+
+    def test_undo_too_many_raises(self, repo_fs):
+        """Undo beyond history should raise ValueError."""
+        _, fs = repo_fs
+        fs1 = fs.write("a.txt", b"a")
+        fs2 = fs1.write("b.txt", b"b")
+
+        with pytest.raises(ValueError, match="Cannot undo 5 steps"):
+            fs2.undo(5)
+
+    def test_undo_on_tag_raises(self, repo_fs):
+        """Undo on read-only snapshot should raise PermissionError."""
+        repo, fs = repo_fs
+        fs1 = fs.write("a.txt", b"a")
+        repo.tags["v1"] = fs1
+
+        tag_fs = repo.tags["v1"]
+        with pytest.raises(PermissionError, match="read-only"):
+            tag_fs.undo()
+
+
+class TestRedo:
+    def test_redo_after_undo(self, repo_fs):
+        """Redo should go forward after undo."""
+        _, fs = repo_fs
+        fs1 = fs.write("a.txt", b"a")
+        fs2 = fs1.write("b.txt", b"b")
+
+        fs_back = fs2.undo()
+        fs_forward = fs_back.redo()
+        assert fs_forward.hash == fs2.hash
+        assert fs_forward.exists("b.txt")
+
+    def test_redo_multiple_steps(self, repo_fs):
+        """Redo should go forward N reflog steps."""
+        _, fs = repo_fs
+        fs1 = fs.write("a.txt", b"a")
+        fs2 = fs1.write("b.txt", b"b")
+        fs3 = fs2.write("c.txt", b"c")
+
+        # Do two separate undo operations (creates 2 reflog entries)
+        fs_back1 = fs3.undo()  # fs3 -> fs2
+        fs_back2 = fs_back1.undo()  # fs2 -> fs1
+
+        # Redo 2 steps should get us back to fs3
+        fs_forward = fs_back2.redo(2)
+        assert fs_forward.hash == fs3.hash
+        assert fs_forward.exists("c.txt")
+
+    def test_redo_updates_branch(self, repo_fs):
+        """Redo should update the branch pointer."""
+        repo, fs = repo_fs
+        fs1 = fs.write("a.txt", b"a")
+        fs2 = fs1.write("b.txt", b"b")
+
+        fs_back = fs2.undo()
+        fs_forward = fs_back.redo()
+        latest = repo.branches["main"]
+        assert latest.hash == fs_forward.hash
+
+    def test_redo_too_many_raises(self, repo_fs):
+        """Redo beyond available history should raise ValueError."""
+        repo, fs = repo_fs
+        fs1 = fs.write("a.txt", b"a")
+
+        # Try to redo when there's no previous undo
+        # The reflog has only 1 entry (the commit), and we're at that commit
+        # Going back 1 step means looking at old_sha of that entry (empty tree)
+        # Going back 2 steps should fail
+        with pytest.raises(ValueError, match="Cannot redo 2 steps"):
+            fs1.redo(2)
+
+    def test_redo_on_tag_raises(self, repo_fs):
+        """Redo on read-only snapshot should raise PermissionError."""
+        repo, fs = repo_fs
+        fs1 = fs.write("a.txt", b"a")
+        fs2 = fs1.write("b.txt", b"b")
+        fs_back = fs2.undo()
+        repo.tags["v1"] = fs_back
+
+        tag_fs = repo.tags["v1"]
+        with pytest.raises(PermissionError, match="read-only"):
+            tag_fs.redo()
+
+
+class TestReflog:
+    def test_reflog_shows_entries(self, repo_fs):
+        """Reflog should show all branch movements."""
+        repo, fs = repo_fs
+        fs.write("a.txt", b"a")
+        fs2 = repo.branches["main"]
+        fs2.write("b.txt", b"b")
+
+        entries = repo.branches.reflog("main")
+        assert len(entries) >= 2
+        assert all("message" in e for e in entries)
+        assert all("new_sha" in e for e in entries)
+        assert all("old_sha" in e for e in entries)
+
+    def test_reflog_includes_undo(self, repo_fs):
+        """Reflog should include undo operations."""
+        repo, fs = repo_fs
+        fs1 = fs.write("a.txt", b"a")
+        fs2 = fs1.write("b.txt", b"b")
+        fs2.undo()
+
+        entries = repo.branches.reflog("main")
+        assert len(entries) >= 3
+        # Last entry should be the undo (branch: set to ...)
+        assert "branch:" in entries[-1]["message"]
+
+    def test_reflog_nonexistent_branch_raises(self, repo_fs):
+        """Reflog on nonexistent branch should raise KeyError."""
+        repo, _ = repo_fs
+        with pytest.raises(KeyError):
+            repo.branches.reflog("nonexistent")
+
+    def test_reflog_on_tags_raises(self, repo_fs):
+        """Reflog on tags should raise ValueError."""
+        repo, fs = repo_fs
+        fs1 = fs.write("a.txt", b"a")
+        repo.tags["v1"] = fs1
+
+        with pytest.raises(ValueError, match="Tags do not have reflog"):
+            repo.tags.reflog("v1")
+
+
+class TestUndoRedoEdgeCases:
+    def test_divergent_history(self, repo_fs):
+        """After undo + new commit, redo goes through reflog chronologically."""
+        repo, fs = repo_fs
+        fs1 = fs.write("a.txt", b"a")
+        fs2 = fs1.write("b.txt", b"b")
+        fs3 = fs2.write("c.txt", b"c")
+
+        # Undo then make new commit (divergent history)
+        fs_back = fs3.undo(2)
+        fs_new = fs_back.write("d.txt", b"d")
+
+        # Redo goes back through reflog, not to orphaned commits
+        fs_redo = fs_new.redo()
+        assert fs_redo.hash == fs_back.hash
+        assert not fs_redo.exists("d.txt")
+
+    def test_redo_after_normal_commit(self, repo_fs):
+        """Redo works after normal commits (not just undo)."""
+        repo, fs = repo_fs
+        fs1 = fs.write("a.txt", b"a")
+        fs2 = fs1.write("b.txt", b"b")
+
+        # Redo without undo goes to previous reflog entry
+        fs_redo = fs2.redo()
+        assert fs_redo.hash == fs1.hash
+        assert not fs_redo.exists("b.txt")
+
+    def test_undo_redo_undo_sequence(self, repo_fs):
+        """Complex sequence: undo → redo → undo works correctly."""
+        repo, fs = repo_fs
+        fs1 = fs.write("a.txt", b"a")
+        fs2 = fs1.write("b.txt", b"b")
+        fs3 = fs2.write("c.txt", b"c")
+
+        fs_undo1 = fs3.undo()
+        fs_redo = fs_undo1.redo()
+        assert fs_redo.hash == fs3.hash
+
+        fs_undo2 = fs_redo.undo()
+        assert fs_undo2.hash == fs2.hash
+
+    def test_multiple_undos_then_multiple_redos(self, repo_fs):
+        """Multiple individual undos followed by multiple redo steps."""
+        repo, fs = repo_fs
+        fs1 = fs.write("a.txt", b"a")
+        fs2 = fs1.write("b.txt", b"b")
+        fs3 = fs2.write("c.txt", b"c")
+        fs4 = fs3.write("d.txt", b"d")
+
+        # Do 3 separate undos (creates 3 reflog entries)
+        fs_b1 = fs4.undo()
+        fs_b2 = fs_b1.undo()
+        fs_b3 = fs_b2.undo()
+        assert fs_b3.hash == fs1.hash
+
+        # Redo 3 steps should get back to fs4
+        fs_forward = fs_b3.redo(3)
+        assert fs_forward.hash == fs4.hash
+        assert fs_forward.exists("d.txt")
+
+    def test_redo_at_initial_commit(self, repo_fs):
+        """Redo from first commit goes to initialization."""
+        repo, fs = repo_fs
+        fs1 = fs.write("a.txt", b"a")
+
+        # Redo from first commit goes to empty tree
+        fs_redo = fs1.redo()
+        assert fs_redo.message == "Initialize main"
+        assert fs_redo.ls() == []
+
+    def test_reflog_chronological_order(self, repo_fs):
+        """Reflog entries should be in chronological order."""
+        repo, fs = repo_fs
+        fs1 = fs.write("a.txt", b"a")
+        fs2 = fs1.write("b.txt", b"b")
+        fs2.undo()
+
+        entries = repo.branches.reflog("main")
+        timestamps = [e["timestamp"] for e in entries]
+        assert timestamps == sorted(timestamps), "Timestamps should increase"
+
+    def test_undo_redo_with_batch(self, repo_fs):
+        """Undo/redo should work with batch operations."""
+        repo, fs = repo_fs
+
+        with fs.batch("Batch 1") as b:
+            b.write("a.txt", b"a")
+            b.write("b.txt", b"b")
+
+        with b.fs.batch("Batch 2") as b2:
+            b2.write("c.txt", b"c")
+
+        fs_before_undo = b2.fs
+        fs_after_undo = fs_before_undo.undo()
+
+        # Should have only files from batch 1
+        assert sorted(fs_after_undo.ls()) == ["a.txt", "b.txt"]
+
+        # Redo should restore batch 2
+        fs_after_redo = fs_after_undo.redo()
+        assert sorted(fs_after_redo.ls()) == ["a.txt", "b.txt", "c.txt"]
+
+    def test_redo_with_stale_snapshot_raises(self, repo_fs):
+        """Redo with stale snapshot should give helpful error."""
+        repo, fs = repo_fs
+        fs1 = fs.write("a.txt", b"a")
+
+        # fs is now stale (points to init commit, branch moved to fs1)
+        with pytest.raises(ValueError, match="stale"):
+            fs.redo()
