@@ -4,32 +4,10 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterator, MutableMapping
-from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import _compat as pygit2
-
-
-@dataclass
-class RefChange:
-    ref: str
-    src_sha: str | None = None   # None for deletes
-    dest_sha: str | None = None  # None for creates
-
-
-@dataclass
-class SyncDiff:
-    create: list[RefChange] = field(default_factory=list)
-    update: list[RefChange] = field(default_factory=list)
-    delete: list[RefChange] = field(default_factory=list)
-
-    @property
-    def in_sync(self) -> bool:
-        return not self.create and not self.update and not self.delete
-
-    @property
-    def total(self) -> int:
-        return len(self.create) + len(self.update) + len(self.delete)
+from .mirror import RefChange, SyncDiff
 
 
 class GitStore:
@@ -109,44 +87,16 @@ class GitStore:
 
         Returns a `SyncDiff` describing what changed (or would change).
         """
-        raw = self._repo.diff_refs(url, "push")
-        diff = self._raw_diff_to_sync_diff(raw)
-        if not dry_run:
-            self._repo.mirror_push(url, progress=progress)
-        return diff
+        from .mirror import backup
+        return backup(self, url, dry_run=dry_run, progress=progress)
 
     def restore(self, url, *, dry_run=False, progress=None) -> SyncDiff:
         """Fetch all refs from *url*, overwriting local state.
 
         Returns a `SyncDiff` describing what changed (or would change).
         """
-        raw = self._repo.diff_refs(url, "pull")
-        diff = self._raw_diff_to_sync_diff(raw)
-        if not dry_run:
-            self._repo.mirror_fetch(url, progress=progress)
-        return diff
-
-    @staticmethod
-    def _raw_diff_to_sync_diff(raw: dict) -> SyncDiff:
-        """Convert bytes-keyed diff dict from _compat to SyncDiff."""
-        src, dest = raw["src"], raw["dest"]
-
-        def _sha(b):
-            return b.decode() if isinstance(b, bytes) else str(b)
-
-        create = [
-            RefChange(ref=ref.decode(), src_sha=_sha(src[ref]))
-            for ref in raw["create"]
-        ]
-        update = [
-            RefChange(ref=ref.decode(), src_sha=_sha(src[ref]), dest_sha=_sha(dest[ref]))
-            for ref in raw["update"]
-        ]
-        delete = [
-            RefChange(ref=ref.decode(), dest_sha=_sha(dest[ref]))
-            for ref in raw["delete"]
-        ]
-        return SyncDiff(create=create, update=update, delete=delete)
+        from .mirror import restore
+        return restore(self, url, dry_run=dry_run, progress=progress)
 
 
 class RefDict(MutableMapping):

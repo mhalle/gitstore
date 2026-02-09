@@ -384,96 +384,6 @@ def _do_import(ctx, store, branch: str, filename: str, message: str | None, fmt:
         _status(ctx, msg)
 
 
-def _resolve_credentials(url):
-    """Inject credentials into an HTTPS URL if available.
-
-    Tries ``git credential fill`` first (works with any configured helper:
-    osxkeychain, wincred, libsecret, ``gh auth setup-git``, etc.).  Falls
-    back to ``gh auth token`` for GitHub hosts.  Non-HTTPS URLs and URLs
-    that already contain credentials are returned unchanged.
-    """
-    if not url.startswith("https://"):
-        return url
-
-    from urllib.parse import urlparse, urlunparse
-
-    parsed = urlparse(url)
-    if parsed.username:
-        return url  # already has credentials
-
-    import subprocess
-
-    # Try git credential fill
-    try:
-        stdin = f"protocol={parsed.scheme}\nhost={parsed.hostname}\n\n"
-        proc = subprocess.run(
-            ["git", "credential", "fill"],
-            input=stdin, capture_output=True, text=True, timeout=5,
-        )
-        if proc.returncode == 0:
-            creds = {}
-            for line in proc.stdout.strip().splitlines():
-                if "=" in line:
-                    k, _, v = line.partition("=")
-                    creds[k] = v
-            username = creds.get("username")
-            password = creds.get("password")
-            if username and password:
-                from urllib.parse import quote
-
-                netloc = f"{quote(username, safe='')}:{quote(password, safe='')}@{parsed.hostname}"
-                if parsed.port:
-                    netloc += f":{parsed.port}"
-                return urlunparse(parsed._replace(netloc=netloc))
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass
-
-    # Fallback: gh auth token (GitHub-specific)
-    try:
-        proc = subprocess.run(
-            ["gh", "auth", "token", "--hostname", parsed.hostname],
-            capture_output=True, text=True, timeout=5,
-        )
-        token = proc.stdout.strip()
-        if proc.returncode == 0 and token:
-            netloc = f"x-access-token:{token}@{parsed.hostname}"
-            if parsed.port:
-                netloc += f":{parsed.port}"
-            return urlunparse(parsed._replace(netloc=netloc))
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass
-
-    return url
-
-
-def _print_diff(diff, direction):
-    """Pretty-print a SyncDiff to stdout."""
-    verb = "push" if direction == "push" else "pull"
-    if diff.in_sync:
-        click.echo(f"Nothing to {verb} — already in sync.")
-        return
-    for c in sorted(diff.create, key=lambda c: c.ref):
-        click.echo(f"  create  {c.ref}  {c.src_sha[:7]}")
-    for c in sorted(diff.update, key=lambda c: c.ref):
-        click.echo(f"  update  {c.ref}  {c.dest_sha[:7]} -> {c.src_sha[:7]}")
-    for c in sorted(diff.delete, key=lambda c: c.ref):
-        click.echo(f"  delete  {c.ref}  {c.dest_sha[:7]}")
-    click.echo(f"{diff.total} ref(s) would be changed.")
-
-
-def _progress_cb(ctx):
-    """Return a progress callback if verbose mode is on, else None."""
-    if not ctx.obj.get("verbose"):
-        return None
-    def _on_progress(msg):
-        text = msg.decode()
-        # After each \r, clear remainder of line so shorter messages
-        # don't leave trailing characters from longer ones.
-        text = text.replace("\r", "\r\033[K")
-        click.echo(text, nl=False, err=True)
-    return _on_progress
-
-
 def _resolve_ref(store: GitStore, ref_str: str):
     """Try branches, then tags, then commit hash."""
     if ref_str in store.branches:
@@ -1332,11 +1242,13 @@ def backup_cmd(ctx, url, dry_run):
 
     Force-overwrites diverged refs and deletes remote-only refs.
     """
+    from .mirror import resolve_credentials, print_diff, progress_cb
+
     store = _open_store(_require_repo(ctx))
-    auth_url = _resolve_credentials(url)
-    diff = store.backup(auth_url, dry_run=dry_run, progress=_progress_cb(ctx))
+    auth_url = resolve_credentials(url)
+    diff = store.backup(auth_url, dry_run=dry_run, progress=progress_cb(ctx))
     if dry_run:
-        _print_diff(diff, "push")
+        print_diff(diff, "push")
     else:
         _status(ctx, f"Backed up to {url}")
 
@@ -1356,11 +1268,13 @@ def restore_cmd(ctx, url, dry_run, no_create):
 
     Force-overwrites diverged refs and deletes local-only refs.
     """
+    from .mirror import resolve_credentials, print_diff, progress_cb
+
     repo_path = _require_repo(ctx)
     store = _open_store(repo_path) if no_create else _open_or_create_bare(repo_path)
-    auth_url = _resolve_credentials(url)
-    diff = store.restore(auth_url, dry_run=dry_run, progress=_progress_cb(ctx))
+    auth_url = resolve_credentials(url)
+    diff = store.restore(auth_url, dry_run=dry_run, progress=progress_cb(ctx))
     if dry_run:
-        _print_diff(diff, "pull")
+        print_diff(diff, "pull")
     else:
         _status(ctx, f"Restored from {url}")
