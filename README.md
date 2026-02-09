@@ -354,8 +354,15 @@ gitstore cp script.sh :script.sh --mode 755
 gitstore cp --follow-symlinks ./dir :dest
 
 # Do not overwrite existing files at the destination
-gitstore cp --no-clobber ./mydir :dest
-gitstore cp --no-clobber :data ./out
+gitstore cp --ignore-existing ./mydir :dest
+gitstore cp --ignore-existing :data ./out
+
+# Sync mode — delete destination files not in source (like rsync --delete)
+gitstore cp --delete ./mydir/ :dest
+gitstore cp --delete :data/ ./out
+
+# Skip failed files and continue (report errors at end)
+gitstore cp --ignore-errors ./mydir/ :dest
 
 # Browse contents
 gitstore ls
@@ -494,7 +501,7 @@ gitstore tar archive.tar --hash abc1234...
 gitstore cp :file.txt local.txt --hash abc1234...
 ```
 
-Write commands (`cp`, `rm`, `unarchive`, `unzip`, `untar`) accept `-m` for custom commit messages. Use `-b` on any command to target a branch other than `main`. Read commands (`cat`, `ls`, `cp`, `archive`, `zip`, `tar`, `log`) accept `--hash` to read from any branch, tag, or full commit hash. `log`, `archive`, `zip`, and `tar` accept `--before` with an ISO 8601 date or datetime to filter to commits on or before that point in time. `cp` handles files, directories, trailing-slash "contents" mode, and glob patterns; pass `-n`/`--dry-run` to preview what would be copied without writing. `cp` accepts `--mode 644` or `--mode 755` to set file permissions, `--follow-symlinks` to dereference symlinks, and `--no-clobber` to skip existing files at the destination. When copying directories, `cp` auto-detects executable permissions from disk and preserves symlinks by default; pass `--follow-symlinks` to dereference them instead. When copying repo→disk, `cp` recreates symlink entries as symlinks on disk. Pass `-v` before the command for status messages on stderr. `archive`, `zip`, and `tar` accept `-` as FILENAME to write to stdout; `unarchive` and `untar` read from stdin when no filename is given (or with `-`). `archive` and `unarchive` auto-detect the format from the filename extension; use `--format zip` or `--format tar` to override or when piping to/from stdout/stdin. The `zip`/`unzip`/`tar`/`untar` commands remain as aliases. `backup` and `restore` operate on the entire repository (all branches and tags) and accept `-n`/`--dry-run` to preview changes without transferring data.
+Write commands (`cp`, `rm`, `unarchive`, `unzip`, `untar`) accept `-m` for custom commit messages. Use `-b` on any command to target a branch other than `main`. Read commands (`cat`, `ls`, `cp`, `archive`, `zip`, `tar`, `log`) accept `--hash` to read from any branch, tag, or full commit hash. `log`, `archive`, `zip`, and `tar` accept `--before` with an ISO 8601 date or datetime to filter to commits on or before that point in time. `cp` handles files, directories, trailing-slash "contents" mode, and glob patterns; pass `-n`/`--dry-run` to preview what would be copied without writing. `cp` accepts `--mode 644` or `--mode 755` to set file permissions, `--follow-symlinks` to dereference symlinks, `--ignore-existing` to skip files that already exist at the destination, `--delete` to remove destination files not present in the source (like rsync `--delete`), and `--ignore-errors` to skip failed files and continue copying. When copying directories, `cp` auto-detects executable permissions from disk and preserves symlinks by default; pass `--follow-symlinks` to dereference them instead. When copying repo→disk, `cp` recreates symlink entries as symlinks on disk. Pass `-v` before the command for status messages on stderr. `archive`, `zip`, and `tar` accept `-` as FILENAME to write to stdout; `unarchive` and `untar` read from stdin when no filename is given (or with `-`). `archive` and `unarchive` auto-detect the format from the filename extension; use `--format zip` or `--format tar` to override or when piping to/from stdout/stdin. The `zip`/`unzip`/`tar`/`untar` commands remain as aliases. `backup` and `restore` operate on the entire repository (all branches and tags) and accept `-n`/`--dry-run` to preview changes without transferring data.
 
 ## Development
 
