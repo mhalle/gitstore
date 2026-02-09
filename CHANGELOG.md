@@ -4,6 +4,10 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.26.2 (2026-02-09)
+
+- Allow `--repo` option at both main group level and subcommand level for flexibility
+
 ## v0.26.1 (2026-02-09)
 
 - Auto-create destination repository when backing up to non-existent local path

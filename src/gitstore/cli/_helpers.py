@@ -227,6 +227,9 @@ def _log_entry_dict(entry) -> dict:
 # ---------------------------------------------------------------------------
 
 @click.group()
+@click.option("--repo", "-r", type=click.Path(), envvar="GITSTORE_REPO",
+              help="Path to bare git repository (or set GITSTORE_REPO).",
+              expose_value=False, callback=_store_repo, is_eager=True)
 @click.option("-v", "--verbose", is_flag=True, help="Verbose output on stderr.")
 @click.pass_context
 def main(ctx, verbose):
