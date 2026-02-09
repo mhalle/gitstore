@@ -395,6 +395,54 @@ gitstore zip archive.zip
 gitstore unzip archive.zip
 gitstore tar archive.tar.gz
 gitstore untar archive.tar.gz
+
+# Backup to a remote (exact mirror — all branches and tags)
+gitstore backup https://github.com/user/repo.git
+gitstore backup git@github.com:user/repo.git
+gitstore backup /path/to/other-bare-repo.git
+
+# Preview what backup would do
+gitstore backup -n https://github.com/user/repo.git
+
+# Restore from a remote (overwrite local to match remote)
+gitstore restore https://github.com/user/repo.git
+
+# Preview what restore would do
+gitstore restore -n https://github.com/user/repo.git
+```
+
+### Backup and restore
+
+`backup` and `restore` replicate an entire gitstore repository to and from a remote URL. They are whole-repo mirror operations: every branch and tag is included, and the destination becomes an exact copy of the source.
+
+- **`gitstore backup URL`** pushes all local refs (branches and tags) to the remote. Remote refs that don't exist locally are deleted. Diverged histories are force-overwritten. After backup, the remote is an exact mirror of the local repo.
+
+- **`gitstore restore URL`** fetches all objects from the remote, then overwrites local refs to match. Local refs that don't exist on the remote are deleted. After restore, the local repo is an exact mirror of the remote.
+
+- **`-n` / `--dry-run`** connects to the remote and compares refs, showing what would be created, updated, or deleted, without transferring any data.
+
+The URL can be any git remote: HTTPS (`https://github.com/...`), SSH (`git@github.com:...`), or a local path (`/path/to/bare-repo.git`).
+
+**Authentication.** For HTTPS URLs, gitstore automatically obtains credentials by running `git credential fill`, which delegates to whatever credential helper is configured on your system (macOS Keychain, Windows Credential Manager, GNOME Keyring, `gh auth setup-git`, etc.). If that fails and the host is GitHub, it falls back to `gh auth token`. SSH URLs use your SSH agent as usual. No additional configuration is needed if `git push` already works for you.
+
+**Typical workflow.** gitstore repos are local bare repositories with no configured remotes. Use `backup` after making changes to push a safety copy, and `restore` to recreate a repo from that copy:
+
+```bash
+# Initial setup: create a repo and add data
+gitstore init -r /path/to/repo.git
+gitstore cp -r /path/to/repo.git data.csv :data.csv
+gitstore tag -r /path/to/repo.git create v1 main
+
+# Push everything to GitHub
+gitstore backup -r /path/to/repo.git https://github.com/user/repo.git
+
+# Later, on another machine: recreate from backup
+gitstore init -r /path/to/repo.git
+gitstore restore -r /path/to/repo.git https://github.com/user/repo.git
+
+# Verify
+gitstore ls -r /path/to/repo.git        # data.csv
+gitstore tag -r /path/to/repo.git list   # v1
 ```
 
 ```bash
@@ -414,7 +462,7 @@ gitstore tar archive.tar --hash abc1234...
 gitstore cp :file.txt local.txt --hash abc1234...
 ```
 
-Write commands (`cp`, `cptree`, `rm`, `unarchive`, `unzip`, `untar`) accept `-m` for custom commit messages. Use `-b` on any command to target a branch other than `main`. Read commands (`cat`, `ls`, `cp`, `cptree`, `archive`, `zip`, `tar`, `log`) accept `--hash` to read from any branch, tag, or full commit hash. `log`, `archive`, `zip`, and `tar` accept `--before` with an ISO 8601 date or datetime to filter to commits on or before that point in time. `cp` accepts `--mode 644` or `--mode 755` to set file permissions; `cptree` auto-detects executable permissions from disk. `cptree` preserves symlinks by default when copying disk→repo; pass `--follow-symlinks` to dereference them instead. When copying repo→disk, `cp` and `cptree` recreate symlink entries as symlinks on disk. Pass `-v` before the command for status messages on stderr. `archive`, `zip`, and `tar` accept `-` as FILENAME to write to stdout; `unarchive` and `untar` read from stdin when no filename is given (or with `-`). `archive` and `unarchive` auto-detect the format from the filename extension; use `--format zip` or `--format tar` to override or when piping to/from stdout/stdin. The `zip`/`unzip`/`tar`/`untar` commands remain as aliases.
+Write commands (`cp`, `cptree`, `rm`, `unarchive`, `unzip`, `untar`) accept `-m` for custom commit messages. Use `-b` on any command to target a branch other than `main`. Read commands (`cat`, `ls`, `cp`, `cptree`, `archive`, `zip`, `tar`, `log`) accept `--hash` to read from any branch, tag, or full commit hash. `log`, `archive`, `zip`, and `tar` accept `--before` with an ISO 8601 date or datetime to filter to commits on or before that point in time. `cp` accepts `--mode 644` or `--mode 755` to set file permissions; `cptree` auto-detects executable permissions from disk. `cptree` preserves symlinks by default when copying disk→repo; pass `--follow-symlinks` to dereference them instead. When copying repo→disk, `cp` and `cptree` recreate symlink entries as symlinks on disk. Pass `-v` before the command for status messages on stderr. `archive`, `zip`, and `tar` accept `-` as FILENAME to write to stdout; `unarchive` and `untar` read from stdin when no filename is given (or with `-`). `archive` and `unarchive` auto-detect the format from the filename extension; use `--format zip` or `--format tar` to override or when piping to/from stdout/stdin. The `zip`/`unzip`/`tar`/`untar` commands remain as aliases. `backup` and `restore` operate on the entire repository (all branches and tags) and accept `-n`/`--dry-run` to preview changes without transferring data.
 
 ## Development
 

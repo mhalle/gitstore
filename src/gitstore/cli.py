@@ -10,6 +10,8 @@ import zipfile
 from pathlib import Path
 
 import click
+from dulwich.client import get_transport_and_path
+from dulwich.protocol import ZERO_SHA
 from gitstore import _compat as pygit2
 
 from .exceptions import StaleSnapshotError
@@ -349,6 +351,213 @@ def _do_import(ctx, store, branch: str, filename: str, message: str | None, fmt:
         _status(ctx, f"Imported {count} file(s) from {filename}")
 
 
+def _resolve_credentials(url):
+    """Inject credentials into an HTTPS URL if available.
+
+    Tries ``git credential fill`` first (works with any configured helper:
+    osxkeychain, wincred, libsecret, ``gh auth setup-git``, etc.).  Falls
+    back to ``gh auth token`` for GitHub hosts.  Non-HTTPS URLs and URLs
+    that already contain credentials are returned unchanged.
+    """
+    if not url.startswith("https://"):
+        return url
+
+    from urllib.parse import urlparse, urlunparse
+
+    parsed = urlparse(url)
+    if parsed.username:
+        return url  # already has credentials
+
+    import subprocess
+
+    # Try git credential fill
+    try:
+        stdin = f"protocol={parsed.scheme}\nhost={parsed.hostname}\n\n"
+        proc = subprocess.run(
+            ["git", "credential", "fill"],
+            input=stdin, capture_output=True, text=True, timeout=5,
+        )
+        if proc.returncode == 0:
+            creds = {}
+            for line in proc.stdout.strip().splitlines():
+                if "=" in line:
+                    k, _, v = line.partition("=")
+                    creds[k] = v
+            username = creds.get("username")
+            password = creds.get("password")
+            if username and password:
+                from urllib.parse import quote
+
+                netloc = f"{quote(username, safe='')}:{quote(password, safe='')}@{parsed.hostname}"
+                if parsed.port:
+                    netloc += f":{parsed.port}"
+                return urlunparse(parsed._replace(netloc=netloc))
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+
+    # Fallback: gh auth token (GitHub-specific)
+    try:
+        proc = subprocess.run(
+            ["gh", "auth", "token", "--hostname", parsed.hostname],
+            capture_output=True, text=True, timeout=5,
+        )
+        token = proc.stdout.strip()
+        if proc.returncode == 0 and token:
+            netloc = f"x-access-token:{token}@{parsed.hostname}"
+            if parsed.port:
+                netloc += f":{parsed.port}"
+            return urlunparse(parsed._replace(netloc=netloc))
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+
+    return url
+
+
+def _diff_refs(dulwich_repo, url, direction):
+    """Compare local and remote refs for dry-run display.
+
+    *direction* is ``"push"`` (local→remote) or ``"pull"`` (remote→local).
+    Returns ``{"create": [...], "update": [...], "delete": [...],
+    "src": {ref: sha}, "dest": {ref: sha}}``.
+    """
+    from dulwich.porcelain import ls_remote
+
+    remote_result = ls_remote(url)
+    refs_dict = remote_result.refs if hasattr(remote_result, "refs") else remote_result
+    remote_refs = {
+        ref: sha
+        for ref, sha in refs_dict.items()
+        if ref != b"HEAD" and not ref.endswith(b"^{}")
+    }
+
+    local_refs = {
+        ref: sha
+        for ref, sha in dulwich_repo.get_refs().items()
+        if ref != b"HEAD"
+    }
+
+    if direction == "push":
+        src, dest = local_refs, remote_refs
+    else:
+        src, dest = remote_refs, local_refs
+
+    create, update, delete = [], [], []
+    for ref, sha in src.items():
+        if ref not in dest:
+            create.append(ref)
+        elif dest[ref] != sha:
+            update.append(ref)
+    for ref in dest:
+        if ref not in src:
+            delete.append(ref)
+
+    return {"create": create, "update": update, "delete": delete,
+            "src": src, "dest": dest}
+
+
+def _sha7(sha):
+    """Abbreviate a bytes or str SHA to 7 chars."""
+    s = sha.decode() if isinstance(sha, bytes) else str(sha)
+    return s[:7]
+
+
+def _print_diff(ctx, diff, direction):
+    """Pretty-print a ref diff to stdout."""
+    verb = "push" if direction == "push" else "pull"
+    src, dest = diff["src"], diff["dest"]
+    total = len(diff["create"]) + len(diff["update"]) + len(diff["delete"])
+    if total == 0:
+        click.echo(f"Nothing to {verb} — already in sync.")
+        return
+    for ref in sorted(diff["create"]):
+        name = ref.decode()
+        click.echo(f"  create  {name}  {_sha7(src[ref])}")
+    for ref in sorted(diff["update"]):
+        name = ref.decode()
+        click.echo(f"  update  {name}  {_sha7(dest[ref])} -> {_sha7(src[ref])}")
+    for ref in sorted(diff["delete"]):
+        name = ref.decode()
+        click.echo(f"  delete  {name}  {_sha7(dest[ref])}")
+    click.echo(f"{total} ref(s) would be changed.")
+
+
+def _progress_cb(ctx):
+    """Return a progress callback if verbose mode is on, else None."""
+    if not ctx.obj.get("verbose"):
+        return None
+    def _on_progress(msg):
+        text = msg.decode()
+        # After each \r, clear remainder of line so shorter messages
+        # don't leave trailing characters from longer ones.
+        text = text.replace("\r", "\r\033[K")
+        click.echo(text, nl=False, err=True)
+    return _on_progress
+
+
+def _do_backup(ctx, dulwich_repo, url, dry_run, display_url=None):
+    """Push all local refs to remote, mirroring (force + delete stale)."""
+    if dry_run:
+        diff = _diff_refs(dulwich_repo, url, "push")
+        _print_diff(ctx, diff, "push")
+        return
+
+    client, path = get_transport_and_path(url)
+    local_refs = {
+        ref: sha
+        for ref, sha in dulwich_repo.get_refs().items()
+        if ref != b"HEAD"
+    }
+
+    def update_refs(remote_refs):
+        new_refs = {}
+        for ref, sha in local_refs.items():
+            new_refs[ref] = sha
+        for ref in remote_refs:
+            if ref not in local_refs and ref != b"HEAD":
+                new_refs[ref] = ZERO_SHA
+        return new_refs
+
+    progress = _progress_cb(ctx)
+
+    def gen_pack(have, want, *, ofs_delta=False, progress=progress):
+        return dulwich_repo.object_store.generate_pack_data(
+            have, want, ofs_delta=ofs_delta, progress=progress,
+        )
+
+    result = client.send_pack(path, update_refs, gen_pack, progress=progress)
+    _status(ctx, f"Backed up to {display_url or url}")
+    return result
+
+
+def _do_restore(ctx, dulwich_repo, url, dry_run, display_url=None):
+    """Fetch all remote refs into local repo, mirroring (force + delete stale)."""
+    if dry_run:
+        diff = _diff_refs(dulwich_repo, url, "pull")
+        _print_diff(ctx, diff, "pull")
+        return
+
+    client, path = get_transport_and_path(url)
+    result = client.fetch(path, dulwich_repo, progress=_progress_cb(ctx))
+
+    remote_refs = {
+        ref: sha
+        for ref, sha in result.refs.items()
+        if ref != b"HEAD" and not ref.endswith(b"^{}")
+    }
+
+    # Set all remote refs locally
+    for ref, sha in remote_refs.items():
+        dulwich_repo.refs[ref] = sha
+
+    # Delete local refs not on remote
+    for ref in list(dulwich_repo.refs.allkeys()):
+        if ref != b"HEAD" and ref not in remote_refs:
+            dulwich_repo.refs.remove_if_equals(ref, dulwich_repo.refs[ref])
+
+    _status(ctx, f"Restored from {display_url or url}")
+    return result
+
+
 def _resolve_ref(store: GitStore, ref_str: str):
     """Try branches, then tags, then commit hash."""
     if ref_str in store.branches:
@@ -394,10 +603,14 @@ def main(ctx, verbose):
 @main.command()
 @_repo_option
 @click.option("--branch", "-b", default="main", help="Initial branch name (default: main).")
+@click.option("-f", "--force", is_flag=True, help="Destroy existing repo and recreate.")
 @click.pass_context
-def init(ctx, branch):
+def init(ctx, branch, force):
     """Create a new bare git repository."""
     repo_path = _require_repo(ctx)
+    if force and os.path.exists(repo_path):
+        import shutil
+        shutil.rmtree(repo_path)
     try:
         GitStore.open(repo_path, create=True, branch=branch)
     except FileExistsError as exc:
@@ -1123,3 +1336,43 @@ def unarchive_cmd(ctx, filename, fmt, branch, message):
             fmt = _detect_archive_format(filename)
     store = _open_store(_require_repo(ctx))
     _do_import(ctx, store, branch, filename, message, fmt)
+
+
+# ---------------------------------------------------------------------------
+# backup
+# ---------------------------------------------------------------------------
+
+@main.command("backup")
+@_repo_option
+@click.argument("url")
+@click.option("-n", "--dry-run", is_flag=True, help="Show what would change without transferring data.")
+@click.pass_context
+def backup_cmd(ctx, url, dry_run):
+    """Push all refs to a remote URL, creating an exact mirror.
+
+    Force-overwrites diverged refs and deletes remote-only refs.
+    """
+    store = _open_store(_require_repo(ctx))
+    dulwich_repo = store._repo._repo
+    auth_url = _resolve_credentials(url)
+    _do_backup(ctx, dulwich_repo, auth_url, dry_run, display_url=url)
+
+
+# ---------------------------------------------------------------------------
+# restore
+# ---------------------------------------------------------------------------
+
+@main.command("restore")
+@_repo_option
+@click.argument("url")
+@click.option("-n", "--dry-run", is_flag=True, help="Show what would change without transferring data.")
+@click.pass_context
+def restore_cmd(ctx, url, dry_run):
+    """Fetch all refs from a remote URL, overwriting local state.
+
+    Force-overwrites diverged refs and deletes local-only refs.
+    """
+    store = _open_store(_require_repo(ctx))
+    dulwich_repo = store._repo._repo
+    auth_url = _resolve_credentials(url)
+    _do_restore(ctx, dulwich_repo, auth_url, dry_run, display_url=url)
