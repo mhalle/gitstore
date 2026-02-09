@@ -446,6 +446,60 @@ class TestSymlinks:
         assert entry is not None
         assert entry[1] != GIT_FILEMODE_LINK
 
+    def test_cptree_disk_to_repo_follow_symlinks_dir(self, runner, initialized_repo, tmp_path):
+        """cptree --follow-symlinks follows symlinked directories."""
+        import os
+        from gitstore import GitStore
+        from gitstore.tree import GIT_FILEMODE_LINK
+
+        src = tmp_path / "treesrc"
+        src.mkdir()
+        real_dir = src / "real_dir"
+        real_dir.mkdir()
+        (real_dir / "a.txt").write_text("aaa")
+        (real_dir / "b.txt").write_text("bbb")
+        os.symlink("real_dir", src / "link_dir")
+
+        result = runner.invoke(main, [
+            "cptree", "--repo", initialized_repo, str(src), ":stuff", "--follow-symlinks"
+        ])
+        assert result.exit_code == 0, result.output
+
+        store = GitStore.open(initialized_repo)
+        fs = store.branches["main"]
+        # The symlinked dir's contents should be stored as regular files
+        assert fs.read("stuff/link_dir/a.txt") == b"aaa"
+        assert fs.read("stuff/link_dir/b.txt") == b"bbb"
+        # It should NOT be a symlink entry
+        from gitstore.tree import _entry_at_path
+        entry = _entry_at_path(store._repo, fs._tree_oid, "stuff/link_dir")
+        assert entry is not None
+        assert entry[1] != GIT_FILEMODE_LINK
+
+    def test_cptree_disk_to_repo_follow_symlinks_cycle(self, runner, initialized_repo, tmp_path):
+        """cptree --follow-symlinks handles symlink cycles without infinite loop."""
+        import os
+
+        src = tmp_path / "treesrc"
+        src.mkdir()
+        (src / "file.txt").write_text("ok")
+        subdir = src / "sub"
+        subdir.mkdir()
+        (subdir / "inner.txt").write_text("inner")
+        # Create a cycle: sub/loop -> .. (points back to src)
+        os.symlink(str(src), subdir / "loop")
+
+        result = runner.invoke(main, [
+            "cptree", "--repo", initialized_repo, str(src), ":cyc", "--follow-symlinks"
+        ])
+        assert result.exit_code == 0, result.output
+
+        from gitstore import GitStore
+        store = GitStore.open(initialized_repo)
+        fs = store.branches["main"]
+        assert fs.read("cyc/file.txt") == b"ok"
+        assert fs.read("cyc/sub/inner.txt") == b"inner"
+
     def test_cptree_repo_to_disk_symlink(self, runner, initialized_repo, tmp_path):
         """cptree repo→disk creates symlinks on disk for symlink entries."""
         import os
@@ -2151,6 +2205,23 @@ class TestUnarchive:
         ])
         assert result.exit_code != 0
         assert "Cannot detect" in result.output
+
+    def test_unarchive_zip_from_stdin(self, runner, initialized_repo):
+        """unarchive --format zip - reads zip from stdin."""
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("stdin_file.txt", "from stdin")
+        zip_bytes = buf.getvalue()
+
+        result = runner.invoke(
+            main,
+            ["unarchive", "--repo", initialized_repo, "--format", "zip", "-"],
+            input=zip_bytes,
+        )
+        assert result.exit_code == 0, result.output
+        result = runner.invoke(main, ["cat", "--repo", initialized_repo, ":stdin_file.txt"])
+        assert result.exit_code == 0
+        assert "from stdin" in result.output
 
     def test_unarchive_custom_message(self, runner, initialized_repo, tmp_path):
         zpath = str(tmp_path / "data.zip")

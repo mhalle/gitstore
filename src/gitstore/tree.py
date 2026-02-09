@@ -30,7 +30,7 @@ def _mode_from_disk(local_path: str) -> int:
     st = os.stat(local_path)
     if stat.S_ISDIR(st.st_mode):
         raise IsADirectoryError(local_path)
-    if st.st_mode & stat.S_IXUSR:
+    if st.st_mode & 0o111:
         return GIT_FILEMODE_BLOB_EXECUTABLE
     return GIT_FILEMODE_BLOB
 

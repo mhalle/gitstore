@@ -259,13 +259,21 @@ def _do_import(ctx, store, branch: str, filename: str, message: str | None, fmt:
     fs = _get_branch_fs(store, branch)
 
     if fmt == "zip":
-        if not zipfile.is_zipfile(filename):
+        from_stdin = filename == "-"
+        if from_stdin:
+            stdin_data = io.BytesIO(click.get_binary_stream("stdin").read())
+            source = stdin_data
+        else:
+            source = filename
+        if not zipfile.is_zipfile(source):
             raise click.ClickException(f"Not a valid zip file: {filename}")
+        if from_stdin:
+            stdin_data.seek(0)
         count = 0
         skipped = 0
         try:
             with fs.batch(message=message) as b:
-                with zipfile.ZipFile(filename, "r") as zf:
+                with zipfile.ZipFile(source, "r") as zf:
                     for info in zf.infolist():
                         if info.is_dir():
                             continue
@@ -348,7 +356,10 @@ def _do_import(ctx, store, branch: str, filename: str, message: str | None, fmt:
                     raise click.ClickException("Tar archive contains no files")
         except StaleSnapshotError:
             raise click.ClickException("Branch modified concurrently — retry")
-        _status(ctx, f"Imported {count} file(s) from {filename}")
+        msg = f"Imported {count} file(s) from {filename}"
+        if skipped:
+            msg += f" ({skipped} hard link(s) skipped)"
+        _status(ctx, msg)
 
 
 def _resolve_credentials(url):
@@ -834,11 +845,21 @@ def cptree(ctx, src, dest, branch, ref, message, follow_symlinks):
                 f"{src_path} is not a directory"
             )
         count = 0
+        seen_realpaths: set[str] = set() if follow_symlinks else set()
         try:
             with fs.batch(message=message) as b:
-                for dirpath, dirnames, filenames in os.walk(local):
+                for dirpath, dirnames, filenames in os.walk(local, followlinks=follow_symlinks):
+                    if follow_symlinks:
+                        # Cycle detection: skip directories we've already visited
+                        real = os.path.realpath(dirpath)
+                        if real in seen_realpaths:
+                            dirnames.clear()
+                            continue
+                        seen_realpaths.add(real)
                     if not follow_symlinks:
                         # Preserve symlinked directories as symlink entries
+                        # and remove them from dirnames so os.walk doesn't descend
+                        symlinked_dirs = []
                         for dname in dirnames:
                             full = Path(dirpath) / dname
                             if full.is_symlink():
@@ -848,6 +869,9 @@ def cptree(ctx, src, dest, branch, ref, message, follow_symlinks):
                                 repo_file = _normalize_repo_path(repo_file)
                                 b.write_symlink(repo_file, os.readlink(full))
                                 count += 1
+                                symlinked_dirs.append(dname)
+                        for dname in symlinked_dirs:
+                            dirnames.remove(dname)
                     for fname in filenames:
                         full = Path(dirpath) / fname
                         rel = full.relative_to(local)

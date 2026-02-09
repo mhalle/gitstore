@@ -229,13 +229,22 @@ class FS:
 
     def dump(self, path: str | Path) -> None:
         """Write the tree contents to a directory on the filesystem."""
+        from .tree import _entry_at_path
         path = Path(path)
         for dirpath, dirnames, filenames in self.walk():
             dir_on_disk = path / dirpath if dirpath else path
             dir_on_disk.mkdir(parents=True, exist_ok=True)
             for filename in filenames:
                 store_path = f"{dirpath}/{filename}" if dirpath else filename
-                (dir_on_disk / filename).write_bytes(self.read(store_path))
+                entry = _entry_at_path(self._store._repo, self._tree_oid, store_path)
+                if entry and entry[1] == GIT_FILEMODE_LINK:
+                    target = self.readlink(store_path)
+                    dest = dir_on_disk / filename
+                    if dest.exists() or dest.is_symlink():
+                        dest.unlink()
+                    os.symlink(target, dest)
+                else:
+                    (dir_on_disk / filename).write_bytes(self.read(store_path))
 
     # --- History ---
 

@@ -112,6 +112,30 @@ class TestDump:
         fs.dump(out)
         assert (out / "hello.txt").read_bytes() == b"Hello!"
 
+    def test_dump_symlinks(self, tmp_path):
+        import os
+        repo = GitStore.open(tmp_path / "test.git", create="main")
+        fs = repo.branches["main"]
+        fs = fs.write("target.txt", b"content")
+        fs = fs.write_symlink("link.txt", "target.txt")
+        out = tmp_path / "out"
+        fs.dump(out)
+        assert (out / "target.txt").read_bytes() == b"content"
+        assert (out / "link.txt").is_symlink()
+        assert os.readlink(out / "link.txt") == "target.txt"
+
+    def test_dump_symlink_overwrites_existing_file(self, tmp_path):
+        import os
+        repo = GitStore.open(tmp_path / "test.git", create="main")
+        fs = repo.branches["main"]
+        fs = fs.write_symlink("link.txt", "target.txt")
+        out = tmp_path / "out"
+        out.mkdir()
+        (out / "link.txt").write_bytes(b"old regular file")
+        fs.dump(out)
+        assert (out / "link.txt").is_symlink()
+        assert os.readlink(out / "link.txt") == "target.txt"
+
 
 class TestPathLikeSupport:
     def test_read_with_path(self, repo_with_files):
