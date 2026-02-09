@@ -95,6 +95,30 @@ def _open_store(repo_path: str) -> GitStore:
         raise click.ClickException(str(exc))
 
 
+def _open_or_create_store(repo_path: str, branch: str = "main") -> GitStore:
+    """Open a store, creating it with *branch* if the repo doesn't exist."""
+    try:
+        return GitStore.open(repo_path)
+    except FileNotFoundError:
+        return GitStore.open(repo_path, create=branch)
+
+
+def _open_or_create_bare(repo_path: str) -> GitStore:
+    """Open a store, creating a bare repo (no branch) if it doesn't exist."""
+    try:
+        return GitStore.open(repo_path)
+    except FileNotFoundError:
+        return GitStore.open(repo_path, create=True)
+
+
+def _no_create_option(f):
+    """Shared --no-create flag for write commands."""
+    return click.option(
+        "--no-create", "no_create", is_flag=True, default=False,
+        help="Do not auto-create the repository if it doesn't exist.",
+    )(f)
+
+
 def _get_branch_fs(store: GitStore, branch: str):
     try:
         return store.branches[branch]
@@ -555,8 +579,9 @@ def destroy(ctx, force):
 @click.option("-m", "message", default=None, help="Commit message.")
 @click.option("--mode", type=click.Choice(["644", "755"]), default=None,
               help="File mode (default: 644).")
+@_no_create_option
 @click.pass_context
-def cp(ctx, args, branch, ref, message, mode):
+def cp(ctx, args, branch, ref, message, mode, no_create):
     """Copy files between disk and repo.
 
     The last argument is the destination; all preceding arguments are sources.
@@ -601,7 +626,11 @@ def cp(ctx, args, branch, ref, message, mode):
 
     multi = len(parsed_sources) > 1
 
-    store = _open_store(_require_repo(ctx))
+    repo_path = _require_repo(ctx)
+    if not src_is_repo and not no_create:
+        store = _open_or_create_store(repo_path, branch)
+    else:
+        store = _open_store(repo_path)
     fs = _get_fs(store, branch, ref)
 
     filemode = (GIT_FILEMODE_BLOB_EXECUTABLE if mode == "755"
@@ -687,8 +716,9 @@ def cp(ctx, args, branch, ref, message, mode):
 @click.option("-m", "message", default=None, help="Commit message.")
 @click.option("--follow-symlinks", is_flag=True, default=False,
               help="Follow symlinks instead of preserving them (disk→repo only).")
+@_no_create_option
 @click.pass_context
-def cptree(ctx, src, dest, branch, ref, message, follow_symlinks):
+def cptree(ctx, src, dest, branch, ref, message, follow_symlinks, no_create):
     """Copy a directory tree between disk and repo.
 
     Prefix repo-side paths with ':'.
@@ -713,7 +743,11 @@ def cptree(ctx, src, dest, branch, ref, message, follow_symlinks):
             "Cannot write to a commit hash — use --branch for writes"
         )
 
-    store = _open_store(_require_repo(ctx))
+    repo_path = _require_repo(ctx)
+    if not src_is_repo and not no_create:
+        store = _open_or_create_store(repo_path, branch)
+    else:
+        store = _open_store(repo_path)
     fs = _get_fs(store, branch, ref)
 
     if not src_is_repo:
@@ -1129,13 +1163,15 @@ def zip_cmd(ctx, filename, branch, ref, at_path, deprecated_at, match_pattern, b
 @click.argument("filename", type=click.Path(exists=True))
 @click.option("--branch", "-b", default="main", help="Branch to import into.")
 @click.option("-m", "message", default=None, help="Commit message.")
+@_no_create_option
 @click.pass_context
-def unzip_cmd(ctx, filename, branch, message):
+def unzip_cmd(ctx, filename, branch, message, no_create):
     """Import a zip file into the repo.
 
     FILENAME is the path to the zip file on disk.
     """
-    store = _open_store(_require_repo(ctx))
+    repo_path = _require_repo(ctx)
+    store = _open_store(repo_path) if no_create else _open_or_create_store(repo_path, branch)
     _do_import(ctx, store, branch, filename, message, "zip")
 
 
@@ -1175,14 +1211,16 @@ def tar_cmd(ctx, filename, branch, ref, at_path, deprecated_at, match_pattern, b
 @click.argument("filename", type=click.Path(), default="-")
 @click.option("--branch", "-b", default="main", help="Branch to import into.")
 @click.option("-m", "message", default=None, help="Commit message.")
+@_no_create_option
 @click.pass_context
-def untar_cmd(ctx, filename, branch, message):
+def untar_cmd(ctx, filename, branch, message, no_create):
     """Import a tar archive into the repo.
 
     FILENAME is the path to the tar file on disk.  Use '-' to read from stdin
     (the default).  Compression is auto-detected.
     """
-    store = _open_store(_require_repo(ctx))
+    repo_path = _require_repo(ctx)
+    store = _open_store(repo_path) if no_create else _open_or_create_store(repo_path, branch)
     _do_import(ctx, store, branch, filename, message, "tar")
 
 
@@ -1224,8 +1262,9 @@ def archive_cmd(ctx, filename, fmt, branch, ref, at_path, match_pattern, before)
               help="Archive format (auto-detected from extension if omitted).")
 @click.option("--branch", "-b", default="main", help="Branch to import into.")
 @click.option("-m", "message", default=None, help="Commit message.")
+@_no_create_option
 @click.pass_context
-def unarchive_cmd(ctx, filename, fmt, branch, message):
+def unarchive_cmd(ctx, filename, fmt, branch, message, no_create):
     """Import an archive file into the repo.
 
     Format is auto-detected from FILENAME extension.
@@ -1239,7 +1278,8 @@ def unarchive_cmd(ctx, filename, fmt, branch, message):
     else:
         if fmt is None:
             fmt = _detect_archive_format(filename)
-    store = _open_store(_require_repo(ctx))
+    repo_path = _require_repo(ctx)
+    store = _open_store(repo_path) if no_create else _open_or_create_store(repo_path, branch)
     _do_import(ctx, store, branch, filename, message, fmt)
 
 
@@ -1274,13 +1314,15 @@ def backup_cmd(ctx, url, dry_run):
 @_repo_option
 @click.argument("url")
 @click.option("-n", "--dry-run", is_flag=True, help="Show what would change without transferring data.")
+@_no_create_option
 @click.pass_context
-def restore_cmd(ctx, url, dry_run):
+def restore_cmd(ctx, url, dry_run, no_create):
     """Fetch all refs from a remote URL, overwriting local state.
 
     Force-overwrites diverged refs and deletes local-only refs.
     """
-    store = _open_store(_require_repo(ctx))
+    repo_path = _require_repo(ctx)
+    store = _open_store(repo_path) if no_create else _open_or_create_bare(repo_path)
     auth_url = _resolve_credentials(url)
     diff = store.restore(auth_url, dry_run=dry_run, progress=_progress_cb(ctx))
     if dry_run:
