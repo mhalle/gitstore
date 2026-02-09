@@ -1193,3 +1193,121 @@ def restore_cmd(ctx, url, dry_run, no_create):
         print_diff(diff, "pull")
     else:
         _status(ctx, f"Restored from {url}")
+
+
+# ---------------------------------------------------------------------------
+# sync
+# ---------------------------------------------------------------------------
+
+@main.command()
+@_repo_option
+@click.argument("args", nargs=-1, required=True)
+@click.option("--branch", "-b", default="main", help="Branch to operate on.")
+@click.option("--hash", "ref", default=None, help="Branch, tag, or commit hash to read from.")
+@click.option("-m", "message", default=None, help="Commit message.")
+@click.option("-n", "--dry-run", "dry_run", is_flag=True, default=False,
+              help="Show what would change without writing.")
+@click.option("--ignore-errors", is_flag=True, default=False,
+              help="Skip files that fail and continue.")
+@_no_create_option
+@click.pass_context
+def sync(ctx, args, branch, ref, message, dry_run, ignore_errors, no_create):
+    """Make one path identical to another (like rsync --delete).
+
+    With one argument, syncs a local directory to the repo root:
+
+        gitstore sync ./dir
+
+    With two arguments, direction is determined by the ':' prefix:
+
+        gitstore sync ./local :repo_path   (disk → repo)
+        gitstore sync :repo_path ./local    (repo → disk)
+    """
+    from .copy import (
+        sync_to_repo, sync_from_repo,
+        sync_to_repo_dry_run, sync_from_repo_dry_run,
+    )
+
+    if len(args) == 1:
+        # 1-arg form: sync local dir to repo root
+        if args[0].startswith(":"):
+            raise click.ClickException(
+                "Single-argument sync must be a local path, not a repo path"
+            )
+        local_path = args[0]
+        repo_dest = ""
+        direction = "to_repo"
+    elif len(args) == 2:
+        src, dest = args
+        src_is_repo = src.startswith(":")
+        dest_is_repo = dest.startswith(":")
+        if src_is_repo and dest_is_repo:
+            raise click.ClickException(
+                "Both arguments are repo paths — one side must be local"
+            )
+        if not src_is_repo and not dest_is_repo:
+            raise click.ClickException(
+                "Neither argument is a repo path — prefix repo paths with ':'"
+            )
+        if not src_is_repo:
+            # disk → repo
+            local_path = src
+            repo_dest = dest[1:].rstrip("/")
+            direction = "to_repo"
+        else:
+            # repo → disk
+            repo_dest = src[1:].rstrip("/")
+            local_path = dest
+            direction = "from_repo"
+    else:
+        raise click.ClickException("sync requires 1 or 2 arguments")
+
+    if ref and direction == "to_repo":
+        raise click.ClickException(
+            "Cannot write to a commit hash — use --branch for writes"
+        )
+
+    repo_path = _require_repo(ctx)
+    if direction == "to_repo" and not dry_run and not no_create:
+        store = _open_or_create_store(repo_path, branch)
+    else:
+        store = _open_store(repo_path)
+    fs = _get_fs(store, branch, ref)
+
+    try:
+        if direction == "to_repo":
+            if dry_run:
+                plan = sync_to_repo_dry_run(fs, local_path, repo_dest)
+                for action in plan.actions():
+                    prefix = {"add": "+", "update": "~", "delete": "-"}[action.action]
+                    click.echo(f"{prefix} :{repo_dest}/{action.path}" if repo_dest else f"{prefix} :{action.path}")
+            else:
+                _new_fs, errs = sync_to_repo(
+                    fs, local_path, repo_dest,
+                    message=message, ignore_errors=ignore_errors,
+                )
+                for e in errs:
+                    click.echo(f"ERROR: {e.path}: {e.error}", err=True)
+                _status(ctx, f"Synced -> :{repo_dest or '/'}")
+                if errs:
+                    ctx.exit(1)
+        else:
+            if dry_run:
+                plan = sync_from_repo_dry_run(fs, repo_dest, local_path)
+                for action in plan.actions():
+                    prefix = {"add": "+", "update": "~", "delete": "-"}[action.action]
+                    click.echo(f"{prefix} {os.path.join(local_path, action.path)}")
+            else:
+                errs = sync_from_repo(
+                    fs, repo_dest, local_path,
+                    ignore_errors=ignore_errors,
+                )
+                for e in errs:
+                    click.echo(f"ERROR: {e.path}: {e.error}", err=True)
+                _status(ctx, f"Synced -> {local_path}")
+                if errs:
+                    ctx.exit(1)
+    except (FileNotFoundError, NotADirectoryError) as exc:
+        raise click.ClickException(str(exc))
+    except StaleSnapshotError:
+        raise click.ClickException("Branch modified concurrently — retry")

@@ -2480,3 +2480,129 @@ class TestCpIgnoreErrors:
         ])
         assert result.exit_code != 0
         assert "ERROR" in result.output
+
+
+# ---------------------------------------------------------------------------
+# TestSync
+# ---------------------------------------------------------------------------
+
+class TestSync:
+    def test_sync_1arg_disk_to_repo(self, runner, initialized_repo, tmp_path):
+        """sync ./dir syncs local dir to repo root."""
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "a.txt").write_text("aaa")
+        (src / "b.txt").write_text("bbb")
+        result = runner.invoke(main, [
+            "sync", "--repo", initialized_repo, str(src),
+        ])
+        assert result.exit_code == 0, result.output
+        r = runner.invoke(main, ["ls", "--repo", initialized_repo])
+        assert "a.txt" in r.output
+        assert "b.txt" in r.output
+
+    def test_sync_2arg_disk_to_repo(self, runner, initialized_repo, tmp_path):
+        """sync ./dir :dest syncs to a repo sub-path."""
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "x.txt").write_text("xxx")
+        result = runner.invoke(main, [
+            "sync", "--repo", initialized_repo, str(src), ":data",
+        ])
+        assert result.exit_code == 0, result.output
+        r = runner.invoke(main, ["ls", "--repo", initialized_repo, ":data"])
+        assert "x.txt" in r.output
+
+    def test_sync_2arg_repo_to_disk(self, runner, repo_with_files, tmp_path):
+        """sync :data ./out syncs repo path to disk."""
+        dest = tmp_path / "out"
+        result = runner.invoke(main, [
+            "sync", "--repo", repo_with_files, ":data", str(dest),
+        ])
+        assert result.exit_code == 0, result.output
+        assert (dest / "data.bin").exists()
+
+    def test_sync_deletes_extra_files(self, runner, repo_with_files, tmp_path):
+        """Sync deletes files in dest not present in source."""
+        # First sync repo data to disk
+        dest = tmp_path / "out"
+        dest.mkdir()
+        (dest / "extra.txt").write_text("extra")
+        (dest / "data.bin").write_bytes(b"\x00\x01\x02")
+        result = runner.invoke(main, [
+            "sync", "--repo", repo_with_files, ":data", str(dest),
+        ])
+        assert result.exit_code == 0, result.output
+        assert (dest / "data.bin").exists()
+        assert not (dest / "extra.txt").exists()
+
+    def test_sync_dry_run(self, runner, initialized_repo, tmp_path):
+        """-n shows plan without writing."""
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "new.txt").write_text("new")
+        result = runner.invoke(main, [
+            "sync", "--repo", initialized_repo, "-n", str(src),
+        ])
+        assert result.exit_code == 0, result.output
+        assert "+" in result.output  # add action
+        # Verify nothing was actually written
+        r = runner.invoke(main, ["ls", "--repo", initialized_repo])
+        assert "new.txt" not in r.output
+
+    def test_sync_both_local_error(self, runner, initialized_repo, tmp_path):
+        """sync a b (no colon on either) errors."""
+        result = runner.invoke(main, [
+            "sync", "--repo", initialized_repo, "a", "b",
+        ])
+        assert result.exit_code != 0
+        assert "Neither argument is a repo path" in result.output
+
+    def test_sync_both_repo_error(self, runner, initialized_repo):
+        """sync :a :b errors."""
+        result = runner.invoke(main, [
+            "sync", "--repo", initialized_repo, ":a", ":b",
+        ])
+        assert result.exit_code != 0
+        assert "Both arguments are repo paths" in result.output
+
+    def test_sync_1arg_repo_error(self, runner, initialized_repo):
+        """sync :path errors (1-arg must be local)."""
+        result = runner.invoke(main, [
+            "sync", "--repo", initialized_repo, ":path",
+        ])
+        assert result.exit_code != 0
+        assert "must be a local path" in result.output
+
+    def test_sync_ignore_errors(self, runner, repo_with_files, tmp_path):
+        """--ignore-errors works."""
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "good.txt").write_text("good")
+        # Create an unreadable file
+        bad = src / "bad.txt"
+        bad.write_text("bad")
+        import os
+        os.chmod(str(bad), 0o000)
+        result = runner.invoke(main, [
+            "sync", "--repo", repo_with_files, str(src), ":dest",
+            "--ignore-errors",
+        ])
+        # Restore permissions for cleanup
+        os.chmod(str(bad), 0o644)
+        # good.txt should have been written
+        r = runner.invoke(main, ["ls", "--repo", repo_with_files, ":dest"])
+        assert "good.txt" in r.output
+
+    def test_sync_custom_message(self, runner, initialized_repo, tmp_path):
+        """-m sets commit message."""
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "f.txt").write_text("data")
+        result = runner.invoke(main, [
+            "sync", "--repo", initialized_repo,
+            "-m", "custom sync message", str(src),
+        ])
+        assert result.exit_code == 0, result.output
+        r = runner.invoke(main, ["log", "--repo", initialized_repo])
+        assert "custom sync message" in r.output
