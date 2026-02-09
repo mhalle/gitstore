@@ -4,6 +4,13 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.26.0 (2026-02-09)
+
+- Extract shared `_glob_match` into `_glob.py` (deduplicate from `fs.py` and `copy.py`)
+- Split `copy.py` (1093 lines) into `copy/` subpackage: `_types`, `_resolve`, `_io`, `_ops`
+- Split `cli.py` (1361 lines) into `cli/` subpackage: `_helpers`, `_basic`, `_cp`, `_sync`, `_refs`, `_archive`, `_mirror`
+- Zero public API changes; all backward-compatible imports preserved
+
 ## v0.25.0 (2026-02-09)
 
 - Unify `CopyPlan` and `list[CopyError]` into `CopyReport` dataclass with `add`, `update`, `delete`, `errors`, and `warnings` fields
