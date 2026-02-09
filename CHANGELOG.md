@@ -4,6 +4,19 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.27.0 (2026-02-09)
+
+**Breaking API change:** `copy_to_repo()` and `sync_to_repo()` now return just `FS` instead of `tuple[FS, CopyReport | None]`. Access the report via `fs.report` property.
+
+- Add `FileEntry` dataclass with `path`, `type` (B/E/L), and `src` (source location) tracking
+- `CopyReport` now uses `list[FileEntry]` instead of `list[str]` for add/update/delete operations
+- Centralize commit message generation with `+/-/~` notation and operation prefixes (Batch cp:, Batch ar:)
+- Add `FS.report` property to access operation report without tuple unpacking
+- Fix `fs.report` to match tuple return value (both now reference same object with source tracking)
+- **API simplification:** `copy_to_repo()` and `sync_to_repo()` return `FS` only; report via `fs.report`
+- Export `FileEntry` from `gitstore` package
+- Update documentation for new API
+
 ## v0.26.2 (2026-02-09)
 
 - Allow `--repo` option at both main group level and subcommand level for flexibility
