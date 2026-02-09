@@ -2,7 +2,7 @@
 
 A versioned key-value filesystem backed by bare Git repositories. Store, retrieve, and version binary data using an immutable-snapshot API — every write produces a new commit, and old snapshots remain accessible forever.
 
-Built on [pygit2](https://www.pygit2.org/), gitstore gives you Git's content-addressable storage, branching, tagging, and history without touching the working directory or the `git` CLI.
+Built on [dulwich](https://www.dulwich.io/), gitstore gives you Git's content-addressable storage, branching, tagging, and history without touching the working directory or the `git` CLI.
 
 ## Installation
 
@@ -10,7 +10,7 @@ Built on [pygit2](https://www.pygit2.org/), gitstore gives you Git's content-add
 pip install gitstore
 ```
 
-Requires Python 3.10+ and pygit2 >= 1.14.
+Requires Python 3.10+ and dulwich.
 
 ## Quick start
 
@@ -364,6 +364,12 @@ gitstore cp --delete :data/ ./out
 # Skip failed files and continue (report errors at end)
 gitstore cp --ignore-errors ./mydir/ :dest
 
+# Sync (make destination identical to source, including deletes)
+gitstore sync ./dir                          # sync local dir to repo root
+gitstore sync ./local :repo_path             # disk → repo
+gitstore sync :repo_path ./local             # repo → disk
+gitstore sync -n ./local :repo_path          # dry run
+
 # Browse contents
 gitstore ls
 gitstore ls subdir
@@ -502,6 +508,14 @@ gitstore cp :file.txt local.txt --hash abc1234...
 ```
 
 Write commands (`cp`, `rm`, `unarchive`, `unzip`, `untar`) accept `-m` for custom commit messages. Use `-b` on any command to target a branch other than `main`. Read commands (`cat`, `ls`, `cp`, `archive`, `zip`, `tar`, `log`) accept `--hash` to read from any branch, tag, or full commit hash. `log`, `archive`, `zip`, and `tar` accept `--before` with an ISO 8601 date or datetime to filter to commits on or before that point in time. `cp` handles files, directories, trailing-slash "contents" mode, and glob patterns; pass `-n`/`--dry-run` to preview what would be copied without writing. `cp` accepts `--mode 644` or `--mode 755` to set file permissions, `--follow-symlinks` to dereference symlinks, `--ignore-existing` to skip files that already exist at the destination, `--delete` to remove destination files not present in the source (like rsync `--delete`), and `--ignore-errors` to skip failed files and continue copying. When copying directories, `cp` auto-detects executable permissions from disk and preserves symlinks by default; pass `--follow-symlinks` to dereference them instead. When copying repo→disk, `cp` recreates symlink entries as symlinks on disk. Pass `-v` before the command for status messages on stderr. `archive`, `zip`, and `tar` accept `-` as FILENAME to write to stdout; `unarchive` and `untar` read from stdin when no filename is given (or with `-`). `archive` and `unarchive` auto-detect the format from the filename extension; use `--format zip` or `--format tar` to override or when piping to/from stdout/stdin. The `zip`/`unzip`/`tar`/`untar` commands remain as aliases. `backup` and `restore` operate on the entire repository (all branches and tags) and accept `-n`/`--dry-run` to preview changes without transferring data.
+
+## Documentation
+
+Structured reference documentation is available in the [`docs/`](docs/) directory:
+
+- [Documentation hub](docs/index.md) -- quick start and navigation
+- [Python API Reference](docs/api.md) -- classes, methods, and data types
+- [CLI Reference](docs/cli.md) -- the `gitstore` command-line tool
 
 ## Development
 
