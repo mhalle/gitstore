@@ -881,6 +881,24 @@ class TestCopyFromRepoDuplicateSources:
         # The overlap warning should be present
         assert any("Overlapping" in w.error for w in report.warnings)
 
+    def test_copy_from_repo_dry_run_delete_duplicate_sources_consistent(self, store_and_fs):
+        """Dry-run with overlapping repo sources deduplicates and warns."""
+        _, fs, tmp_path = store_and_fs
+        fs = fs.write("dir/shared.txt", b"from_dir")
+        fs = fs.write("other/shared.txt", b"from_other")
+        out = tmp_path / "output"
+        out.mkdir()
+        (out / "shared.txt").write_bytes(b"from_dir")
+
+        report = copy_from_repo_dry_run(
+            fs, ["dir/", "other/"], str(out), delete=True,
+        )
+        assert report is not None
+        # "shared.txt" should NOT be in update (content matches first source)
+        assert "shared.txt" not in report.update
+        # The overlap warning should be present
+        assert any("Overlapping" in w.error for w in report.warnings)
+
 
 # ---------------------------------------------------------------------------
 # Fix B3: Contents-mode symlinked dir follows symlink

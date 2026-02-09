@@ -104,6 +104,11 @@ def _walk_local_paths(local_path: str, follow_symlinks: bool = False) -> set[str
 
     When *follow_symlinks* is ``True``, ``os.walk`` follows symlinks with
     cycle detection to avoid infinite loops.
+
+    Note: if *local_path* itself is a symlink to a directory (e.g. contents
+    mode with a trailing ``/``), ``os.walk`` always dereferences it
+    regardless of *follow_symlinks*.  This matches standard Unix semantics
+    where a trailing slash causes the OS to resolve the symlink.
     """
     result: set[str] = set()
     base = Path(local_path)
@@ -916,13 +921,22 @@ def copy_from_repo_dry_run(
 
     if delete:
         base = Path(dest)
+        report = CopyReport()
 
         pair_map: dict[str, str] = {}
-        repo_files: dict[str, bytes] = {}
         for repo_path, local_path in pairs:
             rel = os.path.relpath(local_path, dest).replace(os.sep, "/")
-            pair_map[rel] = repo_path
-            entry = _entry_at_path(fs._store._repo, fs._tree_oid, repo_path)
+            if rel in pair_map:
+                report.warnings.append(CopyError(
+                    path=repo_path,
+                    error=f"Overlapping destination '{rel}': skipping (kept earlier source)",
+                ))
+            else:
+                pair_map[rel] = repo_path
+
+        repo_files: dict[str, bytes] = {}
+        for rel, rp in pair_map.items():
+            entry = _entry_at_path(fs._store._repo, fs._tree_oid, rp)
             if entry is not None:
                 repo_files[rel] = entry[0]._sha
 
@@ -941,7 +955,10 @@ def copy_from_repo_dry_run(
         if ignore_existing:
             update = []
 
-        return _finalize_report(CopyReport(add=add, update=update, delete=delete_list))
+        report.add = add
+        report.update = update
+        report.delete = delete_list
+        return _finalize_report(report)
     else:
         # Non-delete mode: classify by existence only
         add: list[str] = []

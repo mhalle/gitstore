@@ -5,7 +5,7 @@ All public classes and functions are importable from the top-level `gitstore` pa
 ```python
 from gitstore import GitStore, FS, StaleSnapshotError
 from gitstore import copy_to_repo, copy_from_repo, sync_to_repo, sync_from_repo
-from gitstore import CopyPlan, CopyAction, CopyError, SyncDiff, RefChange
+from gitstore import CopyReport, CopyAction, CopyError, SyncDiff, RefChange
 ```
 
 ---
@@ -237,7 +237,7 @@ All path arguments use forward slashes. Glob patterns (`*`, `?`) do not match a 
 
 ### Disk to repo
 
-#### `copy_to_repo(fs, sources, dest, *, follow_symlinks=False, message=None, mode=None, ignore_existing=False, delete=False, ignore_errors=False) -> tuple[FS, list[CopyError]]`
+#### `copy_to_repo(fs, sources, dest, *, follow_symlinks=False, message=None, mode=None, ignore_existing=False, delete=False, ignore_errors=False) -> tuple[FS, CopyReport | None]`
 
 Copy local files/directories/globs into the repo.
 
@@ -253,23 +253,23 @@ Copy local files/directories/globs into the repo.
 | `delete` | `bool` | Remove repo files not in source (rsync `--delete`). |
 | `ignore_errors` | `bool` | Collect per-file errors instead of aborting. |
 
-**Returns:** `(new_fs, errors)` -- the new snapshot and any collected errors.
+**Returns:** `(new_fs, report)` -- the new snapshot and a `CopyReport` (or `None` when nothing was done).
 
-#### `copy_to_repo_dry_run(fs, sources, dest, *, follow_symlinks=False, ignore_existing=False, delete=False) -> CopyPlan`
+#### `copy_to_repo_dry_run(fs, sources, dest, *, follow_symlinks=False, ignore_existing=False, delete=False) -> CopyReport | None`
 
 Preview what `copy_to_repo` would do without writing.
 
-#### `sync_to_repo(fs, local_path, repo_path, *, message=None, ignore_errors=False) -> tuple[FS, list[CopyError]]`
+#### `sync_to_repo(fs, local_path, repo_path, *, message=None, ignore_errors=False) -> tuple[FS, CopyReport | None]`
 
 Make `repo_path` identical to `local_path` (includes deletes).
 
-#### `sync_to_repo_dry_run(fs, local_path, repo_path) -> CopyPlan`
+#### `sync_to_repo_dry_run(fs, local_path, repo_path) -> CopyReport | None`
 
 Preview what `sync_to_repo` would do.
 
 ### Repo to disk
 
-#### `copy_from_repo(fs, sources, dest, *, ignore_existing=False, delete=False, ignore_errors=False) -> list[CopyError]`
+#### `copy_from_repo(fs, sources, dest, *, ignore_existing=False, delete=False, ignore_errors=False) -> CopyReport | None`
 
 Copy repo files/directories/globs to local disk.
 
@@ -282,17 +282,17 @@ Copy repo files/directories/globs to local disk.
 | `delete` | `bool` | Remove local files not in source. |
 | `ignore_errors` | `bool` | Collect per-file errors instead of aborting. |
 
-**Returns:** List of errors (empty on full success).
+**Returns:** `CopyReport` with details of what was copied, or `None` when nothing was done.
 
-#### `copy_from_repo_dry_run(fs, sources, dest, *, ignore_existing=False, delete=False) -> CopyPlan`
+#### `copy_from_repo_dry_run(fs, sources, dest, *, ignore_existing=False, delete=False) -> CopyReport | None`
 
 Preview what `copy_from_repo` would do.
 
-#### `sync_from_repo(fs, repo_path, local_path, *, ignore_errors=False) -> list[CopyError]`
+#### `sync_from_repo(fs, repo_path, local_path, *, ignore_errors=False) -> CopyReport | None`
 
 Make `local_path` identical to `repo_path` (includes deletes).
 
-#### `sync_from_repo_dry_run(fs, repo_path, local_path) -> CopyPlan`
+#### `sync_from_repo_dry_run(fs, repo_path, local_path) -> CopyReport | None`
 
 Preview what `sync_from_repo` would do.
 
@@ -300,30 +300,32 @@ Preview what `sync_from_repo` would do.
 
 ## Data classes
 
-### CopyPlan
+### CopyReport
 
-Describes what a copy or sync operation would do.
+Result of a copy/sync operation (dry-run or real). All copy and sync functions return `CopyReport | None` — `None` when there is nothing to report (no actions, no errors, no warnings).
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `add` | `list[str]` | Paths to add. |
-| `update` | `list[str]` | Paths to update. |
-| `delete` | `list[str]` | Paths to delete. |
+| `add` | `list[str]` | Paths added (or to add, for dry-run). |
+| `update` | `list[str]` | Paths updated (or to update). |
+| `delete` | `list[str]` | Paths deleted (or to delete). |
+| `errors` | `list[CopyError]` | Per-file errors (only when `ignore_errors=True`). |
+| `warnings` | `list[CopyError]` | Non-fatal warnings (e.g. overlapping sources). |
 
 | Property | Type | Description |
 |----------|------|-------------|
-| `in_sync` | `bool` | `True` if no changes. |
-| `total` | `int` | Total number of changes. |
+| `in_sync` | `bool` | `True` if no add/update/delete actions. |
+| `total` | `int` | Total number of add/update/delete actions. |
 
 | Method | Returns | Description |
 |--------|---------|-------------|
 | `actions()` | `list[CopyAction]` | All actions sorted by path. |
 
-`SyncPlan` is a backward-compatible alias for `CopyPlan`.
+`CopyPlan` and `SyncPlan` are backward-compatible aliases for `CopyReport`.
 
 ### CopyAction
 
-A single action within a `CopyPlan`.
+A single action within a `CopyReport`.
 
 | Field | Type | Description |
 |-------|------|-------------|
