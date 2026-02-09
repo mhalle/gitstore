@@ -302,7 +302,7 @@ except StaleSnapshotError:
 
 gitstore includes a command-line interface for working with bare repos without writing Python. Install the package to get the `gitstore` command.
 
-Specify the repository with `--repo`/`-r` or the `GITSTORE_REPO` environment variable. Use `--branch`/`-b` to select a branch (defaults to `main`). Use `--hash` to read from any branch, tag, or commit hash. For `cp` and `cptree`, prefix repo-side paths with `:` to distinguish them from local paths. For other commands (`ls`, `cat`, `rm`) the `:` prefix is optional.
+Specify the repository with `--repo`/`-r` or the `GITSTORE_REPO` environment variable. Use `--branch`/`-b` to select a branch (defaults to `main`). Use `--hash` to read from any branch, tag, or commit hash. For `cp`, prefix repo-side paths with `:` to distinguish them from local paths. For other commands (`ls`, `cat`, `rm`) the `:` prefix is optional.
 
 ```bash
 # Set once per session
@@ -353,10 +353,9 @@ gitstore cp script.sh :script.sh --mode 755
 # Follow symlinks instead of preserving them (disk→repo)
 gitstore cp --follow-symlinks ./dir :dest
 
-# Copy directory trees (symlinks preserved by default)
-gitstore cptree ./local-dir :repo-dir
-gitstore cptree ./local-dir :repo-dir --follow-symlinks  # dereference symlinks
-gitstore cptree :repo-dir ./local-dir
+# Do not overwrite existing files at the destination
+gitstore cp --no-clobber ./mydir :dest
+gitstore cp --no-clobber :data ./out
 
 # Browse contents
 gitstore ls
@@ -495,7 +494,7 @@ gitstore tar archive.tar --hash abc1234...
 gitstore cp :file.txt local.txt --hash abc1234...
 ```
 
-Write commands (`cp`, `cptree`, `rm`, `unarchive`, `unzip`, `untar`) accept `-m` for custom commit messages. Use `-b` on any command to target a branch other than `main`. Read commands (`cat`, `ls`, `cp`, `cptree`, `archive`, `zip`, `tar`, `log`) accept `--hash` to read from any branch, tag, or full commit hash. `log`, `archive`, `zip`, and `tar` accept `--before` with an ISO 8601 date or datetime to filter to commits on or before that point in time. `cp` handles files, directories, trailing-slash "contents" mode, and glob patterns; pass `-n`/`--dry-run` to preview what would be copied without writing. `cp` accepts `--mode 644` or `--mode 755` to set file permissions and `--follow-symlinks` to dereference symlinks. `cptree` auto-detects executable permissions from disk and preserves symlinks by default; pass `--follow-symlinks` to dereference them instead. When copying repo→disk, `cp` and `cptree` recreate symlink entries as symlinks on disk. Pass `-v` before the command for status messages on stderr. `archive`, `zip`, and `tar` accept `-` as FILENAME to write to stdout; `unarchive` and `untar` read from stdin when no filename is given (or with `-`). `archive` and `unarchive` auto-detect the format from the filename extension; use `--format zip` or `--format tar` to override or when piping to/from stdout/stdin. The `zip`/`unzip`/`tar`/`untar` commands remain as aliases. `backup` and `restore` operate on the entire repository (all branches and tags) and accept `-n`/`--dry-run` to preview changes without transferring data.
+Write commands (`cp`, `rm`, `unarchive`, `unzip`, `untar`) accept `-m` for custom commit messages. Use `-b` on any command to target a branch other than `main`. Read commands (`cat`, `ls`, `cp`, `archive`, `zip`, `tar`, `log`) accept `--hash` to read from any branch, tag, or full commit hash. `log`, `archive`, `zip`, and `tar` accept `--before` with an ISO 8601 date or datetime to filter to commits on or before that point in time. `cp` handles files, directories, trailing-slash "contents" mode, and glob patterns; pass `-n`/`--dry-run` to preview what would be copied without writing. `cp` accepts `--mode 644` or `--mode 755` to set file permissions, `--follow-symlinks` to dereference symlinks, and `--no-clobber` to skip existing files at the destination. When copying directories, `cp` auto-detects executable permissions from disk and preserves symlinks by default; pass `--follow-symlinks` to dereference them instead. When copying repo→disk, `cp` recreates symlink entries as symlinks on disk. Pass `-v` before the command for status messages on stderr. `archive`, `zip`, and `tar` accept `-` as FILENAME to write to stdout; `unarchive` and `untar` read from stdin when no filename is given (or with `-`). `archive` and `unarchive` auto-detect the format from the filename extension; use `--format zip` or `--format tar` to override or when piping to/from stdout/stdin. The `zip`/`unzip`/`tar`/`untar` commands remain as aliases. `backup` and `restore` operate on the entire repository (all branches and tags) and accept `-n`/`--dry-run` to preview changes without transferring data.
 
 ## Development
 

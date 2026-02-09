@@ -63,25 +63,25 @@ def test_cp_repo_to_disk_no_auto_create(runner, new_repo, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# cptree auto-creates
+# cp dir auto-creates
 # ---------------------------------------------------------------------------
 
-def test_cptree_auto_creates_repo(runner, new_repo, tmp_path):
+def test_cp_dir_auto_creates_repo(runner, new_repo, tmp_path):
     d = tmp_path / "mydir"
     d.mkdir()
     (d / "a.txt").write_text("aaa")
-    r = runner.invoke(main, ["cptree", "-r", new_repo, str(d), ":stuff"])
+    r = runner.invoke(main, ["cp", "-r", new_repo, str(d) + "/", ":stuff"])
     assert r.exit_code == 0, r.output
     r = runner.invoke(main, ["cat", "-r", new_repo, ":stuff/a.txt"])
     assert r.exit_code == 0
     assert r.output == "aaa"
 
 
-def test_cptree_no_create_prevents_auto_create(runner, new_repo, tmp_path):
+def test_cp_dir_no_create_prevents_auto_create(runner, new_repo, tmp_path):
     d = tmp_path / "mydir"
     d.mkdir()
     (d / "a.txt").write_text("aaa")
-    r = runner.invoke(main, ["cptree", "-r", new_repo, "--no-create", str(d), ":stuff"])
+    r = runner.invoke(main, ["cp", "-r", new_repo, "--no-create", str(d) + "/", ":stuff"])
     assert r.exit_code != 0
     assert not os.path.exists(new_repo)
 
@@ -205,11 +205,11 @@ def test_cp_existing_repo_not_recreated(runner, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# cptree multi-source
+# cp multi-source directories
 # ---------------------------------------------------------------------------
 
-def test_cptree_multi_source_disk_to_repo(runner, new_repo, tmp_path):
-    """cptree dir1 dir2 :dest writes both trees as subdirectories."""
+def test_cp_multi_source_disk_to_repo(runner, new_repo, tmp_path):
+    """cp dir1 dir2 :dest writes both trees as subdirectories."""
     d1 = tmp_path / "alpha"
     d1.mkdir()
     (d1 / "a.txt").write_text("aaa")
@@ -220,7 +220,7 @@ def test_cptree_multi_source_disk_to_repo(runner, new_repo, tmp_path):
     (d2 / "x.txt").write_text("xxx")
 
     r = runner.invoke(main, [
-        "cptree", "-r", new_repo, str(d1), str(d2), ":dest",
+        "cp", "-r", new_repo, str(d1), str(d2), ":dest",
     ])
     assert r.exit_code == 0, r.output
 
@@ -233,27 +233,28 @@ def test_cptree_multi_source_disk_to_repo(runner, new_repo, tmp_path):
     assert r.exit_code == 0 and r.output == "xxx"
 
 
-def test_cptree_multi_source_repo_to_disk(runner, tmp_path):
-    """cptree :dir1 :dir2 /tmp/out extracts both trees as subdirectories."""
+def test_cp_multi_source_repo_to_disk(runner, tmp_path):
+    """cp :dir1 :dir2 /tmp/out extracts both trees as subdirectories."""
     repo = str(tmp_path / "multi.git")
 
     # Set up repo with two directories
     d = tmp_path / "src"
     d.mkdir()
     (d / "f1.txt").write_text("one")
-    r = runner.invoke(main, ["cptree", "-r", repo, str(d), ":alpha"])
+    r = runner.invoke(main, ["cp", "-r", repo, str(d) + "/", ":alpha"])
     assert r.exit_code == 0, r.output
 
     d2 = tmp_path / "src2"
     d2.mkdir()
     (d2 / "f2.txt").write_text("two")
-    r = runner.invoke(main, ["cptree", "-r", repo, str(d2), ":beta"])
+    r = runner.invoke(main, ["cp", "-r", repo, str(d2) + "/", ":beta"])
     assert r.exit_code == 0, r.output
 
     # Extract both into output dir
     out = tmp_path / "out"
+    out.mkdir()
     r = runner.invoke(main, [
-        "cptree", "-r", repo, ":alpha", ":beta", str(out),
+        "cp", "-r", repo, ":alpha", ":beta", str(out),
     ])
     assert r.exit_code == 0, r.output
 
@@ -261,13 +262,13 @@ def test_cptree_multi_source_repo_to_disk(runner, tmp_path):
     assert (out / "beta" / "f2.txt").read_text() == "two"
 
 
-def test_cptree_single_source_backward_compat(runner, new_repo, tmp_path):
-    """Single-source cptree behaves the same as before (contents into dest)."""
+def test_cp_dir_contents_to_repo(runner, new_repo, tmp_path):
+    """cp dir/ :stuff copies contents into :stuff (no dir name prefix)."""
     d = tmp_path / "mydir"
     d.mkdir()
     (d / "file.txt").write_text("content")
 
-    r = runner.invoke(main, ["cptree", "-r", new_repo, str(d), ":stuff"])
+    r = runner.invoke(main, ["cp", "-r", new_repo, str(d) + "/", ":stuff"])
     assert r.exit_code == 0, r.output
 
     # File is at :stuff/file.txt, NOT :stuff/mydir/file.txt
@@ -276,17 +277,18 @@ def test_cptree_single_source_backward_compat(runner, new_repo, tmp_path):
     assert r.output == "content"
 
 
-def test_cptree_single_source_repo_to_disk_backward_compat(runner, tmp_path):
-    """Single-source repo→disk: contents go into dest, not a subdirectory."""
+def test_cp_dir_contents_from_repo(runner, tmp_path):
+    """cp :stuff/ dest copies contents into dest (no stuff prefix)."""
     repo = str(tmp_path / "compat.git")
     d = tmp_path / "src"
     d.mkdir()
     (d / "file.txt").write_text("hello")
-    r = runner.invoke(main, ["cptree", "-r", repo, str(d), ":stuff"])
+    r = runner.invoke(main, ["cp", "-r", repo, str(d) + "/", ":stuff"])
     assert r.exit_code == 0, r.output
 
     out = tmp_path / "out"
-    r = runner.invoke(main, ["cptree", "-r", repo, ":stuff", str(out)])
+    out.mkdir()
+    r = runner.invoke(main, ["cp", "-r", repo, ":stuff/", str(out)])
     assert r.exit_code == 0, r.output
 
     # File is at out/file.txt, NOT out/stuff/file.txt
