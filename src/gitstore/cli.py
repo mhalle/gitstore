@@ -486,6 +486,9 @@ def destroy(ctx, force):
 @click.argument("args", nargs=-1, required=True)
 @click.option("--branch", "-b", default="main", help="Branch to operate on.")
 @click.option("--hash", "ref", default=None, help="Branch, tag, or commit hash to read from.")
+@click.option("--path", "at_path", default=None, help="Use latest commit that changed this path.")
+@click.option("--match", "match_pattern", default=None, help="Use latest commit matching this message pattern (* and ?).")
+@click.option("--before", "before", default=None, help="Use latest commit on or before this date (ISO 8601).")
 @click.option("-m", "message", default=None, help="Commit message.")
 @click.option("--mode", type=click.Choice(["644", "755"]), default=None,
               help="File mode (default: 644).")
@@ -501,7 +504,7 @@ def destroy(ctx, force):
               help="Skip files that fail and continue copying.")
 @_no_create_option
 @click.pass_context
-def cp(ctx, args, branch, ref, message, mode, follow_symlinks, dry_run, ignore_existing, delete, ignore_errors, no_create):
+def cp(ctx, args, branch, ref, at_path, match_pattern, before, message, mode, follow_symlinks, dry_run, ignore_existing, delete, ignore_errors, no_create):
     """Copy files and directories between disk and repo.
 
     The last argument is the destination; all preceding arguments are sources.
@@ -541,9 +544,10 @@ def cp(ctx, args, branch, ref, message, mode, follow_symlinks, dry_run, ignore_e
             "Neither sources nor DEST is a repo path — prefix repo paths with ':'"
         )
 
-    if ref and not src_is_repo:
+    has_snapshot_filters = ref or at_path or match_pattern or before
+    if has_snapshot_filters and not src_is_repo:
         raise click.ClickException(
-            "Cannot write to a commit hash — use --branch for writes"
+            "--hash/--path/--match/--before only apply when reading from repo"
         )
 
     repo_path = _require_repo(ctx)
@@ -551,7 +555,8 @@ def cp(ctx, args, branch, ref, message, mode, follow_symlinks, dry_run, ignore_e
         store = _open_or_create_store(repo_path, branch)
     else:
         store = _open_store(repo_path)
-    fs = _get_fs(store, branch, ref)
+    before = _parse_before(before)
+    fs = _resolve_snapshot(_get_fs(store, branch, ref), at_path, match_pattern, before)
 
     filemode = (GIT_FILEMODE_BLOB_EXECUTABLE if mode == "755"
                 else GIT_FILEMODE_BLOB) if mode else None
@@ -722,11 +727,15 @@ def cp(ctx, args, branch, ref, message, mode, follow_symlinks, dry_run, ignore_e
 @click.argument("path", required=False, default=None)
 @click.option("--branch", "-b", default="main", help="Branch to list.")
 @click.option("--hash", "ref", default=None, help="Branch, tag, or commit hash to read from.")
+@click.option("--path", "at_path", default=None, help="Use latest commit that changed this path.")
+@click.option("--match", "match_pattern", default=None, help="Use latest commit matching this message pattern (* and ?).")
+@click.option("--before", "before", default=None, help="Use latest commit on or before this date (ISO 8601).")
 @click.pass_context
-def ls(ctx, path, branch, ref):
+def ls(ctx, path, branch, ref, at_path, match_pattern, before):
     """List files/directories at PATH (or root)."""
     store = _open_store(_require_repo(ctx))
-    fs = _get_fs(store, branch, ref)
+    before = _parse_before(before)
+    fs = _resolve_snapshot(_get_fs(store, branch, ref), at_path, match_pattern, before)
 
     repo_path = None
     if path is not None:
@@ -754,13 +763,17 @@ def ls(ctx, path, branch, ref):
 @click.argument("path")
 @click.option("--branch", "-b", default="main", help="Branch to read from.")
 @click.option("--hash", "ref", default=None, help="Branch, tag, or commit hash to read from.")
+@click.option("--path", "at_path", default=None, help="Use latest commit that changed this path.")
+@click.option("--match", "match_pattern", default=None, help="Use latest commit matching this message pattern (* and ?).")
+@click.option("--before", "before", default=None, help="Use latest commit on or before this date (ISO 8601).")
 @click.pass_context
-def cat(ctx, path, branch, ref):
+def cat(ctx, path, branch, ref, at_path, match_pattern, before):
     """Print file contents to stdout."""
     repo_path = _normalize_repo_path(_strip_colon(path))
 
     store = _open_store(_require_repo(ctx))
-    fs = _get_fs(store, branch, ref)
+    before = _parse_before(before)
+    fs = _resolve_snapshot(_get_fs(store, branch, ref), at_path, match_pattern, before)
 
     try:
         data = fs.read(repo_path)
@@ -808,10 +821,10 @@ def rm(ctx, path, branch, message):
 
 @main.command()
 @_repo_option
-@click.option("--path", "at_path", default=None, help="Filter to commits that changed this path.")
+@click.option("--path", "at_path", default=None, help="Show only commits that changed this path.")
 @click.option("--at", "deprecated_at", default=None, hidden=True)
-@click.option("--match", "match_pattern", default=None, help="Filter by message (supports * and ? wildcards).")
-@click.option("--before", "before", default=None, help="Only commits on or before this date (ISO 8601).")
+@click.option("--match", "match_pattern", default=None, help="Show only commits matching this message pattern (* and ?).")
+@click.option("--before", "before", default=None, help="Show only commits on or before this date (ISO 8601).")
 @click.option("--branch", "-b", default="main", help="Branch to show log for.")
 @click.option("--hash", "ref", default=None, help="Branch, tag, or commit hash to start from.")
 @click.option("--format", "fmt", default="text",
@@ -877,10 +890,10 @@ def branch_list(ctx):
 @click.argument("name")
 @click.option("--from", "from_ref", default=None, help="Ref to fork from.")
 @click.option("--path", "at_path", default=None,
-              help="Point to latest commit that modified this path.")
+              help="Use latest commit that changed this path.")
 @click.option("--at", "deprecated_at", default=None, hidden=True)
-@click.option("--match", "match_pattern", default=None, help="Filter by message (supports * and ? wildcards).")
-@click.option("--before", "before", default=None, help="Only commits on or before this date (ISO 8601).")
+@click.option("--match", "match_pattern", default=None, help="Use latest commit matching this message pattern (* and ?).")
+@click.option("--before", "before", default=None, help="Use latest commit on or before this date (ISO 8601).")
 @click.pass_context
 def branch_create(ctx, name, from_ref, at_path, deprecated_at, match_pattern, before):
     """Create a new branch NAME, optionally forking from an existing ref."""
@@ -952,10 +965,10 @@ def tag_list(ctx):
 @click.argument("name")
 @click.argument("from_ref", metavar="FROM")
 @click.option("--path", "at_path", default=None,
-              help="Point to latest commit that modified this path.")
+              help="Use latest commit that changed this path.")
 @click.option("--at", "deprecated_at", default=None, hidden=True)
-@click.option("--match", "match_pattern", default=None, help="Filter by message (supports * and ? wildcards).")
-@click.option("--before", "before", default=None, help="Only commits on or before this date (ISO 8601).")
+@click.option("--match", "match_pattern", default=None, help="Use latest commit matching this message pattern (* and ?).")
+@click.option("--before", "before", default=None, help="Use latest commit on or before this date (ISO 8601).")
 @click.pass_context
 def tag_create(ctx, name, from_ref, at_path, deprecated_at, match_pattern, before):
     """Create a new tag NAME from FROM ref."""
@@ -997,10 +1010,10 @@ def tag_delete(ctx, name):
 @click.argument("filename", type=click.Path())
 @click.option("--branch", "-b", default="main", help="Branch to export from.")
 @click.option("--hash", "ref", default=None, help="Branch, tag, or commit hash to export from.")
-@click.option("--path", "at_path", default=None, help="Filter to commits that changed this path.")
+@click.option("--path", "at_path", default=None, help="Use latest commit that changed this path.")
 @click.option("--at", "deprecated_at", default=None, hidden=True)
-@click.option("--match", "match_pattern", default=None, help="Filter by message (supports * and ? wildcards).")
-@click.option("--before", "before", default=None, help="Only commits on or before this date (ISO 8601).")
+@click.option("--match", "match_pattern", default=None, help="Use latest commit matching this message pattern (* and ?).")
+@click.option("--before", "before", default=None, help="Use latest commit on or before this date (ISO 8601).")
 @click.pass_context
 def zip_cmd(ctx, filename, branch, ref, at_path, deprecated_at, match_pattern, before):
     """Export repo contents to a zip file.
@@ -1044,10 +1057,10 @@ def unzip_cmd(ctx, filename, branch, message, no_create):
 @click.argument("filename", type=click.Path())
 @click.option("--branch", "-b", default="main", help="Branch to export from.")
 @click.option("--hash", "ref", default=None, help="Branch, tag, or commit hash to export from.")
-@click.option("--path", "at_path", default=None, help="Filter to commits that changed this path.")
+@click.option("--path", "at_path", default=None, help="Use latest commit that changed this path.")
 @click.option("--at", "deprecated_at", default=None, hidden=True)
-@click.option("--match", "match_pattern", default=None, help="Filter by message (supports * and ? wildcards).")
-@click.option("--before", "before", default=None, help="Only commits on or before this date (ISO 8601).")
+@click.option("--match", "match_pattern", default=None, help="Use latest commit matching this message pattern (* and ?).")
+@click.option("--before", "before", default=None, help="Use latest commit on or before this date (ISO 8601).")
 @click.pass_context
 def tar_cmd(ctx, filename, branch, ref, at_path, deprecated_at, match_pattern, before):
     """Export repo contents to a tar archive.
@@ -1095,9 +1108,9 @@ def untar_cmd(ctx, filename, branch, message, no_create):
               help="Archive format (auto-detected from extension if omitted).")
 @click.option("--branch", "-b", default="main", help="Branch to export from.")
 @click.option("--hash", "ref", default=None, help="Branch, tag, or commit hash.")
-@click.option("--path", "at_path", default=None, help="Filter to commits that changed this path.")
-@click.option("--match", "match_pattern", default=None, help="Filter by message (supports * and ? wildcards).")
-@click.option("--before", "before", default=None, help="Only commits on or before this date (ISO 8601).")
+@click.option("--path", "at_path", default=None, help="Use latest commit that changed this path.")
+@click.option("--match", "match_pattern", default=None, help="Use latest commit matching this message pattern (* and ?).")
+@click.option("--before", "before", default=None, help="Use latest commit on or before this date (ISO 8601).")
 @click.pass_context
 def archive_cmd(ctx, filename, fmt, branch, ref, at_path, match_pattern, before):
     """Export repo contents to an archive file.
@@ -1204,6 +1217,9 @@ def restore_cmd(ctx, url, dry_run, no_create):
 @click.argument("args", nargs=-1, required=True)
 @click.option("--branch", "-b", default="main", help="Branch to operate on.")
 @click.option("--hash", "ref", default=None, help="Branch, tag, or commit hash to read from.")
+@click.option("--path", "at_path", default=None, help="Use latest commit that changed this path.")
+@click.option("--match", "match_pattern", default=None, help="Use latest commit matching this message pattern (* and ?).")
+@click.option("--before", "before", default=None, help="Use latest commit on or before this date (ISO 8601).")
 @click.option("-m", "message", default=None, help="Commit message.")
 @click.option("-n", "--dry-run", "dry_run", is_flag=True, default=False,
               help="Show what would change without writing.")
@@ -1211,7 +1227,7 @@ def restore_cmd(ctx, url, dry_run, no_create):
               help="Skip files that fail and continue.")
 @_no_create_option
 @click.pass_context
-def sync(ctx, args, branch, ref, message, dry_run, ignore_errors, no_create):
+def sync(ctx, args, branch, ref, at_path, match_pattern, before, message, dry_run, ignore_errors, no_create):
     """Make one path identical to another (like rsync --delete).
 
     With one argument, syncs a local directory to the repo root:
@@ -1262,9 +1278,10 @@ def sync(ctx, args, branch, ref, message, dry_run, ignore_errors, no_create):
     else:
         raise click.ClickException("sync requires 1 or 2 arguments")
 
-    if ref and direction == "to_repo":
+    has_snapshot_filters = ref or at_path or match_pattern or before
+    if has_snapshot_filters and direction == "to_repo":
         raise click.ClickException(
-            "Cannot write to a commit hash — use --branch for writes"
+            "--hash/--path/--match/--before only apply when reading from repo"
         )
 
     repo_path = _require_repo(ctx)
@@ -1272,7 +1289,8 @@ def sync(ctx, args, branch, ref, message, dry_run, ignore_errors, no_create):
         store = _open_or_create_store(repo_path, branch)
     else:
         store = _open_store(repo_path)
-    fs = _get_fs(store, branch, ref)
+    before = _parse_before(before)
+    fs = _resolve_snapshot(_get_fs(store, branch, ref), at_path, match_pattern, before)
 
     try:
         if direction == "to_repo":

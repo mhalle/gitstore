@@ -2303,7 +2303,7 @@ class TestHash:
             "--hash", commit_hash
         ])
         assert result.exit_code != 0
-        assert "Cannot write" in result.output
+        assert "only apply when reading from repo" in result.output
 
 
 # ---------------------------------------------------------------------------
