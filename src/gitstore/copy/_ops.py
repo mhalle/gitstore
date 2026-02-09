@@ -6,8 +6,8 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ..tree import _entry_at_path, _normalize_path
-from ._types import CopyError, CopyReport, _finalize_report
+from ..tree import _entry_at_path, _normalize_path, _mode_from_disk, GIT_FILEMODE_LINK
+from ._types import CopyError, CopyReport, FileEntry, _finalize_report
 from ._resolve import (
     _walk_local_paths,
     _walk_repo,
@@ -27,6 +27,66 @@ from ._io import (
 
 if TYPE_CHECKING:
     from ..fs import FS
+
+
+# ---------------------------------------------------------------------------
+# Helper: Convert path lists to FileEntry lists
+# ---------------------------------------------------------------------------
+
+def _make_entries_from_disk(rel_paths: list[str], rel_to_abs: dict[str, str], follow_symlinks: bool = False) -> list[FileEntry]:
+    """Convert relative paths to FileEntry objects by checking filesystem.
+
+    Args:
+        rel_paths: List of relative paths (relative to dest)
+        rel_to_abs: Mapping from relative paths to absolute local paths
+        follow_symlinks: Whether symlinks are being followed
+    """
+    entries = []
+    for rel in rel_paths:
+        full_path = rel_to_abs.get(rel, rel)  # fallback to rel if not in map
+        if os.path.islink(full_path) and not follow_symlinks:
+            entries.append(FileEntry(rel, "L", src=full_path))
+        else:
+            try:
+                mode = _mode_from_disk(full_path)
+                entries.append(FileEntry.from_mode(rel, mode, src=full_path))
+            except OSError:
+                # If we can't read it, assume blob
+                entries.append(FileEntry(rel, "B", src=full_path))
+    return entries
+
+
+def _make_entries_from_repo(fs: FS, rel_paths: list[str], base_path: str) -> list[FileEntry]:
+    """Convert relative paths to FileEntry objects by checking repo."""
+    entries = []
+    for rel in rel_paths:
+        full_path = f"{base_path}/{rel}" if base_path else rel
+        entry = _entry_at_path(fs._store._repo, fs._tree_oid, full_path)
+        if entry:
+            entries.append(FileEntry.from_mode(rel, entry[1], src=full_path))
+        else:
+            # Shouldn't happen, but handle gracefully
+            entries.append(FileEntry(rel, "B", src=full_path))
+    return entries
+
+
+def _make_entries_from_repo_dict(fs: FS, rel_paths: list[str], rel_to_repo: dict[str, str]) -> list[FileEntry]:
+    """Convert relative paths to FileEntry objects by checking repo.
+
+    Args:
+        rel_paths: List of relative paths (relative to dest)
+        rel_to_repo: Mapping from relative paths to repo paths
+    """
+    entries = []
+    for rel in rel_paths:
+        repo_path = rel_to_repo.get(rel, rel)
+        entry = _entry_at_path(fs._store._repo, fs._tree_oid, repo_path)
+        if entry:
+            entries.append(FileEntry.from_mode(rel, entry[1], src=repo_path))
+        else:
+            # Shouldn't happen, but handle gracefully
+            entries.append(FileEntry(rel, "B", src=repo_path))
+    return entries
 
 
 # ---------------------------------------------------------------------------
@@ -129,7 +189,7 @@ def copy_to_repo(
         write_path_set = set(write_rels)
         safe_deletes = _filter_tree_conflicts(write_path_set, delete_rels)
 
-        with fs.batch(message=message) as b:
+        with fs.batch(message=message, operation="cp") as b:
             _write_files_to_repo(b, write_pairs, follow_symlinks=follow_symlinks,
                                  mode=mode, ignore_errors=ignore_errors,
                                  errors=report.errors)
@@ -148,10 +208,17 @@ def copy_to_repo(
                 f"All files failed to copy: {report.errors}"
             )
 
-        report.add = add_rels
-        report.update = update_rels
-        report.delete = safe_deletes
-        return result_fs, _finalize_report(report)
+        # Convert path lists to FileEntry lists with type information
+        # For writes, check local filesystem for modes
+        report.add = _make_entries_from_disk(add_rels, pair_map, follow_symlinks)
+        report.update = _make_entries_from_disk(update_rels, pair_map, follow_symlinks)
+        # For deletes, check repo for modes
+        report.delete = _make_entries_from_repo(fs, safe_deletes, dest)
+
+        # Attach the proper report to result_fs so fs.report and tuple return match
+        final_report = _finalize_report(report)
+        result_fs._report = final_report
+        return result_fs, final_report
     else:
         # Non-delete mode: classify written pairs as add vs update
         if ignore_existing:
@@ -164,18 +231,22 @@ def copy_to_repo(
                 )
             return fs, _finalize_report(report)
 
-        # Classify before writing
+        # Classify before writing and build rel -> local_path mapping
+        pair_map: dict[str, str] = {}
+        add_rels: list[str] = []
+        update_rels: list[str] = []
         for local_path, repo_path in pairs:
             if dest and repo_path.startswith(dest + "/"):
                 rel = repo_path[len(dest) + 1:]
             else:
                 rel = repo_path
+            pair_map[rel] = local_path
             if fs.exists(repo_path):
-                report.update.append(rel)
+                update_rels.append(rel)
             else:
-                report.add.append(rel)
+                add_rels.append(rel)
 
-        with fs.batch(message=message) as b:
+        with fs.batch(message=message, operation="cp") as b:
             _write_files_to_repo(b, pairs, follow_symlinks=follow_symlinks,
                                  mode=mode, ignore_errors=ignore_errors,
                                  errors=report.errors)
@@ -185,7 +256,15 @@ def copy_to_repo(
             raise RuntimeError(
                 f"All files failed to copy: {report.errors}"
             )
-        return result_fs, _finalize_report(report)
+
+        # Convert to FileEntry lists
+        report.add = _make_entries_from_disk(add_rels, pair_map, follow_symlinks)
+        report.update = _make_entries_from_disk(update_rels, pair_map, follow_symlinks)
+
+        # Attach the proper report to result_fs so fs.report and tuple return match
+        final_report = _finalize_report(report)
+        result_fs._report = final_report
+        return result_fs, final_report
 
 
 def copy_from_repo(
@@ -302,9 +381,14 @@ def copy_from_repo(
                              errors=report.errors)
         _prune_empty_dirs(base)
 
-        report.add = add_rels
-        report.update = update_rels
-        report.delete = delete_rels
+        # Convert to FileEntry lists
+        # For add/update from repo, get modes from repo
+        repo_rel_to_path = {rel: pair_map[rel] for rel in add_rels + update_rels}
+        report.add = _make_entries_from_repo_dict(fs, add_rels, repo_rel_to_path)
+        report.update = _make_entries_from_repo_dict(fs, update_rels, repo_rel_to_path)
+        # For deletes from disk, we don't have type info anymore (already deleted)
+        # Just mark as blobs
+        report.delete = [FileEntry(rel, "B") for rel in delete_rels]
     else:
         if ignore_existing:
             pairs = [(r, l) for r, l in pairs if not Path(l).exists()]
@@ -316,20 +400,28 @@ def copy_from_repo(
                 )
             return _finalize_report(report)
 
-        # Classify as add vs update
+        # Classify as add vs update and build mapping
+        repo_rel_to_path: dict[str, str] = {}
+        add_rels: list[str] = []
+        update_rels: list[str] = []
         for repo_path, local_path in pairs:
             rel = os.path.relpath(local_path, dest).replace(os.sep, "/")
+            repo_rel_to_path[rel] = repo_path
             try:
                 exists = Path(local_path).exists()
             except OSError:
                 exists = False
             if exists:
-                report.update.append(rel)
+                update_rels.append(rel)
             else:
-                report.add.append(rel)
+                add_rels.append(rel)
 
         _write_files_to_disk(fs, pairs, ignore_errors=ignore_errors,
                              errors=report.errors)
+
+        # Convert to FileEntry lists (get modes from repo)
+        report.add = _make_entries_from_repo_dict(fs, add_rels, repo_rel_to_path)
+        report.update = _make_entries_from_repo_dict(fs, update_rels, repo_rel_to_path)
 
     # Safety check: if all files failed
     if ignore_errors and report.errors and not pairs:
@@ -385,19 +477,22 @@ def copy_to_repo_dry_run(
         if ignore_existing:
             update = []
 
-        report.add = add
-        report.update = update
-        report.delete = delete_list
+        # Convert to FileEntry lists
+        report.add = _make_entries_from_disk(add, pair_map, follow_symlinks)
+        report.update = _make_entries_from_disk(update, pair_map, follow_symlinks)
+        report.delete = _make_entries_from_repo(fs, delete_list, dest)
         return _finalize_report(report)
     else:
         # Non-delete mode: classify by existence only
         add: list[str] = []
         update: list[str] = []
+        pair_map: dict[str, str] = {}
         for local_path, repo_path in pairs:
             if dest and repo_path.startswith(dest + "/"):
                 rel = repo_path[len(dest) + 1:]
             else:
                 rel = repo_path
+            pair_map[rel] = local_path
             if fs.exists(repo_path):
                 update.append(rel)
             else:
@@ -406,7 +501,10 @@ def copy_to_repo_dry_run(
         if ignore_existing:
             update = []
 
-        return _finalize_report(CopyReport(add=sorted(add), update=sorted(update)))
+        # Convert to FileEntry lists
+        add_entries = _make_entries_from_disk(sorted(add), pair_map, follow_symlinks)
+        update_entries = _make_entries_from_disk(sorted(update), pair_map, follow_symlinks)
+        return _finalize_report(CopyReport(add=add_entries, update=update_entries))
 
 
 def copy_from_repo_dry_run(
@@ -457,16 +555,20 @@ def copy_from_repo_dry_run(
         if ignore_existing:
             update = []
 
-        report.add = add
-        report.update = update
-        report.delete = delete_list
+        # Convert to FileEntry lists
+        report.add = _make_entries_from_repo_dict(fs, add, pair_map)
+        report.update = _make_entries_from_repo_dict(fs, update, pair_map)
+        # For deletes, we don't have type info (files on disk), just mark as blobs
+        report.delete = [FileEntry(rel, "B") for rel in delete_list]
         return _finalize_report(report)
     else:
         # Non-delete mode: classify by existence only
         add: list[str] = []
         update: list[str] = []
+        repo_rel_to_path: dict[str, str] = {}
         for repo_path, local_path in pairs:
             rel = os.path.relpath(local_path, dest).replace(os.sep, "/")
+            repo_rel_to_path[rel] = repo_path
             if Path(local_path).exists():
                 update.append(rel)
             else:
@@ -475,7 +577,10 @@ def copy_from_repo_dry_run(
         if ignore_existing:
             update = []
 
-        return _finalize_report(CopyReport(add=sorted(add), update=sorted(update)))
+        # Convert to FileEntry lists
+        add_entries = _make_entries_from_repo_dict(fs, sorted(add), repo_rel_to_path)
+        update_entries = _make_entries_from_repo_dict(fs, sorted(update), repo_rel_to_path)
+        return _finalize_report(CopyReport(add=add_entries, update=update_entries))
 
 
 # ---------------------------------------------------------------------------
@@ -503,7 +608,10 @@ def sync_to_repo(
         new_fs, delete_rels = _sync_delete_all_in_repo(fs, repo_path, message=message)
         if not delete_rels:
             return new_fs, None
-        return new_fs, CopyReport(delete=delete_rels)
+        # Convert string list to FileEntry list
+        report = CopyReport(delete=_make_entries_from_repo(fs, delete_rels, repo_path))
+        new_fs._report = report
+        return new_fs, report
 
 
 def _sync_delete_all_in_repo(
@@ -519,7 +627,7 @@ def _sync_delete_all_in_repo(
     if not repo_files:
         # _walk_repo returns {} for files (not dirs) — check if dest is a file
         if dest and fs.exists(dest) and not fs.is_dir(dest):
-            with fs.batch(message=message) as b:
+            with fs.batch(message=message, operation="cp") as b:
                 b.remove(dest)
             return b.fs, [""]
         return fs, []
@@ -544,7 +652,8 @@ def sync_from_repo(
         delete_rels = _sync_delete_all_local(local_path)
         if not delete_rels:
             return None
-        return CopyReport(delete=delete_rels)
+        # For local file deletes, we don't have type info - just mark as blobs
+        return CopyReport(delete=[FileEntry(rel, "B") for rel in delete_rels])
 
 
 def _sync_delete_all_local(local_path: str) -> list[str]:
@@ -577,9 +686,10 @@ def sync_to_repo_dry_run(
         repo_files = _walk_repo(fs, dest)
         if not repo_files and dest and fs.exists(dest) and not fs.is_dir(dest):
             # B1 fix: dest is a single file — relative path within dest is ""
-            return CopyReport(delete=[""])
+            return CopyReport(delete=[FileEntry("", "B")])
         delete_list = sorted(repo_files.keys())
-        return _finalize_report(CopyReport(delete=delete_list))
+        delete_entries = _make_entries_from_repo(fs, delete_list, dest)
+        return _finalize_report(CopyReport(delete=delete_entries))
 
 
 def sync_from_repo_dry_run(
@@ -591,5 +701,7 @@ def sync_from_repo_dry_run(
         return copy_from_repo_dry_run(fs, sources, local_path, delete=True)
     except (FileNotFoundError, NotADirectoryError):
         # Nonexistent repo path → everything local is a delete
-        local_paths = _walk_local_paths(local_path)
-        return _finalize_report(CopyReport(delete=sorted(local_paths)))
+        local_paths = sorted(_walk_local_paths(local_path))
+        # For local files being deleted, we don't have type info, mark as blobs
+        delete_entries = [FileEntry(p, "B") for p in local_paths]
+        return _finalize_report(CopyReport(delete=delete_entries))

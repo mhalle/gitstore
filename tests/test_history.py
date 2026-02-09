@@ -99,11 +99,11 @@ class TestLog:
     def test_log_match(self, tmp_path):
         repo = GitStore.open(tmp_path / "test.git", create="main")
         fs = repo.branches["main"]
-        # write() auto-generates "Write <path>" messages
-        fs = fs.write("deploy-v1.txt", b"a")   # "Write deploy-v1.txt"
-        fs = fs.write("fixbug.txt", b"b")       # "Write fixbug.txt"
-        fs = fs.write("deploy-v2.txt", b"c")   # "Write deploy-v2.txt"
-        commits = list(fs.log(match="Write deploy*"))
+        # write() auto-generates "+ <path>" messages (new format)
+        fs = fs.write("deploy-v1.txt", b"a")   # "+ deploy-v1.txt"
+        fs = fs.write("fixbug.txt", b"b")       # "+ fixbug.txt"
+        fs = fs.write("deploy-v2.txt", b"c")   # "+ deploy-v2.txt"
+        commits = list(fs.log(match="+ deploy*"))
         assert len(commits) == 2
         assert all("deploy" in c.message for c in commits)
 

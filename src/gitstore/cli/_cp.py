@@ -152,7 +152,7 @@ def cp(ctx, args, branch, ref, at_path, match_pattern, before, message, mode, fo
                 if dry_run:
                     click.echo(f"{local} -> :{repo_file}")
                 else:
-                    with fs.batch(message=message) as b:
+                    with fs.batch(message=message, operation="cp") as b:
                         b.write_from(repo_file, local, mode=filemode)
                     _status(ctx, f"Copied -> :{repo_file}")
             except (FileNotFoundError, OSError) as exc:

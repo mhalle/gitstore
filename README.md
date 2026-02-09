@@ -31,7 +31,7 @@ print(fs.read("hello.txt"))  # b'Hello, world!'
 
 # Every write is a commit
 print(fs.hash)     # full 40-char SHA
-print(fs.message)  # 'Write hello.txt'
+print(fs.message)  # '+ hello.txt'
 ```
 
 ## Core concepts
@@ -149,6 +149,64 @@ fs1 = repo.branches["main"]
 fs2 = fs1.write("new.txt", b"data")
 assert not fs1.exists("new.txt")  # fs1 is unchanged
 assert fs2.exists("new.txt")
+```
+
+### Commit messages
+
+Write operations automatically generate descriptive commit messages:
+
+```python
+fs = fs.write("config.json", b"{}")
+print(fs.message)  # "+ config.json"
+
+fs = fs.write("deploy.sh", b"#!/bin/sh", mode=0o100755)
+print(fs.message)  # "+ deploy.sh (E)"  -- executable
+
+fs = fs.write_symlink("link", "target")
+print(fs.message)  # "+ link (L)"  -- symlink
+
+fs = fs.write("config.json", b'{"updated": true}')
+print(fs.message)  # "~ config.json"  -- update
+
+fs = fs.remove("old.txt")
+print(fs.message)  # "- old.txt"
+```
+
+Batch operations show a summary with operation context:
+```python
+# Manual batch
+with fs.batch() as b:
+    b.write("a.txt", b"a")
+    b.write("b.txt", b"b")
+    b.remove("c.txt")
+print(b.fs.message)  # "Batch: +2 -1"
+
+# Copy/sync operations show "Batch cp:"
+from gitstore import copy_to_repo
+fs, report = copy_to_repo(fs, ["./data/"], "backup")
+print(fs.message)  # "Batch cp: +10 ~2 -1"
+
+# Archive extraction shows "Batch ar:"
+# (when using gitstore unzip/untar/unarchive)
+```
+
+**Symbols:**
+- `+` = additions
+- `~` = updates
+- `-` = deletions
+
+**Operation prefixes:**
+- `Batch:` = manual batch
+- `Batch cp:` = copy/sync
+- `Batch ar:` = archive extraction
+
+**Type annotations:**
+- `(E)` = executable
+- `(L)` = symlink
+
+Override with a custom message:
+```python
+fs = fs.write("config.json", b"{}", message="Reset config to defaults")
 ```
 
 ### Batch writes

@@ -46,6 +46,7 @@ class FS:
         self._branch = branch
         commit = gitstore._repo[commit_oid]
         self._tree_oid = commit.tree_id
+        self._report = None
 
     @property
     def _writable(self) -> bool:
@@ -82,6 +83,11 @@ class FS:
     @property
     def author_email(self) -> str:
         return self._store._repo[self._commit_oid].author.email
+
+    @property
+    def report(self):
+        """Report of the operation that created this snapshot."""
+        return self._report
 
     # --- Read operations ---
 
@@ -185,17 +191,64 @@ class FS:
 
     # --- Write operations ---
 
+    def _build_report_from_changes(
+        self,
+        writes: dict[str, bytes | tuple[bytes, int] | pygit2.Oid | tuple[pygit2.Oid, int]],
+        removes: set[str],
+    ):
+        """Build CopyReport from writes and removes with type detection."""
+        from .copy._types import CopyReport, FileEntry
+
+        add_entries = []
+        update_entries = []
+
+        for path, value in writes.items():
+            # Extract mode from value
+            if isinstance(value, tuple):
+                _, mode = value
+            else:
+                mode = GIT_FILEMODE_BLOB
+
+            entry = FileEntry.from_mode(path, mode)
+
+            if self.exists(path):
+                update_entries.append(entry)
+            else:
+                add_entries.append(entry)
+
+        # For deletes, query the repo to get types before deletion
+        delete_entries = []
+        for path in removes:
+            entry = _entry_at_path(self._store._repo, self._tree_oid, path)
+            if entry:
+                file_entry = FileEntry.from_mode(path, entry[1])
+                delete_entries.append(file_entry)
+            else:
+                # Shouldn't happen, but handle gracefully
+                delete_entries.append(FileEntry(path, "B"))
+
+        return CopyReport(add=add_entries, update=update_entries, delete=delete_entries)
+
     def _commit_changes(
         self,
         writes: dict[str, bytes | tuple[bytes, int] | pygit2.Oid | tuple[pygit2.Oid, int]],
         removes: set[str],
-        message: str,
+        message: str | None,
+        operation: str | None = None,
     ) -> FS:
         if not self._writable:
             raise PermissionError("Cannot write to a read-only snapshot")
 
+        from .copy._types import format_commit_message
+
         repo = self._store._repo
         sig = self._store._signature
+
+        # Build report from changes
+        report = self._build_report_from_changes(writes, removes)
+
+        # Generate message if not provided
+        final_message = format_commit_message(report, message, operation)
 
         new_tree_oid = rebuild_tree(repo, self._tree_oid, writes, removes)
         if new_tree_oid == self._tree_oid:
@@ -206,7 +259,7 @@ class FS:
             None,
             sig,
             sig,
-            message,
+            final_message,
             new_tree_oid,
             [self._commit_oid],
         )
@@ -221,7 +274,9 @@ class FS:
                 )
             ref.set_target(new_commit_oid)
 
-        return FS(self._store, new_commit_oid, branch=self._branch)
+        new_fs = FS(self._store, new_commit_oid, branch=self._branch)
+        new_fs._report = report
+        return new_fs
 
     def write(
         self,
@@ -233,7 +288,7 @@ class FS:
     ) -> FS:
         path = _normalize_path(path)
         value: bytes | tuple[bytes, int] = (data, mode) if mode is not None else data
-        return self._commit_changes({path: value}, set(), message or f"Write {path}")
+        return self._commit_changes({path: value}, set(), message)
 
     def write_from(
         self,
@@ -251,7 +306,7 @@ class FS:
         repo = self._store._repo
         blob_oid = repo.create_blob_fromdisk(local_path)
         value: pygit2.Oid | tuple[pygit2.Oid, int] = (blob_oid, mode) if mode != GIT_FILEMODE_BLOB else blob_oid
-        return self._commit_changes({path: value}, set(), message or f"Write {path}")
+        return self._commit_changes({path: value}, set(), message)
 
     def write_symlink(
         self,
@@ -264,7 +319,7 @@ class FS:
         data = target.encode()
         return self._commit_changes(
             {path: (data, GIT_FILEMODE_LINK)}, set(),
-            message or f"Symlink {path} -> {target}",
+            message,
         )
 
     def remove(self, path: str | os.PathLike[str], *, message: str | None = None) -> FS:
@@ -277,11 +332,11 @@ class FS:
         obj = _walk_to(self._store._repo, self._tree_oid, path)
         if obj.type == GIT_OBJECT_TREE:
             raise IsADirectoryError(path)
-        return self._commit_changes({}, {path}, message if message is not None else f"Remove {path}")
+        return self._commit_changes({}, {path}, message)
 
-    def batch(self, message: str | None = None):
+    def batch(self, message: str | None = None, operation: str | None = None):
         from .batch import Batch
-        return Batch(self, message=message)
+        return Batch(self, message=message, operation=operation)
 
     # --- Dump ---
 

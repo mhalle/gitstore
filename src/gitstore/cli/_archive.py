@@ -138,7 +138,7 @@ def _do_import(ctx, store, branch: str, filename: str, message: str | None, fmt:
         count = 0
         skipped = 0
         try:
-            with fs.batch(message=message) as b:
+            with fs.batch(message=message, operation="ar") as b:
                 with zipfile.ZipFile(source, "r") as zf:
                     for info in zf.infolist():
                         if info.is_dir():
@@ -184,7 +184,7 @@ def _do_import(ctx, store, branch: str, filename: str, message: str | None, fmt:
         skipped = 0
         member_info: dict[str, int] = {}
         try:
-            with fs.batch(message=message) as b:
+            with fs.batch(message=message, operation="ar") as b:
                 with tf:
                     for member in tf:
                         if member.issym():

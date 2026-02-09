@@ -12,7 +12,15 @@ from gitstore import (
     sync_from_repo_dry_run,
     SyncPlan,
     SyncAction,
+    FileEntry,
 )
+
+
+def paths(entries):
+    """Extract paths from FileEntry list for easier testing."""
+    if entries is None:
+        return set()
+    return {e.path for e in entries}
 
 
 # ---------------------------------------------------------------------------
@@ -174,9 +182,9 @@ class TestSyncToRepoDryRun:
     def test_returns_correct_plan(self, fs, local_dir):
         plan = sync_to_repo_dry_run(fs, str(local_dir), "data")
         assert isinstance(plan, SyncPlan)
-        assert sorted(plan.add) == ["a.txt", "b.txt"]
-        assert plan.update == []
-        assert plan.delete == []
+        assert sorted(paths(plan.add)) == ["a.txt", "b.txt"]
+        assert len(plan.update) == 0
+        assert len(plan.delete) == 0
         assert plan.total == 2
         assert not plan.in_sync
 
@@ -189,17 +197,17 @@ class TestSyncToRepoDryRun:
     def test_detects_updates(self, fs, local_dir):
         fs = fs.write("data/a.txt", b"old")
         plan = sync_to_repo_dry_run(fs, str(local_dir), "data")
-        assert "a.txt" in plan.update
-        assert "b.txt" in plan.add
+        assert "a.txt" in paths(plan.update)
+        assert "b.txt" in paths(plan.add)
 
     def test_detects_deletes(self, fs, local_dir):
         fs = fs.write("data/a.txt", b"alpha")
         fs = fs.write("data/b.txt", b"beta")
         fs = fs.write("data/extra.txt", b"extra")
         plan = sync_to_repo_dry_run(fs, str(local_dir), "data")
-        assert "extra.txt" in plan.delete
-        assert plan.add == []
-        assert plan.update == []
+        assert "extra.txt" in paths(plan.delete)
+        assert len(plan.add) == 0
+        assert len(plan.update) == 0
 
     def test_in_sync(self, fs, local_dir):
         fs1, _report = sync_to_repo(fs, str(local_dir), "data")
@@ -213,9 +221,9 @@ class TestSyncFromRepoDryRun:
         out = tmp_path / "output"
         out.mkdir()
         plan = sync_from_repo_dry_run(fs, "data", str(out))
-        assert plan.add == ["x.txt"]
-        assert plan.update == []
-        assert plan.delete == []
+        assert sorted(paths(plan.add)) == ["x.txt"]
+        assert len(plan.update) == 0
+        assert len(plan.delete) == 0
 
     def test_does_not_write(self, fs, tmp_path):
         fs = fs.write("data/x.txt", b"ex")
@@ -231,7 +239,7 @@ class TestSyncFromRepoDryRun:
         out.mkdir()
         (out / "x.txt").write_bytes(b"old")
         plan = sync_from_repo_dry_run(fs, "data", str(out))
-        assert "x.txt" in plan.update
+        assert "x.txt" in paths(plan.update)
 
     def test_detects_deletes(self, fs, tmp_path):
         fs = fs.write("data/x.txt", b"ex")
@@ -240,9 +248,9 @@ class TestSyncFromRepoDryRun:
         (out / "x.txt").write_bytes(b"ex")
         (out / "extra.txt").write_bytes(b"extra")
         plan = sync_from_repo_dry_run(fs, "data", str(out))
-        assert "extra.txt" in plan.delete
-        assert plan.add == []
-        assert plan.update == []
+        assert "extra.txt" in paths(plan.delete)
+        assert len(plan.add) == 0
+        assert len(plan.update) == 0
 
     def test_in_sync(self, fs, tmp_path):
         fs = fs.write("data/x.txt", b"ex")
@@ -260,9 +268,9 @@ class TestSyncFromRepoDryRun:
 class TestSyncPlanActions:
     def test_actions_sorted_by_path(self):
         plan = SyncPlan(
-            add=["c.txt", "a.txt"],
-            update=["b.txt"],
-            delete=["d.txt"],
+            add=[FileEntry("c.txt", "B"), FileEntry("a.txt", "B")],
+            update=[FileEntry("b.txt", "B")],
+            delete=[FileEntry("d.txt", "B")],
         )
         actions = plan.actions()
         assert [a.path for a in actions] == ["a.txt", "b.txt", "c.txt", "d.txt"]
@@ -311,7 +319,7 @@ class TestSyncSymlinks:
         (local / "link").symlink_to("target_v2")
 
         plan = sync_to_repo_dry_run(fs1, str(local), "data")
-        assert "link" in plan.update
+        assert "link" in paths(plan.update)
 
         fs2, _report = sync_to_repo(fs1, str(local), "data")
         assert fs2.readlink("data/link") == "target_v2"
@@ -326,7 +334,7 @@ class TestSyncSymlinks:
 
         fs = fs.write_symlink("data/link", "target_v2")
         plan = sync_from_repo_dry_run(fs, "data", str(out))
-        assert "link" in plan.update
+        assert "link" in paths(plan.update)
 
         sync_from_repo(fs, "data", str(out))
         assert os.readlink(out / "link") == "target_v2"
@@ -474,8 +482,8 @@ class TestSyncFileDirectoryCollisions:
         (local / "foo").write_text("file")
 
         plan = sync_to_repo_dry_run(fs, str(local), "data")
-        assert "foo" in plan.add
-        assert "foo/bar.txt" in plan.delete
+        assert "foo" in paths(plan.add)
+        assert "foo/bar.txt" in paths(plan.delete)
 
 
 # ---------------------------------------------------------------------------
@@ -542,7 +550,7 @@ class TestSyncContentEdgeCases:
         (local / "f.txt").write_bytes(b"hello\n")
 
         plan = sync_to_repo_dry_run(fs, str(local), "data")
-        assert "f.txt" in plan.update
+        assert "f.txt" in paths(plan.update)
 
 
 # ---------------------------------------------------------------------------
@@ -612,10 +620,10 @@ class TestSyncStructureEdgeCases:
         (local / "add.txt").write_text("new file")
 
         plan = sync_to_repo_dry_run(fs, str(local), "data")
-        assert "add.txt" in plan.add
-        assert "change.txt" in plan.update
-        assert "remove.txt" in plan.delete
-        assert "keep.txt" not in plan.add + plan.update + plan.delete
+        assert "add.txt" in paths(plan.add)
+        assert "change.txt" in paths(plan.update)
+        assert "remove.txt" in paths(plan.delete)
+        assert "keep.txt" not in (paths(plan.add) | paths(plan.update) | paths(plan.delete))
 
         new_fs, _report = sync_to_repo(fs, str(local), "data")
         assert new_fs.read("data/keep.txt") == b"keep"
@@ -632,7 +640,7 @@ class TestSyncStructureEdgeCases:
 
         # The dry run should treat the file as "no children" (all adds)
         plan = sync_to_repo_dry_run(fs, str(local), "data")
-        assert "hello.txt" in plan.add
+        assert "hello.txt" in paths(plan.add)
 
         new_fs, _report = sync_to_repo(fs, str(local), "data")
         assert new_fs.read("data/hello.txt") == b"hello"
@@ -658,10 +666,10 @@ class TestSyncRoundTrip:
         new_fs, _report = sync_to_repo(fs, str(local), "data")
 
         # Verify adds
-        for p in plan.add:
+        for p in paths(plan.add):
             assert new_fs.exists(f"data/{p}")
         # Verify deletes
-        for p in plan.delete:
+        for p in paths(plan.delete):
             assert not new_fs.exists(f"data/{p}")
         # After sync, dry run should show in_sync
         plan2 = sync_to_repo_dry_run(new_fs, str(local), "data")
@@ -680,10 +688,10 @@ class TestSyncRoundTrip:
         sync_from_repo(fs, "data", str(out))
 
         # Verify adds
-        for p in plan.add:
+        for p in paths(plan.add):
             assert (out / p).exists()
         # Verify deletes
-        for p in plan.delete:
+        for p in paths(plan.delete):
             assert not (out / p).exists()
         # After sync, dry run should show in_sync
         plan2 = sync_from_repo_dry_run(fs, "data", str(out))
@@ -784,28 +792,29 @@ class TestDryRunExactMatch:
                 repo_after.add(f"{dp}/{f}" if dp else f)
 
         # Every add in plan should be new
-        for p in plan.add:
+        for p in paths(plan.add):
             assert f"data/{p}" not in repo_before
             assert f"data/{p}" in repo_after
 
         # Every delete in plan should be removed
-        for p in plan.delete:
+        for p in paths(plan.delete):
             assert f"data/{p}" in repo_before
             assert f"data/{p}" not in repo_after
 
         # Every update in plan should exist in both
-        for p in plan.update:
+        for p in paths(plan.update):
             assert f"data/{p}" in repo_before
             assert f"data/{p}" in repo_after
 
         # Nothing else changed — files not in plan should be same
         unchanged = repo_before & repo_after
-        plan_paths = {f"data/{p}" for p in plan.add + plan.update + plan.delete}
+        all_plan_paths = paths(plan.add) | paths(plan.update) | paths(plan.delete)
+        plan_paths = {f"data/{p}" for p in all_plan_paths}
         for p in unchanged:
             if p not in plan_paths:
                 # Verify content unchanged
                 rp = p[len("data/"):]
-                assert rp not in plan.add + plan.update + plan.delete
+                assert rp not in all_plan_paths
 
         # After sync, second dry-run shows in_sync
         plan2 = sync_to_repo_dry_run(new_fs, str(local), "data")
@@ -844,15 +853,15 @@ class TestDryRunExactMatch:
                 rel = os.path.relpath(full, out).replace(os.sep, "/")
                 local_after.add(rel)
 
-        for p in plan.add:
+        for p in paths(plan.add):
             assert p not in local_before
             assert p in local_after
 
-        for p in plan.delete:
+        for p in paths(plan.delete):
             assert p in local_before
             assert p not in local_after
 
-        for p in plan.update:
+        for p in paths(plan.update):
             assert p in local_before
             assert p in local_after
 
@@ -877,7 +886,7 @@ class TestDryRunExactMatch:
         new_fs, _report = sync_to_repo(fs, str(local), "data")
 
         # Plan should show 'foo' added and sub-files deleted
-        assert "foo" in plan.add
+        assert "foo" in paths(plan.add)
 
         # After execution, verify the result matches expectations
         assert new_fs.read("data/foo") == b"I am a file now"
@@ -972,9 +981,9 @@ class TestDeleteSafety:
 
         plan = sync_from_repo_dry_run(fs, "data", str(out))
         assert len(plan.delete) == 5
-        assert sorted(plan.delete) == [f"delete_{i}.txt" for i in range(5)]
-        assert plan.add == []
-        assert plan.update == []
+        assert sorted(paths(plan.delete)) == [f"delete_{i}.txt" for i in range(5)]
+        assert len(plan.add) == 0
+        assert len(plan.update) == 0
 
         sync_from_repo(fs, "data", str(out))
 
@@ -1412,13 +1421,13 @@ class TestSyncDeleteFileAtRepoPath:
         fs = fs.write("data", b"I am a file at 'data'")
         plan = sync_to_repo_dry_run(fs, "/nonexistent/path", "data")
         # B1 fix: the delete entry is "" (relative path within "data" region)
-        assert "" in plan.delete
+        assert "" in paths(plan.delete)
 
     def test_sync_to_repo_dry_run_file_delete_plan_path(self, fs):
         """Verify delete path for file-at-dest is '' not the dest name."""
         fs = fs.write("data", b"I am a file at 'data'")
         plan = sync_to_repo_dry_run(fs, "/nonexistent/path", "data")
         assert plan is not None
-        assert plan.delete == [""]
+        assert sorted(paths(plan.delete)) == [""]
         # Verify that 'data' is NOT in the delete list (was the old bug)
-        assert "data" not in plan.delete
+        assert "data" not in paths(plan.delete)

@@ -109,7 +109,7 @@ class TestLog:
         entries = list(fs3.log(path="script.sh"))
         messages = [e.message for e in entries]
         assert "Make executable" in messages
-        assert "Write script.sh" in messages
+        assert "+ script.sh" in messages
 
 
 class TestStaleSnapshot:
@@ -216,7 +216,7 @@ class TestSymlink:
     def test_write_symlink_default_message(self, repo_fs):
         _, fs = repo_fs
         fs2 = fs.write_symlink("link.txt", "target.txt")
-        assert fs2.message == "Symlink link.txt -> target.txt"
+        assert fs2.message == "+ link.txt (L)"
 
     def test_write_symlink_on_tag_raises(self, tmp_path):
         repo = GitStore.open(tmp_path / "test.git", create="main")

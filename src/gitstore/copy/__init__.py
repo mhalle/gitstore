@@ -12,9 +12,11 @@ from ._types import (
     CopyError,
     CopyPlan,
     CopyReport,
+    FileEntry,
     SyncAction,
     SyncPlan,
     _finalize_report,
+    format_commit_message,
 )
 from ._resolve import (
     _walk_local_paths,
@@ -52,13 +54,14 @@ from ._ops import (
 
 __all__ = [
     # Public types
-    "CopyAction", "CopyError", "CopyReport",
+    "CopyAction", "CopyError", "CopyReport", "FileEntry",
     "CopyPlan", "SyncAction", "SyncPlan",
     # Public functions
     "copy_to_repo", "copy_from_repo",
     "copy_to_repo_dry_run", "copy_from_repo_dry_run",
     "sync_to_repo", "sync_from_repo",
     "sync_to_repo_dry_run", "sync_from_repo_dry_run",
+    "format_commit_message",
     # Private but used by tests
     "_expand_disk_glob",
 ]

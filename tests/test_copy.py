@@ -5,11 +5,18 @@ from pathlib import Path
 
 import pytest
 
-from gitstore import GitStore, copy_to_repo, copy_from_repo, CopyPlan, CopyReport
+from gitstore import GitStore, copy_to_repo, copy_from_repo, CopyPlan, CopyReport, FileEntry
 from gitstore.copy import (
     copy_to_repo_dry_run, copy_from_repo_dry_run,
     _expand_disk_glob,
 )
+
+
+def paths(entries):
+    """Extract paths from FileEntry list for easier testing."""
+    if entries is None:
+        return set()
+    return {e.path for e in entries}
 
 
 @pytest.fixture
@@ -143,7 +150,7 @@ class TestDryRun:
         f.write_text("data")
         plan = copy_to_repo_dry_run(fs, [str(f)], "dest")
         assert plan.total == 1
-        assert "dr.txt" in plan.add
+        assert "dr.txt" in paths(plan.add)
         # Original repo unchanged
         assert not fs.exists("dest/dr.txt")
 
@@ -161,7 +168,7 @@ class TestDryRun:
         d.mkdir()
         (d / "f.txt").write_text("f")
         plan = copy_to_repo_dry_run(fs, [str(d)], "dest")
-        assert "drd/f.txt" in plan.add
+        assert "drd/f.txt" in paths(plan.add)
 
     def test_to_repo_dry_run_shows_updates(self, store_and_fs):
         """Dry run classifies existing files as updates."""
@@ -170,8 +177,8 @@ class TestDryRun:
         f = tmp_path / "existing.txt"
         f.write_text("new content")
         plan = copy_to_repo_dry_run(fs, [str(f)], "")
-        assert "existing.txt" in plan.update
-        assert plan.delete == []
+        assert "existing.txt" in paths(plan.update)
+        assert len(plan.delete) == 0
 
     def test_from_repo_dry_run_shows_updates(self, store_and_fs):
         """Dry run classifies existing local files as updates."""
@@ -180,7 +187,7 @@ class TestDryRun:
         out.mkdir()
         (out / "existing.txt").write_text("local")
         plan = copy_from_repo_dry_run(fs, ["existing.txt"], str(out))
-        assert "existing.txt" in plan.update
+        assert "existing.txt" in paths(plan.update)
 
 
 class TestMixed:
@@ -244,9 +251,9 @@ class TestIgnoreExisting:
         f2 = tmp_path / "brand_new.txt"
         f2.write_text("new")
         plan = copy_to_repo_dry_run(fs, [str(f1), str(f2)], "", ignore_existing=True)
-        assert "brand_new.txt" in plan.add
-        assert "existing.txt" not in plan.add
-        assert plan.update == []
+        assert "brand_new.txt" in paths(plan.add)
+        assert "existing.txt" not in paths(plan.add)
+        assert len(plan.update) == 0
 
     def test_ignore_existing_dry_run_from_repo(self, store_and_fs):
         """Dry run shows only new files with ignore_existing."""
@@ -257,9 +264,9 @@ class TestIgnoreExisting:
         plan = copy_from_repo_dry_run(
             fs, ["existing.txt", "dir/a.txt"], str(out), ignore_existing=True,
         )
-        assert any("a.txt" in p for p in plan.add)
-        assert "existing.txt" not in plan.add
-        assert plan.update == []
+        assert any("a.txt" in p for p in paths(plan.add))
+        assert "existing.txt" not in paths(plan.add)
+        assert len(plan.update) == 0
 
     def test_ignore_existing_dir_to_repo(self, store_and_fs):
         """No-clobber with directory copy skips existing files."""
@@ -500,10 +507,11 @@ class TestDelete:
         (d / "add.txt").write_text("added")
         plan = copy_to_repo_dry_run(fs, [str(d) + "/"], "data", delete=True)
         assert isinstance(plan, CopyPlan)
-        assert "add.txt" in plan.add
-        assert "change.txt" in plan.update
-        assert "extra.txt" in plan.delete
-        assert "keep.txt" not in plan.add + plan.update + plan.delete
+        assert "add.txt" in paths(plan.add)
+        assert "change.txt" in paths(plan.update)
+        assert "extra.txt" in paths(plan.delete)
+        all_paths = paths(plan.add) | paths(plan.update) | paths(plan.delete)
+        assert "keep.txt" not in all_paths
 
     def test_delete_file_dir_conflict(self, store_and_fs):
         """delete=True handles file↔directory conflicts."""
@@ -538,8 +546,8 @@ class TestDelete:
         (out / "extra.txt").write_text("extra")
         plan = copy_from_repo_dry_run(fs, ["existing.txt"], str(out), delete=True)
         assert isinstance(plan, CopyPlan)
-        assert "existing.txt" in plan.add
-        assert "extra.txt" in plan.delete
+        assert "existing.txt" in paths(plan.add)
+        assert "extra.txt" in paths(plan.delete)
 
 
 # ---------------------------------------------------------------------------
@@ -877,7 +885,7 @@ class TestCopyFromRepoDuplicateSources:
         )
         assert report is not None
         # "shared.txt" should NOT be in update (content matches first source)
-        assert "shared.txt" not in report.update
+        assert "shared.txt" not in paths(report.update)
         # The overlap warning should be present
         assert any("Overlapping" in w.error for w in report.warnings)
 
@@ -895,7 +903,7 @@ class TestCopyFromRepoDuplicateSources:
         )
         assert report is not None
         # "shared.txt" should NOT be in update (content matches first source)
-        assert "shared.txt" not in report.update
+        assert "shared.txt" not in paths(report.update)
         # The overlap warning should be present
         assert any("Overlapping" in w.error for w in report.warnings)
 

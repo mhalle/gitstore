@@ -148,6 +148,58 @@ Create a symbolic link at `path` pointing to `target`.
 
 Remove a file. Raises `FileNotFoundError` if missing, `IsADirectoryError` if path is a directory.
 
+### Commit Messages
+
+Write operations automatically generate descriptive commit messages. You can override by passing a custom `message` to any write method.
+
+**Auto-generated format:**
+
+Single operations:
+```
++ filename.txt              # add regular file
++ script.sh (E)             # add executable
++ config.json (L)           # add symlink
+~ filename.txt              # update file
+~ script.sh (E)             # update executable
+- filename.txt              # remove file
+```
+
+Batch operations:
+```
+Batch: +3                   # manual batch: 3 additions
+Batch: ~2                   # manual batch: 2 updates
+Batch: -5                   # manual batch: 5 deletions
+Batch: +1 ~1 -1             # manual batch: mixed operations
+Batch cp: +3                # copy operation: 3 additions
+Batch cp: +1 ~2 -1          # copy operation: mixed
+Batch ar: +10               # archive extraction: 10 additions
+```
+
+**Symbols:**
+- **`+`** = additions
+- **`~`** = updates/modifications
+- **`-`** = deletions
+
+**Operation prefixes (batch only):**
+- **`Batch:`** = manual `fs.batch()` call
+- **`Batch cp:`** = copy/sync operation (`copy_to_repo`, `copy_from_repo`, `sync_to_repo`, `sync_from_repo`)
+- **`Batch ar:`** = archive extraction (`unzip`, `untar`, `unarchive`)
+
+**Type annotations:**
+- **`(E)`** = executable file (mode 0o100755)
+- **`(L)`** = symbolic link
+- Regular files have no annotation
+
+**Custom messages:**
+```python
+fs = fs.write("config.json", b"{}", message="Reset configuration")
+fs = fs.write("deploy.sh", script, message="feat: update deployment script")
+
+with fs.batch(message="Import dataset v2") as b:
+    b.write("data.csv", csv_data)
+    b.write("meta.json", metadata)
+```
+
 ### Batch
 
 #### `fs.batch(message=None) -> Batch`

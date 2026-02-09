@@ -16,15 +16,15 @@ if TYPE_CHECKING:
 class Batch:
     """Accumulates writes and removes, commits once on exit."""
 
-    def __init__(self, fs: FS, message: str | None = None):
+    def __init__(self, fs: FS, message: str | None = None, operation: str | None = None):
         if not fs._writable:
             raise PermissionError("Cannot batch on a read-only snapshot")
         self._fs = fs
         self._repo = fs._store._repo
         self._message = message
+        self._operation = operation
         self._writes: dict[str, bytes | tuple[bytes, int] | pygit2.Oid | tuple[pygit2.Oid, int]] = {}
         self._removes: set[str] = set()
-        self._ops: list[str] = []
         self._closed = False
         self.fs: FS | None = None
 
@@ -38,7 +38,6 @@ class Batch:
         self._removes.discard(path)
         blob_oid = self._repo.create_blob(data)
         self._writes[path] = (blob_oid, mode) if mode is not None else blob_oid
-        self._ops.append(f"Write {path}")
 
     def write_from(self, path: str | os.PathLike[str], local_path: str | os.PathLike[str], *, mode: int | None = None) -> None:
         self._check_open()
@@ -50,7 +49,6 @@ class Batch:
             mode = detected_mode
         blob_oid = self._repo.create_blob_fromdisk(local_path)
         self._writes[path] = (blob_oid, mode) if mode != GIT_FILEMODE_BLOB else blob_oid
-        self._ops.append(f"Write {path}")
 
     def write_symlink(self, path: str | os.PathLike[str], target: str) -> None:
         self._check_open()
@@ -58,7 +56,6 @@ class Batch:
         self._removes.discard(path)
         blob_oid = self._repo.create_blob(target.encode())
         self._writes[path] = (blob_oid, GIT_FILEMODE_LINK)
-        self._ops.append(f"Symlink {path} -> {target}")
 
     def remove(self, path: str | os.PathLike[str]) -> None:
         self._check_open()
@@ -77,7 +74,6 @@ class Batch:
         self._writes.pop(path, None)
         if exists_in_base:
             self._removes.add(path)
-        self._ops.append(f"Remove {path}")
 
     def open(self, path: str | os.PathLike[str], mode: str = "wb"):
         self._check_open()
@@ -99,7 +95,7 @@ class Batch:
             self._closed = True
             return False
 
-        message = self._message or "Batch: " + "; ".join(self._ops)
-        self.fs = self._fs._commit_changes(self._writes, self._removes, message)
+        # Let _commit_changes build report and generate message
+        self.fs = self._fs._commit_changes(self._writes, self._removes, self._message, self._operation)
         self._closed = True
         return False
