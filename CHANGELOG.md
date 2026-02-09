@@ -4,6 +4,20 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.25.0 (2026-02-09)
+
+- Unify `CopyPlan` and `list[CopyError]` into `CopyReport` dataclass with `add`, `update`, `delete`, `errors`, and `warnings` fields
+- All copy/sync functions now return `CopyReport | None` (`None` when nothing to report)
+- Overlap collisions reported as warnings instead of errors (CLI exits 0 for warnings-only)
+- Fix `sync_to_repo_dry_run` file-at-dest producing wrong plan path
+- Fix `copy_from_repo` delete mode using wrong source for hash comparison on overlapping destinations
+- Fix contents-mode (`"symlink_dir/"`) silently producing zero pairs for symlinked directories
+- Fix `copy_from_repo_dry_run` delete mode not deduplicating overlapping sources
+- Update `docs/api.md` for new `CopyReport` API
+- Backward-compatible aliases: `CopyPlan = CopyReport`, `SyncPlan = CopyReport`
+
+## v0.24.0 (2026-02-09)
+
 - Add `docs/` directory with API and CLI reference documentation
 - Fix stale pygit2 references in README
 
