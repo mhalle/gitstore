@@ -579,36 +579,43 @@ def destroy(ctx, force):
 @click.option("-m", "message", default=None, help="Commit message.")
 @click.option("--mode", type=click.Choice(["644", "755"]), default=None,
               help="File mode (default: 644).")
+@click.option("--follow-symlinks", is_flag=True, default=False,
+              help="Follow symlinks instead of preserving them (disk→repo only).")
+@click.option("-n", "--dry-run", "dry_run", is_flag=True, default=False,
+              help="Show what would be copied without writing.")
 @_no_create_option
 @click.pass_context
-def cp(ctx, args, branch, ref, message, mode, no_create):
-    """Copy files between disk and repo.
+def cp(ctx, args, branch, ref, message, mode, follow_symlinks, dry_run, no_create):
+    """Copy files and directories between disk and repo.
 
     The last argument is the destination; all preceding arguments are sources.
     Sources must all be the same type (all repo or all local), and the
-    destination must be the opposite type.  With multiple sources the
-    destination must be a directory.
+    destination must be the opposite type.
+
+    Directories are copied recursively with their name preserved.
+    A trailing '/' on a source means "contents of" (like rsync).
+    Glob patterns (* and ?) are expanded; they do not match leading dots.
 
     Prefix repo-side paths with ':'.
     """
+    from .copy import (
+        copy_to_repo, copy_from_repo,
+        copy_to_repo_dry_run, copy_from_repo_dry_run,
+    )
+
     if len(args) < 2:
         raise click.ClickException("cp requires at least two arguments (SRC... DEST)")
 
     raw_sources = args[:-1]
     raw_dest = args[-1]
 
-    # Parse all paths
-    parsed_sources = [_parse_repo_path(s) for s in raw_sources]
-    dest_is_repo, dest_path = _parse_repo_path(raw_dest)
-
-    # Validate: all sources must be the same type
-    src_is_repo = parsed_sources[0][0]
-    if any(p[0] != src_is_repo for p in parsed_sources):
+    # Determine direction
+    dest_is_repo = raw_dest.startswith(":")
+    src_is_repo = raw_sources[0].startswith(":")
+    if any((s.startswith(":")) != src_is_repo for s in raw_sources):
         raise click.ClickException(
             "All source paths must be the same type (all repo or all local)"
         )
-
-    # Source and dest must be opposite types
     if src_is_repo == dest_is_repo:
         if src_is_repo:
             raise click.ClickException(
@@ -618,7 +625,194 @@ def cp(ctx, args, branch, ref, message, mode, no_create):
             "Neither sources nor DEST is a repo path — prefix repo paths with ':'"
         )
 
-    # --hash cannot be used for disk→repo (writing)
+    if ref and not src_is_repo:
+        raise click.ClickException(
+            "Cannot write to a commit hash — use --branch for writes"
+        )
+
+    repo_path = _require_repo(ctx)
+    if not src_is_repo and not dry_run and not no_create:
+        store = _open_or_create_store(repo_path, branch)
+    else:
+        store = _open_store(repo_path)
+    fs = _get_fs(store, branch, ref)
+
+    filemode = (GIT_FILEMODE_BLOB_EXECUTABLE if mode == "755"
+                else GIT_FILEMODE_BLOB) if mode else None
+
+    # Detect single-plain-file case (no glob, no trailing slash, no directory).
+    # In this case, like standard `cp`, the dest is the exact path, not a
+    # parent directory.
+    single_file_src = (
+        len(raw_sources) == 1
+        and "*" not in raw_sources[0] and "?" not in raw_sources[0]
+        and not raw_sources[0].endswith("/")
+    )
+
+    if not src_is_repo:
+        # Disk → repo
+        dest_path = raw_dest[1:]  # strip leading ':'
+        if dest_path:
+            dest_path = dest_path.rstrip("/")
+            if dest_path:
+                dest_path = _normalize_repo_path(dest_path)
+
+        src_raw = raw_sources[0]
+        is_single_file = single_file_src and os.path.isfile(src_raw)
+
+        if is_single_file:
+            # Single file: dest is the exact repo path, unless dest is an
+            # existing directory — then place the file inside it.
+            local = Path(src_raw)
+            if dest_path and fs.is_dir(dest_path):
+                repo_file = _normalize_repo_path(f"{dest_path}/{local.name}")
+            elif dest_path:
+                repo_file = dest_path
+            else:
+                repo_file = _normalize_repo_path(local.name)
+            try:
+                if dry_run:
+                    click.echo(f"{local} -> :{repo_file}")
+                else:
+                    with fs.batch(message=message) as b:
+                        b.write_from(repo_file, local, mode=filemode)
+                    _status(ctx, f"Copied -> :{repo_file}")
+            except (FileNotFoundError, OSError) as exc:
+                raise click.ClickException(str(exc))
+            except StaleSnapshotError:
+                raise click.ClickException("Branch modified concurrently — retry")
+        else:
+            source_paths = list(raw_sources)
+            try:
+                if dry_run:
+                    pairs = copy_to_repo_dry_run(fs, source_paths, dest_path)
+                    for local, repo_file in pairs:
+                        click.echo(f"{local} -> :{repo_file}")
+                else:
+                    copy_to_repo(
+                        fs, source_paths, dest_path,
+                        follow_symlinks=follow_symlinks,
+                        message=message, mode=filemode,
+                    )
+                    _status(ctx, f"Copied -> :{dest_path or '/'}")
+            except (FileNotFoundError, NotADirectoryError) as exc:
+                raise click.ClickException(str(exc))
+            except StaleSnapshotError:
+                raise click.ClickException("Branch modified concurrently — retry")
+    else:
+        # Repo → disk
+        source_paths = [s[1:] for s in raw_sources]  # strip ':'
+        dest_path = raw_dest
+
+        src_raw = source_paths[0]
+        is_single_repo_file = (
+            single_file_src and src_raw
+            and not fs.is_dir(_normalize_repo_path(src_raw))
+        )
+
+        if is_single_repo_file:
+            # Single file: dest is the exact local path (or into dir if dir exists)
+            src_path = _normalize_repo_path(src_raw)
+            if not fs.exists(src_path):
+                raise click.ClickException(f"File not found in repo: {src_path}")
+            local_dest = Path(dest_path)
+            if local_dest.is_dir():
+                out = local_dest / Path(src_path).name
+            else:
+                out = local_dest
+            if dry_run:
+                click.echo(f":{src_path} -> {out}")
+            else:
+                try:
+                    out.parent.mkdir(parents=True, exist_ok=True)
+                    entry = _entry_at_path(fs._store._repo, fs._tree_oid, src_path)
+                    if entry and entry[1] == GIT_FILEMODE_LINK:
+                        target = fs.readlink(src_path)
+                        out.symlink_to(target)
+                    else:
+                        out.write_bytes(fs.read(src_path))
+                except OSError as exc:
+                    raise click.ClickException(f"Cannot write {out}: {exc}")
+                _status(ctx, f"Copied :{src_path} -> {out}")
+        else:
+            try:
+                if dry_run:
+                    pairs = copy_from_repo_dry_run(fs, source_paths, dest_path)
+                    for repo_file, local in pairs:
+                        click.echo(f":{repo_file} -> {local}")
+                else:
+                    copy_from_repo(fs, source_paths, dest_path)
+                    _status(ctx, f"Copied -> {dest_path}")
+            except (FileNotFoundError, NotADirectoryError) as exc:
+                raise click.ClickException(str(exc))
+            except OSError as exc:
+                raise click.ClickException(str(exc))
+
+
+# ---------------------------------------------------------------------------
+# cptree helpers (delegated to copy module)
+# ---------------------------------------------------------------------------
+
+def _cptree_disk_to_repo(b, local, dest_path, follow_symlinks):
+    from .copy import _cptree_disk_to_repo as _impl
+    return _impl(b, local, dest_path, follow_symlinks)
+
+
+def _cptree_repo_to_disk(fs, src_path, local_dest):
+    from .copy import _cptree_repo_to_disk as _impl
+    _impl(fs, src_path, local_dest)
+
+
+# ---------------------------------------------------------------------------
+# cptree
+# ---------------------------------------------------------------------------
+
+@main.command()
+@_repo_option
+@click.argument("args", nargs=-1, required=True)
+@click.option("--branch", "-b", default="main", help="Branch to operate on.")
+@click.option("--hash", "ref", default=None, help="Branch, tag, or commit hash to read from.")
+@click.option("-m", "message", default=None, help="Commit message.")
+@click.option("--follow-symlinks", is_flag=True, default=False,
+              help="Follow symlinks instead of preserving them (disk→repo only).")
+@_no_create_option
+@click.pass_context
+def cptree(ctx, args, branch, ref, message, follow_symlinks, no_create):
+    """Copy directory trees between disk and repo.
+
+    The last argument is the destination; all preceding arguments are sources.
+    With a single source, its contents go into the destination.
+    With multiple sources, each becomes a subdirectory of the destination
+    named by its basename.
+
+    Prefix repo-side paths with ':'.
+    Symlinks are preserved by default when copying disk→repo.
+    Use --follow-symlinks to dereference them instead.
+    """
+    if len(args) < 2:
+        raise click.ClickException("cptree requires at least two arguments (SRC... DEST)")
+
+    raw_sources = args[:-1]
+    raw_dest = args[-1]
+
+    parsed_sources = [_parse_repo_path(s) for s in raw_sources]
+    dest_is_repo, dest_path = _parse_repo_path(raw_dest)
+
+    src_is_repo = parsed_sources[0][0]
+    if any(p[0] != src_is_repo for p in parsed_sources):
+        raise click.ClickException(
+            "All source paths must be the same type (all repo or all local)"
+        )
+
+    if src_is_repo == dest_is_repo:
+        if src_is_repo:
+            raise click.ClickException(
+                "Both sources and DEST are repo paths — one side must be local"
+            )
+        raise click.ClickException(
+            "Neither sources nor DEST is a repo path — prefix repo paths with ':'"
+        )
+
     if ref and not src_is_repo:
         raise click.ClickException(
             "Cannot write to a commit hash — use --branch for writes"
@@ -633,181 +827,36 @@ def cp(ctx, args, branch, ref, message, mode, no_create):
         store = _open_store(repo_path)
     fs = _get_fs(store, branch, ref)
 
-    filemode = (GIT_FILEMODE_BLOB_EXECUTABLE if mode == "755"
-                else GIT_FILEMODE_BLOB) if mode else None
-
-    if not src_is_repo:
-        # Disk → repo
-        if multi:
-            dest_path = _normalize_repo_path(dest_path) if dest_path else ""
-        # Validate all sources before creating any blobs
-        locals_and_targets: list[tuple[Path, str]] = []
-        for _is_repo, src_path in parsed_sources:
-            local = Path(src_path)
-            if local.is_dir():
-                raise click.ClickException(
-                    f"{src_path} is a directory — use cptree for directories"
-                )
-            if not local.exists():
-                raise click.ClickException(f"Local file not found: {src_path}")
-            if dest_path:
-                if multi:
-                    repo_file = _normalize_repo_path(f"{dest_path}/{local.name}")
-                else:
-                    repo_file = _normalize_repo_path(dest_path)
-            else:
-                # Bare ":" — copy to root, keep original filename
-                repo_file = _normalize_repo_path(local.name)
-            locals_and_targets.append((local, repo_file))
-        try:
-            with fs.batch(message=message) as b:
-                for local, repo_file in locals_and_targets:
-                    b.write_from(repo_file, local, mode=filemode)
-        except StaleSnapshotError:
-            raise click.ClickException("Branch modified concurrently — retry")
-        for _local, repo_file in locals_and_targets:
-            _status(ctx, f"Copied -> :{repo_file}")
-    else:
-        # Repo → disk
-        local_dest = Path(dest_path)
-        if multi and not local_dest.is_dir():
-            try:
-                local_dest.mkdir(parents=True, exist_ok=True)
-            except OSError as exc:
-                raise click.ClickException(f"Cannot create directory {local_dest}: {exc}")
-        for _is_repo, src_path in parsed_sources:
-            src_path = _normalize_repo_path(src_path)
-
-            # Check entry type (symlink, tree, or blob)
-            entry = _entry_at_path(fs._store._repo, fs._tree_oid, src_path)
-            if entry is None:
-                raise click.ClickException(f"File not found in repo: {src_path}")
-            _oid, fm = entry
-            if fm == GIT_FILEMODE_TREE:
-                raise click.ClickException(
-                    f"{src_path} is a directory — use cptree for directories"
-                )
-
-            out = local_dest
-            if local_dest.is_dir():
-                out = local_dest / Path(src_path).name
-            try:
-                out.parent.mkdir(parents=True, exist_ok=True)
-                if fm == GIT_FILEMODE_LINK:
-                    target = fs.readlink(src_path)
-                    out.symlink_to(target)
-                else:
-                    out.write_bytes(fs.read(src_path))
-            except OSError as exc:
-                raise click.ClickException(f"Cannot write {out}: {exc}")
-            _status(ctx, f"Copied :{src_path} -> {out}")
-
-
-# ---------------------------------------------------------------------------
-# cptree
-# ---------------------------------------------------------------------------
-
-@main.command()
-@_repo_option
-@click.argument("src")
-@click.argument("dest")
-@click.option("--branch", "-b", default="main", help="Branch to operate on.")
-@click.option("--hash", "ref", default=None, help="Branch, tag, or commit hash to read from.")
-@click.option("-m", "message", default=None, help="Commit message.")
-@click.option("--follow-symlinks", is_flag=True, default=False,
-              help="Follow symlinks instead of preserving them (disk→repo only).")
-@_no_create_option
-@click.pass_context
-def cptree(ctx, src, dest, branch, ref, message, follow_symlinks, no_create):
-    """Copy a directory tree between disk and repo.
-
-    Prefix repo-side paths with ':'.
-    Symlinks are preserved by default when copying disk→repo.
-    Use --follow-symlinks to dereference them instead.
-    """
-    src_is_repo, src_path = _parse_repo_path(src)
-    dest_is_repo, dest_path = _parse_repo_path(dest)
-
-    if src_is_repo == dest_is_repo:
-        if src_is_repo:
-            raise click.ClickException(
-                "Both SRC and DEST are repo paths — one must be a local path"
-            )
-        raise click.ClickException(
-            "Neither SRC nor DEST is a repo path — prefix repo paths with ':'"
-        )
-
-    # --hash cannot be used for disk→repo (writing)
-    if ref and not src_is_repo:
-        raise click.ClickException(
-            "Cannot write to a commit hash — use --branch for writes"
-        )
-
-    repo_path = _require_repo(ctx)
-    if not src_is_repo and not no_create:
-        store = _open_or_create_store(repo_path, branch)
-    else:
-        store = _open_store(repo_path)
-    fs = _get_fs(store, branch, ref)
-
     if not src_is_repo:
         # Disk → repo
         if dest_path:
             dest_path = _normalize_repo_path(dest_path)
-        local = Path(src_path)
-        if not local.is_dir():
-            raise click.ClickException(
-                f"{src_path} is not a directory"
-            )
-        count = 0
-        seen_realpaths: set[str] = set() if follow_symlinks else set()
+
+        # Validate all sources are directories
+        locals_list: list[tuple[Path, str]] = []
+        for _is_repo, sp in parsed_sources:
+            local = Path(sp)
+            if not local.is_dir():
+                raise click.ClickException(f"{sp} is not a directory")
+            if multi:
+                target = f"{dest_path}/{local.name}" if dest_path else local.name
+            else:
+                target = dest_path or ""
+            locals_list.append((local, target))
+
+        total = 0
         try:
             with fs.batch(message=message) as b:
-                for dirpath, dirnames, filenames in os.walk(local, followlinks=follow_symlinks):
-                    if follow_symlinks:
-                        # Cycle detection: skip directories we've already visited
-                        real = os.path.realpath(dirpath)
-                        if real in seen_realpaths:
-                            dirnames.clear()
-                            continue
-                        seen_realpaths.add(real)
-                    if not follow_symlinks:
-                        # Preserve symlinked directories as symlink entries
-                        # and remove them from dirnames so os.walk doesn't descend
-                        symlinked_dirs = []
-                        for dname in dirnames:
-                            full = Path(dirpath) / dname
-                            if full.is_symlink():
-                                rel = full.relative_to(local)
-                                repo_file = f"{dest_path}/{rel}" if dest_path else str(rel)
-                                repo_file = repo_file.replace(os.sep, "/")
-                                repo_file = _normalize_repo_path(repo_file)
-                                b.write_symlink(repo_file, os.readlink(full))
-                                count += 1
-                                symlinked_dirs.append(dname)
-                        for dname in symlinked_dirs:
-                            dirnames.remove(dname)
-                    for fname in filenames:
-                        full = Path(dirpath) / fname
-                        rel = full.relative_to(local)
-                        repo_file = f"{dest_path}/{rel}" if dest_path else str(rel)
-                        repo_file = repo_file.replace(os.sep, "/")
-                        repo_file = _normalize_repo_path(repo_file)
-                        if not follow_symlinks and full.is_symlink():
-                            b.write_symlink(repo_file, os.readlink(full))
-                        else:
-                            try:
-                                b.write_from(repo_file, full)
-                            except (KeyError, OSError) as exc:
-                                raise click.ClickException(f"Cannot read {full}: {exc}")
-                        count += 1
-                if count == 0:
-                    raise click.ClickException(
-                        f"No files found in directory: {src_path}"
-                    )
+                for local, target in locals_list:
+                    count = _cptree_disk_to_repo(b, local, target, follow_symlinks)
+                    if count == 0:
+                        raise click.ClickException(
+                            f"No files found in directory: {local}"
+                        )
+                    total += count
         except StaleSnapshotError:
             raise click.ClickException("Branch modified concurrently — retry")
-        _status(ctx, f"Copied {count} file(s) -> :{dest_path or '/'}")
+        _status(ctx, f"Copied {total} file(s) -> :{dest_path or '/'}")
     else:
         # Repo → disk
         local_dest = Path(dest_path)
@@ -815,42 +864,28 @@ def cptree(ctx, src, dest, branch, ref, message, follow_symlinks, no_create):
             local_dest.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
             raise click.ClickException(f"Cannot create directory {local_dest}: {exc}")
-        if src_path:
-            src_path = _normalize_repo_path(src_path)
-        src_repo_path = src_path or None
-        try:
-            for dirpath, _dirs, files in fs.walk(src_repo_path):
-                for fname in files:
-                    if dirpath:
-                        store_path = f"{dirpath}/{fname}"
-                    else:
-                        store_path = fname
-                    # Strip the src_path prefix to get relative path
-                    if src_path and store_path.startswith(src_path + "/"):
-                        rel = store_path[len(src_path) + 1:]
-                    else:
-                        rel = store_path
-                    out = local_dest / rel
-                    try:
-                        out.parent.mkdir(parents=True, exist_ok=True)
-                        # Check if symlink
-                        entry = _entry_at_path(fs._store._repo, fs._tree_oid, store_path)
-                        if entry and entry[1] == GIT_FILEMODE_LINK:
-                            target = fs.readlink(store_path)
-                            out.symlink_to(target)
-                        else:
-                            out.write_bytes(fs.read(store_path))
-                    except OSError as exc:
-                        raise click.ClickException(f"Cannot write {out}: {exc}")
-        except FileNotFoundError:
-            raise click.ClickException(
-                f"Path not found in repo: {src_path}"
-            )
-        except NotADirectoryError:
-            raise click.ClickException(
-                f"{src_path} is not a directory in the repo"
-            )
-        _status(ctx, f"Copied :{src_path or '/'} -> {local_dest}")
+
+        for _is_repo, sp in parsed_sources:
+            src_path = _normalize_repo_path(sp) if sp else ""
+            if multi:
+                out_dir = local_dest / Path(sp).name
+            else:
+                out_dir = local_dest
+            try:
+                out_dir.mkdir(parents=True, exist_ok=True)
+            except OSError as exc:
+                raise click.ClickException(f"Cannot create directory {out_dir}: {exc}")
+            try:
+                _cptree_repo_to_disk(fs, src_path, out_dir)
+            except FileNotFoundError:
+                raise click.ClickException(
+                    f"Path not found in repo: {sp}"
+                )
+            except NotADirectoryError:
+                raise click.ClickException(
+                    f"{sp} is not a directory in the repo"
+                )
+            _status(ctx, f"Copied :{sp or '/'} -> {out_dir}")
 
 
 # ---------------------------------------------------------------------------

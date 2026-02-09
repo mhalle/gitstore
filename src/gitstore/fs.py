@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from datetime import datetime, timedelta, timezone
+from fnmatch import fnmatch as _fnmatch
 from pathlib import Path
 from typing import TYPE_CHECKING, Iterator
 
@@ -14,7 +15,9 @@ from .exceptions import StaleSnapshotError
 from .tree import (
     GIT_FILEMODE_BLOB,
     GIT_FILEMODE_LINK,
+    GIT_FILEMODE_TREE,
     GIT_OBJECT_TREE,
+    _entry_at_path,
     _is_root_path,
     _mode_from_disk,
     _normalize_path,
@@ -28,6 +31,17 @@ from .tree import (
 
 if TYPE_CHECKING:
     from .repo import GitStore
+
+
+def _glob_match(pattern: str, name: str) -> bool:
+    """Match *name* against a glob *pattern* segment.
+
+    ``*`` and ``?`` do not match a leading ``.`` unless the pattern itself
+    starts with ``.`` (Unix/rsync convention).
+    """
+    if not pattern.startswith(".") and name.startswith("."):
+        return False
+    return _fnmatch(name, pattern)
 
 
 class FS:
@@ -100,6 +114,61 @@ class FS:
 
     def exists(self, path: str | os.PathLike[str]) -> bool:
         return exists_at_path(self._store._repo, self._tree_oid, path)
+
+    def is_dir(self, path: str | os.PathLike[str]) -> bool:
+        """Return True if *path* is a directory (tree) in the repo."""
+        path = _normalize_path(path)
+        entry = _entry_at_path(self._store._repo, self._tree_oid, path)
+        if entry is None:
+            return False
+        return entry[1] == GIT_FILEMODE_TREE
+
+    def glob(self, pattern: str) -> list[str]:
+        """Expand a glob pattern against the repo tree.
+
+        Supports ``*`` and ``?`` (no ``**``).  ``*`` and ``?`` do not match
+        a leading ``.`` unless the pattern segment itself starts with ``.``.
+        Returns a sorted list of matching paths (files and directories).
+        """
+        pattern = pattern.strip("/")
+        if not pattern:
+            return []
+        segments = pattern.split("/")
+        return sorted(self._glob_walk(segments, None))
+
+    def _glob_walk(self, segments: list[str], prefix: str | None) -> list[str]:
+        """Recursive glob helper."""
+        if not segments:
+            return []
+        seg = segments[0]
+        rest = segments[1:]
+        has_wild = "*" in seg or "?" in seg
+
+        if has_wild:
+            # List entries at current level
+            try:
+                entries = self.ls(prefix)
+            except (FileNotFoundError, NotADirectoryError):
+                return []
+            results: list[str] = []
+            for name in entries:
+                if not _glob_match(seg, name):
+                    continue
+                full = f"{prefix}/{name}" if prefix else name
+                if rest:
+                    results.extend(self._glob_walk(rest, full))
+                else:
+                    results.append(full)
+            return results
+        else:
+            # Literal segment — just descend
+            full = f"{prefix}/{seg}" if prefix else seg
+            if rest:
+                return self._glob_walk(rest, full)
+            else:
+                if self.exists(full):
+                    return [full]
+                return []
 
     def readlink(self, path: str | os.PathLike[str]) -> str:
         """Read the target of a symlink."""

@@ -324,17 +324,34 @@ gitstore init --repo /path/to/repo.git
 gitstore destroy                          # fails if repo has data
 gitstore destroy -f                       # force-remove non-empty repo
 
-# Copy files in and out
+# Copy files, directories, and globs
 gitstore cp local-file.txt :remote-file.txt
 gitstore cp :remote-file.txt local-copy.txt
 gitstore cp local-file.txt :              # keep original name at root
 
-# Multiple sources (last arg is destination directory)
+# Multiple sources (last arg is destination)
 gitstore cp file1.txt file2.txt :dir
 gitstore cp :a.txt :b.txt ./local-dir
 
+# Directories are copied recursively with name preserved
+gitstore cp ./mydir :dest                 # creates :dest/mydir/...
+
+# Trailing slash = "contents of" (like rsync)
+gitstore cp ./mydir/ :dest                # creates :dest/... (no mydir prefix)
+
+# Glob patterns (* and ?) — do not match leading dots
+gitstore cp './src/*.py' :backup          # only .py files, no dotfiles
+gitstore cp ':docs/*.md' ./local-docs     # repo-side glob
+
+# Dry run — show what would be copied without writing
+gitstore cp -n ./mydir :dest
+gitstore cp --dry-run :data ./out
+
 # Set file mode
 gitstore cp script.sh :script.sh --mode 755
+
+# Follow symlinks instead of preserving them (disk→repo)
+gitstore cp --follow-symlinks ./dir :dest
 
 # Copy directory trees (symlinks preserved by default)
 gitstore cptree ./local-dir :repo-dir
@@ -411,6 +428,22 @@ gitstore restore https://github.com/user/repo.git
 gitstore restore -n https://github.com/user/repo.git
 ```
 
+### Copy behavior
+
+`cp` handles files, directories, trailing-slash, and glob patterns following rsync conventions:
+
+| Command | Result |
+|---------|--------|
+| `cp file.txt :dest` | `:dest` is the file (or `:dest/file.txt` if `:dest` is an existing directory) |
+| `cp dir :dest` | `:dest/dir/...` (directory name preserved) |
+| `cp dir/ :dest` | `:dest/...` (contents poured into dest, including dotfiles) |
+| `cp 'dir/*' :dest` | `:dest/a.txt` etc. (glob-matched children, no dotfiles) |
+| `cp 'dir/*.txt' :dest` | only matching files |
+| `cp f1 dir1 :dest` | `:dest/f1`, `:dest/dir1/...` (mixed sources) |
+| `cp ':dir/*' /out` | repo-side glob to local disk |
+
+Glob patterns (`*`, `?`) do not match files or directories whose names start with `.` (Unix convention). Use `.*` to match dotfiles explicitly. Trailing `/` on a source means "contents of" and includes dotfiles (it is not a glob).
+
 ### Backup and restore
 
 `backup` and `restore` replicate an entire gitstore repository to and from a remote URL. They are whole-repo mirror operations: every branch and tag is included, and the destination becomes an exact copy of the source.
@@ -462,7 +495,7 @@ gitstore tar archive.tar --hash abc1234...
 gitstore cp :file.txt local.txt --hash abc1234...
 ```
 
-Write commands (`cp`, `cptree`, `rm`, `unarchive`, `unzip`, `untar`) accept `-m` for custom commit messages. Use `-b` on any command to target a branch other than `main`. Read commands (`cat`, `ls`, `cp`, `cptree`, `archive`, `zip`, `tar`, `log`) accept `--hash` to read from any branch, tag, or full commit hash. `log`, `archive`, `zip`, and `tar` accept `--before` with an ISO 8601 date or datetime to filter to commits on or before that point in time. `cp` accepts `--mode 644` or `--mode 755` to set file permissions; `cptree` auto-detects executable permissions from disk. `cptree` preserves symlinks by default when copying disk→repo; pass `--follow-symlinks` to dereference them instead. When copying repo→disk, `cp` and `cptree` recreate symlink entries as symlinks on disk. Pass `-v` before the command for status messages on stderr. `archive`, `zip`, and `tar` accept `-` as FILENAME to write to stdout; `unarchive` and `untar` read from stdin when no filename is given (or with `-`). `archive` and `unarchive` auto-detect the format from the filename extension; use `--format zip` or `--format tar` to override or when piping to/from stdout/stdin. The `zip`/`unzip`/`tar`/`untar` commands remain as aliases. `backup` and `restore` operate on the entire repository (all branches and tags) and accept `-n`/`--dry-run` to preview changes without transferring data.
+Write commands (`cp`, `cptree`, `rm`, `unarchive`, `unzip`, `untar`) accept `-m` for custom commit messages. Use `-b` on any command to target a branch other than `main`. Read commands (`cat`, `ls`, `cp`, `cptree`, `archive`, `zip`, `tar`, `log`) accept `--hash` to read from any branch, tag, or full commit hash. `log`, `archive`, `zip`, and `tar` accept `--before` with an ISO 8601 date or datetime to filter to commits on or before that point in time. `cp` handles files, directories, trailing-slash "contents" mode, and glob patterns; pass `-n`/`--dry-run` to preview what would be copied without writing. `cp` accepts `--mode 644` or `--mode 755` to set file permissions and `--follow-symlinks` to dereference symlinks. `cptree` auto-detects executable permissions from disk and preserves symlinks by default; pass `--follow-symlinks` to dereference them instead. When copying repo→disk, `cp` and `cptree` recreate symlink entries as symlinks on disk. Pass `-v` before the command for status messages on stderr. `archive`, `zip`, and `tar` accept `-` as FILENAME to write to stdout; `unarchive` and `untar` read from stdin when no filename is given (or with `-`). `archive` and `unarchive` auto-detect the format from the filename extension; use `--format zip` or `--format tar` to override or when piping to/from stdout/stdin. The `zip`/`unzip`/`tar`/`untar` commands remain as aliases. `backup` and `restore` operate on the entire repository (all branches and tags) and accept `-n`/`--dry-run` to preview changes without transferring data.
 
 ## Development
 

@@ -211,18 +211,20 @@ class TestCp:
         assert result.exit_code != 0
         assert "not found" in result.output.lower()
 
-    def test_directory_error_suggests_cptree(self, runner, repo_with_files, tmp_path):
+    def test_directory_copies_recursively(self, runner, repo_with_files, tmp_path):
         dest = tmp_path / "out"
         result = runner.invoke(main, ["cp", "--repo", repo_with_files, ":data", str(dest)])
-        assert result.exit_code != 0
-        assert "cptree" in result.output.lower()
+        assert result.exit_code == 0, result.output
+        assert (dest / "data" / "data.bin").exists()
 
-    def test_local_directory_error_suggests_cptree(self, runner, initialized_repo, tmp_path):
+    def test_local_directory_copies_recursively(self, runner, initialized_repo, tmp_path):
         d = tmp_path / "somedir"
         d.mkdir()
+        (d / "f.txt").write_text("content")
         result = runner.invoke(main, ["cp", "--repo", initialized_repo, str(d), ":dest"])
-        assert result.exit_code != 0
-        assert "cptree" in result.output.lower()
+        assert result.exit_code == 0, result.output
+        result = runner.invoke(main, ["ls", "--repo", initialized_repo, ":dest/somedir"])
+        assert "f.txt" in result.output
 
     def test_multi_disk_to_repo(self, runner, initialized_repo, tmp_path):
         f1 = tmp_path / "a.txt"
@@ -292,6 +294,179 @@ class TestCp:
         assert "dev.txt" in result.output
         result = runner.invoke(main, ["ls", "--repo", initialized_repo, "-b", "main"])
         assert "dev.txt" not in result.output
+
+    def test_single_file_into_existing_repo_dir(self, runner, repo_with_files, tmp_path):
+        """cp file.txt :data — data is an existing directory, file goes inside."""
+        f = tmp_path / "new.txt"
+        f.write_text("new content")
+        result = runner.invoke(main, ["cp", "--repo", repo_with_files, str(f), ":data"])
+        assert result.exit_code == 0, result.output
+        # File placed inside :data/, not overwriting it
+        result = runner.invoke(main, ["cat", "--repo", repo_with_files, ":data/new.txt"])
+        assert result.exit_code == 0
+        assert result.output == "new content"
+        # Original directory contents still intact
+        result = runner.invoke(main, ["cat", "--repo", repo_with_files, ":data/data.bin"])
+        assert result.exit_code == 0
+
+    def test_single_repo_file_into_existing_local_dir(self, runner, repo_with_files, tmp_path):
+        """cp :hello.txt existing_dir/ — file goes inside the local dir."""
+        dest = tmp_path / "outdir"
+        dest.mkdir()
+        result = runner.invoke(main, ["cp", "--repo", repo_with_files, ":hello.txt", str(dest)])
+        assert result.exit_code == 0, result.output
+        assert (dest / "hello.txt").read_text() == "hello world\n"
+
+
+# ---------------------------------------------------------------------------
+# TestCpDirectories
+# ---------------------------------------------------------------------------
+
+class TestCpDirectories:
+    def test_disk_dir_to_repo(self, runner, initialized_repo, tmp_path):
+        d = tmp_path / "mydir"
+        d.mkdir()
+        (d / "a.txt").write_text("aaa")
+        (d / "b.txt").write_text("bbb")
+        result = runner.invoke(main, ["cp", "--repo", initialized_repo, str(d), ":dest"])
+        assert result.exit_code == 0, result.output
+        result = runner.invoke(main, ["ls", "--repo", initialized_repo, ":dest/mydir"])
+        assert "a.txt" in result.output
+        assert "b.txt" in result.output
+
+    def test_disk_dir_trailing_slash(self, runner, initialized_repo, tmp_path):
+        d = tmp_path / "mydir"
+        d.mkdir()
+        (d / "a.txt").write_text("aaa")
+        result = runner.invoke(main, ["cp", "--repo", initialized_repo, str(d) + "/", ":dest"])
+        assert result.exit_code == 0, result.output
+        # Contents mode: a.txt directly under dest, no mydir
+        result = runner.invoke(main, ["ls", "--repo", initialized_repo, ":dest"])
+        assert "a.txt" in result.output
+
+    def test_repo_dir_to_disk(self, runner, repo_with_files, tmp_path):
+        dest = tmp_path / "out"
+        dest.mkdir()
+        result = runner.invoke(main, ["cp", "--repo", repo_with_files, ":data", str(dest)])
+        assert result.exit_code == 0, result.output
+        assert (dest / "data" / "data.bin").exists()
+        assert (dest / "data" / "data.bin").read_bytes() == b"\x00\x01\x02"
+
+    def test_repo_dir_trailing_slash(self, runner, repo_with_files, tmp_path):
+        dest = tmp_path / "out"
+        dest.mkdir()
+        result = runner.invoke(main, ["cp", "--repo", repo_with_files, ":data/", str(dest)])
+        assert result.exit_code == 0, result.output
+        # Contents mode: data.bin directly in out
+        assert (dest / "data.bin").exists()
+
+    def test_mixed_file_and_dir(self, runner, initialized_repo, tmp_path):
+        f = tmp_path / "file.txt"
+        f.write_text("file")
+        d = tmp_path / "subdir"
+        d.mkdir()
+        (d / "nested.txt").write_text("nested")
+        result = runner.invoke(main, [
+            "cp", "--repo", initialized_repo, str(f), str(d), ":dest"
+        ])
+        assert result.exit_code == 0, result.output
+        result = runner.invoke(main, ["cat", "--repo", initialized_repo, ":dest/file.txt"])
+        assert result.output == "file"
+        result = runner.invoke(main, ["cat", "--repo", initialized_repo, ":dest/subdir/nested.txt"])
+        assert result.output == "nested"
+
+
+# ---------------------------------------------------------------------------
+# TestCpGlob
+# ---------------------------------------------------------------------------
+
+class TestCpGlob:
+    def test_disk_glob_to_repo(self, runner, initialized_repo, tmp_path):
+        d = tmp_path / "gdir"
+        d.mkdir()
+        (d / "a.txt").write_text("aaa")
+        (d / "b.txt").write_text("bbb")
+        (d / "c.md").write_text("ccc")
+        (d / ".hidden").write_text("hid")
+        result = runner.invoke(main, [
+            "cp", "--repo", initialized_repo, str(d / "*.txt"), ":out"
+        ])
+        assert result.exit_code == 0, result.output
+        result = runner.invoke(main, ["ls", "--repo", initialized_repo, ":out"])
+        assert "a.txt" in result.output
+        assert "b.txt" in result.output
+        assert "c.md" not in result.output
+        assert ".hidden" not in result.output
+
+    def test_repo_glob_to_disk(self, runner, repo_with_files, tmp_path):
+        # Add more files to repo
+        f1 = tmp_path / "x.txt"
+        f1.write_text("xxx")
+        f2 = tmp_path / "y.md"
+        f2.write_text("yyy")
+        runner.invoke(main, ["cp", "--repo", repo_with_files, str(f1), ":x.txt"])
+        runner.invoke(main, ["cp", "--repo", repo_with_files, str(f2), ":y.md"])
+
+        dest = tmp_path / "out"
+        dest.mkdir()
+        result = runner.invoke(main, [
+            "cp", "--repo", repo_with_files, ":*.txt", str(dest)
+        ])
+        assert result.exit_code == 0, result.output
+        assert (dest / "x.txt").exists()
+        assert (dest / "hello.txt").exists()
+        assert not (dest / "y.md").exists()
+
+    def test_glob_no_dotfiles(self, runner, initialized_repo, tmp_path):
+        d = tmp_path / "dots"
+        d.mkdir()
+        (d / ".env").write_text("secret")
+        (d / "app.txt").write_text("app")
+        result = runner.invoke(main, [
+            "cp", "--repo", initialized_repo, str(d / "*"), ":out"
+        ])
+        assert result.exit_code == 0, result.output
+        result = runner.invoke(main, ["ls", "--repo", initialized_repo, ":out"])
+        assert "app.txt" in result.output
+        assert ".env" not in result.output
+
+
+# ---------------------------------------------------------------------------
+# TestCpDryRun
+# ---------------------------------------------------------------------------
+
+class TestCpDryRun:
+    def test_dry_run_disk_to_repo(self, runner, initialized_repo, tmp_path):
+        f = tmp_path / "dr.txt"
+        f.write_text("data")
+        # Single file: dest is the exact path
+        result = runner.invoke(main, [
+            "cp", "--repo", initialized_repo, "-n", str(f), ":dest"
+        ])
+        assert result.exit_code == 0, result.output
+        assert "dr.txt" in result.output
+        assert "-> :dest" in result.output
+        # Nothing written
+        result = runner.invoke(main, ["ls", "--repo", initialized_repo])
+        assert "dr.txt" not in result.output
+
+    def test_dry_run_repo_to_disk(self, runner, repo_with_files, tmp_path):
+        dest = tmp_path / "drout"
+        result = runner.invoke(main, [
+            "cp", "--repo", repo_with_files, "-n", ":hello.txt", str(dest)
+        ])
+        assert result.exit_code == 0, result.output
+        assert "hello.txt" in result.output
+        assert not dest.exists()
+
+    def test_dry_run_dir(self, runner, repo_with_files, tmp_path):
+        dest = tmp_path / "drout"
+        result = runner.invoke(main, [
+            "cp", "--repo", repo_with_files, "--dry-run", ":data", str(dest)
+        ])
+        assert result.exit_code == 0, result.output
+        assert "data.bin" in result.output
+        assert not dest.exists()
 
 
 # ---------------------------------------------------------------------------
