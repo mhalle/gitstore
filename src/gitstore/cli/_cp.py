@@ -50,6 +50,8 @@ from ._helpers import (
 def cp(ctx, args, branch, ref, at_path, match_pattern, before, message, mode, follow_symlinks, dry_run, ignore_existing, delete, ignore_errors, no_create):
     """Copy files and directories between disk and repo.
 
+    Requires --repo or GITSTORE_REPO environment variable.
+
     The last argument is the destination; all preceding arguments are sources.
     Sources must all be the same type (all repo or all local), and the
     destination must be the opposite type.
@@ -59,6 +61,12 @@ def cp(ctx, args, branch, ref, at_path, match_pattern, before, message, mode, fo
     Glob patterns (* and ?) are expanded; they do not match leading dots.
 
     Prefix repo-side paths with ':'.
+
+    Examples:
+
+        gitstore --repo path/to/repo.git cp file.txt :
+        gitstore --repo path/to/repo.git cp :file.txt ./
+        gitstore --repo path/to/repo.git cp '*.jpg' :images/
     """
     from ..copy import (
         copy_to_repo, copy_from_repo,

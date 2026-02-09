@@ -39,14 +39,16 @@ from ._helpers import (
 def sync(ctx, args, branch, ref, at_path, match_pattern, before, message, dry_run, ignore_errors, no_create):
     """Make one path identical to another (like rsync --delete).
 
+    Requires --repo or GITSTORE_REPO environment variable.
+
     With one argument, syncs a local directory to the repo root:
 
-        gitstore sync ./dir
+        gitstore --repo path/to/repo.git sync ./dir
 
     With two arguments, direction is determined by the ':' prefix:
 
-        gitstore sync ./local :repo_path   (disk → repo)
-        gitstore sync :repo_path ./local    (repo → disk)
+        gitstore --repo path/to/repo.git sync ./local :repo_path   (disk → repo)
+        gitstore --repo path/to/repo.git sync :repo_path ./local    (repo → disk)
     """
     from ..copy import (
         sync_to_repo, sync_from_repo,
