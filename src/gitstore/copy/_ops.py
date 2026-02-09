@@ -104,8 +104,8 @@ def copy_to_repo(
     ignore_existing: bool = False,
     delete: bool = False,
     ignore_errors: bool = False,
-) -> tuple[FS, CopyReport | None]:
-    """Copy local files/dirs/globs into the repo. Returns ``(new_fs, report)``.
+) -> FS:
+    """Copy local files/dirs/globs into the repo. Returns new ``FS``.
 
     With ``delete=True``, files under *dest* that are not covered by
     *sources* are removed (rsync ``--delete`` semantics).
@@ -113,7 +113,7 @@ def copy_to_repo(
     When *ignore_errors* is ``True``, per-file errors are collected instead
     of aborting. If **all** files fail, a ``RuntimeError`` is raised.
 
-    Returns ``None`` as the report when there are no actions, errors, or warnings.
+    The operation report is available via ``fs.report``.
     """
     report = CopyReport()
 
@@ -127,7 +127,8 @@ def copy_to_repo(
         if not resolved:
             if report.errors:
                 raise RuntimeError(f"All files failed to copy: {report.errors}")
-            return fs, _finalize_report(report)
+            fs._report = _finalize_report(report)
+            return fs
     else:
         resolved = _resolve_disk_sources(sources)
 
@@ -179,7 +180,8 @@ def copy_to_repo(
                 raise RuntimeError(
                     f"All files failed to copy: {report.errors}"
                 )
-            return fs, _finalize_report(report)
+            fs._report = _finalize_report(report)
+            return fs
 
         write_pairs = []
         for rel in write_rels:
@@ -215,10 +217,10 @@ def copy_to_repo(
         # For deletes, check repo for modes
         report.delete = _make_entries_from_repo(fs, safe_deletes, dest)
 
-        # Attach the proper report to result_fs so fs.report and tuple return match
+        # Attach the proper report to result_fs
         final_report = _finalize_report(report)
         result_fs._report = final_report
-        return result_fs, final_report
+        return result_fs
     else:
         # Non-delete mode: classify written pairs as add vs update
         if ignore_existing:
@@ -229,7 +231,8 @@ def copy_to_repo(
                 raise RuntimeError(
                     f"All files failed to copy: {report.errors}"
                 )
-            return fs, _finalize_report(report)
+            fs._report = _finalize_report(report)
+            return fs
 
         # Classify before writing and build rel -> local_path mapping
         pair_map: dict[str, str] = {}
@@ -261,10 +264,10 @@ def copy_to_repo(
         report.add = _make_entries_from_disk(add_rels, pair_map, follow_symlinks)
         report.update = _make_entries_from_disk(update_rels, pair_map, follow_symlinks)
 
-        # Attach the proper report to result_fs so fs.report and tuple return match
+        # Attach the proper report to result_fs
         final_report = _finalize_report(report)
         result_fs._report = final_report
-        return result_fs, final_report
+        return result_fs
 
 
 def copy_from_repo(
@@ -596,8 +599,11 @@ def sync_to_repo(
     fs: FS, local_path: str, repo_path: str, *,
     message: str | None = None,
     ignore_errors: bool = False,
-) -> tuple[FS, CopyReport | None]:
-    """Make *repo_path* identical to *local_path*. Returns ``(new_fs, report)``."""
+) -> FS:
+    """Make *repo_path* identical to *local_path*. Returns new ``FS``.
+
+    The operation report is available via ``fs.report``.
+    """
     try:
         return copy_to_repo(
             fs, [_ensure_trailing_slash(local_path)], repo_path,
@@ -607,11 +613,12 @@ def sync_to_repo(
         # Nonexistent local path → treat as empty source (delete everything)
         new_fs, delete_rels = _sync_delete_all_in_repo(fs, repo_path, message=message)
         if not delete_rels:
-            return new_fs, None
+            new_fs._report = None
+            return new_fs
         # Convert string list to FileEntry list
         report = CopyReport(delete=_make_entries_from_repo(fs, delete_rels, repo_path))
         new_fs._report = report
-        return new_fs, report
+        return new_fs
 
 
 def _sync_delete_all_in_repo(

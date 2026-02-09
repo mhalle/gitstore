@@ -289,7 +289,7 @@ All path arguments use forward slashes. Glob patterns (`*`, `?`) do not match a 
 
 ### Disk to repo
 
-#### `copy_to_repo(fs, sources, dest, *, follow_symlinks=False, message=None, mode=None, ignore_existing=False, delete=False, ignore_errors=False) -> tuple[FS, CopyReport | None]`
+#### `copy_to_repo(fs, sources, dest, *, follow_symlinks=False, message=None, mode=None, ignore_existing=False, delete=False, ignore_errors=False) -> FS`
 
 Copy local files/directories/globs into the repo.
 
@@ -305,15 +305,15 @@ Copy local files/directories/globs into the repo.
 | `delete` | `bool` | Remove repo files not in source (rsync `--delete`). |
 | `ignore_errors` | `bool` | Collect per-file errors instead of aborting. |
 
-**Returns:** `(new_fs, report)` -- the new snapshot and a `CopyReport` (or `None` when nothing was done).
+**Returns:** New `FS` snapshot. The operation report is available via `fs.report` (a `CopyReport` or `None` when nothing was done).
 
 #### `copy_to_repo_dry_run(fs, sources, dest, *, follow_symlinks=False, ignore_existing=False, delete=False) -> CopyReport | None`
 
 Preview what `copy_to_repo` would do without writing.
 
-#### `sync_to_repo(fs, local_path, repo_path, *, message=None, ignore_errors=False) -> tuple[FS, CopyReport | None]`
+#### `sync_to_repo(fs, local_path, repo_path, *, message=None, ignore_errors=False) -> FS`
 
-Make `repo_path` identical to `local_path` (includes deletes).
+Make `repo_path` identical to `local_path` (includes deletes). Returns new `FS` snapshot with report available via `fs.report`.
 
 #### `sync_to_repo_dry_run(fs, local_path, repo_path) -> CopyReport | None`
 

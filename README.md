@@ -183,8 +183,9 @@ print(b.fs.message)  # "Batch: +2 -1"
 
 # Copy/sync operations show "Batch cp:"
 from gitstore import copy_to_repo
-fs, report = copy_to_repo(fs, ["./data/"], "backup")
+fs = copy_to_repo(fs, ["./data/"], "backup")
 print(fs.message)  # "Batch cp: +10 ~2 -1"
+print(fs.report.add)  # [FileEntry(...), ...]
 
 # Archive extraction shows "Batch ar:"
 # (when using gitstore unzip/untar/unarchive)

@@ -183,7 +183,7 @@ def cp(ctx, args, branch, ref, at_path, match_pattern, before, message, mode, fo
                             else:
                                 click.echo(f"{prefix} :{dest_path or ''}{action.path}")
                 else:
-                    _new_fs, report = copy_to_repo(
+                    _new_fs = copy_to_repo(
                         fs, source_paths, dest_path,
                         follow_symlinks=follow_symlinks,
                         message=message, mode=filemode,
@@ -191,6 +191,7 @@ def cp(ctx, args, branch, ref, at_path, match_pattern, before, message, mode, fo
                         delete=delete,
                         ignore_errors=ignore_errors,
                     )
+                    report = _new_fs.report
                     if report:
                         for w in report.warnings:
                             click.echo(f"WARNING: {w.path}: {w.error}", err=True)

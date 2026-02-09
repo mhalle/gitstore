@@ -117,10 +117,11 @@ def sync(ctx, args, branch, ref, at_path, match_pattern, before, message, dry_ru
                         else:
                             click.echo(f"{prefix} :{repo_dest or ''}{action.path}")
             else:
-                _new_fs, report = sync_to_repo(
+                _new_fs = sync_to_repo(
                     fs, local_path, repo_dest,
                     message=message, ignore_errors=ignore_errors,
                 )
+                report = _new_fs.report
                 if report:
                     for w in report.warnings:
                         click.echo(f"WARNING: {w.path}: {w.error}", err=True)
