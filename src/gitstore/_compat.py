@@ -415,13 +415,30 @@ class Repository:
         Returns ``{"create": [...], "update": [...], "delete": [...],
         "src": {ref: sha}, "dest": {ref: sha}}`` with bytes keys.
         """
-        remote_result = _ls_remote(url)
-        refs_dict = remote_result.refs if hasattr(remote_result, "refs") else remote_result
-        remote_refs = {
-            ref: sha
-            for ref, sha in refs_dict.items()
-            if ref != b"HEAD" and not ref.endswith(b"^{}")
-        }
+        import os
+        from dulwich.errors import NotGitRepository
+
+        # Auto-create remote for push if it's a local path that doesn't exist
+        is_local = not any(url.startswith(proto) for proto in ["http://", "https://", "git://", "ssh://"])
+        if is_local and direction == "push":
+            local_path = url[7:] if url.startswith("file://") else url
+            if not os.path.exists(local_path):
+                _DRepo.init_bare(local_path, mkdir=True)
+
+        try:
+            remote_result = _ls_remote(url)
+            refs_dict = remote_result.refs if hasattr(remote_result, "refs") else remote_result
+            remote_refs = {
+                ref: sha
+                for ref, sha in refs_dict.items()
+                if ref != b"HEAD" and not ref.endswith(b"^{}")
+            }
+        except NotGitRepository:
+            # Remote doesn't exist - treat as empty for push, fail for pull
+            if direction == "push":
+                remote_refs = {}
+            else:
+                raise
 
         local_refs = {
             ref: sha

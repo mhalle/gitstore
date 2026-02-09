@@ -254,3 +254,26 @@ class TestBackupForceOverwrites:
         final_refs = _get_refs(remote)
         local_refs = _get_refs(repo_with_data)
         assert final_refs == local_refs
+
+
+class TestBackupAutoCreate:
+    def test_backup_creates_nonexistent_destination(self, runner, repo_with_data, tmp_path):
+        import os
+
+        # Destination path that doesn't exist yet
+        remote = str(tmp_path / "nonexistent.git")
+        assert not os.path.exists(remote)
+
+        # Backup should auto-create the destination and succeed
+        r = runner.invoke(main, ["backup", "--repo", repo_with_data, remote])
+        assert r.exit_code == 0, r.output
+
+        # Verify destination was created
+        assert os.path.exists(remote)
+
+        # Verify refs were synced correctly
+        local_refs = _get_refs(repo_with_data)
+        remote_refs = _get_refs(remote)
+        assert local_refs == remote_refs
+        assert any("refs/heads/main" in ref for ref in remote_refs)
+        assert any("refs/tags/v1" in ref for ref in remote_refs)

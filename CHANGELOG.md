@@ -4,6 +4,12 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.26.1 (2026-02-09)
+
+- Auto-create destination repository when backing up to non-existent local path
+- Fix help text for `cp` and `sync` commands to clarify `--repo` requirement
+- Add test for backup auto-create behavior
+
 ## v0.26.0 (2026-02-09)
 
 - Extract shared `_glob_match` into `_glob.py` (deduplicate from `fs.py` and `copy.py`)
