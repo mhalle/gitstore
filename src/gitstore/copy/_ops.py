@@ -174,7 +174,7 @@ def copy_to_repo(
                     try:
                         if not follow_symlinks and local_path.is_symlink():
                             pass  # fall through to hash
-                        elif local_path.stat().st_mtime <= commit_ts:
+                        elif int(local_path.stat().st_mtime) <= commit_ts:
                             continue  # assume unchanged
                     except OSError:
                         pass  # fall through to hash on stat failure
@@ -372,7 +372,7 @@ def copy_from_repo(
                         try:
                             if local_path.is_symlink():
                                 pass  # fall through to hash
-                            elif local_path.stat().st_mtime <= commit_ts:
+                            elif int(local_path.stat().st_mtime) <= commit_ts:
                                 continue  # assume unchanged
                         except OSError:
                             pass  # fall through to hash on stat failure
@@ -526,7 +526,7 @@ def copy_to_repo_dry_run(
                 try:
                     if not follow_symlinks and local_path.is_symlink():
                         pass  # fall through to hash
-                    elif local_path.stat().st_mtime <= commit_ts:
+                    elif int(local_path.stat().st_mtime) <= commit_ts:
                         continue  # assume unchanged
                 except OSError:
                     pass  # fall through to hash on stat failure
@@ -623,7 +623,7 @@ def copy_from_repo_dry_run(
                     try:
                         if local_path.is_symlink():
                             pass  # fall through to hash
-                        elif local_path.stat().st_mtime <= commit_ts:
+                        elif int(local_path.stat().st_mtime) <= commit_ts:
                             continue  # assume unchanged
                     except OSError:
                         pass  # fall through to hash on stat failure

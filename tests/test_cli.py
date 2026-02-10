@@ -2914,8 +2914,8 @@ class TestChecksumMode:
         r = runner.invoke(main, ["sync", "--repo", initialized_repo, str(src)])
         assert r.exit_code == 0, r.output
 
-        # Rewrite the file (content changes, mtime updates)
-        time.sleep(0.05)
+        # Rewrite the file — mtime must land in a later second
+        time.sleep(1.1)
         (src / "a.txt").write_text("changed")
 
         r = runner.invoke(main, ["sync", "--repo", initialized_repo, "-n", str(src)])
@@ -2980,8 +2980,8 @@ class TestChecksumMode:
         r = runner.invoke(main, ["sync", "--repo", initialized_repo, str(src)])
         assert r.exit_code == 0, r.output
 
-        # Modify one file
-        time.sleep(0.05)
+        # Modify one file — mtime must land in a later second
+        time.sleep(1.1)
         (src / "a.txt").write_text("AAA")
 
         # Dry-run with --checksum
