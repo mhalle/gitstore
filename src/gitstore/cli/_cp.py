@@ -45,9 +45,11 @@ from ._helpers import (
               help="Delete destination files not present in source (like rsync --delete).")
 @click.option("--ignore-errors", is_flag=True, default=False,
               help="Skip files that fail and continue copying.")
+@click.option("-c", "--checksum", is_flag=True, default=False,
+              help="Compare files by checksum instead of mtime (slower, exact).")
 @_no_create_option
 @click.pass_context
-def cp(ctx, args, branch, ref, at_path, match_pattern, before, message, mode, follow_symlinks, dry_run, ignore_existing, delete, ignore_errors, no_create):
+def cp(ctx, args, branch, ref, at_path, match_pattern, before, message, mode, follow_symlinks, dry_run, ignore_existing, delete, ignore_errors, checksum, no_create):
     """Copy files and directories between disk and repo.
 
     Requires --repo or GITSTORE_REPO environment variable.
@@ -172,6 +174,7 @@ def cp(ctx, args, branch, ref, at_path, match_pattern, before, message, mode, fo
                         follow_symlinks=follow_symlinks,
                         ignore_existing=ignore_existing,
                         delete=delete,
+                        checksum=checksum,
                     )
                     if report:
                         for w in report.warnings:
@@ -190,6 +193,7 @@ def cp(ctx, args, branch, ref, at_path, match_pattern, before, message, mode, fo
                         ignore_existing=ignore_existing,
                         delete=delete,
                         ignore_errors=ignore_errors,
+                        checksum=checksum,
                     )
                     report = _new_fs.report
                     if report:
@@ -257,6 +261,7 @@ def cp(ctx, args, branch, ref, at_path, match_pattern, before, message, mode, fo
                         fs, source_paths, dest_path,
                         ignore_existing=ignore_existing,
                         delete=delete,
+                        checksum=checksum,
                     )
                     if report:
                         for w in report.warnings:
@@ -270,6 +275,7 @@ def cp(ctx, args, branch, ref, at_path, match_pattern, before, message, mode, fo
                         ignore_existing=ignore_existing,
                         delete=delete,
                         ignore_errors=ignore_errors,
+                        checksum=checksum,
                     )
                     if report:
                         for w in report.warnings:

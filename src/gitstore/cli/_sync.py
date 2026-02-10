@@ -34,9 +34,11 @@ from ._helpers import (
               help="Show what would change without writing.")
 @click.option("--ignore-errors", is_flag=True, default=False,
               help="Skip files that fail and continue.")
+@click.option("-c", "--checksum", is_flag=True, default=False,
+              help="Compare files by checksum instead of mtime (slower, exact).")
 @_no_create_option
 @click.pass_context
-def sync(ctx, args, branch, ref, at_path, match_pattern, before, message, dry_run, ignore_errors, no_create):
+def sync(ctx, args, branch, ref, at_path, match_pattern, before, message, dry_run, ignore_errors, checksum, no_create):
     """Make one path identical to another (like rsync --delete).
 
     Requires --repo or GITSTORE_REPO environment variable.
@@ -106,7 +108,8 @@ def sync(ctx, args, branch, ref, at_path, match_pattern, before, message, dry_ru
     try:
         if direction == "to_repo":
             if dry_run:
-                report = sync_to_repo_dry_run(fs, local_path, repo_dest)
+                report = sync_to_repo_dry_run(fs, local_path, repo_dest,
+                                                     checksum=checksum)
                 if report:
                     for w in report.warnings:
                         click.echo(f"WARNING: {w.path}: {w.error}", err=True)
@@ -120,6 +123,7 @@ def sync(ctx, args, branch, ref, at_path, match_pattern, before, message, dry_ru
                 _new_fs = sync_to_repo(
                     fs, local_path, repo_dest,
                     message=message, ignore_errors=ignore_errors,
+                    checksum=checksum,
                 )
                 report = _new_fs.report
                 if report:
@@ -132,7 +136,8 @@ def sync(ctx, args, branch, ref, at_path, match_pattern, before, message, dry_ru
                     ctx.exit(1)
         else:
             if dry_run:
-                report = sync_from_repo_dry_run(fs, repo_dest, local_path)
+                report = sync_from_repo_dry_run(fs, repo_dest, local_path,
+                                                       checksum=checksum)
                 if report:
                     for w in report.warnings:
                         click.echo(f"WARNING: {w.path}: {w.error}", err=True)
@@ -143,6 +148,7 @@ def sync(ctx, args, branch, ref, at_path, match_pattern, before, message, dry_ru
                 report = sync_from_repo(
                     fs, repo_dest, local_path,
                     ignore_errors=ignore_errors,
+                    checksum=checksum,
                 )
                 if report:
                     for w in report.warnings:

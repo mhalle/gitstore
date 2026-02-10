@@ -1,6 +1,8 @@
 """Tests for the gitstore CLI."""
 
 import io
+import os
+import time
 import zipfile
 
 import pytest
@@ -2880,3 +2882,150 @@ class TestSync:
         assert result.exit_code == 0, result.output
         r = runner.invoke(main, ["log", "--repo", initialized_repo])
         assert "custom sync message" in r.output
+
+
+class TestChecksumMode:
+    """Tests for the mtime-based (default) vs checksum change detection."""
+
+    def test_sync_skips_unchanged_files_default_mode(self, runner, initialized_repo, tmp_path):
+        """Default mode: sync dir to repo, touch nothing, sync again → no updates."""
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "a.txt").write_text("aaa")
+        (src / "b.txt").write_text("bbb")
+
+        # Initial sync
+        r = runner.invoke(main, ["sync", "--repo", initialized_repo, str(src)])
+        assert r.exit_code == 0, r.output
+
+        # Second sync with no changes — dry-run should show nothing
+        r = runner.invoke(main, ["sync", "--repo", initialized_repo, "-n", str(src)])
+        assert r.exit_code == 0, r.output
+        assert "~" not in r.output  # no updates
+        assert "+" not in r.output  # no adds
+        assert "-" not in r.output  # no deletes
+
+    def test_sync_detects_new_mtime(self, runner, initialized_repo, tmp_path):
+        """Rewriting a file (new mtime) is detected in default mode."""
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "a.txt").write_text("original")
+
+        r = runner.invoke(main, ["sync", "--repo", initialized_repo, str(src)])
+        assert r.exit_code == 0, r.output
+
+        # Rewrite the file (content changes, mtime updates)
+        time.sleep(0.05)
+        (src / "a.txt").write_text("changed")
+
+        r = runner.invoke(main, ["sync", "--repo", initialized_repo, "-n", str(src)])
+        assert r.exit_code == 0, r.output
+        assert "~" in r.output  # update detected
+
+    def test_cp_delete_skips_unchanged_default_mode(self, runner, initialized_repo, tmp_path):
+        """cp --delete: unchanged files are skipped in default (mtime) mode."""
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "x.txt").write_text("xxx")
+
+        r = runner.invoke(main, [
+            "cp", "--repo", initialized_repo, "--delete",
+            str(src) + "/", ":",
+        ])
+        assert r.exit_code == 0, r.output
+
+        # Dry-run again with no changes
+        r = runner.invoke(main, [
+            "cp", "--repo", initialized_repo, "--delete", "-n",
+            str(src) + "/", ":",
+        ])
+        assert r.exit_code == 0, r.output
+        assert "~" not in r.output
+
+    def test_checksum_detects_backdated_change(self, runner, initialized_repo, tmp_path):
+        """--checksum catches content change even when mtime is backdated."""
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "a.txt").write_text("original")
+
+        r = runner.invoke(main, ["sync", "--repo", initialized_repo, str(src)])
+        assert r.exit_code == 0, r.output
+
+        # Change content but backdate the mtime to before the commit
+        (src / "a.txt").write_text("sneaky change")
+        old_time = 1000000000.0  # Sep 2001
+        os.utime(src / "a.txt", (old_time, old_time))
+
+        # Default mode (mtime): misses the change
+        r = runner.invoke(main, [
+            "sync", "--repo", initialized_repo, "-n", str(src),
+        ])
+        assert r.exit_code == 0, r.output
+        assert "~" not in r.output  # mtime mode skips it
+
+        # --checksum mode: catches it
+        r = runner.invoke(main, [
+            "sync", "--repo", initialized_repo, "-n", "-c", str(src),
+        ])
+        assert r.exit_code == 0, r.output
+        assert "~" in r.output  # checksum mode catches it
+
+    def test_checksum_dry_run_matches_real_run(self, runner, initialized_repo, tmp_path):
+        """--checksum dry-run and real-run agree on what changes."""
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "a.txt").write_text("aaa")
+        (src / "b.txt").write_text("bbb")
+
+        r = runner.invoke(main, ["sync", "--repo", initialized_repo, str(src)])
+        assert r.exit_code == 0, r.output
+
+        # Modify one file
+        time.sleep(0.05)
+        (src / "a.txt").write_text("AAA")
+
+        # Dry-run with --checksum
+        r = runner.invoke(main, [
+            "sync", "--repo", initialized_repo, "-n", "-c", str(src),
+        ])
+        assert r.exit_code == 0, r.output
+        assert ":a.txt" in r.output
+        assert "b.txt" not in r.output
+
+        # Real run with --checksum
+        r = runner.invoke(main, [
+            "sync", "--repo", initialized_repo, "-c", str(src),
+        ])
+        assert r.exit_code == 0, r.output
+
+        # Verify: now a dry-run shows no changes
+        r = runner.invoke(main, [
+            "sync", "--repo", initialized_repo, "-n", "-c", str(src),
+        ])
+        assert r.exit_code == 0, r.output
+        assert "~" not in r.output
+        assert "+" not in r.output
+
+    def test_default_mode_skips_old_mtime_file(self, runner, initialized_repo, tmp_path):
+        """Document the tradeoff: a file with old mtime is skipped in default mode."""
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "a.txt").write_text("original")
+
+        r = runner.invoke(main, ["sync", "--repo", initialized_repo, str(src)])
+        assert r.exit_code == 0, r.output
+
+        # Write new content but backdate mtime
+        (src / "a.txt").write_text("different content")
+        old_time = 946684800.0  # Jan 1 2000
+        os.utime(src / "a.txt", (old_time, old_time))
+
+        # Default mode skips it (file appears unchanged)
+        r = runner.invoke(main, [
+            "sync", "--repo", initialized_repo, str(src),
+        ])
+        assert r.exit_code == 0, r.output
+
+        # Verify the repo still has the original content
+        r = runner.invoke(main, ["cat", "--repo", initialized_repo, "a.txt"])
+        assert r.output == "original"

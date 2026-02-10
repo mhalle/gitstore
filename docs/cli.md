@@ -82,6 +82,7 @@ gitstore cp --ref v1.0 :data ./local          # from tag/branch/hash
 | `--ignore-existing` | Skip existing destination files. |
 | `--delete` | Delete dest files not in source (rsync `--delete`). |
 | `--ignore-errors` | Skip failed files and continue. |
+| `-c`, `--checksum` | Compare files by checksum instead of mtime (slower, exact). |
 | `--no-create` | Don't auto-create the repo. |
 
 #### Copy behavior
@@ -123,6 +124,7 @@ gitstore sync :data ./local --ref v1.0        # from tag
 | `-m`, `--message` | Commit message (supports [placeholders](#message-placeholders)). |
 | `-n`, `--dry-run` | Preview without writing. |
 | `--ignore-errors` | Skip failed files. |
+| `-c`, `--checksum` | Compare files by checksum instead of mtime (slower, exact). |
 | `--no-create` | Don't auto-create the repo. |
 
 ### ls

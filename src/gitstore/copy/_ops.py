@@ -104,6 +104,7 @@ def copy_to_repo(
     ignore_existing: bool = False,
     delete: bool = False,
     ignore_errors: bool = False,
+    checksum: bool = True,
 ) -> FS:
     """Copy local files/dirs/globs into the repo. Returns new ``FS``.
 
@@ -160,11 +161,25 @@ def copy_to_repo(
         delete_rels = sorted(repo_rels - local_rels)
         both = sorted(local_rels & repo_rels)
 
+        if not checksum:
+            commit_ts = fs._store._repo[fs._commit_oid].commit_time
+
         update_rels: list[str] = []
         for rel in both:
             try:
                 repo_oid, repo_mode = repo_files[rel]
-                if _local_file_oid_abs(Path(pair_map[rel]), follow_symlinks=follow_symlinks) != repo_oid:
+                local_path = Path(pair_map[rel])
+
+                if not checksum:
+                    try:
+                        if not follow_symlinks and local_path.is_symlink():
+                            pass  # fall through to hash
+                        elif local_path.stat().st_mtime < commit_ts:
+                            continue  # assume unchanged
+                    except OSError:
+                        pass  # fall through to hash on stat failure
+
+                if _local_file_oid_abs(local_path, follow_symlinks=follow_symlinks) != repo_oid:
                     update_rels.append(rel)
                 elif repo_mode != GIT_FILEMODE_LINK and _mode_from_disk(pair_map[rel]) != repo_mode:
                     update_rels.append(rel)
@@ -281,6 +296,7 @@ def copy_from_repo(
     ignore_existing: bool = False,
     delete: bool = False,
     ignore_errors: bool = False,
+    checksum: bool = True,
 ) -> CopyReport | None:
     """Copy repo files/dirs/globs to local disk. Returns a ``CopyReport`` or ``None``.
 
@@ -342,11 +358,25 @@ def copy_from_repo(
         delete_rels = sorted(local_paths - source_rels)
         both = sorted(source_rels & local_paths)
 
+        if not checksum:
+            commit_ts = fs._store._repo[fs._commit_oid].commit_time
+
         update_rels: list[str] = []
         for rel in both:
             try:
                 if rel in repo_files:
                     repo_oid, repo_mode = repo_files[rel]
+                    local_path = base / rel
+
+                    if not checksum:
+                        try:
+                            if local_path.is_symlink():
+                                pass  # fall through to hash
+                            elif local_path.stat().st_mtime < commit_ts:
+                                continue  # assume unchanged
+                        except OSError:
+                            pass  # fall through to hash on stat failure
+
                     if _local_file_oid(base, rel) != repo_oid:
                         update_rels.append(rel)
                     elif repo_mode != GIT_FILEMODE_LINK and _mode_from_disk(str(base / rel)) != repo_mode:
@@ -452,6 +482,7 @@ def copy_to_repo_dry_run(
     follow_symlinks: bool = False,
     ignore_existing: bool = False,
     delete: bool = False,
+    checksum: bool = True,
 ) -> CopyReport | None:
     """Compute what copy_to_repo would do. Returns a ``CopyReport`` or ``None``."""
     resolved = _resolve_disk_sources(sources)
@@ -481,10 +512,24 @@ def copy_to_repo_dry_run(
         delete_list = sorted(repo_rels - local_rels)
         both = sorted(local_rels & repo_rels)
 
+        if not checksum:
+            commit_ts = fs._store._repo[fs._commit_oid].commit_time
+
         update: list[str] = []
         for rel in both:
             repo_oid, repo_mode = repo_files[rel]
-            if _local_file_oid_abs(Path(pair_map[rel]), follow_symlinks=follow_symlinks) != repo_oid:
+            local_path = Path(pair_map[rel])
+
+            if not checksum:
+                try:
+                    if not follow_symlinks and local_path.is_symlink():
+                        pass  # fall through to hash
+                    elif local_path.stat().st_mtime < commit_ts:
+                        continue  # assume unchanged
+                except OSError:
+                    pass  # fall through to hash on stat failure
+
+            if _local_file_oid_abs(local_path, follow_symlinks=follow_symlinks) != repo_oid:
                 update.append(rel)
             elif repo_mode != GIT_FILEMODE_LINK and _mode_from_disk(pair_map[rel]) != repo_mode:
                 update.append(rel)
@@ -529,6 +574,7 @@ def copy_from_repo_dry_run(
     *,
     ignore_existing: bool = False,
     delete: bool = False,
+    checksum: bool = True,
 ) -> CopyReport | None:
     """Compute what copy_from_repo would do. Returns a ``CopyReport`` or ``None``."""
     resolved = _resolve_repo_sources(fs, sources)
@@ -562,10 +608,24 @@ def copy_from_repo_dry_run(
         delete_list = sorted(local_paths - source_rels)
         both = sorted(source_rels & local_paths)
 
+        if not checksum:
+            commit_ts = fs._store._repo[fs._commit_oid].commit_time
+
         update: list[str] = []
         for rel in both:
             if rel in repo_files:
                 repo_oid, repo_mode = repo_files[rel]
+                local_path = base / rel
+
+                if not checksum:
+                    try:
+                        if local_path.is_symlink():
+                            pass  # fall through to hash
+                        elif local_path.stat().st_mtime < commit_ts:
+                            continue  # assume unchanged
+                    except OSError:
+                        pass  # fall through to hash on stat failure
+
                 if _local_file_oid(base, rel) != repo_oid:
                     update.append(rel)
                 elif repo_mode != GIT_FILEMODE_LINK and _mode_from_disk(str(base / rel)) != repo_mode:
@@ -615,6 +675,7 @@ def sync_to_repo(
     fs: FS, local_path: str, repo_path: str, *,
     message: str | None = None,
     ignore_errors: bool = False,
+    checksum: bool = True,
 ) -> FS:
     """Make *repo_path* identical to *local_path*. Returns new ``FS``.
 
@@ -624,6 +685,7 @@ def sync_to_repo(
         return copy_to_repo(
             fs, [_ensure_trailing_slash(local_path)], repo_path,
             message=message, delete=True, ignore_errors=ignore_errors,
+            checksum=checksum,
         )
     except (FileNotFoundError, NotADirectoryError):
         # Nonexistent local path → treat as empty source (delete everything)
@@ -667,12 +729,13 @@ def _sync_delete_all_in_repo(
 def sync_from_repo(
     fs: FS, repo_path: str, local_path: str, *,
     ignore_errors: bool = False,
+    checksum: bool = True,
 ) -> CopyReport | None:
     """Make *local_path* identical to *repo_path*. Returns a ``CopyReport`` or ``None``."""
     try:
         sources = [_ensure_trailing_slash(repo_path)] if repo_path else [""]
         return copy_from_repo(fs, sources, local_path, delete=True,
-                              ignore_errors=ignore_errors)
+                              ignore_errors=ignore_errors, checksum=checksum)
     except (FileNotFoundError, NotADirectoryError):
         # Nonexistent repo path → treat as empty source (delete everything local)
         delete_rels = _sync_delete_all_local(local_path)
@@ -699,12 +762,14 @@ def _sync_delete_all_local(local_path: str) -> list[str]:
 
 
 def sync_to_repo_dry_run(
-    fs: FS, local_path: str, repo_path: str,
+    fs: FS, local_path: str, repo_path: str, *,
+    checksum: bool = True,
 ) -> CopyReport | None:
     """Compute what ``sync_to_repo`` would do without writing."""
     try:
         return copy_to_repo_dry_run(
             fs, [_ensure_trailing_slash(local_path)], repo_path, delete=True,
+            checksum=checksum,
         )
     except (FileNotFoundError, NotADirectoryError):
         # Nonexistent local path → everything in repo is a delete
@@ -720,12 +785,14 @@ def sync_to_repo_dry_run(
 
 
 def sync_from_repo_dry_run(
-    fs: FS, repo_path: str, local_path: str,
+    fs: FS, repo_path: str, local_path: str, *,
+    checksum: bool = True,
 ) -> CopyReport | None:
     """Compute what ``sync_from_repo`` would do without writing."""
     try:
         sources = [_ensure_trailing_slash(repo_path)] if repo_path else [""]
-        return copy_from_repo_dry_run(fs, sources, local_path, delete=True)
+        return copy_from_repo_dry_run(fs, sources, local_path, delete=True,
+                                      checksum=checksum)
     except (FileNotFoundError, NotADirectoryError):
         # Nonexistent repo path → everything local is a delete
         local_paths = sorted(_walk_local_paths(local_path))
