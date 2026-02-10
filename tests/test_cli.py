@@ -1069,6 +1069,43 @@ class TestRm:
 
 
 # ---------------------------------------------------------------------------
+# TestWrite
+# ---------------------------------------------------------------------------
+
+class TestWrite:
+    def test_write_from_stdin(self, runner, initialized_repo):
+        result = runner.invoke(main, ["write", "--repo", initialized_repo, "file.txt"], input=b"hello world\n")
+        assert result.exit_code == 0, result.output
+
+        result = runner.invoke(main, ["cat", "--repo", initialized_repo, "file.txt"])
+        assert result.exit_code == 0
+        assert result.output == "hello world\n"
+
+    def test_write_overwrites_existing(self, runner, repo_with_files):
+        result = runner.invoke(main, ["write", "--repo", repo_with_files, "hello.txt"], input=b"new content\n")
+        assert result.exit_code == 0, result.output
+
+        result = runner.invoke(main, ["cat", "--repo", repo_with_files, "hello.txt"])
+        assert result.exit_code == 0
+        assert result.output == "new content\n"
+
+    def test_write_custom_message(self, runner, initialized_repo):
+        result = runner.invoke(main, ["write", "--repo", initialized_repo, "file.txt", "-m", "my msg"], input=b"data")
+        assert result.exit_code == 0, result.output
+
+        result = runner.invoke(main, ["log", "--repo", initialized_repo])
+        assert "my msg" in result.output
+
+    def test_write_colon_prefix_optional(self, runner, initialized_repo):
+        result = runner.invoke(main, ["write", "--repo", initialized_repo, ":file.txt"], input=b"abc")
+        assert result.exit_code == 0, result.output
+
+        result = runner.invoke(main, ["cat", "--repo", initialized_repo, "file.txt"])
+        assert result.exit_code == 0
+        assert result.output == "abc"
+
+
+# ---------------------------------------------------------------------------
 # TestLog
 # ---------------------------------------------------------------------------
 

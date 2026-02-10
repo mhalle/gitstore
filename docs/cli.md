@@ -178,6 +178,22 @@ gitstore rm old-file.txt -m "Clean up"
 | `-b`, `--branch` | Branch (default: `main`). |
 | `-m`, `--message` | Commit message. |
 
+### write
+
+Write stdin to a file in the repo.
+
+```bash
+echo "hello" | gitstore write file.txt
+cat data.json | gitstore write :config.json
+cat image.png | gitstore write :assets/logo.png -m "Add logo"
+```
+
+| Option | Description |
+|--------|-------------|
+| `-b`, `--branch` | Branch (default: `main`). |
+| `-m`, `--message` | Commit message. |
+| `--no-create` | Don't auto-create the repo. |
+
 ---
 
 ## History
@@ -355,7 +371,7 @@ gitstore restore -n https://github.com/user/repo.git  # dry run
 
 ### The `:` prefix
 
-For `cp` and `sync`, prefix repo-side paths with `:` to distinguish them from local paths. For other commands (`ls`, `cat`, `rm`) the `:` is optional.
+For `cp` and `sync`, prefix repo-side paths with `:` to distinguish them from local paths. For other commands (`ls`, `cat`, `rm`, `write`) the `:` is optional.
 
 ### Snapshot filters
 

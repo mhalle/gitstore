@@ -1,4 +1,4 @@
-"""Basic commands: init, destroy, ls, cat, rm, log."""
+"""Basic commands: init, destroy, ls, cat, rm, write, log."""
 
 from __future__ import annotations
 
@@ -19,12 +19,14 @@ from ._helpers import (
     _strip_colon,
     _normalize_repo_path,
     _open_store,
+    _open_or_create_store,
     _get_branch_fs,
     _get_fs,
     _normalize_at_path,
     _parse_before,
     _resolve_snapshot,
     _log_entry_dict,
+    _no_create_option,
 )
 
 
@@ -229,6 +231,38 @@ def rm(ctx, path, branch, message):
             "Branch modified concurrently — retry"
         )
     _status(ctx, f"Removed :{repo_path}")
+
+
+# ---------------------------------------------------------------------------
+# write
+# ---------------------------------------------------------------------------
+
+@main.command()
+@_repo_option
+@click.argument("path")
+@click.option("--branch", "-b", default="main", help="Branch to write to.")
+@click.option("-m", "--message", default=None, help="Commit message.")
+@_no_create_option
+@click.pass_context
+def write(ctx, path, branch, message, no_create):
+    """Write stdin to a file in the repo."""
+    repo_path = _require_repo(ctx)
+    if no_create:
+        store = _open_store(repo_path)
+    else:
+        store = _open_or_create_store(repo_path, branch=branch)
+    fs = _get_branch_fs(store, branch)
+
+    repo_path_norm = _normalize_repo_path(_strip_colon(path))
+    data = sys.stdin.buffer.read()
+
+    try:
+        fs.write(repo_path_norm, data, message=message)
+    except StaleSnapshotError:
+        raise click.ClickException(
+            "Branch modified concurrently — retry"
+        )
+    _status(ctx, f"Wrote :{repo_path_norm}")
 
 
 # ---------------------------------------------------------------------------
