@@ -1429,6 +1429,105 @@ class TestTag:
 
 
 # ---------------------------------------------------------------------------
+# TestTagOption (--tag / --force-tag on write commands)
+# ---------------------------------------------------------------------------
+
+class TestTagOption:
+    def test_write_tag(self, runner, initialized_repo):
+        result = runner.invoke(
+            main, ["write", "--repo", initialized_repo, ":hello.txt", "--tag", "v1"],
+            input=b"hello",
+        )
+        assert result.exit_code == 0, result.output
+        result = runner.invoke(main, ["tag", "--repo", initialized_repo, "list"])
+        assert "v1" in result.output
+
+    def test_rm_tag(self, runner, repo_with_files):
+        result = runner.invoke(
+            main, ["rm", "--repo", repo_with_files, ":hello.txt", "--tag", "after-rm"],
+        )
+        assert result.exit_code == 0, result.output
+        result = runner.invoke(main, ["tag", "--repo", repo_with_files, "list"])
+        assert "after-rm" in result.output
+
+    def test_cp_tag(self, runner, initialized_repo, tmp_path):
+        f = tmp_path / "file.txt"
+        f.write_text("data")
+        result = runner.invoke(
+            main, ["cp", "--repo", initialized_repo, str(f), ":", "--tag", "cp-v1"],
+        )
+        assert result.exit_code == 0, result.output
+        result = runner.invoke(main, ["tag", "--repo", initialized_repo, "list"])
+        assert "cp-v1" in result.output
+
+    def test_unzip_tag(self, runner, initialized_repo, tmp_path):
+        zpath = tmp_path / "test.zip"
+        with zipfile.ZipFile(str(zpath), "w") as zf:
+            zf.writestr("a.txt", "aaa")
+        result = runner.invoke(
+            main, ["unzip", "--repo", initialized_repo, str(zpath), "--tag", "zip-v1"],
+        )
+        assert result.exit_code == 0, result.output
+        result = runner.invoke(main, ["tag", "--repo", initialized_repo, "list"])
+        assert "zip-v1" in result.output
+
+    def test_duplicate_tag_error(self, runner, initialized_repo):
+        runner.invoke(
+            main, ["write", "--repo", initialized_repo, ":a.txt", "--tag", "dup"],
+            input=b"one",
+        )
+        result = runner.invoke(
+            main, ["write", "--repo", initialized_repo, ":b.txt", "--tag", "dup"],
+            input=b"two",
+        )
+        assert result.exit_code != 0
+        assert "already exists" in result.output.lower()
+
+    def test_force_tag_overwrites(self, runner, initialized_repo):
+        runner.invoke(
+            main, ["write", "--repo", initialized_repo, ":a.txt", "--tag", "rel"],
+            input=b"one",
+        )
+        result = runner.invoke(
+            main, ["write", "--repo", initialized_repo, ":b.txt", "--tag", "rel", "--force-tag"],
+            input=b"two",
+        )
+        assert result.exit_code == 0, result.output
+        # Tag should point at the second commit
+        from gitstore import GitStore
+        store = GitStore.open(initialized_repo, create=False)
+        fs = store.tags["rel"]
+        assert fs.read("b.txt") == b"two"
+
+    def test_sync_tag(self, runner, initialized_repo, tmp_path):
+        d = tmp_path / "syncdir"
+        d.mkdir()
+        (d / "x.txt").write_text("x")
+        result = runner.invoke(
+            main, ["sync", "--repo", initialized_repo, str(d), ":", "--tag", "sync-v1"],
+        )
+        assert result.exit_code == 0, result.output
+        result = runner.invoke(main, ["tag", "--repo", initialized_repo, "list"])
+        assert "sync-v1" in result.output
+
+    def test_cp_tag_rejected_repo_to_disk(self, runner, repo_with_files, tmp_path):
+        result = runner.invoke(
+            main, ["cp", "--repo", repo_with_files, ":hello.txt", str(tmp_path / "out.txt"), "--tag", "nope"],
+        )
+        assert result.exit_code != 0
+        assert "only applies when writing to repo" in result.output.lower()
+
+    def test_sync_tag_rejected_repo_to_disk(self, runner, repo_with_files, tmp_path):
+        dest = tmp_path / "out"
+        dest.mkdir()
+        result = runner.invoke(
+            main, ["sync", "--repo", repo_with_files, ":", str(dest), "--tag", "nope"],
+        )
+        assert result.exit_code != 0
+        assert "only applies when writing to repo" in result.output.lower()
+
+
+# ---------------------------------------------------------------------------
 # TestErrorPaths
 # ---------------------------------------------------------------------------
 

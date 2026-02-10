@@ -27,6 +27,8 @@ from ._helpers import (
     _resolve_snapshot,
     _log_entry_dict,
     _no_create_option,
+    _tag_option,
+    _apply_tag,
 )
 
 
@@ -212,8 +214,9 @@ def cat(ctx, path, branch, ref, at_path, match_pattern, before):
 @click.argument("path")
 @click.option("--branch", "-b", default="main", help="Branch to remove from.")
 @click.option("-m", "--message", default=None, help="Commit message. Use {default} to include auto-generated message.")
+@_tag_option
 @click.pass_context
-def rm(ctx, path, branch, message):
+def rm(ctx, path, branch, message, tag, force_tag):
     """Remove a file from the repo."""
     store = _open_store(_require_repo(ctx))
     fs = _get_branch_fs(store, branch)
@@ -221,7 +224,7 @@ def rm(ctx, path, branch, message):
     repo_path = _normalize_repo_path(_strip_colon(path))
 
     try:
-        fs.remove(repo_path, message=message)
+        new_fs = fs.remove(repo_path, message=message)
     except FileNotFoundError:
         raise click.ClickException(f"File not found: {repo_path}")
     except IsADirectoryError:
@@ -230,6 +233,8 @@ def rm(ctx, path, branch, message):
         raise click.ClickException(
             "Branch modified concurrently — retry"
         )
+    if tag:
+        _apply_tag(store, new_fs, tag, force_tag)
     _status(ctx, f"Removed :{repo_path}")
 
 
@@ -243,8 +248,9 @@ def rm(ctx, path, branch, message):
 @click.option("--branch", "-b", default="main", help="Branch to write to.")
 @click.option("-m", "--message", default=None, help="Commit message.")
 @_no_create_option
+@_tag_option
 @click.pass_context
-def write(ctx, path, branch, message, no_create):
+def write(ctx, path, branch, message, no_create, tag, force_tag):
     """Write stdin to a file in the repo."""
     repo_path = _require_repo(ctx)
     if no_create:
@@ -257,11 +263,13 @@ def write(ctx, path, branch, message, no_create):
     data = sys.stdin.buffer.read()
 
     try:
-        fs.write(repo_path_norm, data, message=message)
+        new_fs = fs.write(repo_path_norm, data, message=message)
     except StaleSnapshotError:
         raise click.ClickException(
             "Branch modified concurrently — retry"
         )
+    if tag:
+        _apply_tag(store, new_fs, tag, force_tag)
     _status(ctx, f"Wrote :{repo_path_norm}")
 
 

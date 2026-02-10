@@ -18,6 +18,8 @@ from ._helpers import (
     _get_fs,
     _parse_before,
     _resolve_snapshot,
+    _tag_option,
+    _apply_tag,
 )
 
 
@@ -37,8 +39,9 @@ from ._helpers import (
 @click.option("-c", "--checksum", is_flag=True, default=False,
               help="Compare files by checksum instead of mtime (slower, exact).")
 @_no_create_option
+@_tag_option
 @click.pass_context
-def sync(ctx, args, branch, ref, at_path, match_pattern, before, message, dry_run, ignore_errors, checksum, no_create):
+def sync(ctx, args, branch, ref, at_path, match_pattern, before, message, dry_run, ignore_errors, checksum, no_create, tag, force_tag):
     """Make one path identical to another (like rsync --delete).
 
     Requires --repo or GITSTORE_REPO environment variable.
@@ -96,6 +99,10 @@ def sync(ctx, args, branch, ref, at_path, match_pattern, before, message, dry_ru
         raise click.ClickException(
             "--ref/--path/--match/--before only apply when reading from repo"
         )
+    if tag and direction == "from_repo":
+        raise click.ClickException(
+            "--tag only applies when writing to repo (disk → repo)"
+        )
 
     repo_path = _require_repo(ctx)
     if direction == "to_repo" and not dry_run and not no_create:
@@ -131,6 +138,8 @@ def sync(ctx, args, branch, ref, at_path, match_pattern, before, message, dry_ru
                         click.echo(f"WARNING: {w.path}: {w.error}", err=True)
                     for e in report.errors:
                         click.echo(f"ERROR: {e.path}: {e.error}", err=True)
+                if tag:
+                    _apply_tag(store, _new_fs, tag, force_tag)
                 _status(ctx, f"Synced -> :{repo_dest or '/'}")
                 if report and report.errors:
                     ctx.exit(1)

@@ -24,6 +24,8 @@ from ._helpers import (
     _parse_before,
     _resolve_snapshot,
     _detect_archive_format,
+    _tag_option,
+    _apply_tag,
 )
 
 
@@ -121,6 +123,7 @@ def _do_import(ctx, store, branch: str, filename: str, message: str | None, fmt:
     """Import an archive into a branch.
 
     *fmt* must be ``"zip"`` or ``"tar"``.  *filename* may be ``"-"`` for stdin.
+    Returns the new FS after commit.
     """
     fs = _get_branch_fs(store, branch)
 
@@ -161,6 +164,7 @@ def _do_import(ctx, store, branch: str, filename: str, message: str | None, fmt:
         if skipped:
             msg += f" ({skipped} hard link(s) skipped)"
         _status(ctx, msg)
+        return b.fs
     else:
         import tarfile
 
@@ -226,6 +230,7 @@ def _do_import(ctx, store, branch: str, filename: str, message: str | None, fmt:
         if skipped:
             msg += f" ({skipped} hard link(s) skipped)"
         _status(ctx, msg)
+        return b.fs
 
 
 # ---------------------------------------------------------------------------
@@ -264,15 +269,18 @@ def zip_cmd(ctx, filename, branch, ref, at_path, deprecated_at, match_pattern, b
 @click.option("--branch", "-b", default="main", help="Branch to import into.")
 @click.option("-m", "--message", default=None, help="Commit message. Use {default} to include auto-generated message.")
 @_no_create_option
+@_tag_option
 @click.pass_context
-def unzip_cmd(ctx, filename, branch, message, no_create):
+def unzip_cmd(ctx, filename, branch, message, no_create, tag, force_tag):
     """Import a zip file into the repo.
 
     FILENAME is the path to the zip file on disk.
     """
     repo_path = _require_repo(ctx)
     store = _open_store(repo_path) if no_create else _open_or_create_store(repo_path, branch)
-    _do_import(ctx, store, branch, filename, message, "zip")
+    new_fs = _do_import(ctx, store, branch, filename, message, "zip")
+    if tag:
+        _apply_tag(store, new_fs, tag, force_tag)
 
 
 # ---------------------------------------------------------------------------
@@ -312,8 +320,9 @@ def tar_cmd(ctx, filename, branch, ref, at_path, deprecated_at, match_pattern, b
 @click.option("--branch", "-b", default="main", help="Branch to import into.")
 @click.option("-m", "--message", default=None, help="Commit message. Use {default} to include auto-generated message.")
 @_no_create_option
+@_tag_option
 @click.pass_context
-def untar_cmd(ctx, filename, branch, message, no_create):
+def untar_cmd(ctx, filename, branch, message, no_create, tag, force_tag):
     """Import a tar archive into the repo.
 
     FILENAME is the path to the tar file on disk.  Use '-' to read from stdin
@@ -321,7 +330,9 @@ def untar_cmd(ctx, filename, branch, message, no_create):
     """
     repo_path = _require_repo(ctx)
     store = _open_store(repo_path) if no_create else _open_or_create_store(repo_path, branch)
-    _do_import(ctx, store, branch, filename, message, "tar")
+    new_fs = _do_import(ctx, store, branch, filename, message, "tar")
+    if tag:
+        _apply_tag(store, new_fs, tag, force_tag)
 
 
 # ---------------------------------------------------------------------------
@@ -363,8 +374,9 @@ def archive_cmd(ctx, filename, fmt, branch, ref, at_path, match_pattern, before)
 @click.option("--branch", "-b", default="main", help="Branch to import into.")
 @click.option("-m", "--message", default=None, help="Commit message. Use {default} to include auto-generated message.")
 @_no_create_option
+@_tag_option
 @click.pass_context
-def unarchive_cmd(ctx, filename, fmt, branch, message, no_create):
+def unarchive_cmd(ctx, filename, fmt, branch, message, no_create, tag, force_tag):
     """Import an archive file into the repo.
 
     Format is auto-detected from FILENAME extension.
@@ -380,4 +392,6 @@ def unarchive_cmd(ctx, filename, fmt, branch, message, no_create):
             fmt = _detect_archive_format(filename)
     repo_path = _require_repo(ctx)
     store = _open_store(repo_path) if no_create else _open_or_create_store(repo_path, branch)
-    _do_import(ctx, store, branch, filename, message, fmt)
+    new_fs = _do_import(ctx, store, branch, filename, message, fmt)
+    if tag:
+        _apply_tag(store, new_fs, tag, force_tag)

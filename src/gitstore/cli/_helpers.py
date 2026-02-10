@@ -117,6 +117,25 @@ def _no_create_option(f):
     )(f)
 
 
+def _tag_option(f):
+    """Shared --tag / --force-tag options for write commands."""
+    f = click.option("--force-tag", is_flag=True, default=False,
+                     help="Overwrite tag if it already exists.")(f)
+    f = click.option("--tag", default=None,
+                     help="Create a tag at the resulting commit.")(f)
+    return f
+
+
+def _apply_tag(store: GitStore, new_fs, tag: str, force_tag: bool):
+    """Create a tag pointing at *new_fs*, with optional force-overwrite."""
+    if force_tag and tag in store.tags:
+        del store.tags[tag]
+    try:
+        store.tags[tag] = new_fs
+    except KeyError:
+        raise click.ClickException(f"Tag already exists: {tag} (use --force-tag to overwrite)")
+
+
 def _get_branch_fs(store: GitStore, branch: str):
     try:
         return store.branches[branch]

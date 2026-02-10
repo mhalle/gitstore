@@ -84,6 +84,8 @@ gitstore cp --ref v1.0 :data ./local          # from tag/branch/hash
 | `--ignore-errors` | Skip failed files and continue. |
 | `-c`, `--checksum` | Compare files by checksum instead of mtime (slower, exact). |
 | `--no-create` | Don't auto-create the repo. |
+| `--tag` | Create a tag at the resulting commit (disk→repo only). |
+| `--force-tag` | Overwrite tag if it already exists. |
 
 #### Copy behavior
 
@@ -126,6 +128,8 @@ gitstore sync :data ./local --ref v1.0        # from tag
 | `--ignore-errors` | Skip failed files. |
 | `-c`, `--checksum` | Compare files by checksum instead of mtime (slower, exact). |
 | `--no-create` | Don't auto-create the repo. |
+| `--tag` | Create a tag at the resulting commit (disk→repo only). |
+| `--force-tag` | Overwrite tag if it already exists. |
 
 ### ls
 
@@ -177,6 +181,8 @@ gitstore rm old-file.txt -m "Clean up"
 |--------|-------------|
 | `-b`, `--branch` | Branch (default: `main`). |
 | `-m`, `--message` | Commit message. |
+| `--tag` | Create a tag at the resulting commit. |
+| `--force-tag` | Overwrite tag if it already exists. |
 
 ### write
 
@@ -193,6 +199,8 @@ cat image.png | gitstore write :assets/logo.png -m "Add logo"
 | `-b`, `--branch` | Branch (default: `main`). |
 | `-m`, `--message` | Commit message. |
 | `--no-create` | Don't auto-create the repo. |
+| `--tag` | Create a tag at the resulting commit. |
+| `--force-tag` | Overwrite tag if it already exists. |
 
 ---
 
@@ -325,10 +333,12 @@ gitstore unarchive --format tar < archive.tar        # stdin
 | `-b`, `--branch` | Branch (default: `main`). |
 | `-m`, `--message` | Commit message. |
 | `--no-create` | Don't auto-create the repo. |
+| `--tag` | Create a tag at the resulting commit. |
+| `--force-tag` | Overwrite tag if it already exists. |
 
 ### zip / unzip / tar / untar
 
-Aliases with a fixed format. Same options as archive/unarchive.
+Aliases with a fixed format. Same options as archive/unarchive (including `--tag` / `--force-tag` for import commands).
 
 ```bash
 gitstore zip out.zip                          # = archive --format zip

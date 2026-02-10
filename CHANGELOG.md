@@ -4,6 +4,17 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.36.0 (2026-02-10)
+
+**New features:**
+
+- Add `--tag` and `--force-tag` options to all write commands (`write`, `rm`, `cp`, `sync`, `unzip`, `untar`, `unarchive`) — create a tag at the resulting commit without a separate `tag create` step
+- `--tag` on repo→disk `cp`/`sync` is rejected with a clear error
+
+**Tests:**
+
+- Add 9 tests for `--tag`/`--force-tag`: write, rm, cp, sync, unzip, duplicate error, force overwrite, cp/sync repo→disk rejection
+
 ## v0.35.0 (2026-02-10)
 
 **New features:**
