@@ -170,16 +170,41 @@ def _disk_glob_walk(segments: list[str], prefix: str) -> list[str]:
 # Source resolution
 # ---------------------------------------------------------------------------
 
-def _resolve_disk_sources(sources: list[str]) -> list[tuple[str, str]]:
-    """Resolve local source specs into ``(local_path, mode)`` tuples.
+def _resolve_disk_sources(sources: list[str]) -> list[tuple[str, str, str]]:
+    """Resolve local source specs into ``(local_path, mode, prefix)`` tuples.
 
     ``mode`` is one of:
     - ``"file"``    — single file
     - ``"dir"``     — directory, name preserved
     - ``"contents"`` — directory, trailing ``/`` → pour contents
+
+    ``prefix`` is an intermediate path to inject between the destination and
+    the file name.  It is ``""`` for normal sources and non-empty when the
+    source contains an rsync-style ``/./`` pivot marker (with ``idx > 0``).
     """
-    resolved: list[tuple[str, str]] = []
+    resolved: list[tuple[str, str, str]] = []
     for src in sources:
+        # --- /./  pivot detection (rsync -R style) ---
+        idx = src.find("/./")
+        if idx > 0:
+            base = src[:idx]
+            rest = src[idx + 3:]            # may end with "/" or be empty
+            contents_mode = rest.endswith("/")
+            rest_clean = rest.rstrip("/")
+            full_path = os.path.join(base, rest_clean) if rest_clean else base
+
+            if not os.path.exists(full_path):
+                raise FileNotFoundError(f"Local file not found: {full_path}")
+
+            if os.path.isdir(full_path):
+                mode = "contents" if contents_mode else "dir"
+            else:
+                mode = "file"
+
+            prefix = os.path.dirname(rest_clean) if rest_clean else ""
+            resolved.append((full_path, mode, prefix))
+            continue
+
         contents_mode = src.endswith("/")
         has_glob = "*" in src or "?" in src
 
@@ -189,19 +214,19 @@ def _resolve_disk_sources(sources: list[str]) -> list[tuple[str, str]]:
                 raise FileNotFoundError(f"No matches for pattern: {src}")
             for path in expanded:
                 if os.path.isdir(path):
-                    resolved.append((path, "dir"))
+                    resolved.append((path, "dir", ""))
                 else:
-                    resolved.append((path, "file"))
+                    resolved.append((path, "file", ""))
         elif contents_mode:
             path = src.rstrip("/")
             if not os.path.isdir(path):
                 raise NotADirectoryError(f"Not a directory: {path}")
-            resolved.append((path, "contents"))
+            resolved.append((path, "contents", ""))
         else:
             if os.path.isdir(src):
-                resolved.append((src, "dir"))
+                resolved.append((src, "dir", ""))
             elif os.path.exists(src):
-                resolved.append((src, "file"))
+                resolved.append((src, "file", ""))
             else:
                 raise FileNotFoundError(f"Local file not found: {src}")
     return resolved
@@ -251,19 +276,22 @@ def _resolve_repo_sources(fs: FS, sources: list[str]) -> list[tuple[str, str]]:
 # ---------------------------------------------------------------------------
 
 def _enum_disk_to_repo(
-    resolved: list[tuple[str, str]], dest: str,
+    resolved: list[tuple[str, str, str]], dest: str,
     *, follow_symlinks: bool = False,
 ) -> list[tuple[str, str]]:
     """Build ``(local_path, repo_path)`` pairs for disk → repo copy."""
     pairs: list[tuple[str, str]] = []
-    for local_path, mode in resolved:
+    for local_path, mode, prefix in resolved:
+        # Build the effective destination by injecting the pivot prefix.
+        _dest = "/".join(p for p in (dest, prefix) if p)
+
         if mode == "file":
             name = os.path.basename(local_path)
-            repo_file = f"{dest}/{name}" if dest else name
+            repo_file = f"{_dest}/{name}" if _dest else name
             pairs.append((local_path, _normalize_path(repo_file)))
         elif mode == "dir":
             dirname = os.path.basename(local_path)
-            target = f"{dest}/{dirname}" if dest else dirname
+            target = f"{_dest}/{dirname}" if _dest else dirname
             # If the source itself is a symlink to a directory and we're not
             # following symlinks, treat it as a single symlink entry.
             if not follow_symlinks and Path(local_path).is_symlink():
@@ -276,7 +304,7 @@ def _enum_disk_to_repo(
         elif mode == "contents":
             for rel in sorted(_walk_local_paths(local_path, follow_symlinks)):
                 full = os.path.join(local_path, rel)
-                repo_file = f"{dest}/{rel}" if dest else rel
+                repo_file = f"{_dest}/{rel}" if _dest else rel
                 pairs.append((full, _normalize_path(repo_file)))
     return pairs
 

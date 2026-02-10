@@ -15,7 +15,7 @@ Requires Python 3.10+ and [dulwich](https://www.dulwich.io/).
 ```python
 from gitstore import GitStore
 
-repo = GitStore.open("data.git", create="main")
+repo = GitStore.open("data.git")
 fs = repo.branches["main"]
 fs = fs.write("hello.txt", b"Hello, world!")
 print(fs.read("hello.txt"))  # b'Hello, world!'
