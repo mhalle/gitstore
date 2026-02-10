@@ -4,6 +4,18 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.38.0 (2026-02-10)
+
+**New features:**
+
+- Add `fs.iglob(pattern)` — streaming generator that yields unique matches without sorting or materializing the full list
+
+**Performance:**
+
+- Convert internal `_glob_walk` (list-builder) to `_iglob_walk` (generator) — eliminates intermediate list allocations at every recursion level
+- `glob()` no longer sorts results; use `sorted(fs.glob(...))` if order matters
+- CLI `ls` uses `iglob()` for streaming dedup
+
 ## v0.37.1 (2026-02-10)
 
 **Bug fixes:**

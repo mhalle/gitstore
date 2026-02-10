@@ -131,6 +131,22 @@ class FS:
                 raise NotADirectoryError(path)
         return [(e.name, e.filemode == GIT_FILEMODE_TREE) for e in tree]
 
+    def iglob(self, pattern: str) -> Iterator[str]:
+        """Expand a glob pattern against the repo tree, yielding unique matches.
+
+        Like :meth:`glob` but returns an unordered iterator instead of a
+        sorted list.  Useful when you only need to iterate once and don't
+        need sorted output.
+        """
+        pattern = pattern.strip("/")
+        if not pattern:
+            return
+        seen: set[str] = set()
+        for path in self._iglob_walk(pattern.split("/"), None):
+            if path not in seen:
+                seen.add(path)
+                yield path
+
     def glob(self, pattern: str) -> list[str]:
         """Expand a glob pattern against the repo tree.
 
@@ -138,18 +154,14 @@ class FS:
         a leading ``.`` unless the pattern segment itself starts with ``.``.
         ``**`` matches zero or more directory levels, skipping directories
         whose names start with ``.``.
-        Returns a sorted list of matching paths (files and directories).
+        Returns a deduplicated list of matching paths (files and directories).
         """
-        pattern = pattern.strip("/")
-        if not pattern:
-            return []
-        segments = pattern.split("/")
-        return sorted(set(self._glob_walk(segments, None)))
+        return list(self.iglob(pattern))
 
-    def _glob_walk(self, segments: list[str], prefix: str | None) -> list[str]:
-        """Recursive glob helper."""
+    def _iglob_walk(self, segments: list[str], prefix: str | None) -> Iterator[str]:
+        """Recursive glob generator."""
         if not segments:
-            return []
+            return
         seg = segments[0]
         rest = segments[1:]
 
@@ -157,26 +169,25 @@ class FS:
             try:
                 entries = self._ls_typed(prefix)
             except (FileNotFoundError, NotADirectoryError):
-                return []
-            results: list[str] = []
+                return
             if rest:
                 # Zero dirs: try rest at current level
-                results.extend(self._glob_walk(rest, prefix))
+                yield from self._iglob_walk(rest, prefix)
             else:
                 # ** alone at end: yield non-dot entries at this level
                 for name, _is_dir in entries:
                     if name.startswith("."):
                         continue
                     full = f"{prefix}/{name}" if prefix else name
-                    results.append(full)
+                    yield full
             # One+ dirs: recurse into non-dot subdirs
             for name, entry_is_dir in entries:
                 if name.startswith("."):
                     continue
                 full = f"{prefix}/{name}" if prefix else name
                 if entry_is_dir:
-                    results.extend(self._glob_walk(segments, full))  # keep **
-            return results
+                    yield from self._iglob_walk(segments, full)  # keep **
+            return
 
         has_wild = "*" in seg or "?" in seg
 
@@ -185,26 +196,23 @@ class FS:
             try:
                 entries = self.ls(prefix)
             except (FileNotFoundError, NotADirectoryError):
-                return []
-            results: list[str] = []
+                return
             for name in entries:
                 if not _glob_match(seg, name):
                     continue
                 full = f"{prefix}/{name}" if prefix else name
                 if rest:
-                    results.extend(self._glob_walk(rest, full))
+                    yield from self._iglob_walk(rest, full)
                 else:
-                    results.append(full)
-            return results
+                    yield full
         else:
             # Literal segment — just descend
             full = f"{prefix}/{seg}" if prefix else seg
             if rest:
-                return self._glob_walk(rest, full)
+                yield from self._iglob_walk(rest, full)
             else:
                 if self.exists(full):
-                    return [full]
-                return []
+                    yield full
 
     def readlink(self, path: str | os.PathLike[str]) -> str:
         """Read the target of a symlink."""

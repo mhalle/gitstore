@@ -130,7 +130,7 @@ def ls(ctx, paths, branch, recursive, ref, at_path, match_pattern, before):
 
         if has_glob:
             pattern = _strip_colon(path)
-            matches = fs.glob(pattern)
+            matches = fs.iglob(pattern)
             if recursive:
                 for m in matches:
                     if fs.is_dir(m):
