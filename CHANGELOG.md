@@ -4,6 +4,24 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.34.0 (2026-02-10)
+
+**New features:**
+
+- Add rsync-style `/./` pivot marker for `cp` source paths — controls which part of the source path is preserved at the destination
+  - `cp /data/./logs/app :backup` → `backup/logs/app/...`
+  - `cp /data/./logs/app/ :backup` → `backup/logs/...` (contents mode)
+  - Leading `./` (e.g. `./mydir`) does not trigger pivot mode
+
+**Documentation:**
+
+- Rewrite `docs/api.md` and `docs/cli.md` in terse, scannable man-page style
+- Fix stale `create="main"` in `docs/index.md`
+
+**Tests:**
+
+- Add 6 tests for `/./` pivot: directory, contents, file, leading-dot-slash, not-found, dry-run
+
 ## v0.33.0 (2026-02-09)
 
 **Breaking changes:**
