@@ -101,7 +101,7 @@ def tag_list(ctx):
 @tag.command("create")
 @_repo_option
 @click.argument("name")
-@click.argument("from_ref", metavar="FROM")
+@click.option("--from", "from_ref", required=True, help="Ref to tag (branch, tag, or commit hash).")
 @click.option("--path", "at_path", default=None,
               help="Use latest commit that changed this path.")
 @click.option("--at", "deprecated_at", default=None, hidden=True)
@@ -109,7 +109,7 @@ def tag_list(ctx):
 @click.option("--before", "before", default=None, help="Use latest commit on or before this date (ISO 8601).")
 @click.pass_context
 def tag_create(ctx, name, from_ref, at_path, deprecated_at, match_pattern, before):
-    """Create a new tag NAME from FROM ref."""
+    """Create a new tag NAME from a ref."""
     at_path = at_path or deprecated_at
     before = _parse_before(before)
     store = _open_store(_require_repo(ctx))

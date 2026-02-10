@@ -42,7 +42,7 @@ def repo_with_data(tmp_path, runner):
     r = runner.invoke(main, ["cp", "--repo", p, str(hello), ":hello.txt"])
     assert r.exit_code == 0, r.output
 
-    r = runner.invoke(main, ["tag", "--repo", p, "create", "v1", "main"])
+    r = runner.invoke(main, ["tag", "--repo", p, "create", "v1", "--from", "main"])
     assert r.exit_code == 0, r.output
 
     return p

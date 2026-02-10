@@ -294,10 +294,10 @@ gitstore tag
 gitstore tag list
 
 # Create
-gitstore tag create v1.0 main
-gitstore tag create v1.0 main --path bugfix.py
-gitstore tag create v1.0 main --match "deploy*"
-gitstore tag create v1.0 main --before 2024-06-01
+gitstore tag create v1.0 --from main
+gitstore tag create v1.0 --from main --path bugfix.py
+gitstore tag create v1.0 --from main --match "deploy*"
+gitstore tag create v1.0 --from main --before 2024-06-01
 
 # Delete
 gitstore tag delete v1.0
@@ -308,10 +308,10 @@ gitstore tag delete v1.0
 | Argument | Description |
 |----------|-------------|
 | `NAME` | Tag name. |
-| `FROM` | Ref to tag (branch, tag, or commit hash). |
 
 | Option | Description |
 |--------|-------------|
+| `--from` | Ref to tag (branch, tag, or commit hash). Required. |
 | `--path` | Use latest commit that changed this path. |
 | `--match` | Use latest commit matching this message pattern. |
 | `--before` | Use latest commit on or before this date. |

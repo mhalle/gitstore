@@ -16,6 +16,10 @@ All notable changes to gitstore are documented in this file.
   - Messages without `{` are returned as-is (backward compatible)
 - Add `--message` long flag (previously `-m` only) to `cp`, `sync`, `rm`, `unzip`, `untar`, `unarchive`
 
+**Breaking changes:**
+
+- `tag create` now uses `--from` option instead of positional `FROM` argument (consistent with `branch create`)
+
 **Documentation:**
 
 - Document message placeholders in CLI and API docs

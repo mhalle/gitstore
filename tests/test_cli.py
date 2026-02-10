@@ -984,7 +984,7 @@ class TestBranch:
         assert "already exists" in result.output.lower()
 
     def test_create_from_tag(self, runner, initialized_repo):
-        runner.invoke(main, ["tag", "--repo", initialized_repo, "create", "v1", "main"])
+        runner.invoke(main, ["tag", "--repo", initialized_repo, "create", "v1", "--from", "main"])
         result = runner.invoke(main, ["branch", "--repo", initialized_repo, "create", "from-tag", "--from", "v1"])
         assert result.exit_code == 0
 
@@ -1055,19 +1055,19 @@ class TestTag:
         assert result.exit_code == 0
 
     def test_create(self, runner, initialized_repo):
-        result = runner.invoke(main, ["tag", "--repo", initialized_repo, "create", "v1", "main"])
+        result = runner.invoke(main, ["tag", "--repo", initialized_repo, "create", "v1", "--from", "main"])
         assert result.exit_code == 0
         result = runner.invoke(main, ["tag", "--repo", initialized_repo, "list"])
         assert "v1" in result.output
 
     def test_duplicate_error(self, runner, initialized_repo):
-        runner.invoke(main, ["tag", "--repo", initialized_repo, "create", "v1", "main"])
-        result = runner.invoke(main, ["tag", "--repo", initialized_repo, "create", "v1", "main"])
+        runner.invoke(main, ["tag", "--repo", initialized_repo, "create", "v1", "--from", "main"])
+        result = runner.invoke(main, ["tag", "--repo", initialized_repo, "create", "v1", "--from", "main"])
         assert result.exit_code != 0
         assert "already exists" in result.output.lower()
 
     def test_delete(self, runner, initialized_repo):
-        runner.invoke(main, ["tag", "--repo", initialized_repo, "create", "v2", "main"])
+        runner.invoke(main, ["tag", "--repo", initialized_repo, "create", "v2", "--from", "main"])
         result = runner.invoke(main, ["tag", "--repo", initialized_repo, "delete", "v2"])
         assert result.exit_code == 0
         result = runner.invoke(main, ["tag", "--repo", initialized_repo, "list"])
@@ -1079,15 +1079,15 @@ class TestTag:
         assert "not found" in result.output.lower()
 
     def test_list_shows_all(self, runner, initialized_repo):
-        runner.invoke(main, ["tag", "--repo", initialized_repo, "create", "alpha", "main"])
-        runner.invoke(main, ["tag", "--repo", initialized_repo, "create", "beta", "main"])
+        runner.invoke(main, ["tag", "--repo", initialized_repo, "create", "alpha", "--from", "main"])
+        runner.invoke(main, ["tag", "--repo", initialized_repo, "create", "beta", "--from", "main"])
         result = runner.invoke(main, ["tag", "--repo", initialized_repo, "list"])
         assert "alpha" in result.output
         assert "beta" in result.output
 
     def test_at_flag(self, runner, repo_with_files):
         result = runner.invoke(main, [
-            "tag", "--repo", repo_with_files, "create", "v-at", "main",
+            "tag", "--repo", repo_with_files, "create", "v-at", "--from", "main",
             "--path", "hello.txt"
         ])
         assert result.exit_code == 0
@@ -1105,12 +1105,12 @@ class TestTag:
         full_hash = fs.hash
 
         result = runner.invoke(main, [
-            "tag", "--repo", repo_with_files, "create", "from-hash", full_hash
+            "tag", "--repo", repo_with_files, "create", "from-hash", "--from", full_hash
         ])
         assert result.exit_code == 0
 
     def test_default_invocation_lists(self, runner, initialized_repo):
-        runner.invoke(main, ["tag", "--repo", initialized_repo, "create", "t1", "main"])
+        runner.invoke(main, ["tag", "--repo", initialized_repo, "create", "t1", "--from", "main"])
         result = runner.invoke(main, ["tag", "--repo", initialized_repo])
         assert "t1" in result.output
 
@@ -1206,7 +1206,7 @@ class TestResolveRef:
         # Get the tree OID (not a commit)
         tree_oid = str(fs._tree_oid)
         result = runner.invoke(main, [
-            "tag", "--repo", repo_with_files, "create", "bad-ref", tree_oid
+            "tag", "--repo", repo_with_files, "create", "bad-ref", "--from", tree_oid
         ])
         assert result.exit_code != 0
         assert "not a commit" in result.output.lower()
@@ -2196,7 +2196,7 @@ class TestHash:
 
     def test_cat_by_tag(self, runner, repo_with_files):
         # Create a tag first
-        runner.invoke(main, ["tag", "--repo", repo_with_files, "create", "v1.0", "main"])
+        runner.invoke(main, ["tag", "--repo", repo_with_files, "create", "v1.0", "--from", "main"])
         result = runner.invoke(main, [
             "cat", "--repo", repo_with_files, "hello.txt", "--hash", "v1.0"
         ])
