@@ -22,7 +22,7 @@ def paths(entries):
 @pytest.fixture
 def store_and_fs(tmp_path):
     """Create a store with some files in the repo."""
-    repo = GitStore.open(tmp_path / "test.git", create="main")
+    repo = GitStore.open(tmp_path / "test.git")
     fs = repo.branches["main"]
     fs = fs.write("existing.txt", b"exists")
     fs = fs.write("dir/a.txt", b"aaa")

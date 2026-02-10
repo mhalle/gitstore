@@ -166,7 +166,7 @@ class TestCp:
         assert result.exit_code == 0, result.output
         # Verify mode via library
         from gitstore import GitStore
-        store = GitStore.open(initialized_repo)
+        store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         tree = store._repo[fs._tree_oid]
         entry = tree["script.sh"]
@@ -180,7 +180,7 @@ class TestCp:
         ])
         assert result.exit_code == 0, result.output
         from gitstore import GitStore
-        store = GitStore.open(initialized_repo)
+        store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         tree = store._repo[fs._tree_oid]
         entry = tree["plain.txt"]
@@ -194,7 +194,7 @@ class TestCp:
         ])
         assert result.exit_code == 0, result.output
         from gitstore import GitStore
-        store = GitStore.open(initialized_repo)
+        store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         tree = store._repo[fs._tree_oid]
         entry = tree["default.txt"]
@@ -588,7 +588,7 @@ class TestSymlinks:
         """cp repo→disk creates a symlink on disk for symlink entries."""
         import os
         from gitstore import GitStore
-        store = GitStore.open(initialized_repo)
+        store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         fs = fs.write("target.txt", b"content")
         fs.write_symlink("link.txt", "target.txt")
@@ -613,7 +613,7 @@ class TestSymlinks:
         result = runner.invoke(main, ["cp", "--repo", initialized_repo, str(src) + "/", ":stuff"])
         assert result.exit_code == 0, result.output
 
-        store = GitStore.open(initialized_repo)
+        store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         assert fs.readlink("stuff/link.txt") == "real.txt"
         from gitstore.tree import _entry_at_path
@@ -637,7 +637,7 @@ class TestSymlinks:
         result = runner.invoke(main, ["cp", "--repo", initialized_repo, str(src) + "/", ":stuff"])
         assert result.exit_code == 0, result.output
 
-        store = GitStore.open(initialized_repo)
+        store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         assert fs.readlink("stuff/link_dir") == "real_dir"
         from gitstore.tree import _entry_at_path
@@ -661,7 +661,7 @@ class TestSymlinks:
         ])
         assert result.exit_code == 0, result.output
 
-        store = GitStore.open(initialized_repo)
+        store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         # Should be a regular file, not a symlink
         assert fs.read("stuff/link.txt") == b"hello"
@@ -689,7 +689,7 @@ class TestSymlinks:
         ])
         assert result.exit_code == 0, result.output
 
-        store = GitStore.open(initialized_repo)
+        store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         # The symlinked dir's contents should be stored as regular files
         assert fs.read("stuff/link_dir/a.txt") == b"aaa"
@@ -719,7 +719,7 @@ class TestSymlinks:
         assert result.exit_code == 0, result.output
 
         from gitstore import GitStore
-        store = GitStore.open(initialized_repo)
+        store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         assert fs.read("cyc/file.txt") == b"ok"
         assert fs.read("cyc/sub/inner.txt") == b"inner"
@@ -728,7 +728,7 @@ class TestSymlinks:
         """cp :dir/ dest creates symlinks on disk for symlink entries."""
         import os
         from gitstore import GitStore
-        store = GitStore.open(initialized_repo)
+        store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         fs = fs.write("dir/target.txt", b"content")
         fs.write_symlink("dir/link.txt", "target.txt")
@@ -1046,7 +1046,7 @@ class TestBranch:
 
     def test_hash(self, runner, repo_with_files):
         from gitstore import GitStore
-        store = GitStore.open(repo_with_files)
+        store = GitStore.open(repo_with_files, create=False)
         expected = store.branches["main"].hash
         result = runner.invoke(main, ["branch", "--repo", repo_with_files, "hash", "main"])
         assert result.exit_code == 0
@@ -1056,7 +1056,7 @@ class TestBranch:
 
     def test_hash_back(self, runner, repo_with_files):
         from gitstore import GitStore
-        store = GitStore.open(repo_with_files)
+        store = GitStore.open(repo_with_files, create=False)
         expected = store.branches["main"].parent.hash
         result = runner.invoke(main, [
             "branch", "--repo", repo_with_files, "hash", "main", "--back", "1"
@@ -1073,7 +1073,7 @@ class TestBranch:
 
     def test_hash_path(self, runner, repo_with_files):
         from gitstore import GitStore
-        store = GitStore.open(repo_with_files)
+        store = GitStore.open(repo_with_files, create=False)
         fs = store.branches["main"]
         expected = next(fs.log(path="hello.txt")).hash
         result = runner.invoke(main, [
@@ -1145,7 +1145,7 @@ class TestTag:
 
         # Get the full hash via the library
         from gitstore import GitStore
-        store = GitStore.open(repo_with_files)
+        store = GitStore.open(repo_with_files, create=False)
         fs = store.branches["main"]
         full_hash = fs.hash
 
@@ -1162,7 +1162,7 @@ class TestTag:
     def test_hash(self, runner, initialized_repo):
         runner.invoke(main, ["tag", "--repo", initialized_repo, "create", "v1", "--from", "main"])
         from gitstore import GitStore
-        store = GitStore.open(initialized_repo)
+        store = GitStore.open(initialized_repo, create=False)
         expected = store.tags["v1"].hash
         result = runner.invoke(main, ["tag", "--repo", initialized_repo, "hash", "v1"])
         assert result.exit_code == 0
@@ -1262,7 +1262,7 @@ class TestResolveRef:
     def test_non_commit_hash_rejected(self, runner, repo_with_files):
         """Passing a tree/blob hash should produce a clear error."""
         from gitstore import GitStore
-        store = GitStore.open(repo_with_files)
+        store = GitStore.open(repo_with_files, create=False)
         fs = store.branches["main"]
         # Get the tree OID (not a commit)
         tree_oid = str(fs._tree_oid)
@@ -1382,7 +1382,7 @@ class TestZip:
     def test_zip_preserves_symlink(self, runner, initialized_repo, tmp_path):
         """Symlinks in the repo are exported as symlinks in the zip."""
         from gitstore import GitStore
-        store = GitStore.open(initialized_repo)
+        store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         fs = fs.write("target.txt", b"content")
         fs.write_symlink("link.txt", "target.txt")
@@ -1399,7 +1399,7 @@ class TestZip:
     def test_zip_create_system_unix(self, runner, initialized_repo, tmp_path):
         """Zip entries have create_system=3 (Unix) for correct external_attr."""
         from gitstore import GitStore
-        store = GitStore.open(initialized_repo)
+        store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         fs = fs.write("file.txt", b"data")
         fs.write_symlink("link.txt", "file.txt")
@@ -1471,7 +1471,7 @@ class TestUnzip:
         assert result.exit_code == 0, result.output
 
         from gitstore import GitStore
-        store = GitStore.open(initialized_repo)
+        store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         tree = store._repo[fs._tree_oid]
         assert tree["script.sh"].filemode == 0o100755
@@ -1496,7 +1496,7 @@ class TestUnzip:
         assert result.exit_code == 0, result.output
 
         from gitstore import GitStore
-        store = GitStore.open(p2)
+        store = GitStore.open(p2, create=False)
         fs = store.branches["main"]
         tree = store._repo[fs._tree_oid]
         assert tree["run.sh"].filemode == 0o100755
@@ -1530,7 +1530,7 @@ class TestUnzip:
 
         from gitstore import GitStore
         from gitstore.tree import GIT_FILEMODE_LINK
-        store = GitStore.open(initialized_repo)
+        store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         tree = store._repo[fs._tree_oid]
         assert tree["link.txt"].filemode == GIT_FILEMODE_LINK
@@ -1540,7 +1540,7 @@ class TestUnzip:
         """Zip then unzip preserves symlinks."""
         from gitstore import GitStore
         from gitstore.tree import GIT_FILEMODE_LINK
-        store = GitStore.open(initialized_repo)
+        store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         fs = fs.write("target.txt", b"content")
         fs.write_symlink("link.txt", "target.txt")
@@ -1555,7 +1555,7 @@ class TestUnzip:
         result = runner.invoke(main, ["unzip", "--repo", p2, archive])
         assert result.exit_code == 0, result.output
 
-        store2 = GitStore.open(p2)
+        store2 = GitStore.open(p2, create=False)
         fs2 = store2.branches["main"]
         assert fs2.readlink("link.txt") == "target.txt"
         tree = store2._repo[fs2._tree_oid]
@@ -1680,7 +1680,7 @@ class TestTar:
         """Symlinks in the repo are exported as symlinks in the tar."""
         import tarfile
         from gitstore import GitStore
-        store = GitStore.open(initialized_repo)
+        store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         fs = fs.write("target.txt", b"content")
         fs.write_symlink("link.txt", "target.txt")
@@ -1778,7 +1778,7 @@ class TestUntar:
         assert result.exit_code == 0, result.output
 
         from gitstore import GitStore
-        store = GitStore.open(initialized_repo)
+        store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         tree = store._repo[fs._tree_oid]
         assert tree["script.sh"].filemode == 0o100755
@@ -1803,7 +1803,7 @@ class TestUntar:
         assert result.exit_code == 0, result.output
 
         from gitstore import GitStore
-        store = GitStore.open(p2)
+        store = GitStore.open(p2, create=False)
         fs = store.branches["main"]
         tree = store._repo[fs._tree_oid]
         assert tree["run.sh"].filemode == 0o100755
@@ -1871,7 +1871,7 @@ class TestUntar:
 
         from gitstore import GitStore
         from gitstore.tree import GIT_FILEMODE_LINK
-        store = GitStore.open(initialized_repo)
+        store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         tree = store._repo[fs._tree_oid]
         assert tree["link.txt"].filemode == GIT_FILEMODE_LINK
@@ -1882,7 +1882,7 @@ class TestUntar:
         import tarfile
         from gitstore import GitStore
         from gitstore.tree import GIT_FILEMODE_LINK
-        store = GitStore.open(initialized_repo)
+        store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         fs = fs.write("target.txt", b"content")
         fs.write_symlink("link.txt", "target.txt")
@@ -1897,7 +1897,7 @@ class TestUntar:
         result = runner.invoke(main, ["untar", "--repo", p2, archive])
         assert result.exit_code == 0, result.output
 
-        store2 = GitStore.open(p2)
+        store2 = GitStore.open(p2, create=False)
         fs2 = store2.branches["main"]
         assert fs2.readlink("link.txt") == "target.txt"
         tree = store2._repo[fs2._tree_oid]
@@ -1963,7 +1963,7 @@ class TestUntar:
         result = runner.invoke(main, ["untar", "--repo", initialized_repo, tpath])
         assert result.exit_code == 0, result.output
         from gitstore import GitStore
-        store = GitStore.open(initialized_repo)
+        store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         tree = store._repo[fs._tree_oid]
         assert tree["link.sh"].filemode == 0o100755
@@ -2002,7 +2002,7 @@ class TestNonUtf8Symlink:
         """Non-UTF-8 symlink targets produce a clear error on zip export."""
         from gitstore import GitStore
         from gitstore.tree import GIT_FILEMODE_LINK
-        store = GitStore.open(initialized_repo)
+        store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         # Write a symlink with non-UTF-8 target bytes directly via pygit2
         repo = store._repo
@@ -2023,7 +2023,7 @@ class TestNonUtf8Symlink:
         """Non-UTF-8 symlink targets produce a clear error on tar export."""
         from gitstore import GitStore
         from gitstore.tree import GIT_FILEMODE_LINK
-        store = GitStore.open(initialized_repo)
+        store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         repo = store._repo
         bad_target = b"caf\xe9"
@@ -2062,7 +2062,7 @@ class TestBefore:
         runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":a.txt", "-m", "second"])
 
         from gitstore import GitStore
-        store = GitStore.open(initialized_repo)
+        store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         entries = list(fs.log())
         # cutoff = time of "first" commit (second entry, since log is newest-first)
@@ -2100,7 +2100,7 @@ class TestBefore:
         runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":a.txt", "-m", "add a"])
 
         from gitstore import GitStore
-        store = GitStore.open(initialized_repo)
+        store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         cutoff = fs.time  # time of "add a" commit
 
@@ -2125,7 +2125,7 @@ class TestBefore:
         runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":a.txt", "-m", "deploy v1"])
 
         from gitstore import GitStore
-        store = GitStore.open(initialized_repo)
+        store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         cutoff = fs.time
 
@@ -2150,7 +2150,7 @@ class TestBefore:
         runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":a.txt", "-m", "add a"])
 
         from gitstore import GitStore
-        store = GitStore.open(initialized_repo)
+        store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         cutoff = fs.time
 
@@ -2178,7 +2178,7 @@ class TestBefore:
         runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":a.txt", "-m", "add a"])
 
         from gitstore import GitStore
-        store = GitStore.open(initialized_repo)
+        store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         cutoff = fs.time
 
@@ -2226,7 +2226,7 @@ class TestHash:
     def _get_commit_hash(repo_path):
         """Get the full commit hash of HEAD on main."""
         from gitstore import GitStore
-        store = GitStore.open(repo_path)
+        store = GitStore.open(repo_path, create=False)
         fs = store.branches["main"]
         return fs.hash
 
@@ -2234,7 +2234,7 @@ class TestHash:
     def _get_parent_hash(repo_path):
         """Get the full commit hash of HEAD~1 on main."""
         from gitstore import GitStore
-        store = GitStore.open(repo_path)
+        store = GitStore.open(repo_path, create=False)
         fs = store.branches["main"]
         return fs.parent.hash
 

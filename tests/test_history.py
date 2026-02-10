@@ -9,7 +9,7 @@ from gitstore import GitStore
 
 @pytest.fixture
 def repo_with_history(tmp_path):
-    repo = GitStore.open(tmp_path / "test.git", create="main")
+    repo = GitStore.open(tmp_path / "test.git")
     fs = repo.branches["main"]  # init commit
     fs = fs.write("a.txt", b"a")
     fs = fs.write("b.txt", b"b")
@@ -18,7 +18,7 @@ def repo_with_history(tmp_path):
 
 class TestParent:
     def test_root_parent_is_none(self, tmp_path):
-        repo = GitStore.open(tmp_path / "test.git", create="main")
+        repo = GitStore.open(tmp_path / "test.git")
         fs = repo.branches["main"]
         assert fs.parent is None
 
@@ -62,7 +62,7 @@ class TestLog:
         assert len(commits) == 3
 
     def test_log_with_path(self, tmp_path):
-        repo = GitStore.open(tmp_path / "test.git", create="main")
+        repo = GitStore.open(tmp_path / "test.git")
         fs = repo.branches["main"]
         fs = fs.write("a.txt", b"a1")
         fs = fs.write("b.txt", b"b1")
@@ -73,7 +73,7 @@ class TestLog:
         assert "a.txt" in commits[1].message
 
     def test_log_path_added_and_removed(self, tmp_path):
-        repo = GitStore.open(tmp_path / "test.git", create="main")
+        repo = GitStore.open(tmp_path / "test.git")
         fs = repo.branches["main"]
         fs = fs.write("x.txt", b"data")
         fs = fs.remove("x.txt")
@@ -81,14 +81,14 @@ class TestLog:
         assert len(commits) == 2
 
     def test_log_path_no_matches(self, tmp_path):
-        repo = GitStore.open(tmp_path / "test.git", create="main")
+        repo = GitStore.open(tmp_path / "test.git")
         fs = repo.branches["main"]
         fs = fs.write("a.txt", b"a")
         commits = list(fs.log("nonexistent"))
         assert commits == []
 
     def test_log_at_kwarg(self, tmp_path):
-        repo = GitStore.open(tmp_path / "test.git", create="main")
+        repo = GitStore.open(tmp_path / "test.git")
         fs = repo.branches["main"]
         fs = fs.write("a.txt", b"a1")
         fs = fs.write("b.txt", b"b1")
@@ -97,7 +97,7 @@ class TestLog:
         assert len(commits) == 2
 
     def test_log_match(self, tmp_path):
-        repo = GitStore.open(tmp_path / "test.git", create="main")
+        repo = GitStore.open(tmp_path / "test.git")
         fs = repo.branches["main"]
         # write() auto-generates "+ <path>" messages (new format)
         fs = fs.write("deploy-v1.txt", b"a")   # "+ deploy-v1.txt"
@@ -108,14 +108,14 @@ class TestLog:
         assert all("deploy" in c.message for c in commits)
 
     def test_log_match_no_results(self, tmp_path):
-        repo = GitStore.open(tmp_path / "test.git", create="main")
+        repo = GitStore.open(tmp_path / "test.git")
         fs = repo.branches["main"]
         fs = fs.write("a.txt", b"a")
         commits = list(fs.log(match="zzz*"))
         assert commits == []
 
     def test_log_at_and_match(self, tmp_path):
-        repo = GitStore.open(tmp_path / "test.git", create="main")
+        repo = GitStore.open(tmp_path / "test.git")
         fs = repo.branches["main"]
         fs = fs.write("a.txt", b"a")    # "Write a.txt"
         fs = fs.write("b.txt", b"b")    # "Write b.txt"
@@ -134,19 +134,19 @@ class TestLog:
 
 class TestCommitMetadata:
     def test_time_is_datetime(self, tmp_path):
-        repo = GitStore.open(tmp_path / "test.git", create="main")
+        repo = GitStore.open(tmp_path / "test.git")
         fs = repo.branches["main"]
         assert isinstance(fs.time, datetime)
         assert fs.time.tzinfo is not None
 
     def test_author_name(self, tmp_path):
-        repo = GitStore.open(tmp_path / "test.git", create="main", author="alice")
+        repo = GitStore.open(tmp_path / "test.git", author="alice")
         fs = repo.branches["main"]
         assert fs.author_name == "alice"
 
     def test_author_email(self, tmp_path):
         repo = GitStore.open(
-            tmp_path / "test.git", create="main", email="alice@example.com"
+            tmp_path / "test.git", email="alice@example.com"
         )
         fs = repo.branches["main"]
         assert fs.author_email == "alice@example.com"

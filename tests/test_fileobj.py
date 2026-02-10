@@ -7,7 +7,7 @@ from gitstore import GitStore
 
 @pytest.fixture
 def repo_fs(tmp_path):
-    repo = GitStore.open(tmp_path / "test.git", create="main")
+    repo = GitStore.open(tmp_path / "test.git")
     fs = repo.branches["main"]
     fs = fs.write("hello.txt", b"Hello World")
     return repo, fs
@@ -82,7 +82,7 @@ class TestWritableFile:
         assert f.fs is None
 
     def test_write_on_tag_raises(self, tmp_path):
-        repo = GitStore.open(tmp_path / "test.git", create="main")
+        repo = GitStore.open(tmp_path / "test.git")
         fs = repo.branches["main"]
         repo.tags["v1"] = fs
         tag_fs = repo.tags["v1"]

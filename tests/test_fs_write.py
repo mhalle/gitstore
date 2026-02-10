@@ -10,7 +10,7 @@ from gitstore.tree import GIT_FILEMODE_BLOB_EXECUTABLE, GIT_FILEMODE_LINK
 
 @pytest.fixture
 def repo_fs(tmp_path):
-    repo = GitStore.open(tmp_path / "test.git", create="main")
+    repo = GitStore.open(tmp_path / "test.git")
     fs = repo.branches["main"]
     return repo, fs
 
@@ -59,7 +59,7 @@ class TestWrite:
         assert tree["run.sh"].filemode == GIT_FILEMODE_BLOB_EXECUTABLE
 
     def test_write_on_tag_raises(self, tmp_path):
-        repo = GitStore.open(tmp_path / "test.git", create="main")
+        repo = GitStore.open(tmp_path / "test.git")
         fs = repo.branches["main"]
         repo.tags["v1"] = fs
         tag_fs = repo.tags["v1"]
@@ -80,7 +80,7 @@ class TestRemove:
             fs.remove("nope.txt")
 
     def test_remove_on_tag_raises(self, tmp_path):
-        repo = GitStore.open(tmp_path / "test.git", create="main")
+        repo = GitStore.open(tmp_path / "test.git")
         fs = repo.branches["main"].write("x.txt", b"x")
         repo.tags["v1"] = fs
         with pytest.raises(PermissionError):
@@ -171,7 +171,7 @@ class TestWriteFrom:
         assert fs2.message == "Import file"
 
     def test_write_from_on_tag_raises(self, tmp_path):
-        repo = GitStore.open(tmp_path / "test.git", create="main")
+        repo = GitStore.open(tmp_path / "test.git")
         fs = repo.branches["main"]
         repo.tags["v1"] = fs
         tag_fs = repo.tags["v1"]
@@ -219,7 +219,7 @@ class TestSymlink:
         assert fs2.message == "+ link.txt (L)"
 
     def test_write_symlink_on_tag_raises(self, tmp_path):
-        repo = GitStore.open(tmp_path / "test.git", create="main")
+        repo = GitStore.open(tmp_path / "test.git")
         fs = repo.branches["main"]
         repo.tags["v1"] = fs
         tag_fs = repo.tags["v1"]

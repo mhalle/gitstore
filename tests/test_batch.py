@@ -12,7 +12,7 @@ from gitstore.tree import GIT_FILEMODE_BLOB_EXECUTABLE, GIT_FILEMODE_LINK
 
 @pytest.fixture
 def repo_fs(tmp_path):
-    repo = GitStore.open(tmp_path / "test.git", create="main")
+    repo = GitStore.open(tmp_path / "test.git")
     fs = repo.branches["main"]
     fs = fs.write("a.txt", b"a")
     return repo, fs
@@ -63,7 +63,7 @@ class TestBatch:
         assert b.fs is None
 
     def test_batch_on_readonly_raises(self, tmp_path):
-        repo = GitStore.open(tmp_path / "test.git", create="main")
+        repo = GitStore.open(tmp_path / "test.git")
         fs = repo.branches["main"]
         repo.tags["v1"] = fs
         tag_fs = repo.tags["v1"]

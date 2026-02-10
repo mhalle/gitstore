@@ -14,24 +14,28 @@ from gitstore import CopyReport, CopyAction, CopyError, SyncDiff, RefChange
 
 The entry point. Opens or creates a bare Git repository.
 
-### `GitStore.open(path, create=None, *, branch=None, author="gitstore", email="gitstore@localhost")`
+### `GitStore.open(path, *, create=True, branch="main", author="gitstore", email="gitstore@localhost")`
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `path` | `str \| Path` | Path to the bare repository. |
-| `create` | `str \| bool \| None` | `None` -- open existing (fail if missing). `True` -- create empty bare repo. `str` -- create bare repo and bootstrap a branch with that name. |
-| `branch` | `str \| None` | Initial branch name. Shorthand: `create=True, branch="main"` is equivalent to `create="main"`. |
+| `create` | `bool` | If `True` (default), create the repo when it doesn't exist. If `False`, raise `FileNotFoundError` when missing. |
+| `branch` | `str \| None` | Initial branch name when creating (default `"main"`). `None` to create a bare repo with no branches. |
 | `author` | `str` | Default author name for commits. |
 | `email` | `str` | Default author email for commits. |
 
 **Returns:** `GitStore`
 
-**Raises:** `FileNotFoundError` (missing repo when `create=None`), `FileExistsError` (path exists when creating), `ValueError` (`create=False` or conflicting `create`+`branch`).
+**Raises:** `FileNotFoundError` (missing repo when `create=False`).
+
+Idempotent: if the repo already exists, it is opened regardless of `create` and `branch`.
 
 ```python
-repo = GitStore.open("data.git", create="main")
-repo = GitStore.open("data.git", create=True, branch="main")  # equivalent
-repo = GitStore.open("data.git")                                # open existing
+repo = GitStore.open("data.git")                                # create or open (default)
+repo = GitStore.open("data.git", branch="dev")                  # create with "dev" branch
+repo = GitStore.open("data.git", branch=None)                   # bare (no branches)
+repo = GitStore.open("data.git", create=False)                  # open existing only
+repo = GitStore.open("data.git", author="alice", email="a@b")   # custom author
 ```
 
 ### `repo.branches`

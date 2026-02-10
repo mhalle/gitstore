@@ -17,8 +17,8 @@ Requires Python 3.10+ and dulwich.
 ```python
 from gitstore import GitStore
 
-# Create a new repository with a "main" branch
-repo = GitStore.open("data.git", create="main")
+# Create (or open) a repository with a "main" branch
+repo = GitStore.open("data.git")
 
 # Get a snapshot of the branch
 fs = repo.branches["main"]
@@ -49,20 +49,20 @@ Snapshots obtained from **branches** are writable. Snapshots obtained from **tag
 ### Opening a repository
 
 ```python
-# Create new repo with an initial branch
-repo = GitStore.open("data.git", create="main")
-
-# Equivalent — separate create and branch args
-repo = GitStore.open("data.git", create=True, branch="main")
-
-# Create empty repo (no branches)
-repo = GitStore.open("data.git", create=True)
-
-# Open existing repo
+# Create or open a repo with a "main" branch (default)
 repo = GitStore.open("data.git")
 
+# Create with a custom branch name
+repo = GitStore.open("data.git", branch="dev")
+
+# Create empty repo (no branches)
+repo = GitStore.open("data.git", branch=None)
+
+# Open existing repo only (fail if missing)
+repo = GitStore.open("data.git", create=False)
+
 # Custom author for commits
-repo = GitStore.open("data.git", create="main", author="alice", email="alice@example.com")
+repo = GitStore.open("data.git", author="alice", email="alice@example.com")
 ```
 
 ### Branches and tags
@@ -346,8 +346,7 @@ except StaleSnapshotError:
 
 | Exception | When |
 |-----------|------|
-| `FileNotFoundError` | `read`/`remove` on a missing path; `write_from` with a missing local file; opening a missing repo |
-| `FileExistsError` | Creating a repo at a path that already exists |
+| `FileNotFoundError` | `read`/`remove` on a missing path; `write_from` with a missing local file; opening a missing repo with `create=False` |
 | `IsADirectoryError` | `read` on a directory path; `write_from` with a directory as local path; `remove` on a directory |
 | `NotADirectoryError` | `ls`/`walk` on a file path |
 | `PermissionError` | Writing to a tag snapshot |

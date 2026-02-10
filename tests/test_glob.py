@@ -8,7 +8,7 @@ from gitstore import GitStore
 @pytest.fixture
 def fs_with_tree(tmp_path):
     """Create a repo with a varied tree for glob testing."""
-    repo = GitStore.open(tmp_path / "test.git", create="main")
+    repo = GitStore.open(tmp_path / "test.git")
     fs = repo.branches["main"]
     fs = fs.write("readme.txt", b"readme")
     fs = fs.write("setup.py", b"setup")

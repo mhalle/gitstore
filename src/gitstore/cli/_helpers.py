@@ -94,25 +94,19 @@ def _require_repo(ctx) -> str:
 
 def _open_store(repo_path: str) -> GitStore:
     try:
-        return GitStore.open(repo_path)
+        return GitStore.open(repo_path, create=False)
     except FileNotFoundError as exc:
         raise click.ClickException(str(exc))
 
 
 def _open_or_create_store(repo_path: str, branch: str = "main") -> GitStore:
     """Open a store, creating it with *branch* if the repo doesn't exist."""
-    try:
-        return GitStore.open(repo_path)
-    except FileNotFoundError:
-        return GitStore.open(repo_path, create=branch)
+    return GitStore.open(repo_path, branch=branch)
 
 
 def _open_or_create_bare(repo_path: str) -> GitStore:
     """Open a store, creating a bare repo (no branch) if it doesn't exist."""
-    try:
-        return GitStore.open(repo_path)
-    except FileNotFoundError:
-        return GitStore.open(repo_path, create=True)
+    return GitStore.open(repo_path, branch=None)
 
 
 def _no_create_option(f):

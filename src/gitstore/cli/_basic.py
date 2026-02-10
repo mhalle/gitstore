@@ -43,10 +43,9 @@ def init(ctx, branch, force):
     if force and os.path.exists(repo_path):
         import shutil
         shutil.rmtree(repo_path)
-    try:
-        GitStore.open(repo_path, create=True, branch=branch)
-    except FileExistsError as exc:
-        raise click.ClickException(str(exc))
+    elif os.path.exists(repo_path):
+        raise click.ClickException(f"Repository already exists: {repo_path}")
+    GitStore.open(repo_path, branch=branch)
     _status(ctx, f"Initialized {repo_path}")
 
 
@@ -65,7 +64,7 @@ def destroy(ctx, force):
     """
     repo_path = _require_repo(ctx)
     try:
-        store = GitStore.open(repo_path)
+        store = GitStore.open(repo_path, create=False)
     except FileNotFoundError:
         raise click.ClickException(f"Repository not found: {repo_path}")
 
@@ -239,7 +238,7 @@ def undo(ctx, branch, steps):
     repo_path = _require_repo(ctx)
 
     try:
-        repo = GitStore.open(repo_path)
+        repo = GitStore.open(repo_path, create=False)
         fs = repo.branches[branch]
 
         # Perform undo
@@ -283,7 +282,7 @@ def redo(ctx, branch, steps):
     repo_path = _require_repo(ctx)
 
     try:
-        repo = GitStore.open(repo_path)
+        repo = GitStore.open(repo_path, create=False)
         fs = repo.branches[branch]
 
         # Perform redo
@@ -335,7 +334,7 @@ def reflog(ctx, branch, limit, fmt):
     repo_path = _require_repo(ctx)
 
     try:
-        repo = GitStore.open(repo_path)
+        repo = GitStore.open(repo_path, create=False)
         entries = repo.branches.reflog(branch)
 
         # Apply limit if specified

@@ -30,7 +30,7 @@ def paths(entries):
 @pytest.fixture
 def store(tmp_path):
     p = str(tmp_path / "test.git")
-    return GitStore.open(p, create="main")
+    return GitStore.open(p)
 
 
 @pytest.fixture

@@ -9,7 +9,7 @@ from gitstore import GitStore
 
 @pytest.fixture
 def repo_with_files(tmp_path):
-    repo = GitStore.open(tmp_path / "test.git", create="main")
+    repo = GitStore.open(tmp_path / "test.git")
     fs = repo.branches["main"]
     fs = fs.write("hello.txt", b"Hello!")
     fs = fs.write("src/main.py", b"print('hi')")
@@ -97,7 +97,7 @@ class TestDump:
         assert (out / "src" / "lib" / "util.py").read_bytes() == b"# util"
 
     def test_dump_empty_tree(self, tmp_path):
-        repo = GitStore.open(tmp_path / "test.git", create="main")
+        repo = GitStore.open(tmp_path / "test.git")
         fs = repo.branches["main"]
         out = tmp_path / "out"
         fs.dump(out)
@@ -114,7 +114,7 @@ class TestDump:
 
     def test_dump_symlinks(self, tmp_path):
         import os
-        repo = GitStore.open(tmp_path / "test.git", create="main")
+        repo = GitStore.open(tmp_path / "test.git")
         fs = repo.branches["main"]
         fs = fs.write("target.txt", b"content")
         fs = fs.write_symlink("link.txt", "target.txt")
@@ -126,7 +126,7 @@ class TestDump:
 
     def test_dump_symlink_overwrites_existing_file(self, tmp_path):
         import os
-        repo = GitStore.open(tmp_path / "test.git", create="main")
+        repo = GitStore.open(tmp_path / "test.git")
         fs = repo.branches["main"]
         fs = fs.write_symlink("link.txt", "target.txt")
         out = tmp_path / "out"

@@ -5,7 +5,7 @@ from gitstore import GitStore
 
 def test_full_workflow(tmp_path):
     repo = GitStore.open(
-        tmp_path / "test.git", create="main", author="test", email="t@t.com"
+        tmp_path / "test.git", author="test", email="t@t.com"
     )
     fs = repo.branches["main"]
     fs = fs.write("hello.txt", b"Hello!")

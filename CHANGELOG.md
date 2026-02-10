@@ -4,6 +4,17 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.33.0 (2026-02-09)
+
+**Breaking changes:**
+
+- Simplify `GitStore.open()` API: `create` is now a plain `bool` (default `True`), `branch` defaults to `"main"`
+  - Old: `GitStore.open(path, create="main")` / `GitStore.open(path, create=True, branch="main")`
+  - New: `GitStore.open(path)` (creates with "main" branch if missing, opens if exists)
+  - `create=False` raises `FileNotFoundError` when the repo is missing
+  - `branch=None` creates a bare repo with no branches
+  - `open()` is now idempotent — no more `FileExistsError`
+
 ## v0.32.0 (2026-02-09)
 
 **Documentation:**

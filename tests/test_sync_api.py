@@ -14,7 +14,7 @@ from gitstore import GitStore, SyncDiff, RefChange
 def store(tmp_path):
     """A GitStore with a 'main' branch and one commit."""
     p = str(tmp_path / "src.git")
-    s = GitStore.open(p, create="main")
+    s = GitStore.open(p)
     fs = s.branches["main"]
     with fs.batch(message="add hello") as b:
         b.write("hello.txt", b"hello world\n")
