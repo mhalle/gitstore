@@ -1044,6 +1044,51 @@ class TestBranch:
         assert result.exit_code != 0
         assert "invalid" in result.output.lower()
 
+    def test_hash(self, runner, repo_with_files):
+        from gitstore import GitStore
+        store = GitStore.open(repo_with_files)
+        expected = store.branches["main"].hash
+        result = runner.invoke(main, ["branch", "--repo", repo_with_files, "hash", "main"])
+        assert result.exit_code == 0
+        out = result.output.strip()
+        assert len(out) == 40
+        assert out == expected
+
+    def test_hash_back(self, runner, repo_with_files):
+        from gitstore import GitStore
+        store = GitStore.open(repo_with_files)
+        expected = store.branches["main"].parent.hash
+        result = runner.invoke(main, [
+            "branch", "--repo", repo_with_files, "hash", "main", "--back", "1"
+        ])
+        assert result.exit_code == 0
+        assert result.output.strip() == expected
+
+    def test_hash_back_too_far(self, runner, initialized_repo):
+        result = runner.invoke(main, [
+            "branch", "--repo", initialized_repo, "hash", "main", "--back", "100"
+        ])
+        assert result.exit_code != 0
+        assert "history too short" in result.output.lower()
+
+    def test_hash_path(self, runner, repo_with_files):
+        from gitstore import GitStore
+        store = GitStore.open(repo_with_files)
+        fs = store.branches["main"]
+        expected = next(fs.log(path="hello.txt")).hash
+        result = runner.invoke(main, [
+            "branch", "--repo", repo_with_files, "hash", "main", "--path", "hello.txt"
+        ])
+        assert result.exit_code == 0
+        assert result.output.strip() == expected
+
+    def test_hash_nonexistent(self, runner, initialized_repo):
+        result = runner.invoke(main, [
+            "branch", "--repo", initialized_repo, "hash", "ghost"
+        ])
+        assert result.exit_code != 0
+        assert "not found" in result.output.lower()
+
 
 # ---------------------------------------------------------------------------
 # TestTag
@@ -1113,6 +1158,22 @@ class TestTag:
         runner.invoke(main, ["tag", "--repo", initialized_repo, "create", "t1", "--from", "main"])
         result = runner.invoke(main, ["tag", "--repo", initialized_repo])
         assert "t1" in result.output
+
+    def test_hash(self, runner, initialized_repo):
+        runner.invoke(main, ["tag", "--repo", initialized_repo, "create", "v1", "--from", "main"])
+        from gitstore import GitStore
+        store = GitStore.open(initialized_repo)
+        expected = store.tags["v1"].hash
+        result = runner.invoke(main, ["tag", "--repo", initialized_repo, "hash", "v1"])
+        assert result.exit_code == 0
+        out = result.output.strip()
+        assert len(out) == 40
+        assert out == expected
+
+    def test_hash_nonexistent(self, runner, initialized_repo):
+        result = runner.invoke(main, ["tag", "--repo", initialized_repo, "hash", "ghost"])
+        assert result.exit_code != 0
+        assert "not found" in result.output.lower()
 
 
 # ---------------------------------------------------------------------------

@@ -4,6 +4,17 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.31.0 (2026-02-09)
+
+**New features:**
+
+- Add `branch hash NAME` command — prints the 40-char commit SHA for a branch, with `--back`, `--path`, `--match`, `--before` filters
+- Add `tag hash NAME` command — prints the 40-char commit SHA for a tag
+
+**Tests:**
+
+- Add 7 tests for `branch hash` and `tag hash` commands
+
 ## v0.30.0 (2026-02-09)
 
 **New features:**

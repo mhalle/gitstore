@@ -269,7 +269,27 @@ gitstore branch create dev --from main --before 2024-06-01
 
 # Delete
 gitstore branch delete dev
+
+# Hash
+gitstore branch hash main
+gitstore branch hash main --back 3
+gitstore branch hash main --path config.json
+gitstore branch hash main --match "deploy*"
+gitstore branch hash main --before 2024-06-01
 ```
+
+#### branch hash
+
+| Argument | Description |
+|----------|-------------|
+| `NAME` | Branch name. |
+
+| Option | Description |
+|--------|-------------|
+| `--back N` | Walk back N parent commits (default: 0 = tip). |
+| `--path` | Use latest commit that changed this path. |
+| `--match` | Use latest commit matching this message pattern. |
+| `--before` | Use latest commit on or before this date. |
 
 #### branch create
 
@@ -301,7 +321,16 @@ gitstore tag create v1.0 --from main --before 2024-06-01
 
 # Delete
 gitstore tag delete v1.0
+
+# Hash
+gitstore tag hash v1.0
 ```
+
+#### tag hash
+
+| Argument | Description |
+|----------|-------------|
+| `NAME` | Tag name. |
 
 #### tag create
 

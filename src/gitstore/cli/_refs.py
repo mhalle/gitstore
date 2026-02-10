@@ -84,6 +84,35 @@ def branch_delete(ctx, name):
     _status(ctx, f"Deleted branch {name}")
 
 
+@branch.command("hash")
+@_repo_option
+@click.argument("name")
+@click.option("--back", type=int, default=0, help="Walk back N commits.")
+@click.option("--path", "at_path", default=None,
+              help="Use latest commit that changed this path.")
+@click.option("--match", "match_pattern", default=None,
+              help="Use latest commit matching this message pattern (* and ?).")
+@click.option("--before", "before", default=None,
+              help="Use latest commit on or before this date (ISO 8601).")
+@click.pass_context
+def branch_hash(ctx, name, back, at_path, match_pattern, before):
+    """Print the commit hash of branch NAME."""
+    store = _open_store(_require_repo(ctx))
+    try:
+        fs = store.branches[name]
+    except KeyError:
+        raise click.ClickException(f"Branch not found: {name}")
+    before = _parse_before(before)
+    fs = _resolve_snapshot(fs, at_path, match_pattern, before)
+    for _ in range(back):
+        p = fs.parent
+        if p is None:
+            raise click.ClickException(
+                f"Cannot go back {back} commits — history too short")
+        fs = p
+    click.echo(fs.hash)
+
+
 # ---------------------------------------------------------------------------
 # tag subcommands
 # ---------------------------------------------------------------------------
@@ -137,6 +166,20 @@ def tag_delete(ctx, name):
     except KeyError:
         raise click.ClickException(f"Tag not found: {name}")
     _status(ctx, f"Deleted tag {name}")
+
+
+@tag.command("hash")
+@_repo_option
+@click.argument("name")
+@click.pass_context
+def tag_hash(ctx, name):
+    """Print the commit hash of tag NAME."""
+    store = _open_store(_require_repo(ctx))
+    try:
+        fs = store.tags[name]
+    except KeyError:
+        raise click.ClickException(f"Tag not found: {name}")
+    click.echo(fs.hash)
 
 
 # Wire up the default subcommand references in _helpers
