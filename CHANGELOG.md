@@ -4,6 +4,17 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.35.0 (2026-02-10)
+
+**New features:**
+
+- Default to mtime-based change detection for `cp --delete` and `sync` — skips hashing files whose mtime predates the commit timestamp (like rsync)
+- Add `-c`/`--checksum` flag to `cp` and `sync` for exact SHA-1 comparison when needed (backdated mtime, archive extraction, etc.)
+
+**Tests:**
+
+- Add 6 tests for mtime vs checksum mode: unchanged skip, new mtime detection, cp --delete, backdated mtime tradeoff, dry-run/real-run agreement
+
 ## v0.34.0 (2026-02-10)
 
 **New features:**
