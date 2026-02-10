@@ -1123,13 +1123,41 @@ class TestCopyToRepoPivot:
         new_fs = copy_to_repo(fs, [src], "dest")
         assert new_fs.read("dest/sub/file.txt") == b"hi"
 
-    def test_pivot_with_glob_unsupported(self, store_and_fs):
-        """base/./sub/*.txt is treated as literal → FileNotFoundError."""
+    def test_pivot_with_glob(self, store_and_fs):
+        """base/./sub/*.txt expands glob and preserves pivot prefix."""
         _, fs, tmp_path = store_and_fs
         d = tmp_path / "base" / "sub"
         d.mkdir(parents=True)
         (d / "a.txt").write_text("aaa")
+        (d / "b.txt").write_text("bbb")
+        (d / "c.py").write_text("ccc")
         src = str(tmp_path / "base") + "/./sub/*.txt"
+        new_fs = copy_to_repo(fs, [src], "dest")
+        assert new_fs.read("dest/sub/a.txt") == b"aaa"
+        assert new_fs.read("dest/sub/b.txt") == b"bbb"
+        assert not new_fs.exists("dest/sub/c.py")
+
+    def test_pivot_with_glob_recursive(self, store_and_fs):
+        """base/./**/*.py expands recursive glob with pivot prefix."""
+        _, fs, tmp_path = store_and_fs
+        d = tmp_path / "base"
+        d.mkdir(parents=True)
+        (d / "x.py").write_text("x")
+        pkg = d / "pkg"
+        pkg.mkdir()
+        (pkg / "y.py").write_text("y")
+        src = str(tmp_path / "base") + "/./**/*.py"
+        new_fs = copy_to_repo(fs, [src], "dest")
+        assert new_fs.read("dest/x.py") == b"x"
+        assert new_fs.read("dest/pkg/y.py") == b"y"
+
+    def test_pivot_with_glob_no_match(self, store_and_fs):
+        """base/./sub/*.xyz raises FileNotFoundError when nothing matches."""
+        _, fs, tmp_path = store_and_fs
+        d = tmp_path / "base" / "sub"
+        d.mkdir(parents=True)
+        (d / "a.txt").write_text("aaa")
+        src = str(tmp_path / "base") + "/./sub/*.xyz"
         with pytest.raises(FileNotFoundError):
             copy_to_repo(fs, [src], "dest")
 
@@ -1220,11 +1248,35 @@ class TestCopyFromRepoPivot:
         copy_from_repo(fs, ["base\\.\\sub/file.txt"], str(out))
         assert (out / "sub" / "file.txt").read_text() == "hi"
 
-    def test_pivot_with_glob_unsupported(self, store_and_fs):
-        """base/./sub/*.txt is treated as literal → FileNotFoundError."""
+    def test_pivot_with_glob(self, store_and_fs):
+        """base/./sub/*.txt expands glob and preserves pivot prefix."""
+        _, fs, tmp_path = store_and_fs
+        fs = fs.write("base/sub/a.txt", b"aaa")
+        fs = fs.write("base/sub/b.txt", b"bbb")
+        fs = fs.write("base/sub/c.py", b"ccc")
+        out = tmp_path / "output"
+        out.mkdir()
+        copy_from_repo(fs, ["base/./sub/*.txt"], str(out))
+        assert (out / "sub" / "a.txt").read_text() == "aaa"
+        assert (out / "sub" / "b.txt").read_text() == "bbb"
+        assert not (out / "sub" / "c.py").exists()
+
+    def test_pivot_with_glob_recursive(self, store_and_fs):
+        """base/./**/*.py expands recursive glob with pivot prefix."""
+        _, fs, tmp_path = store_and_fs
+        fs = fs.write("base/x.py", b"x")
+        fs = fs.write("base/pkg/y.py", b"y")
+        out = tmp_path / "output"
+        out.mkdir()
+        copy_from_repo(fs, ["base/./**/*.py"], str(out))
+        assert (out / "x.py").read_text() == "x"
+        assert (out / "pkg" / "y.py").read_text() == "y"
+
+    def test_pivot_with_glob_no_match(self, store_and_fs):
+        """base/./sub/*.xyz raises FileNotFoundError when nothing matches."""
         _, fs, tmp_path = store_and_fs
         fs = fs.write("base/sub/a.txt", b"aaa")
         out = tmp_path / "output"
         out.mkdir()
         with pytest.raises(FileNotFoundError):
-            copy_from_repo(fs, ["base/./sub/*.txt"], str(out))
+            copy_from_repo(fs, ["base/./sub/*.xyz"], str(out))

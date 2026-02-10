@@ -137,9 +137,35 @@ def _expand_disk_glob(pattern: str) -> list[str]:
 def _disk_glob_walk(segments: list[str], prefix: str) -> list[str]:
     seg = segments[0]
     rest = segments[1:]
-    has_wild = "*" in seg or "?" in seg
 
     scan_dir = prefix or "."
+
+    if seg == "**":
+        # Match zero or more directory levels, skipping dotfiles.
+        try:
+            entries = os.listdir(scan_dir)
+        except (FileNotFoundError, NotADirectoryError, PermissionError):
+            return []
+        results: list[str] = []
+        # Zero dirs: try matching rest against entries at this level
+        if rest:
+            results.extend(_disk_glob_walk(rest, prefix))
+        else:
+            for name in entries:
+                if name.startswith("."):
+                    continue
+                full = os.path.join(prefix, name) if prefix else name
+                results.append(full)
+        # One+ dirs: recurse into non-dot subdirs (keep ** segment)
+        for name in entries:
+            if name.startswith("."):
+                continue
+            full = os.path.join(prefix, name) if prefix else name
+            if os.path.isdir(full):
+                results.extend(_disk_glob_walk(segments, full))
+        return results
+
+    has_wild = "*" in seg or "?" in seg
 
     if has_wild:
         try:
@@ -195,6 +221,27 @@ def _resolve_disk_sources(sources: list[str]) -> list[tuple[str, str, str]]:
             rest = rest_os.replace(os.sep, "/")            # normalised for contents_mode / prefix
             contents_mode = rest.endswith("/")
             rest_clean = rest.rstrip("/")
+            has_glob = "*" in rest_clean or "?" in rest_clean
+
+            if has_glob:
+                # Pivot + glob: expand the full pattern and compute
+                # per-match prefix relative to the pivot base.
+                full_pattern = os.path.join(base, rest_clean) if rest_clean else base
+                expanded = _expand_disk_glob(full_pattern)
+                if not expanded:
+                    raise FileNotFoundError(f"No matches for pattern: {full_pattern}")
+                base_prefix = base.replace(os.sep, "/").rstrip("/") + "/"
+                for path in expanded:
+                    rel = path.replace(os.sep, "/")
+                    if rel.startswith(base_prefix):
+                        rel = rel[len(base_prefix):]
+                    prefix = "/".join(rel.split("/")[:-1])
+                    if os.path.isdir(path):
+                        resolved.append((path, "dir", prefix))
+                    else:
+                        resolved.append((path, "file", prefix))
+                continue
+
             rest_os_clean = rest_os.rstrip("/").rstrip(os.sep)
             full_path = os.path.join(base, rest_os_clean) if rest_os_clean else base
 
@@ -257,6 +304,25 @@ def _resolve_repo_sources(fs: FS, sources: list[str]) -> list[tuple[str, str, st
             rest = src[idx + 3:].replace("\\", "/")   # normalise for repo paths
             contents_mode = rest.endswith("/")
             rest_clean = rest.rstrip("/")
+            has_glob = "*" in rest_clean or "?" in rest_clean
+
+            if has_glob:
+                # Pivot + glob: expand via repo glob and compute
+                # per-match prefix relative to the pivot base.
+                full_pattern = f"{base}/{rest_clean}" if rest_clean else base
+                expanded = fs.glob(full_pattern)
+                if not expanded:
+                    raise FileNotFoundError(f"No matches for pattern in repo: {full_pattern}")
+                base_prefix = base.rstrip("/") + "/"
+                for path in expanded:
+                    rel = path[len(base_prefix):] if path.startswith(base_prefix) else path
+                    prefix = "/".join(rel.split("/")[:-1])
+                    if fs.is_dir(path):
+                        resolved.append((path, "dir", prefix))
+                    else:
+                        resolved.append((path, "file", prefix))
+                continue
+
             full_path = f"{base}/{rest_clean}" if rest_clean else base
             full_path = _normalize_path(full_path)
             if not fs.exists(full_path):
