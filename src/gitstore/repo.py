@@ -194,6 +194,32 @@ class RefDict(MutableMapping):
     def __len__(self) -> int:
         return sum(1 for _ in self)
 
+    def set(self, name: str, fs) -> FS:
+        """Set branch to FS snapshot and return writable FS bound to it.
+
+        This is a convenience method that combines setting and getting:
+
+            fs_new = repo.branches.set('feature', fs)
+
+        Is equivalent to:
+
+            repo.branches['feature'] = fs
+            fs_new = repo.branches['feature']
+
+        Args:
+            name: Branch name
+            fs: FS snapshot to set (can be read-only)
+
+        Returns:
+            New writable FS bound to the branch
+
+        Example:
+            >>> fs_wow = repo.branches.set('wow', fs_main)
+            >>> fs_wow.branch  # 'wow' (not 'main')
+        """
+        self[name] = fs
+        return self[name]
+
     def reflog(self, name: str) -> list[dict]:
         """Read reflog entries for a branch.
 

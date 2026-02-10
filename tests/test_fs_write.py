@@ -539,3 +539,66 @@ class TestUndoRedoEdgeCases:
         # fs is now stale (points to init commit, branch moved to fs1)
         with pytest.raises(ValueError, match="stale"):
             fs.redo()
+
+
+class TestBranchesSet:
+    def test_set_returns_writable_fs(self, repo_fs):
+        """branches.set() should return writable FS bound to new branch."""
+        repo, fs = repo_fs
+        fs1 = fs.write("a.txt", b"a")
+
+        fs_new = repo.branches.set("feature", fs1)
+
+        assert fs_new.branch == "feature"
+        assert fs_new.hash == fs1.hash
+        assert fs_new is not fs1  # New object
+        assert fs_new._writable
+
+    def test_set_creates_new_branch(self, repo_fs):
+        """branches.set() should create branch if it doesn't exist."""
+        repo, fs = repo_fs
+        fs1 = fs.write("a.txt", b"a")
+
+        fs_feature = repo.branches.set("feature", fs1)
+
+        assert "feature" in repo.branches
+        assert repo.branches["feature"].hash == fs1.hash
+
+    def test_set_updates_existing_branch(self, repo_fs):
+        """branches.set() should update existing branch."""
+        repo, fs = repo_fs
+        fs1 = fs.write("a.txt", b"a")
+        fs2 = fs1.write("b.txt", b"b")
+
+        repo.branches["feature"] = fs1
+        fs_updated = repo.branches.set("feature", fs2)
+
+        assert fs_updated.hash == fs2.hash
+        assert fs_updated.branch == "feature"
+
+    def test_set_with_readonly_snapshot(self, repo_fs):
+        """branches.set() should accept read-only snapshots."""
+        repo, fs = repo_fs
+        fs1 = fs.write("a.txt", b"a")
+
+        repo.tags["v1"] = fs1
+        tag_fs = repo.tags["v1"]
+
+        # Should accept read-only tag snapshot
+        fs_branch = repo.branches.set("from-tag", tag_fs)
+
+        assert fs_branch.branch == "from-tag"
+        assert fs_branch._writable
+        assert fs_branch.hash == tag_fs.hash
+
+    def test_set_result_is_writable(self, repo_fs):
+        """FS returned by set() should be writable."""
+        repo, fs = repo_fs
+        fs1 = fs.write("a.txt", b"a")
+
+        fs_branch = repo.branches.set("feature", fs1)
+        fs2 = fs_branch.write("b.txt", b"b")
+
+        # Should update the 'feature' branch
+        assert fs2.branch == "feature"
+        assert repo.branches["feature"].hash == fs2.hash

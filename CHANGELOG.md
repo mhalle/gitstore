@@ -4,6 +4,25 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.28.0 (2026-02-09)
+
+**New features:**
+
+- Add undo/redo functionality with reflog support
+  - `fs.undo(steps=1)` - Move branch back N commits
+  - `fs.redo(steps=1)` - Move branch forward using reflog
+  - `repo.branches.reflog(name)` - Read branch movement history
+  - CLI commands: `gitstore undo`, `gitstore redo`, `gitstore reflog`
+  - Reflog supports text, JSON, and JSONL output formats
+- Add `repo.branches.set(name, fs)` method to solve chained assignment footgun
+  - Returns writable FS bound to the branch (unlike bracket assignment)
+  - Avoids confusion where `fs2 = repo.branches['x'] = fs1` leaves fs2 bound to old branch
+- Document old snapshot semantics: readable bookmarks that can reset/create branches but cannot write
+
+**Tests:**
+- Add 22 comprehensive tests for undo/redo/reflog including edge cases
+- Add 5 tests for `branches.set()` method
+
 ## v0.27.0 (2026-02-09)
 
 **Breaking API change:** `copy_to_repo()` and `sync_to_repo()` now return just `FS` instead of `tuple[FS, CopyReport | None]`. Access the report via `fs.report` property.

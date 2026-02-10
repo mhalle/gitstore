@@ -45,6 +45,30 @@ del repo.branches["dev"]        # delete
 "main" in repo.branches         # True
 ```
 
+#### `repo.branches.set(name, fs) -> FS`
+
+Set a branch to an FS snapshot and return a writable FS bound to it. This combines setting and getting in one operation.
+
+**Returns:** New writable `FS` bound to the branch (not the input `fs`).
+
+```python
+# Instead of:
+repo.branches['feature'] = fs
+fs_feature = repo.branches['feature']
+
+# Use:
+fs_feature = repo.branches.set('feature', fs)
+```
+
+**Important:** Avoids the chained assignment footgun:
+```python
+# ❌ WRONG - fs2 is still bound to old branch!
+fs2 = repo.branches['wow'] = fs1
+
+# ✓ CORRECT - fs2 is bound to 'wow'
+fs2 = repo.branches.set('wow', fs1)
+```
+
 #### `repo.branches.reflog(name) -> list[dict]`
 
 Read the reflog (reference log) for a branch. The reflog records every time a branch pointer moves, including commits, undos, and branch updates.
@@ -351,20 +375,32 @@ fs1 = fs.write("a.txt", b"a")
 fs2 = fs1.write("b.txt", b"b")
 fs3 = fs2.write("c.txt", b"c")
 
-# Create new branch from fs1
-repo.branches["experiment"] = fs1
-
-# Get writable snapshot from new branch
-exp = repo.branches["experiment"]
+# Create new branch from fs1 and get writable FS
+exp = repo.branches.set("experiment", fs1)
 exp = exp.write("x.txt", b"x")  # Works!
 ```
 
-The new branch starts at the old snapshot's commit, and you can write from the fresh branch snapshot.
+**Alternative (two statements):**
+```python
+repo.branches["experiment"] = fs1  # Set branch
+exp = repo.branches["experiment"]   # Get writable FS
+```
+
+**⚠️ Warning - Chained assignment doesn't work:**
+```python
+# ❌ WRONG - exp is still bound to old branch!
+exp = repo.branches["experiment"] = fs1
+exp.branch  # NOT "experiment"!
+
+# ✓ CORRECT - use .set() instead
+exp = repo.branches.set("experiment", fs1)
+exp.branch  # "experiment" ✓
+```
 
 **Pattern:**
 1. Keep old snapshot as read-only bookmark
-2. Use it to set branch pointers (`repo.branches[name] = old_fs`)
-3. Get fresh snapshot from branch to continue writing
+2. Use `.set()` to create branch and get writable FS in one step
+3. Or use bracket notation in two separate statements
 
 ---
 
