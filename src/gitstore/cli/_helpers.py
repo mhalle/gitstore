@@ -131,7 +131,7 @@ def _get_branch_fs(store: GitStore, branch: str):
 
 
 def _get_fs(store: GitStore, branch: str, ref: str | None):
-    """Resolve an FS from --hash (any ref) or --branch."""
+    """Resolve an FS from --ref (any ref) or --branch."""
     if ref:
         return _resolve_ref(store, ref)
     return _get_branch_fs(store, branch)

@@ -236,7 +236,7 @@ def _do_import(ctx, store, branch: str, filename: str, message: str | None, fmt:
 @_repo_option
 @click.argument("filename", type=click.Path())
 @click.option("--branch", "-b", default="main", help="Branch to export from.")
-@click.option("--hash", "ref", default=None, help="Branch, tag, or commit hash to export from.")
+@click.option("--ref", "ref", default=None, help="Branch, tag, or commit hash to export from.")
 @click.option("--path", "at_path", default=None, help="Use latest commit that changed this path.")
 @click.option("--at", "deprecated_at", default=None, hidden=True)
 @click.option("--match", "match_pattern", default=None, help="Use latest commit matching this message pattern (* and ?).")
@@ -283,7 +283,7 @@ def unzip_cmd(ctx, filename, branch, message, no_create):
 @_repo_option
 @click.argument("filename", type=click.Path())
 @click.option("--branch", "-b", default="main", help="Branch to export from.")
-@click.option("--hash", "ref", default=None, help="Branch, tag, or commit hash to export from.")
+@click.option("--ref", "ref", default=None, help="Branch, tag, or commit hash to export from.")
 @click.option("--path", "at_path", default=None, help="Use latest commit that changed this path.")
 @click.option("--at", "deprecated_at", default=None, hidden=True)
 @click.option("--match", "match_pattern", default=None, help="Use latest commit matching this message pattern (* and ?).")
@@ -334,7 +334,7 @@ def untar_cmd(ctx, filename, branch, message, no_create):
 @click.option("--format", "fmt", type=click.Choice(["zip", "tar"]), default=None,
               help="Archive format (auto-detected from extension if omitted).")
 @click.option("--branch", "-b", default="main", help="Branch to export from.")
-@click.option("--hash", "ref", default=None, help="Branch, tag, or commit hash.")
+@click.option("--ref", "ref", default=None, help="Branch, tag, or commit hash.")
 @click.option("--path", "at_path", default=None, help="Use latest commit that changed this path.")
 @click.option("--match", "match_pattern", default=None, help="Use latest commit matching this message pattern (* and ?).")
 @click.option("--before", "before", default=None, help="Use latest commit on or before this date (ISO 8601).")

@@ -28,7 +28,7 @@ from ._helpers import (
 @_repo_option
 @click.argument("args", nargs=-1, required=True)
 @click.option("--branch", "-b", default="main", help="Branch to operate on.")
-@click.option("--hash", "ref", default=None, help="Branch, tag, or commit hash to read from.")
+@click.option("--ref", "ref", default=None, help="Branch, tag, or commit hash to read from.")
 @click.option("--path", "at_path", default=None, help="Use latest commit that changed this path.")
 @click.option("--match", "match_pattern", default=None, help="Use latest commit matching this message pattern (* and ?).")
 @click.option("--before", "before", default=None, help="Use latest commit on or before this date (ISO 8601).")
@@ -98,7 +98,7 @@ def cp(ctx, args, branch, ref, at_path, match_pattern, before, message, mode, fo
     has_snapshot_filters = ref or at_path or match_pattern or before
     if has_snapshot_filters and not src_is_repo:
         raise click.ClickException(
-            "--hash/--path/--match/--before only apply when reading from repo"
+            "--ref/--path/--match/--before only apply when reading from repo"
         )
 
     repo_path = _require_repo(ctx)

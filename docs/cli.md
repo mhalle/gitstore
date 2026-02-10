@@ -26,11 +26,11 @@ For `cp` and `sync`, prefix repo-side paths with `:` to distinguish them from lo
 
 ### Snapshot filters
 
-Read commands support `--hash` to read from any branch, tag, or full commit hash. Several commands also support these filters to select a specific commit:
+Read commands support `--ref` to read from any branch, tag, or full commit hash. Several commands also support these filters to select a specific commit:
 
 | Option | Description |
 |--------|-------------|
-| `--hash REF` | Branch, tag, or commit hash to read from. |
+| `--ref REF` | Branch, tag, or commit hash to read from. |
 | `--path PATH` | Use the latest commit that changed this file. |
 | `--match PATTERN` | Use the latest commit matching this message pattern (`*` and `?`). |
 | `--before DATE` | Use the latest commit on or before this date (ISO 8601). |
@@ -111,14 +111,14 @@ gitstore cp ':docs/*.md' ./local-docs         # repo-side glob
 gitstore cp -n ./mydir :dest
 
 # With snapshot filters
-gitstore cp :file.txt local.txt --hash v1.0
+gitstore cp :file.txt local.txt --ref v1.0
 gitstore cp :file.txt local.txt --path file.txt --before 2024-06-01
 ```
 
 | Option | Description |
 |--------|-------------|
 | `--branch`, `-b` | Branch to operate on (default: `main`). |
-| `--hash` | Branch, tag, or commit hash to read from. |
+| `--ref` | Branch, tag, or commit hash to read from. |
 | `--path` | Use latest commit that changed this path. |
 | `--match` | Use latest commit matching this message pattern. |
 | `--before` | Use latest commit on or before this date. |
@@ -159,13 +159,13 @@ gitstore sync :repo_path ./local     # repo to disk
 gitstore sync -n ./local :repo_path
 
 # With snapshot filters (repo to disk only)
-gitstore sync :data ./local --hash v1.0
+gitstore sync :data ./local --ref v1.0
 ```
 
 | Option | Description |
 |--------|-------------|
 | `--branch`, `-b` | Branch to operate on (default: `main`). |
-| `--hash` | Branch, tag, or commit hash to read from. |
+| `--ref` | Branch, tag, or commit hash to read from. |
 | `--path` | Use latest commit that changed this path. |
 | `--match` | Use latest commit matching this message pattern. |
 | `--before` | Use latest commit on or before this date. |
@@ -181,14 +181,14 @@ List files and directories.
 ```bash
 gitstore ls                    # root listing
 gitstore ls subdir             # subdirectory
-gitstore ls --hash v1.0        # at a specific ref
+gitstore ls --ref v1.0        # at a specific ref
 gitstore ls --path file.txt    # at commit that last changed file.txt
 ```
 
 | Option | Description |
 |--------|-------------|
 | `--branch`, `-b` | Branch to list (default: `main`). |
-| `--hash` | Branch, tag, or commit hash. |
+| `--ref` | Branch, tag, or commit hash. |
 | `--path` | Use latest commit that changed this path. |
 | `--match` | Use latest commit matching this message pattern. |
 | `--before` | Use latest commit on or before this date. |
@@ -199,14 +199,14 @@ Print file contents to stdout.
 
 ```bash
 gitstore cat file.txt
-gitstore cat file.txt --hash v1.0
+gitstore cat file.txt --ref v1.0
 gitstore cat file.txt --path file.txt --before 2024-06-01
 ```
 
 | Option | Description |
 |--------|-------------|
 | `--branch`, `-b` | Branch to read from (default: `main`). |
-| `--hash` | Branch, tag, or commit hash. |
+| `--ref` | Branch, tag, or commit hash. |
 | `--path` | Use latest commit that changed this path. |
 | `--match` | Use latest commit matching this message pattern. |
 | `--before` | Use latest commit on or before this date. |
@@ -243,7 +243,7 @@ gitstore log --format jsonl
 | Option | Description |
 |--------|-------------|
 | `--branch`, `-b` | Branch to show log for (default: `main`). |
-| `--hash` | Branch, tag, or commit hash to start from. |
+| `--ref` | Branch, tag, or commit hash to start from. |
 | `--path` | Show only commits that changed this path. |
 | `--match` | Show only commits matching this message pattern. |
 | `--before` | Show only commits on or before this date. |
@@ -342,7 +342,7 @@ gitstore unarchive archive.zip -m "Import data" -b dev
 |--------|-------------|
 | `--format` | `zip` or `tar` (overrides auto-detection; required for stdout). |
 | `--branch`, `-b` | Branch to export from (default: `main`). |
-| `--hash` | Branch, tag, or commit hash. |
+| `--ref` | Branch, tag, or commit hash. |
 | `--path` | Use latest commit that changed this path. |
 | `--match` | Use latest commit matching this message pattern. |
 | `--before` | Use latest commit on or before this date. |

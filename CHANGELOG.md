@@ -19,6 +19,7 @@ All notable changes to gitstore are documented in this file.
 **Breaking changes:**
 
 - `tag create` now uses `--from` option instead of positional `FROM` argument (consistent with `branch create`)
+- Rename `--hash` to `--ref` on all read commands (`cp`, `sync`, `ls`, `cat`, `log`, `archive`, `zip`, `tar`)
 
 **Documentation:**
 

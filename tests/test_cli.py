@@ -2159,7 +2159,7 @@ class TestBefore:
 # ---------------------------------------------------------------------------
 
 class TestHash:
-    """Tests for the --hash option on read commands."""
+    """Tests for the --ref option on read commands."""
 
     @staticmethod
     def _get_commit_hash(repo_path):
@@ -2180,7 +2180,7 @@ class TestHash:
     def test_cat_by_hash(self, runner, repo_with_files):
         commit_hash = self._get_commit_hash(repo_with_files)
         result = runner.invoke(main, [
-            "cat", "--repo", repo_with_files, "hello.txt", "--hash", commit_hash
+            "cat", "--repo", repo_with_files, "hello.txt", "--ref", commit_hash
         ])
         assert result.exit_code == 0
         assert "hello world" in result.output
@@ -2188,7 +2188,7 @@ class TestHash:
     def test_ls_by_hash(self, runner, repo_with_files):
         commit_hash = self._get_commit_hash(repo_with_files)
         result = runner.invoke(main, [
-            "ls", "--repo", repo_with_files, "--hash", commit_hash
+            "ls", "--repo", repo_with_files, "--ref", commit_hash
         ])
         assert result.exit_code == 0
         assert "hello.txt" in result.output
@@ -2198,7 +2198,7 @@ class TestHash:
         # Create a tag first
         runner.invoke(main, ["tag", "--repo", repo_with_files, "create", "v1.0", "--from", "main"])
         result = runner.invoke(main, [
-            "cat", "--repo", repo_with_files, "hello.txt", "--hash", "v1.0"
+            "cat", "--repo", repo_with_files, "hello.txt", "--ref", "v1.0"
         ])
         assert result.exit_code == 0
         assert "hello world" in result.output
@@ -2207,7 +2207,7 @@ class TestHash:
         commit_hash = self._get_commit_hash(repo_with_files)
         short = commit_hash[:7]
         result = runner.invoke(main, [
-            "cat", "--repo", repo_with_files, "hello.txt", "--hash", short
+            "cat", "--repo", repo_with_files, "hello.txt", "--ref", short
         ])
         # pygit2 resolves short hashes, so this should succeed
         assert result.exit_code == 0
@@ -2218,7 +2218,7 @@ class TestHash:
         dest = tmp_path / "out.txt"
         result = runner.invoke(main, [
             "cp", "--repo", repo_with_files, ":hello.txt", str(dest),
-            "--hash", commit_hash
+            "--ref", commit_hash
         ])
         assert result.exit_code == 0
         assert dest.read_text() == "hello world\n"
@@ -2229,7 +2229,7 @@ class TestHash:
         dest.mkdir()
         result = runner.invoke(main, [
             "cp", "--repo", repo_with_files, ":data/", str(dest),
-            "--hash", commit_hash
+            "--ref", commit_hash
         ])
         assert result.exit_code == 0
         assert (dest / "data.bin").read_bytes() == b"\x00\x01\x02"
@@ -2239,7 +2239,7 @@ class TestHash:
         parent_hash = self._get_parent_hash(repo_with_files)
         out = str(tmp_path / "archive.zip")
         result = runner.invoke(main, [
-            "zip", "--repo", repo_with_files, out, "--hash", parent_hash
+            "zip", "--repo", repo_with_files, out, "--ref", parent_hash
         ])
         assert result.exit_code == 0, result.output
         with zipfile.ZipFile(out, "r") as zf:
@@ -2253,7 +2253,7 @@ class TestHash:
         parent_hash = self._get_parent_hash(repo_with_files)
         out = str(tmp_path / "archive.tar")
         result = runner.invoke(main, [
-            "tar", "--repo", repo_with_files, out, "--hash", parent_hash
+            "tar", "--repo", repo_with_files, out, "--ref", parent_hash
         ])
         assert result.exit_code == 0, result.output
         with tarfile.open(out, "r") as tf:
@@ -2264,7 +2264,7 @@ class TestHash:
     def test_log_by_hash(self, runner, repo_with_files):
         parent_hash = self._get_parent_hash(repo_with_files)
         result = runner.invoke(main, [
-            "log", "--repo", repo_with_files, "--hash", parent_hash
+            "log", "--repo", repo_with_files, "--ref", parent_hash
         ])
         assert result.exit_code == 0
         lines = result.output.strip().split("\n")
@@ -2278,10 +2278,10 @@ class TestHash:
         # Create a dev branch with different content
         runner.invoke(main, ["branch", "--repo", repo_with_files, "create", "dev", "--from", "main"])
         commit_hash = self._get_commit_hash(repo_with_files)
-        # Use --branch dev but --hash pointing to main's commit
+        # Use --branch dev but --ref pointing to main's commit
         result = runner.invoke(main, [
             "cat", "--repo", repo_with_files, "hello.txt",
-            "-b", "dev", "--hash", commit_hash
+            "-b", "dev", "--ref", commit_hash
         ])
         assert result.exit_code == 0
         assert "hello world" in result.output
@@ -2289,7 +2289,7 @@ class TestHash:
     def test_hash_invalid_ref(self, runner, repo_with_files):
         result = runner.invoke(main, [
             "cat", "--repo", repo_with_files, "hello.txt",
-            "--hash", "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+            "--ref", "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
         ])
         assert result.exit_code != 0
         assert "Unknown ref" in result.output
@@ -2300,7 +2300,7 @@ class TestHash:
         f.write_text("data")
         result = runner.invoke(main, [
             "cp", "--repo", repo_with_files, str(f), ":new.txt",
-            "--hash", commit_hash
+            "--ref", commit_hash
         ])
         assert result.exit_code != 0
         assert "only apply when reading from repo" in result.output

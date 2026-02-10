@@ -91,7 +91,7 @@ def destroy(ctx, force):
 @_repo_option
 @click.argument("path", required=False, default=None)
 @click.option("--branch", "-b", default="main", help="Branch to list.")
-@click.option("--hash", "ref", default=None, help="Branch, tag, or commit hash to read from.")
+@click.option("--ref", "ref", default=None, help="Branch, tag, or commit hash to read from.")
 @click.option("--path", "at_path", default=None, help="Use latest commit that changed this path.")
 @click.option("--match", "match_pattern", default=None, help="Use latest commit matching this message pattern (* and ?).")
 @click.option("--before", "before", default=None, help="Use latest commit on or before this date (ISO 8601).")
@@ -127,7 +127,7 @@ def ls(ctx, path, branch, ref, at_path, match_pattern, before):
 @_repo_option
 @click.argument("path")
 @click.option("--branch", "-b", default="main", help="Branch to read from.")
-@click.option("--hash", "ref", default=None, help="Branch, tag, or commit hash to read from.")
+@click.option("--ref", "ref", default=None, help="Branch, tag, or commit hash to read from.")
 @click.option("--path", "at_path", default=None, help="Use latest commit that changed this path.")
 @click.option("--match", "match_pattern", default=None, help="Use latest commit matching this message pattern (* and ?).")
 @click.option("--before", "before", default=None, help="Use latest commit on or before this date (ISO 8601).")
@@ -191,7 +191,7 @@ def rm(ctx, path, branch, message):
 @click.option("--match", "match_pattern", default=None, help="Show only commits matching this message pattern (* and ?).")
 @click.option("--before", "before", default=None, help="Show only commits on or before this date (ISO 8601).")
 @click.option("--branch", "-b", default="main", help="Branch to show log for.")
-@click.option("--hash", "ref", default=None, help="Branch, tag, or commit hash to start from.")
+@click.option("--ref", "ref", default=None, help="Branch, tag, or commit hash to start from.")
 @click.option("--format", "fmt", default="text",
               type=click.Choice(["text", "json", "jsonl"]),
               help="Output format.")
