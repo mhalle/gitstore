@@ -170,7 +170,7 @@ def ls(ctx, paths, branch, recursive, ref, at_path, match_pattern, before):
             except NotADirectoryError:
                 raise click.ClickException(f"Not a directory: {repo_path}")
 
-    for entry in sorted(results):
+    for entry in results:
         click.echo(entry)
 
 

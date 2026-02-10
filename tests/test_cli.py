@@ -850,7 +850,7 @@ class TestLsRecursive:
         assert "src/sub/deep.txt" in lines
         assert "docs/guide.md" in lines
         assert "docs/api.md" in lines
-        assert lines == sorted(lines)
+        assert len(lines) == len(set(lines))  # unique, not necessarily sorted
 
     def test_subdir(self, runner, repo_with_tree):
         result = runner.invoke(main, ["ls", "-R", "--repo", repo_with_tree, ":src"])
