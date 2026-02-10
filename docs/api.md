@@ -243,6 +243,29 @@ with fs.batch(message="Import dataset v2") as b:
     b.write("meta.json", metadata)
 ```
 
+**Message placeholders:**
+
+Custom messages can include placeholders that expand at commit time:
+
+| Placeholder | Expands to | Example |
+|-------------|------------|---------|
+| `{default}` | Full auto-generated message | `Batch cp: +3 ~1` |
+| `{add_count}` | Number of added files | `3` |
+| `{update_count}` | Number of updated files | `1` |
+| `{delete_count}` | Number of deleted files | `0` |
+| `{total_count}` | Total changed files | `4` |
+| `{op}` | Operation name (`cp`, `ar`, or empty) | `cp` |
+
+```python
+from gitstore import copy_to_repo
+
+new_fs = copy_to_repo(fs, ["src/"], "deploy",
+                       message="Deploy v2: {default}")
+# Commit message: "Deploy v2: Batch cp: +3 ~1"
+```
+
+A message without `{` is returned as-is (backward compatible). Unknown placeholders raise `KeyError`.
+
 ### Batch
 
 #### `fs.batch(message=None) -> Batch`
@@ -468,7 +491,7 @@ Copy local files/directories/globs into the repo.
 | `sources` | `list[str]` | Local source paths. Trailing `/` means "contents of". |
 | `dest` | `str` | Repo destination path (empty string for root). |
 | `follow_symlinks` | `bool` | Dereference symlinks instead of preserving them. |
-| `message` | `str \| None` | Custom commit message. |
+| `message` | `str \| None` | Custom commit message (supports [placeholders](#message-placeholders)). |
 | `mode` | `int \| None` | Override file mode for all files. |
 | `ignore_existing` | `bool` | Skip files that already exist in the repo. |
 | `delete` | `bool` | Remove repo files not in source (rsync `--delete`). |

@@ -158,7 +158,7 @@ def cat(ctx, path, branch, ref, at_path, match_pattern, before):
 @_repo_option
 @click.argument("path")
 @click.option("--branch", "-b", default="main", help="Branch to remove from.")
-@click.option("-m", "message", default=None, help="Commit message.")
+@click.option("-m", "--message", default=None, help="Commit message. Use {default} to include auto-generated message.")
 @click.pass_context
 def rm(ctx, path, branch, message):
     """Remove a file from the repo."""

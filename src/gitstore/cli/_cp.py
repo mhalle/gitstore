@@ -32,7 +32,7 @@ from ._helpers import (
 @click.option("--path", "at_path", default=None, help="Use latest commit that changed this path.")
 @click.option("--match", "match_pattern", default=None, help="Use latest commit matching this message pattern (* and ?).")
 @click.option("--before", "before", default=None, help="Use latest commit on or before this date (ISO 8601).")
-@click.option("-m", "message", default=None, help="Commit message.")
+@click.option("-m", "--message", default=None, help="Commit message. Use {default} to include auto-generated message.")
 @click.option("--mode", type=click.Choice(["644", "755"]), default=None,
               help="File mode (default: 644).")
 @click.option("--follow-symlinks", is_flag=True, default=False,

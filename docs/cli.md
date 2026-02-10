@@ -122,7 +122,7 @@ gitstore cp :file.txt local.txt --path file.txt --before 2024-06-01
 | `--path` | Use latest commit that changed this path. |
 | `--match` | Use latest commit matching this message pattern. |
 | `--before` | Use latest commit on or before this date. |
-| `-m` | Commit message. |
+| `-m`, `--message` | Commit message (supports [placeholders](#message-placeholders)). |
 | `--mode` | File mode: `644` (default) or `755`. |
 | `--follow-symlinks` | Dereference symlinks (disk to repo only). |
 | `-n`, `--dry-run` | Show what would be copied without writing. |
@@ -169,7 +169,7 @@ gitstore sync :data ./local --hash v1.0
 | `--path` | Use latest commit that changed this path. |
 | `--match` | Use latest commit matching this message pattern. |
 | `--before` | Use latest commit on or before this date. |
-| `-m` | Commit message. |
+| `-m`, `--message` | Commit message (supports [placeholders](#message-placeholders)). |
 | `-n`, `--dry-run` | Show what would change without writing. |
 | `--ignore-errors` | Skip failed files and continue. |
 | `--no-create` | Do not auto-create the repository. |
@@ -223,7 +223,7 @@ gitstore rm old-file.txt -m "Clean up"
 | Option | Description |
 |--------|-------------|
 | `--branch`, `-b` | Branch to remove from (default: `main`). |
-| `-m` | Commit message. |
+| `-m`, `--message` | Commit message (supports [placeholders](#message-placeholders)). |
 
 ### log
 
@@ -353,7 +353,7 @@ gitstore unarchive archive.zip -m "Import data" -b dev
 |--------|-------------|
 | `--format` | `zip` or `tar` (overrides auto-detection; required for stdin). |
 | `--branch`, `-b` | Branch to import into (default: `main`). |
-| `-m` | Commit message. |
+| `-m`, `--message` | Commit message (supports [placeholders](#message-placeholders)). |
 | `--no-create` | Do not auto-create the repository. |
 
 ### zip / unzip / tar / untar
@@ -397,6 +397,27 @@ gitstore restore -n https://github.com/user/repo.git   # preview
 |--------|-------------|
 | `-n`, `--dry-run` | Show what would change without transferring data. |
 | `--no-create` | Do not auto-create the repository. |
+
+### Message placeholders
+
+The `-m` option accepts placeholders that expand at commit time:
+
+| Placeholder | Expands to | Example |
+|-------------|------------|---------|
+| `{default}` | Full auto-generated message | `Batch cp: +3 ~1` |
+| `{add_count}` | Number of added files | `3` |
+| `{update_count}` | Number of updated files | `1` |
+| `{delete_count}` | Number of deleted files | `0` |
+| `{total_count}` | Total changed files | `4` |
+| `{op}` | Operation name (`cp`, `ar`, or empty) | `cp` |
+
+```bash
+gitstore cp dir/ :dest -m "Deploy v2: {default}"       # Deploy v2: Batch cp: +3 ~1
+gitstore sync ./src :code -m "Sync {total_count} files" # Sync 4 files
+gitstore cp file.txt : -m "Release build"               # Release build (no placeholders)
+```
+
+A message without `{` is returned as-is (backward compatible). Unknown placeholders raise an error.
 
 ---
 

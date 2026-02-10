@@ -29,7 +29,7 @@ from ._helpers import (
 @click.option("--path", "at_path", default=None, help="Use latest commit that changed this path.")
 @click.option("--match", "match_pattern", default=None, help="Use latest commit matching this message pattern (* and ?).")
 @click.option("--before", "before", default=None, help="Use latest commit on or before this date (ISO 8601).")
-@click.option("-m", "message", default=None, help="Commit message.")
+@click.option("-m", "--message", default=None, help="Commit message. Use {default} to include auto-generated message.")
 @click.option("-n", "--dry-run", "dry_run", is_flag=True, default=False,
               help="Show what would change without writing.")
 @click.option("--ignore-errors", is_flag=True, default=False,

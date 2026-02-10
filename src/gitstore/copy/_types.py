@@ -88,12 +88,30 @@ def format_commit_message(report: CopyReport, custom_message: str | None = None,
 
     Args:
         report: The operation report
-        custom_message: Custom message (overrides auto-generation)
+        custom_message: Custom message (overrides auto-generation).
+            Supports placeholders: ``{default}``, ``{add_count}``,
+            ``{update_count}``, ``{delete_count}``, ``{total_count}``,
+            ``{op}``.
         operation: Operation type ("cp", "ar") or None for generic batch
     """
     if custom_message:
+        if "{" in custom_message:
+            default = _auto_message(report, operation)
+            return custom_message.format(
+                default=default,
+                add_count=len(report.add),
+                update_count=len(report.update),
+                delete_count=len(report.delete),
+                total_count=report.total,
+                op=operation or "",
+            )
         return custom_message
 
+    return _auto_message(report, operation)
+
+
+def _auto_message(report: CopyReport, operation: str | None) -> str:
+    """Generate the default auto commit message."""
     if report.total == 0:
         return "No changes"
 

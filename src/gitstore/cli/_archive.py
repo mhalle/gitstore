@@ -262,7 +262,7 @@ def zip_cmd(ctx, filename, branch, ref, at_path, deprecated_at, match_pattern, b
 @_repo_option
 @click.argument("filename", type=click.Path(exists=True))
 @click.option("--branch", "-b", default="main", help="Branch to import into.")
-@click.option("-m", "message", default=None, help="Commit message.")
+@click.option("-m", "--message", default=None, help="Commit message. Use {default} to include auto-generated message.")
 @_no_create_option
 @click.pass_context
 def unzip_cmd(ctx, filename, branch, message, no_create):
@@ -310,7 +310,7 @@ def tar_cmd(ctx, filename, branch, ref, at_path, deprecated_at, match_pattern, b
 @_repo_option
 @click.argument("filename", type=click.Path(), default="-")
 @click.option("--branch", "-b", default="main", help="Branch to import into.")
-@click.option("-m", "message", default=None, help="Commit message.")
+@click.option("-m", "--message", default=None, help="Commit message. Use {default} to include auto-generated message.")
 @_no_create_option
 @click.pass_context
 def untar_cmd(ctx, filename, branch, message, no_create):
@@ -361,7 +361,7 @@ def archive_cmd(ctx, filename, fmt, branch, ref, at_path, match_pattern, before)
 @click.option("--format", "fmt", type=click.Choice(["zip", "tar"]), default=None,
               help="Archive format (auto-detected from extension if omitted).")
 @click.option("--branch", "-b", default="main", help="Branch to import into.")
-@click.option("-m", "message", default=None, help="Commit message.")
+@click.option("-m", "--message", default=None, help="Commit message. Use {default} to include auto-generated message.")
 @_no_create_option
 @click.pass_context
 def unarchive_cmd(ctx, filename, fmt, branch, message, no_create):

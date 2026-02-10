@@ -4,6 +4,26 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.30.0 (2026-02-09)
+
+**New features:**
+
+- Add message template placeholders for `--message` / `-m` flag
+  - `{default}` — full auto-generated message
+  - `{add_count}`, `{update_count}`, `{delete_count}`, `{total_count}` — file counts
+  - `{op}` — operation name (`cp`, `ar`, or empty)
+  - Example: `--message "Deploy v2: {default}"` → `Deploy v2: Batch cp: +3 ~1`
+  - Messages without `{` are returned as-is (backward compatible)
+- Add `--message` long flag (previously `-m` only) to `cp`, `sync`, `rm`, `unzip`, `untar`, `unarchive`
+
+**Documentation:**
+
+- Document message placeholders in CLI and API docs
+
+**Tests:**
+
+- Add 13 tests for `format_commit_message` placeholder substitution
+
 ## v0.29.0 (2026-02-09)
 
 **Bug fixes:**
