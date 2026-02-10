@@ -119,6 +119,18 @@ class FS:
             return False
         return entry[1] == GIT_FILEMODE_TREE
 
+    def _ls_typed(self, path: str | None) -> list[tuple[str, bool]]:
+        """Return [(name, is_dir), ...] for entries at *path*."""
+        repo = self._store._repo
+        if path is None or _is_root_path(path):
+            tree = repo[self._tree_oid]
+        else:
+            path = _normalize_path(path)
+            tree = _walk_to(repo, self._tree_oid, path)
+            if tree.type != GIT_OBJECT_TREE:
+                raise NotADirectoryError(path)
+        return [(e.name, e.filemode == GIT_FILEMODE_TREE) for e in tree]
+
     def glob(self, pattern: str) -> list[str]:
         """Expand a glob pattern against the repo tree.
 
@@ -143,7 +155,7 @@ class FS:
 
         if seg == "**":
             try:
-                entries = self.ls(prefix)
+                entries = self._ls_typed(prefix)
             except (FileNotFoundError, NotADirectoryError):
                 return []
             results: list[str] = []
@@ -152,17 +164,17 @@ class FS:
                 results.extend(self._glob_walk(rest, prefix))
             else:
                 # ** alone at end: yield non-dot entries at this level
-                for name in entries:
+                for name, _is_dir in entries:
                     if name.startswith("."):
                         continue
                     full = f"{prefix}/{name}" if prefix else name
                     results.append(full)
             # One+ dirs: recurse into non-dot subdirs
-            for name in entries:
+            for name, entry_is_dir in entries:
                 if name.startswith("."):
                     continue
                 full = f"{prefix}/{name}" if prefix else name
-                if self.is_dir(full):
+                if entry_is_dir:
                     results.extend(self._glob_walk(segments, full))  # keep **
             return results
 

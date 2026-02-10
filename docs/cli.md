@@ -110,6 +110,8 @@ An embedded `/./` in a source path (rsync `-R` style) splits the path into a loc
 
 A leading `./` (e.g. `./mydir`) is a normal relative path and does **not** trigger pivot mode.
 
+Glob patterns (`*`, `?`, `**`) in the segment after `/./` are not supported — use them before the pivot or as separate sources.
+
 ### sync
 
 Make one path identical to another (like rsync `--delete`).

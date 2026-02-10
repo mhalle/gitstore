@@ -185,13 +185,18 @@ def _resolve_disk_sources(sources: list[str]) -> list[tuple[str, str, str]]:
     resolved: list[tuple[str, str, str]] = []
     for src in sources:
         # --- /./  pivot detection (rsync -R style) ---
-        idx = src.find("/./")
+        # Normalize separators only for the probe so backslash pivots
+        # are found on Windows without mangling extended-length paths
+        # (\\?\...) or the rest of the source string.
+        idx = src.replace(os.sep, "/").find("/./")
         if idx > 0:
             base = src[:idx]
-            rest = src[idx + 3:]            # may end with "/" or be empty
+            rest_os = src[idx + 3:]                        # OS-native for full_path
+            rest = rest_os.replace(os.sep, "/")            # normalised for contents_mode / prefix
             contents_mode = rest.endswith("/")
             rest_clean = rest.rstrip("/")
-            full_path = os.path.join(base, rest_clean) if rest_clean else base
+            rest_os_clean = rest_os.rstrip("/").rstrip(os.sep)
+            full_path = os.path.join(base, rest_os_clean) if rest_os_clean else base
 
             if not os.path.exists(full_path):
                 raise FileNotFoundError(f"Local file not found: {full_path}")
@@ -199,9 +204,11 @@ def _resolve_disk_sources(sources: list[str]) -> list[tuple[str, str, str]]:
             if os.path.isdir(full_path):
                 mode = "contents" if contents_mode else "dir"
             else:
+                if contents_mode:
+                    raise NotADirectoryError(f"Not a directory: {full_path}")
                 mode = "file"
 
-            prefix = os.path.dirname(rest_clean) if rest_clean else ""
+            prefix = "/".join(rest_clean.split("/")[:-1]) if rest_clean else ""
             resolved.append((full_path, mode, prefix))
             continue
 
@@ -242,10 +249,12 @@ def _resolve_repo_sources(fs: FS, sources: list[str]) -> list[tuple[str, str, st
     resolved: list[tuple[str, str, str]] = []
     for src in sources:
         # --- /./  pivot detection (rsync -R style) ---
-        idx = src.find("/./")
+        # Normalize only for the probe — repo entries may legitimately
+        # contain literal backslashes on POSIX.
+        idx = src.replace("\\", "/").find("/./")
         if idx > 0:
-            base = src[:idx]
-            rest = src[idx + 3:]            # may end with "/" or be empty
+            base = src[:idx].replace("\\", "/")
+            rest = src[idx + 3:].replace("\\", "/")   # normalise for repo paths
             contents_mode = rest.endswith("/")
             rest_clean = rest.rstrip("/")
             full_path = f"{base}/{rest_clean}" if rest_clean else base
@@ -255,6 +264,8 @@ def _resolve_repo_sources(fs: FS, sources: list[str]) -> list[tuple[str, str, st
             if fs.is_dir(full_path):
                 mode = "contents" if contents_mode else "dir"
             else:
+                if contents_mode:
+                    raise NotADirectoryError(f"Not a directory in repo: {full_path}")
                 mode = "file"
             prefix = "/".join(rest_clean.split("/")[:-1]) if rest_clean else ""
             resolved.append((full_path, mode, prefix))

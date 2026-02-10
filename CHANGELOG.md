@@ -4,6 +4,25 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.37.1 (2026-02-10)
+
+**Bug fixes:**
+
+- Pivot + trailing slash on file now raises `NotADirectoryError` — `base/./file.txt/` no longer silently treats a file as `mode="file"`, matching non-pivot behavior
+- Normalize path separators for pivot detection on Windows — `base\.\sub\file` is now found correctly without mangling `\\?\` extended-length paths or literal backslashes in POSIX repo entries
+
+**Performance:**
+
+- Avoid quadratic `is_dir` calls in `**` glob — new `_ls_typed()` method reads the tree once per directory instead of N separate `_entry_at_path` lookups
+
+**Documentation:**
+
+- Document that glob patterns after `/./` pivot are unsupported (matches rsync behavior)
+
+**Tests:**
+
+- Add 6 tests for pivot edge cases: trailing-slash error, backslash normalization, glob-after-pivot (both disk→repo and repo→disk)
+
 ## v0.37.0 (2026-02-10)
 
 **New features:**

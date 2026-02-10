@@ -1102,6 +1102,37 @@ class TestCopyToRepoPivot:
         assert report is not None
         assert paths(report.add) == {"sub/mydir/p.txt"}
 
+    def test_pivot_file_trailing_slash_error(self, store_and_fs):
+        """cp /base/./file.txt/ :dest → NotADirectoryError"""
+        _, fs, tmp_path = store_and_fs
+        d = tmp_path / "base"
+        d.mkdir(parents=True)
+        (d / "file.txt").write_text("hello")
+        src = str(d) + "/./file.txt/"
+        with pytest.raises(NotADirectoryError):
+            copy_to_repo(fs, [src], "dest")
+
+    @pytest.mark.skipif(os.sep == "/", reason="backslash pivot only on Windows")
+    def test_pivot_backslash_normalization(self, store_and_fs):
+        """base\\.\\sub\\file normalised to forward slashes before pivot."""
+        _, fs, tmp_path = store_and_fs
+        d = tmp_path / "base" / "sub"
+        d.mkdir(parents=True)
+        (d / "file.txt").write_text("hi")
+        src = str(tmp_path / "base") + "\\.\\sub\\file.txt"
+        new_fs = copy_to_repo(fs, [src], "dest")
+        assert new_fs.read("dest/sub/file.txt") == b"hi"
+
+    def test_pivot_with_glob_unsupported(self, store_and_fs):
+        """base/./sub/*.txt is treated as literal → FileNotFoundError."""
+        _, fs, tmp_path = store_and_fs
+        d = tmp_path / "base" / "sub"
+        d.mkdir(parents=True)
+        (d / "a.txt").write_text("aaa")
+        src = str(tmp_path / "base") + "/./sub/*.txt"
+        with pytest.raises(FileNotFoundError):
+            copy_to_repo(fs, [src], "dest")
+
 
 # ---------------------------------------------------------------------------
 # /./  pivot (rsync -R style) — repo → disk
@@ -1170,3 +1201,30 @@ class TestCopyFromRepoPivot:
         _, fs, tmp_path = store_and_fs
         with pytest.raises(FileNotFoundError):
             copy_from_repo(fs, ["nope/./foo"], str(tmp_path / "out"))
+
+    def test_pivot_file_trailing_slash_error(self, store_and_fs):
+        """cp :base/./file.txt/ ./dest → NotADirectoryError"""
+        _, fs, tmp_path = store_and_fs
+        fs = fs.write("base/file.txt", b"hello")
+        out = tmp_path / "output"
+        out.mkdir()
+        with pytest.raises(NotADirectoryError):
+            copy_from_repo(fs, ["base/./file.txt/"], str(out))
+
+    def test_pivot_backslash_normalization(self, store_and_fs):
+        """base\\.\\sub/file.txt normalised (repo paths, cross-platform)."""
+        _, fs, tmp_path = store_and_fs
+        fs = fs.write("base/sub/file.txt", b"hi")
+        out = tmp_path / "output"
+        out.mkdir()
+        copy_from_repo(fs, ["base\\.\\sub/file.txt"], str(out))
+        assert (out / "sub" / "file.txt").read_text() == "hi"
+
+    def test_pivot_with_glob_unsupported(self, store_and_fs):
+        """base/./sub/*.txt is treated as literal → FileNotFoundError."""
+        _, fs, tmp_path = store_and_fs
+        fs = fs.write("base/sub/a.txt", b"aaa")
+        out = tmp_path / "output"
+        out.mkdir()
+        with pytest.raises(FileNotFoundError):
+            copy_from_repo(fs, ["base/./sub/*.txt"], str(out))

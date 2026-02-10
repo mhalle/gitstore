@@ -78,7 +78,7 @@ wheels = [
 
 [[package]]
 name = "gitstore"
-version = "0.36.0"
+version = "0.37.1"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
