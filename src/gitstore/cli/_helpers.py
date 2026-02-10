@@ -233,7 +233,33 @@ def _log_entry_dict(entry) -> dict:
 @click.option("-v", "--verbose", is_flag=True, help="Verbose output on stderr.")
 @click.pass_context
 def main(ctx, verbose):
-    """gitstore — a git-backed file store."""
+    """gitstore — a git-backed file store.
+
+    Store and retrieve files in bare git repositories with automatic
+    versioning, branching, and tagging. No working tree required.
+
+    \b
+    Quick start:
+      gitstore init -r data.git
+      gitstore cp file.txt :file.txt
+      gitstore cat :file.txt
+      gitstore ls
+
+    \b
+    Common workflows:
+      cp / sync       Copy or sync files between disk and repo
+      ls / cat        List or read files from the repo
+      log / reflog    View commit history or branch pointer history
+      branch / tag    Manage branches and tags
+      undo / redo     Step through branch history
+      archive / zip / tar          Export to archive
+      unarchive / unzip / untar    Import from archive
+      backup / restore             Mirror to/from a remote URL
+
+    \b
+    Repo paths are prefixed with ':' (e.g. :path/to/file).
+    Set GITSTORE_REPO to avoid passing --repo on every call.
+    """
     ctx.ensure_object(dict)
     ctx.obj["verbose"] = verbose
 

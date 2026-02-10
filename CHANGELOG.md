@@ -4,6 +4,12 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.32.0 (2026-02-09)
+
+**Documentation:**
+
+- Expand `gitstore --help` with quick-start examples, grouped command reference, and usage tips
+
 ## v0.31.0 (2026-02-09)
 
 **New features:**
