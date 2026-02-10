@@ -54,6 +54,46 @@ def repo_with_files(tmp_path, runner):
     return p
 
 
+@pytest.fixture
+def repo_with_tree(tmp_path, runner):
+    """Repo with a deeper tree for glob/recursive tests.
+
+    Tree:
+        readme.txt, setup.py, .hidden,
+        src/main.py, src/util.py, src/sub/deep.txt,
+        docs/guide.md, docs/api.md
+    """
+    p = str(tmp_path / "tree.git")
+    r = runner.invoke(main, ["init", "--repo", p, "--branch", "main"])
+    assert r.exit_code == 0, r.output
+
+    # Create files on disk
+    root = tmp_path / "treefiles"
+    root.mkdir()
+    (root / "readme.txt").write_text("readme")
+    (root / "setup.py").write_text("setup")
+    (root / ".hidden").write_text("hidden")
+
+    src = root / "src"
+    src.mkdir()
+    (src / "main.py").write_text("main")
+    (src / "util.py").write_text("util")
+    sub = src / "sub"
+    sub.mkdir()
+    (sub / "deep.txt").write_text("deep")
+
+    docs = root / "docs"
+    docs.mkdir()
+    (docs / "guide.md").write_text("guide")
+    (docs / "api.md").write_text("api")
+
+    # Copy entire tree into repo root (trailing / = contents mode)
+    r = runner.invoke(main, ["cp", "--repo", p, str(root) + "/", ":"])
+    assert r.exit_code == 0, r.output
+
+    return p
+
+
 # ---------------------------------------------------------------------------
 # TestInit
 # ---------------------------------------------------------------------------
@@ -789,6 +829,129 @@ class TestLs:
         result = runner.invoke(main, ["ls", "--repo", repo_with_files, "data"])
         assert result.exit_code == 0
         assert "data.bin" in result.output
+
+
+# ---------------------------------------------------------------------------
+# TestLsRecursive
+# ---------------------------------------------------------------------------
+
+class TestLsRecursive:
+    def test_root_lists_all_files(self, runner, repo_with_tree):
+        result = runner.invoke(main, ["ls", "-R", "--repo", repo_with_tree])
+        assert result.exit_code == 0
+        lines = result.output.strip().splitlines()
+        assert ".hidden" in lines
+        assert "readme.txt" in lines
+        assert "setup.py" in lines
+        assert "src/main.py" in lines
+        assert "src/util.py" in lines
+        assert "src/sub/deep.txt" in lines
+        assert "docs/guide.md" in lines
+        assert "docs/api.md" in lines
+        assert lines == sorted(lines)
+
+    def test_subdir(self, runner, repo_with_tree):
+        result = runner.invoke(main, ["ls", "-R", "--repo", repo_with_tree, ":src"])
+        assert result.exit_code == 0
+        lines = result.output.strip().splitlines()
+        assert "src/main.py" in lines
+        assert "src/util.py" in lines
+        assert "src/sub/deep.txt" in lines
+        # root files not present
+        assert "readme.txt" not in lines
+
+    def test_nonexistent_error(self, runner, repo_with_tree):
+        result = runner.invoke(main, ["ls", "-R", "--repo", repo_with_tree, ":nonexistent"])
+        assert result.exit_code != 0
+        assert "not found" in result.output.lower()
+
+    def test_file_not_a_directory(self, runner, repo_with_tree):
+        result = runner.invoke(main, ["ls", "-R", "--repo", repo_with_tree, ":readme.txt"])
+        assert result.exit_code != 0
+        assert "not a directory" in result.output.lower()
+
+    def test_empty_branch(self, runner, tmp_path):
+        p = str(tmp_path / "empty.git")
+        r = runner.invoke(main, ["init", "--repo", p, "--branch", "main"])
+        assert r.exit_code == 0
+        result = runner.invoke(main, ["ls", "-R", "--repo", p])
+        assert result.exit_code == 0
+        assert result.output.strip() == ""
+
+
+# ---------------------------------------------------------------------------
+# TestLsGlob
+# ---------------------------------------------------------------------------
+
+class TestLsGlob:
+    def test_star_txt_root(self, runner, repo_with_tree):
+        result = runner.invoke(main, ["ls", "--repo", repo_with_tree, "*.txt"])
+        assert result.exit_code == 0
+        lines = result.output.strip().splitlines()
+        assert "readme.txt" in lines
+        # nested files not matched by single-level glob
+        assert "src/sub/deep.txt" not in lines
+
+    def test_src_star_py(self, runner, repo_with_tree):
+        result = runner.invoke(main, ["ls", "--repo", repo_with_tree, "src/*.py"])
+        assert result.exit_code == 0
+        lines = result.output.strip().splitlines()
+        assert "src/main.py" in lines
+        assert "src/util.py" in lines
+
+    def test_no_matches_silent(self, runner, repo_with_tree):
+        result = runner.invoke(main, ["ls", "--repo", repo_with_tree, "*.zzz"])
+        assert result.exit_code == 0
+        assert result.output.strip() == ""
+
+    def test_colon_prefix_stripped(self, runner, repo_with_tree):
+        result = runner.invoke(main, ["ls", "--repo", repo_with_tree, ":*.txt"])
+        assert result.exit_code == 0
+        lines = result.output.strip().splitlines()
+        assert "readme.txt" in lines
+
+    def test_star_excludes_dotfiles(self, runner, repo_with_tree):
+        result = runner.invoke(main, ["ls", "--repo", repo_with_tree, "*"])
+        assert result.exit_code == 0
+        lines = result.output.strip().splitlines()
+        assert ".hidden" not in lines
+
+    def test_dot_star_matches_dotfiles(self, runner, repo_with_tree):
+        result = runner.invoke(main, ["ls", "--repo", repo_with_tree, ".*"])
+        assert result.exit_code == 0
+        lines = result.output.strip().splitlines()
+        assert ".hidden" in lines
+
+    def test_question_mark(self, runner, repo_with_tree):
+        result = runner.invoke(main, ["ls", "--repo", repo_with_tree, "docs/???.md"])
+        assert result.exit_code == 0
+        lines = result.output.strip().splitlines()
+        assert "docs/api.md" in lines
+        # "guide.md" has 5 chars before .md, so ??? won't match
+        assert "docs/guide.md" not in lines
+
+    def test_docs_star(self, runner, repo_with_tree):
+        result = runner.invoke(main, ["ls", "--repo", repo_with_tree, "docs/*"])
+        assert result.exit_code == 0
+        lines = result.output.strip().splitlines()
+        assert "docs/guide.md" in lines
+        assert "docs/api.md" in lines
+
+
+# ---------------------------------------------------------------------------
+# TestLsGlobRecursive
+# ---------------------------------------------------------------------------
+
+class TestLsGlobRecursive:
+    def test_glob_recursive_expands_dirs(self, runner, repo_with_tree):
+        result = runner.invoke(main, ["ls", "-R", "--repo", repo_with_tree, "src/*"])
+        assert result.exit_code == 0
+        lines = result.output.strip().splitlines()
+        # Direct file matches
+        assert "src/main.py" in lines
+        assert "src/util.py" in lines
+        # src/sub is a dir match — should be expanded recursively
+        assert "src/sub/deep.txt" in lines
 
 
 # ---------------------------------------------------------------------------

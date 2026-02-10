@@ -127,16 +127,22 @@ gitstore sync :data ./local --ref v1.0        # from tag
 
 ### ls
 
-List files and directories.
+List files and directories. Supports glob wildcards (`*`, `?`) and recursive listing.
 
 ```bash
 gitstore ls                                   # root
 gitstore ls subdir                            # subdirectory
 gitstore ls --ref v1.0                        # at a tag
+gitstore ls '*.txt'                           # glob (quote to avoid shell expansion)
+gitstore ls 'src/*.py'                        # glob in subdirectory
+gitstore ls -R                                # all files recursively
+gitstore ls -R :src                           # recursive under src/
+gitstore ls -R 'src/*'                        # glob + recursive expansion
 ```
 
 | Option | Description |
 |--------|-------------|
+| `-R`, `--recursive` | List all files recursively with full paths. |
 | `-b`, `--branch` | Branch (default: `main`). |
 | `--ref`, `--path`, `--match`, `--before` | Snapshot filters. |
 
