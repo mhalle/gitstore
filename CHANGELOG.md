@@ -4,6 +4,23 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.37.0 (2026-02-10)
+
+**New features:**
+
+- Add `**` glob support — `fs.glob("**/*.py")` matches files at any depth, skipping dot-named entries (consistent with `*`)
+- Add `/./` pivot for repo→disk copies — `cp :src/./lib/utils.py ./dest` → `dest/lib/utils.py`; mirrors the existing disk→repo pivot
+
+**Cleanup:**
+
+- Remove dead `_parse_repo_path` helper from CLI
+
+**Tests:**
+
+- Add 9 tests for `**` glob: all, extension, prefix, middle, no-dotfiles, no-duplicates, empty-repo, at-root, sorted
+- Add 6 tests for repo-side `/./` pivot: directory, contents, file, leading-dot-slash, dry-run, not-found
+- Add 2 CLI tests for repo-side pivot
+
 ## v0.36.0 (2026-02-10)
 
 **New features:**

@@ -3192,3 +3192,43 @@ class TestChecksumMode:
         assert r.exit_code == 0, r.output
         assert "~" not in r.output  # no updates
         assert "+" not in r.output  # no adds
+
+
+# ---------------------------------------------------------------------------
+# Repo-side /./  pivot
+# ---------------------------------------------------------------------------
+
+class TestCpRepoPivot:
+    """CLI tests for repo→disk /./  pivot."""
+
+    def test_cp_repo_pivot_dir(self, runner, initialized_repo, tmp_path):
+        """cp :base/./sub/dir ./dest preserves sub/dir structure."""
+        from gitstore import GitStore
+        store = GitStore.open(initialized_repo, create=False)
+        fs = store.branches["main"]
+        fs = fs.write("base/sub/mydir/x.txt", b"xxx")
+        fs.write("base/sub/mydir/y.txt", b"yyy")
+
+        dest = tmp_path / "pivotout"
+        r = runner.invoke(main, [
+            "cp", "--repo", initialized_repo,
+            ":base/./sub/mydir", str(dest),
+        ])
+        assert r.exit_code == 0, r.output
+        assert (dest / "sub" / "mydir" / "x.txt").read_text() == "xxx"
+        assert (dest / "sub" / "mydir" / "y.txt").read_text() == "yyy"
+
+    def test_cp_repo_pivot_dry_run(self, runner, initialized_repo, tmp_path):
+        """cp -n :base/./sub/file.txt ./dest shows pivot structure."""
+        from gitstore import GitStore
+        store = GitStore.open(initialized_repo, create=False)
+        fs = store.branches["main"]
+        fs.write("base/sub/file.txt", b"hello")
+
+        dest = tmp_path / "pivotout"
+        r = runner.invoke(main, [
+            "cp", "--repo", initialized_repo, "-n",
+            ":base/./sub/file.txt", str(dest),
+        ])
+        assert r.exit_code == 0, r.output
+        assert "file.txt" in r.output

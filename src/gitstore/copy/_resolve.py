@@ -232,10 +232,34 @@ def _resolve_disk_sources(sources: list[str]) -> list[tuple[str, str, str]]:
     return resolved
 
 
-def _resolve_repo_sources(fs: FS, sources: list[str]) -> list[tuple[str, str]]:
-    """Resolve repo source specs into ``(repo_path, mode)`` tuples."""
-    resolved: list[tuple[str, str]] = []
+def _resolve_repo_sources(fs: FS, sources: list[str]) -> list[tuple[str, str, str]]:
+    """Resolve repo source specs into ``(repo_path, mode, prefix)`` tuples.
+
+    ``prefix`` is an intermediate path to inject between the destination and
+    the file name.  It is ``""`` for normal sources and non-empty when the
+    source contains an rsync-style ``/./`` pivot marker (with ``idx > 0``).
+    """
+    resolved: list[tuple[str, str, str]] = []
     for src in sources:
+        # --- /./  pivot detection (rsync -R style) ---
+        idx = src.find("/./")
+        if idx > 0:
+            base = src[:idx]
+            rest = src[idx + 3:]            # may end with "/" or be empty
+            contents_mode = rest.endswith("/")
+            rest_clean = rest.rstrip("/")
+            full_path = f"{base}/{rest_clean}" if rest_clean else base
+            full_path = _normalize_path(full_path)
+            if not fs.exists(full_path):
+                raise FileNotFoundError(f"File not found in repo: {full_path}")
+            if fs.is_dir(full_path):
+                mode = "contents" if contents_mode else "dir"
+            else:
+                mode = "file"
+            prefix = "/".join(rest_clean.split("/")[:-1]) if rest_clean else ""
+            resolved.append((full_path, mode, prefix))
+            continue
+
         contents_mode = src.endswith("/")
         has_glob = "*" in src or "?" in src
 
@@ -245,29 +269,29 @@ def _resolve_repo_sources(fs: FS, sources: list[str]) -> list[tuple[str, str]]:
                 raise FileNotFoundError(f"No matches for pattern: {src}")
             for path in expanded:
                 if fs.is_dir(path):
-                    resolved.append((path, "dir"))
+                    resolved.append((path, "dir", ""))
                 else:
-                    resolved.append((path, "file"))
+                    resolved.append((path, "file", ""))
         elif contents_mode:
             path = src.rstrip("/")
             if path:
                 path = _normalize_path(path)
             if path and not fs.is_dir(path):
                 raise NotADirectoryError(f"Not a directory in repo: {path}")
-            resolved.append((path, "contents"))
+            resolved.append((path, "contents", ""))
         else:
             if src:
                 path = _normalize_path(src)
             else:
                 path = ""
             if not path:
-                resolved.append(("", "contents"))
+                resolved.append(("", "contents", ""))
             elif not fs.exists(path):
                 raise FileNotFoundError(f"File not found in repo: {path}")
             elif fs.is_dir(path):
-                resolved.append((path, "dir"))
+                resolved.append((path, "dir", ""))
             else:
-                resolved.append((path, "file"))
+                resolved.append((path, "file", ""))
     return resolved
 
 
@@ -310,18 +334,20 @@ def _enum_disk_to_repo(
 
 
 def _enum_repo_to_disk(
-    fs: FS, resolved: list[tuple[str, str]], dest: str,
+    fs: FS, resolved: list[tuple[str, str, str]], dest: str,
 ) -> list[tuple[str, str]]:
     """Build ``(repo_path, local_path)`` pairs for repo → disk copy."""
     pairs: list[tuple[str, str]] = []
-    for repo_path, mode in resolved:
+    for repo_path, mode, prefix in resolved:
+        _dest = os.path.join(dest, prefix) if prefix else dest
+
         if mode == "file":
             name = repo_path.rsplit("/", 1)[-1]
-            local = os.path.join(dest, name)
+            local = os.path.join(_dest, name)
             pairs.append((repo_path, local))
         elif mode == "dir":
             dirname = repo_path.rsplit("/", 1)[-1]
-            target = os.path.join(dest, dirname)
+            target = os.path.join(_dest, dirname)
             for dirpath, _dirs, files in fs.walk(repo_path):
                 for fname in files:
                     store_path = f"{dirpath}/{fname}" if dirpath else fname
@@ -340,6 +366,6 @@ def _enum_repo_to_disk(
                         rel = store_path[len(repo_path) + 1:]
                     else:
                         rel = store_path
-                    local = os.path.join(dest, rel)
+                    local = os.path.join(_dest, rel)
                     pairs.append((store_path, local))
     return pairs

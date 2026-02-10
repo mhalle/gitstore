@@ -25,13 +25,6 @@ from ..tree import (
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _parse_repo_path(raw: str) -> tuple[bool, str]:
-    """Return (is_repo, path).  A leading ':' marks a repo-side path."""
-    if raw.startswith(":"):
-        return True, raw[1:].rstrip("/")
-    return False, raw
-
-
 def _strip_colon(raw: str) -> str:
     """Strip an optional leading ':' from a repo-side path."""
     return raw[1:] if raw.startswith(":") else raw

@@ -112,3 +112,68 @@ class TestGlobEdgeCases:
     def test_results_sorted(self, fs_with_tree):
         result = fs_with_tree.glob("*")
         assert result == sorted(result)
+
+
+class TestGlobDoublestar:
+    def test_doublestar_all(self, fs_with_tree):
+        """** matches everything recursively (skipping dotfile dirs)."""
+        result = fs_with_tree.glob("**")
+        # Should include files and dirs at all levels
+        assert "readme.txt" in result
+        assert "src/main.py" in result
+        assert "src/sub/deep.txt" in result
+        assert "docs/guide.md" in result
+
+    def test_doublestar_extension(self, fs_with_tree):
+        """**/*.py matches .py at all depths."""
+        result = fs_with_tree.glob("**/*.py")
+        assert "setup.py" in result
+        assert "src/main.py" in result
+        assert "src/util.py" in result
+        # Non-.py excluded
+        assert "readme.txt" not in result
+        assert "src/sub/deep.txt" not in result
+
+    def test_doublestar_prefix(self, fs_with_tree):
+        """src/**/*.py matches .py files under src/."""
+        result = fs_with_tree.glob("src/**/*.py")
+        assert "src/main.py" in result
+        assert "src/util.py" in result
+        # Root-level .py not matched
+        assert "setup.py" not in result
+
+    def test_doublestar_middle(self, fs_with_tree):
+        """src/**/deep.txt matches nested file."""
+        result = fs_with_tree.glob("src/**/deep.txt")
+        assert "src/sub/deep.txt" in result
+
+    def test_doublestar_no_dotfiles(self, fs_with_tree):
+        """** skips dot-named entries, consistent with * behavior."""
+        result = fs_with_tree.glob("**")
+        assert ".hidden" not in result
+        assert "src/.config" not in result
+        # Regular files still present
+        assert "readme.txt" in result
+        assert "src/main.py" in result
+
+    def test_doublestar_no_duplicates(self, fs_with_tree):
+        """No file appears twice in results."""
+        result = fs_with_tree.glob("**/*.py")
+        assert len(result) == len(set(result))
+
+    def test_doublestar_empty_repo(self, tmp_path):
+        """** returns [] for empty repo."""
+        from gitstore import GitStore
+        repo = GitStore.open(tmp_path / "empty.git")
+        fs = repo.branches["main"]
+        result = fs.glob("**")
+        assert result == []
+
+    def test_doublestar_at_root(self, fs_with_tree):
+        """**/readme.txt matches file at root."""
+        result = fs_with_tree.glob("**/readme.txt")
+        assert "readme.txt" in result
+
+    def test_doublestar_results_sorted(self, fs_with_tree):
+        result = fs_with_tree.glob("**")
+        assert result == sorted(result)

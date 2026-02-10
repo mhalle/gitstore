@@ -313,7 +313,7 @@ def copy_from_repo(
     report = CopyReport()
 
     if ignore_errors:
-        resolved: list[tuple[str, str]] = []
+        resolved: list[tuple[str, str, str]] = []
         for src in sources:
             try:
                 resolved.extend(_resolve_repo_sources(fs, [src]))

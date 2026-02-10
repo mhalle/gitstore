@@ -121,13 +121,14 @@ def cp(ctx, args, branch, ref, at_path, match_pattern, before, message, mode, fo
     filemode = (GIT_FILEMODE_BLOB_EXECUTABLE if mode == "755"
                 else GIT_FILEMODE_BLOB) if mode else None
 
-    # Detect single-plain-file case (no glob, no trailing slash, no directory).
-    # In this case, like standard `cp`, the dest is the exact path, not a
-    # parent directory.
+    # Detect single-plain-file case (no glob, no trailing slash, no directory,
+    # no /./  pivot).  In this case, like standard `cp`, the dest is the exact
+    # path, not a parent directory.
     single_file_src = (
         len(raw_sources) == 1
         and "*" not in raw_sources[0] and "?" not in raw_sources[0]
         and not raw_sources[0].endswith("/")
+        and "/./" not in raw_sources[0]
     )
 
     if not src_is_repo:

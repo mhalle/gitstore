@@ -62,6 +62,11 @@ gitstore cp /home/user/./projects/f.txt :bak  # → bak/projects/f.txt
 gitstore cp :file.txt ./local.txt
 gitstore cp ':docs/*.md' ./local-docs
 
+# Pivot (/./): preserve partial repo path
+gitstore cp ':data/./logs/app' ./backup          # → backup/logs/app/...
+gitstore cp ':data/./logs/app/' ./backup         # → backup/logs/...
+gitstore cp ':src/./lib/utils.py' ./dest         # → dest/lib/utils.py
+
 # Options
 gitstore cp -n ./mydir :dest                  # dry run
 gitstore cp --delete ./src/ :code             # remove extra repo files
@@ -95,12 +100,13 @@ gitstore cp --ref v1.0 :data ./local          # from tag/branch/hash
 | `dir` | `dest/dir/...` (name preserved) |
 | `dir/` | `dest/...` (contents poured, including dotfiles) |
 | `'dir/*'` | `dest/a.txt ...` (glob, no dotfiles) |
+| `'**/*.py'` | `dest/matched...` (recursive glob) |
 | `/base/./sub/dir` | `dest/sub/dir/...` (pivot) |
 | `/base/./sub/dir/` | `dest/sub/...` (pivot + contents) |
 
 #### /./  pivot
 
-An embedded `/./` in a source path (rsync `-R` style) splits the path into a locator and a preserved suffix. Everything before `/./` locates files on disk; everything after becomes the destination-relative path.
+An embedded `/./` in a source path (rsync `-R` style) splits the path into a locator and a preserved suffix. Everything before `/./` locates the source (on disk or in the repo); everything after becomes the destination-relative path. Works in both disk→repo and repo→disk directions.
 
 A leading `./` (e.g. `./mydir`) is a normal relative path and does **not** trigger pivot mode.
 
@@ -141,6 +147,8 @@ gitstore ls subdir                            # subdirectory
 gitstore ls --ref v1.0                        # at a tag
 gitstore ls '*.txt'                           # glob (quote to avoid shell expansion)
 gitstore ls 'src/*.py'                        # glob in subdirectory
+gitstore ls '**/*.py'                         # ** matches all depths
+gitstore ls 'src/**/*.txt'                    # ** under a prefix
 gitstore ls '*.txt' '*.py'                    # multiple globs
 gitstore ls :src :docs                        # multiple directories
 gitstore ls -R                                # all files recursively
@@ -432,6 +440,7 @@ A message without `{` is used as-is. Unknown placeholders raise an error.
 | `dir` | `dest/dir/...` (name preserved) |
 | `dir/` | `dest/...` (contents, including dotfiles) |
 | `'dir/*'` | `dest/matched...` (glob, no dotfiles) |
+| `'**/*.py'` | `dest/matched...` (recursive glob) |
 | `/base/./sub/dir` | `dest/sub/dir/...` (pivot) |
 | `/base/./sub/dir/` | `dest/sub/...` (pivot + contents) |
 

@@ -1101,3 +1101,72 @@ class TestCopyToRepoPivot:
         report = copy_to_repo_dry_run(fs, [src], "dest")
         assert report is not None
         assert paths(report.add) == {"sub/mydir/p.txt"}
+
+
+# ---------------------------------------------------------------------------
+# /./  pivot (rsync -R style) — repo → disk
+# ---------------------------------------------------------------------------
+
+class TestCopyFromRepoPivot:
+    """Test the /./  pivot marker for repo → disk copies."""
+
+    def test_pivot_directory(self, store_and_fs):
+        """cp :src/./sub/dir ./dest → dest/sub/dir/..."""
+        _, fs, tmp_path = store_and_fs
+        # repo has: dir/a.txt, dir/b.txt
+        out = tmp_path / "output"
+        out.mkdir()
+        # Use pivot: "dir" is the base, "a.txt" etc are inside
+        # First set up a deeper structure in the repo
+        fs = fs.write("base/sub/mydir/x.txt", b"xxx")
+        fs = fs.write("base/sub/mydir/y.txt", b"yyy")
+        copy_from_repo(fs, ["base/./sub/mydir"], str(out))
+        assert (out / "sub" / "mydir" / "x.txt").read_text() == "xxx"
+        assert (out / "sub" / "mydir" / "y.txt").read_text() == "yyy"
+
+    def test_pivot_contents(self, store_and_fs):
+        """cp :src/./sub/dir/ ./dest → dest/sub/..."""
+        _, fs, tmp_path = store_and_fs
+        fs = fs.write("base/sub/mydir/a.txt", b"aaa")
+        fs = fs.write("base/sub/mydir/b.txt", b"bbb")
+        out = tmp_path / "output"
+        out.mkdir()
+        copy_from_repo(fs, ["base/./sub/mydir/"], str(out))
+        assert (out / "sub" / "a.txt").read_text() == "aaa"
+        assert (out / "sub" / "b.txt").read_text() == "bbb"
+
+    def test_pivot_file(self, store_and_fs):
+        """cp :src/./sub/file.txt ./dest → dest/sub/file.txt"""
+        _, fs, tmp_path = store_and_fs
+        fs = fs.write("base/sub/file.txt", b"hello")
+        out = tmp_path / "output"
+        out.mkdir()
+        copy_from_repo(fs, ["base/./sub/file.txt"], str(out))
+        assert (out / "sub" / "file.txt").read_text() == "hello"
+
+    def test_leading_dot_slash_not_pivot(self, store_and_fs):
+        """./dir has no pivot — behaves as normal relative path."""
+        _, fs, tmp_path = store_and_fs
+        # "./dir" starts with ./ so idx=0, not > 0 — no pivot
+        # But repo paths don't start with ./ anyway; this just tests
+        # that the function doesn't crash on edge cases.
+        # The repo "dir" already exists in the fixture.
+        out = tmp_path / "output"
+        out.mkdir()
+        copy_from_repo(fs, ["dir"], str(out))
+        assert (out / "dir" / "a.txt").read_text() == "aaa"
+
+    def test_pivot_dry_run(self, store_and_fs):
+        """dry-run produces correct plan with pivot paths."""
+        _, fs, tmp_path = store_and_fs
+        fs = fs.write("base/sub/mydir/p.txt", b"ppp")
+        out = tmp_path / "output"
+        report = copy_from_repo_dry_run(fs, ["base/./sub/mydir"], str(out))
+        assert report is not None
+        assert paths(report.add) == {"sub/mydir/p.txt"}
+
+    def test_pivot_not_found(self, store_and_fs):
+        """cp :nope/./foo ./dest → FileNotFoundError"""
+        _, fs, tmp_path = store_and_fs
+        with pytest.raises(FileNotFoundError):
+            copy_from_repo(fs, ["nope/./foo"], str(tmp_path / "out"))

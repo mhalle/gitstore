@@ -122,15 +122,17 @@ class FS:
     def glob(self, pattern: str) -> list[str]:
         """Expand a glob pattern against the repo tree.
 
-        Supports ``*`` and ``?`` (no ``**``).  ``*`` and ``?`` do not match
+        Supports ``*``, ``?``, and ``**``.  ``*`` and ``?`` do not match
         a leading ``.`` unless the pattern segment itself starts with ``.``.
+        ``**`` matches zero or more directory levels, skipping directories
+        whose names start with ``.``.
         Returns a sorted list of matching paths (files and directories).
         """
         pattern = pattern.strip("/")
         if not pattern:
             return []
         segments = pattern.split("/")
-        return sorted(self._glob_walk(segments, None))
+        return sorted(set(self._glob_walk(segments, None)))
 
     def _glob_walk(self, segments: list[str], prefix: str | None) -> list[str]:
         """Recursive glob helper."""
@@ -138,6 +140,32 @@ class FS:
             return []
         seg = segments[0]
         rest = segments[1:]
+
+        if seg == "**":
+            try:
+                entries = self.ls(prefix)
+            except (FileNotFoundError, NotADirectoryError):
+                return []
+            results: list[str] = []
+            if rest:
+                # Zero dirs: try rest at current level
+                results.extend(self._glob_walk(rest, prefix))
+            else:
+                # ** alone at end: yield non-dot entries at this level
+                for name in entries:
+                    if name.startswith("."):
+                        continue
+                    full = f"{prefix}/{name}" if prefix else name
+                    results.append(full)
+            # One+ dirs: recurse into non-dot subdirs
+            for name in entries:
+                if name.startswith("."):
+                    continue
+                full = f"{prefix}/{name}" if prefix else name
+                if self.is_dir(full):
+                    results.extend(self._glob_walk(segments, full))  # keep **
+            return results
+
         has_wild = "*" in seg or "?" in seg
 
         if has_wild:
