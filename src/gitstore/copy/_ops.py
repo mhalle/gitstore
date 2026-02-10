@@ -174,7 +174,7 @@ def copy_to_repo(
                     try:
                         if not follow_symlinks and local_path.is_symlink():
                             pass  # fall through to hash
-                        elif local_path.stat().st_mtime < commit_ts:
+                        elif local_path.stat().st_mtime <= commit_ts:
                             continue  # assume unchanged
                     except OSError:
                         pass  # fall through to hash on stat failure
@@ -372,7 +372,7 @@ def copy_from_repo(
                         try:
                             if local_path.is_symlink():
                                 pass  # fall through to hash
-                            elif local_path.stat().st_mtime < commit_ts:
+                            elif local_path.stat().st_mtime <= commit_ts:
                                 continue  # assume unchanged
                         except OSError:
                             pass  # fall through to hash on stat failure
@@ -417,9 +417,10 @@ def copy_from_repo(
         for rel in add_rels + update_rels:
             write_pairs.append((pair_map[rel], str(base / rel)))
 
+        cts = fs._store._repo[fs._commit_oid].commit_time
         _write_files_to_disk(fs, write_pairs, base=base,
                              ignore_errors=ignore_errors,
-                             errors=report.errors)
+                             errors=report.errors, commit_ts=cts)
         _prune_empty_dirs(base)
 
         # Convert to FileEntry lists
@@ -457,9 +458,10 @@ def copy_from_repo(
             else:
                 add_rels.append(rel)
 
+        cts = fs._store._repo[fs._commit_oid].commit_time
         _write_files_to_disk(fs, pairs, base=Path(dest),
                              ignore_errors=ignore_errors,
-                             errors=report.errors)
+                             errors=report.errors, commit_ts=cts)
 
         # Convert to FileEntry lists (get modes from repo)
         report.add = _make_entries_from_repo_dict(fs, add_rels, repo_rel_to_path)
@@ -524,7 +526,7 @@ def copy_to_repo_dry_run(
                 try:
                     if not follow_symlinks and local_path.is_symlink():
                         pass  # fall through to hash
-                    elif local_path.stat().st_mtime < commit_ts:
+                    elif local_path.stat().st_mtime <= commit_ts:
                         continue  # assume unchanged
                 except OSError:
                     pass  # fall through to hash on stat failure
@@ -621,7 +623,7 @@ def copy_from_repo_dry_run(
                     try:
                         if local_path.is_symlink():
                             pass  # fall through to hash
-                        elif local_path.stat().st_mtime < commit_ts:
+                        elif local_path.stat().st_mtime <= commit_ts:
                             continue  # assume unchanged
                     except OSError:
                         pass  # fall through to hash on stat failure

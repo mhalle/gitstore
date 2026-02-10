@@ -246,6 +246,8 @@ def cp(ctx, args, branch, ref, at_path, match_pattern, before, message, mode, fo
                         out.symlink_to(target)
                     else:
                         out.write_bytes(fs.read(src_path))
+                    cts = fs._store._repo[fs._commit_oid].commit_time
+                    os.utime(out, (cts, cts), follow_symlinks=False)
                 except OSError as exc:
                     if ignore_errors:
                         click.echo(f"ERROR: {out}: {exc}", err=True)

@@ -3029,3 +3029,30 @@ class TestChecksumMode:
         # Verify the repo still has the original content
         r = runner.invoke(main, ["cat", "--repo", initialized_repo, "a.txt"])
         assert r.output == "original"
+
+    def test_round_trip_preserves_mtime(self, runner, initialized_repo, tmp_path):
+        """After repo→disk, files get commit mtime so disk→repo skips them."""
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "a.txt").write_text("aaa")
+        (src / "b.txt").write_text("bbb")
+
+        # Sync disk → repo
+        r = runner.invoke(main, ["sync", "--repo", initialized_repo, str(src)])
+        assert r.exit_code == 0, r.output
+
+        # Sync repo → disk (different directory)
+        dest = tmp_path / "dest"
+        r = runner.invoke(main, [
+            "sync", "--repo", initialized_repo, ":", str(dest),
+        ])
+        assert r.exit_code == 0, r.output
+        assert (dest / "a.txt").read_text() == "aaa"
+
+        # Now sync that dest back to repo — should detect no changes
+        r = runner.invoke(main, [
+            "sync", "--repo", initialized_repo, "-n", str(dest),
+        ])
+        assert r.exit_code == 0, r.output
+        assert "~" not in r.output  # no updates
+        assert "+" not in r.output  # no adds

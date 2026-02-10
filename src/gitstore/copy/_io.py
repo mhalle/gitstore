@@ -80,11 +80,16 @@ def _write_files_to_repo(batch, pairs, *, follow_symlinks=False, mode=None,
 
 
 def _write_files_to_disk(fs: FS, pairs, *, base: Path | None = None,
-                         ignore_errors=False, errors=None):
+                         ignore_errors=False, errors=None,
+                         commit_ts: int | None = None):
     """Write ``(repo_path, local_path)`` pairs to local disk.
 
     When *base* is given, path-clearing only removes blocking files
     within that root directory (never at or above *base*).
+
+    When *commit_ts* is given, set the mtime of each written file to
+    that epoch timestamp so that mtime-based change detection works
+    across round-trips.
     """
     for repo_path, local_path in pairs:
         try:
@@ -110,6 +115,8 @@ def _write_files_to_disk(fs: FS, pairs, *, base: Path | None = None,
                 out.write_bytes(fs.read(repo_path))
                 if entry and entry[1] == GIT_FILEMODE_BLOB_EXECUTABLE:
                     os.chmod(local_path, 0o755)
+            if commit_ts is not None:
+                os.utime(local_path, (commit_ts, commit_ts), follow_symlinks=False)
         except OSError as exc:
             if not ignore_errors:
                 raise
