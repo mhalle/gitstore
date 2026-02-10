@@ -955,6 +955,56 @@ class TestLsGlobRecursive:
 
 
 # ---------------------------------------------------------------------------
+# TestLsMultiArg
+# ---------------------------------------------------------------------------
+
+class TestLsMultiArg:
+    def test_multiple_dirs(self, runner, repo_with_tree):
+        result = runner.invoke(main, ["ls", "--repo", repo_with_tree, ":src", ":docs"])
+        assert result.exit_code == 0
+        lines = result.output.strip().splitlines()
+        assert "main.py" in lines
+        assert "util.py" in lines
+        assert "guide.md" in lines
+        assert "api.md" in lines
+
+    def test_multiple_globs(self, runner, repo_with_tree):
+        result = runner.invoke(main, ["ls", "--repo", repo_with_tree, "*.txt", "*.py"])
+        assert result.exit_code == 0
+        lines = result.output.strip().splitlines()
+        assert "readme.txt" in lines
+        assert "setup.py" in lines
+
+    def test_dedup_overlapping_globs(self, runner, repo_with_tree):
+        """Overlapping patterns should not produce duplicate lines."""
+        result = runner.invoke(main, ["ls", "--repo", repo_with_tree, "*.txt", "readme.*"])
+        assert result.exit_code == 0
+        lines = result.output.strip().splitlines()
+        assert lines.count("readme.txt") == 1
+
+    def test_dedup_recursive_overlap(self, runner, repo_with_tree):
+        """Overlapping -R dirs should not produce duplicate lines."""
+        result = runner.invoke(main, ["ls", "-R", "--repo", repo_with_tree, ":src", ":src"])
+        assert result.exit_code == 0
+        lines = result.output.strip().splitlines()
+        assert lines.count("src/main.py") == 1
+
+    def test_mix_glob_and_plain(self, runner, repo_with_tree):
+        result = runner.invoke(main, ["ls", "--repo", repo_with_tree, "*.txt", ":docs"])
+        assert result.exit_code == 0
+        lines = result.output.strip().splitlines()
+        assert "readme.txt" in lines
+        assert "guide.md" in lines
+        assert "api.md" in lines
+
+    def test_error_stops_early(self, runner, repo_with_tree):
+        """An invalid path still raises an error."""
+        result = runner.invoke(main, ["ls", "--repo", repo_with_tree, ":src", ":nonexistent"])
+        assert result.exit_code != 0
+        assert "not found" in result.output.lower()
+
+
+# ---------------------------------------------------------------------------
 # TestCat
 # ---------------------------------------------------------------------------
 

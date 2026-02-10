@@ -88,7 +88,7 @@ def destroy(ctx, force):
 
 @main.command()
 @_repo_option
-@click.argument("path", required=False, default=None)
+@click.argument("paths", nargs=-1)
 @click.option("--branch", "-b", default="main", help="Branch to list.")
 @click.option("-R", "--recursive", is_flag=True, help="List all files recursively with full paths.")
 @click.option("--ref", "ref", default=None, help="Branch, tag, or commit hash to read from.")
@@ -96,77 +96,78 @@ def destroy(ctx, force):
 @click.option("--match", "match_pattern", default=None, help="Use latest commit matching this message pattern (* and ?).")
 @click.option("--before", "before", default=None, help="Use latest commit on or before this date (ISO 8601).")
 @click.pass_context
-def ls(ctx, path, branch, recursive, ref, at_path, match_pattern, before):
-    """List files/directories at PATH (or root).
+def ls(ctx, paths, branch, recursive, ref, at_path, match_pattern, before):
+    """List files/directories at PATH(s) (or root).
 
-    Supports glob wildcards (* and ?) in PATH — quote patterns to prevent
-    shell expansion.  Use -R for recursive listing.
+    Accepts multiple paths and glob patterns.  Results are coalesced and
+    deduplicated.  Quote glob patterns to prevent shell expansion.
 
     \b
     Examples:
-        gitstore ls                    # root listing
-        gitstore ls :src               # subdirectory
-        gitstore ls '*.txt'            # glob (root .txt files)
-        gitstore ls 'src/*.py'         # glob in subdirectory
-        gitstore ls -R                 # all files recursively
-        gitstore ls -R :src            # recursive under src/
+        gitstore ls                         # root listing
+        gitstore ls :src                    # subdirectory
+        gitstore ls '*.txt' '*.py'          # multiple globs
+        gitstore ls :src :docs              # multiple directories
+        gitstore ls -R                      # all files recursively
+        gitstore ls -R :src :docs           # recursive under multiple dirs
     """
     store = _open_store(_require_repo(ctx))
     before = _parse_before(before)
     fs = _resolve_snapshot(_get_fs(store, branch, ref), at_path, match_pattern, before)
 
-    has_glob = path is not None and ("*" in path or "?" in path)
+    # No args → list root (single implicit path)
+    if not paths:
+        paths = (None,)
 
-    if has_glob:
-        pattern = _strip_colon(path)
-        matches = fs.glob(pattern)
-        if not matches:
-            return
-        if recursive:
-            expanded = []
-            for m in matches:
-                if fs.is_dir(m):
-                    for dp, _, fnames in fs.walk(m):
-                        for f in fnames:
-                            expanded.append(f"{dp}/{f}" if dp else f)
-                else:
-                    expanded.append(m)
-            matches = expanded
-        for entry in sorted(matches):
-            click.echo(entry)
+    results: set[str] = set()
 
-    elif recursive:
-        repo_path = None
-        if path is not None:
-            repo_path = _strip_colon(path)
-            if repo_path:
-                repo_path = _normalize_repo_path(repo_path)
-        try:
-            results = []
-            for dp, _, fnames in fs.walk(repo_path if repo_path else None):
-                for f in fnames:
-                    results.append(f"{dp}/{f}" if dp else f)
-        except FileNotFoundError:
-            raise click.ClickException(f"Path not found: {repo_path}")
-        except NotADirectoryError:
-            raise click.ClickException(f"Not a directory: {repo_path}")
-        for entry in sorted(results):
-            click.echo(entry)
+    for path in paths:
+        has_glob = path is not None and ("*" in path or "?" in path)
 
-    else:
-        repo_path = None
-        if path is not None:
-            repo_path = _strip_colon(path)
-            if repo_path:
-                repo_path = _normalize_repo_path(repo_path)
-        try:
-            entries = fs.ls(repo_path if repo_path else None)
-        except FileNotFoundError:
-            raise click.ClickException(f"Path not found: {repo_path}")
-        except NotADirectoryError:
-            raise click.ClickException(f"Not a directory: {repo_path}")
-        for entry in sorted(entries):
-            click.echo(entry)
+        if has_glob:
+            pattern = _strip_colon(path)
+            matches = fs.glob(pattern)
+            if recursive:
+                for m in matches:
+                    if fs.is_dir(m):
+                        for dp, _, fnames in fs.walk(m):
+                            for f in fnames:
+                                results.add(f"{dp}/{f}" if dp else f)
+                    else:
+                        results.add(m)
+            else:
+                results.update(matches)
+
+        elif recursive:
+            repo_path = None
+            if path is not None:
+                repo_path = _strip_colon(path)
+                if repo_path:
+                    repo_path = _normalize_repo_path(repo_path)
+            try:
+                for dp, _, fnames in fs.walk(repo_path if repo_path else None):
+                    for f in fnames:
+                        results.add(f"{dp}/{f}" if dp else f)
+            except FileNotFoundError:
+                raise click.ClickException(f"Path not found: {repo_path}")
+            except NotADirectoryError:
+                raise click.ClickException(f"Not a directory: {repo_path}")
+
+        else:
+            repo_path = None
+            if path is not None:
+                repo_path = _strip_colon(path)
+                if repo_path:
+                    repo_path = _normalize_repo_path(repo_path)
+            try:
+                results.update(fs.ls(repo_path if repo_path else None))
+            except FileNotFoundError:
+                raise click.ClickException(f"Path not found: {repo_path}")
+            except NotADirectoryError:
+                raise click.ClickException(f"Not a directory: {repo_path}")
+
+    for entry in sorted(results):
+        click.echo(entry)
 
 
 # ---------------------------------------------------------------------------

@@ -127,7 +127,7 @@ gitstore sync :data ./local --ref v1.0        # from tag
 
 ### ls
 
-List files and directories. Supports glob wildcards (`*`, `?`) and recursive listing.
+List files and directories. Accepts multiple paths and glob patterns — results are coalesced and deduplicated.
 
 ```bash
 gitstore ls                                   # root
@@ -135,8 +135,10 @@ gitstore ls subdir                            # subdirectory
 gitstore ls --ref v1.0                        # at a tag
 gitstore ls '*.txt'                           # glob (quote to avoid shell expansion)
 gitstore ls 'src/*.py'                        # glob in subdirectory
+gitstore ls '*.txt' '*.py'                    # multiple globs
+gitstore ls :src :docs                        # multiple directories
 gitstore ls -R                                # all files recursively
-gitstore ls -R :src                           # recursive under src/
+gitstore ls -R :src :docs                     # recursive under multiple dirs
 gitstore ls -R 'src/*'                        # glob + recursive expansion
 ```
 
