@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ..tree import GIT_FILEMODE_LINK, _entry_at_path
+from ..tree import GIT_FILEMODE_BLOB_EXECUTABLE, GIT_FILEMODE_LINK, _entry_at_path
 from ._types import CopyError
 
 if TYPE_CHECKING:
@@ -29,18 +29,20 @@ def _blob_hasher(size: int) -> hashlib._Hash:
     return hashlib.sha1(f"blob {size}\0".encode())
 
 
-def _local_file_oid(base: Path, rel: str) -> bytes:
+def _local_file_oid(base: Path, rel: str, *, follow_symlinks: bool = False) -> bytes:
     """Compute git blob OID for a local file by streaming through SHA-1.
 
-    Symlinks hash their target string.  Regular files are streamed in
-    chunks to avoid loading entire contents into memory.
+    Symlinks hash their target string unless *follow_symlinks* is True,
+    in which case they are dereferenced and the content is hashed.
+    Regular files are streamed in chunks to avoid loading entire
+    contents into memory.
     """
-    return _local_file_oid_abs(base / rel)
+    return _local_file_oid_abs(base / rel, follow_symlinks=follow_symlinks)
 
 
-def _local_file_oid_abs(full: Path) -> bytes:
+def _local_file_oid_abs(full: Path, *, follow_symlinks: bool = False) -> bytes:
     """Compute git blob OID for a local file given its absolute path."""
-    if full.is_symlink():
+    if not follow_symlinks and full.is_symlink():
         data = os.readlink(full).encode()
         h = _blob_hasher(len(data))
         h.update(data)
@@ -77,11 +79,27 @@ def _write_files_to_repo(batch, pairs, *, follow_symlinks=False, mode=None,
                 errors.append(CopyError(path=local_path, error=str(exc)))
 
 
-def _write_files_to_disk(fs: FS, pairs, *, ignore_errors=False, errors=None):
-    """Write ``(repo_path, local_path)`` pairs to local disk."""
+def _write_files_to_disk(fs: FS, pairs, *, base: Path | None = None,
+                         ignore_errors=False, errors=None):
+    """Write ``(repo_path, local_path)`` pairs to local disk.
+
+    When *base* is given, path-clearing only removes blocking files
+    within that root directory (never at or above *base*).
+    """
     for repo_path, local_path in pairs:
         try:
             out = Path(local_path)
+            # Clear blocking paths: if a parent is a file, remove it
+            for parent in out.parents:
+                if base is not None and parent == base:
+                    break
+                if parent.exists() and not parent.is_dir():
+                    parent.unlink()
+                    break
+            # If dest is a directory but we need a file, remove the dir
+            if out.is_dir() and not out.is_symlink():
+                import shutil
+                shutil.rmtree(out)
             out.parent.mkdir(parents=True, exist_ok=True)
             if out.exists() or out.is_symlink():
                 out.unlink()
@@ -90,6 +108,8 @@ def _write_files_to_disk(fs: FS, pairs, *, ignore_errors=False, errors=None):
                 out.symlink_to(fs.readlink(repo_path))
             else:
                 out.write_bytes(fs.read(repo_path))
+                if entry and entry[1] == GIT_FILEMODE_BLOB_EXECUTABLE:
+                    os.chmod(local_path, 0o755)
         except OSError as exc:
             if not ignore_errors:
                 raise

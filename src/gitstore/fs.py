@@ -14,6 +14,7 @@ from ._lock import repo_lock
 from .exceptions import StaleSnapshotError
 from .tree import (
     GIT_FILEMODE_BLOB,
+    GIT_FILEMODE_BLOB_EXECUTABLE,
     GIT_FILEMODE_LINK,
     GIT_FILEMODE_TREE,
     GIT_OBJECT_TREE,
@@ -251,18 +252,6 @@ class FS:
         final_message = format_commit_message(report, message, operation)
 
         new_tree_oid = rebuild_tree(repo, self._tree_oid, writes, removes)
-        if new_tree_oid == self._tree_oid:
-            return self  # nothing changed
-
-        # Create commit object without moving the ref
-        new_commit_oid = repo.create_commit(
-            None,
-            sig,
-            sig,
-            final_message,
-            new_tree_oid,
-            [self._commit_oid],
-        )
 
         # Atomic check-and-update under file lock
         ref_name = f"refs/heads/{self._branch}"
@@ -272,6 +261,19 @@ class FS:
                 raise StaleSnapshotError(
                     f"Branch {self._branch!r} has advanced since this snapshot"
                 )
+
+            if new_tree_oid == self._tree_oid:
+                return self  # nothing changed, branch is current
+
+            # Create commit object and move the ref
+            new_commit_oid = repo.create_commit(
+                None,
+                sig,
+                sig,
+                final_message,
+                new_tree_oid,
+                [self._commit_oid],
+            )
             # Pass commit message to reflog
             ref.set_target(new_commit_oid, message=f"commit: {final_message}".encode())
 
@@ -359,6 +361,8 @@ class FS:
                     os.symlink(target, dest)
                 else:
                     (dir_on_disk / filename).write_bytes(self.read(store_path))
+                    if entry and entry[1] == GIT_FILEMODE_BLOB_EXECUTABLE:
+                        os.chmod(dir_on_disk / filename, 0o755)
 
     # --- History ---
 
@@ -392,6 +396,14 @@ class FS:
         """
         if not self._writable:
             raise PermissionError("Cannot undo on a read-only snapshot")
+
+        # Verify we're at the branch head
+        ref_name = f"refs/heads/{self._branch}"
+        ref = self._store._repo.references[ref_name]
+        if ref.resolve().target != self._commit_oid:
+            raise StaleSnapshotError(
+                f"Branch {self._branch!r} has advanced since this snapshot"
+            )
 
         # Walk back N parents
         current = self
@@ -433,6 +445,14 @@ class FS:
         """
         if not self._writable:
             raise PermissionError("Cannot redo on a read-only snapshot")
+
+        # Verify we're at the branch head
+        ref_name = f"refs/heads/{self._branch}"
+        ref = self._store._repo.references[ref_name]
+        if ref.resolve().target != self._commit_oid:
+            raise StaleSnapshotError(
+                f"Branch {self._branch!r} has advanced since this snapshot"
+            )
 
         # Read reflog for this branch
         from dulwich import reflog as dreflog

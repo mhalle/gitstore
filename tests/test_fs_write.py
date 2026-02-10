@@ -537,7 +537,7 @@ class TestUndoRedoEdgeCases:
         fs1 = fs.write("a.txt", b"a")
 
         # fs is now stale (points to init commit, branch moved to fs1)
-        with pytest.raises(ValueError, match="stale"):
+        with pytest.raises(StaleSnapshotError, match="advanced"):
             fs.redo()
 
 

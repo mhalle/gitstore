@@ -163,7 +163,10 @@ def copy_to_repo(
         update_rels: list[str] = []
         for rel in both:
             try:
-                if _local_file_oid_abs(Path(pair_map[rel])) != repo_files[rel]:
+                repo_oid, repo_mode = repo_files[rel]
+                if _local_file_oid_abs(Path(pair_map[rel]), follow_symlinks=follow_symlinks) != repo_oid:
+                    update_rels.append(rel)
+                elif repo_mode != GIT_FILEMODE_LINK and _mode_from_disk(pair_map[rel]) != repo_mode:
                     update_rels.append(rel)
             except OSError as exc:
                 if not ignore_errors:
@@ -330,7 +333,7 @@ def copy_from_repo(
         for rel, rp in pair_map.items():
             entry = _entry_at_path(fs._store._repo, fs._tree_oid, rp)
             if entry is not None:
-                repo_files[rel] = entry[0]._sha
+                repo_files[rel] = (entry[0]._sha, entry[1])
 
         local_paths = _walk_local_paths(dest)
         source_rels = set(pair_map.keys())
@@ -342,8 +345,12 @@ def copy_from_repo(
         update_rels: list[str] = []
         for rel in both:
             try:
-                if rel in repo_files and _local_file_oid(base, rel) != repo_files[rel]:
-                    update_rels.append(rel)
+                if rel in repo_files:
+                    repo_oid, repo_mode = repo_files[rel]
+                    if _local_file_oid(base, rel) != repo_oid:
+                        update_rels.append(rel)
+                    elif repo_mode != GIT_FILEMODE_LINK and _mode_from_disk(str(base / rel)) != repo_mode:
+                        update_rels.append(rel)
             except OSError as exc:
                 if not ignore_errors:
                     raise
@@ -380,7 +387,8 @@ def copy_from_repo(
         for rel in add_rels + update_rels:
             write_pairs.append((pair_map[rel], str(base / rel)))
 
-        _write_files_to_disk(fs, write_pairs, ignore_errors=ignore_errors,
+        _write_files_to_disk(fs, write_pairs, base=base,
+                             ignore_errors=ignore_errors,
                              errors=report.errors)
         _prune_empty_dirs(base)
 
@@ -419,7 +427,8 @@ def copy_from_repo(
             else:
                 add_rels.append(rel)
 
-        _write_files_to_disk(fs, pairs, ignore_errors=ignore_errors,
+        _write_files_to_disk(fs, pairs, base=Path(dest),
+                             ignore_errors=ignore_errors,
                              errors=report.errors)
 
         # Convert to FileEntry lists (get modes from repo)
@@ -474,7 +483,10 @@ def copy_to_repo_dry_run(
 
         update: list[str] = []
         for rel in both:
-            if _local_file_oid_abs(Path(pair_map[rel])) != repo_files[rel]:
+            repo_oid, repo_mode = repo_files[rel]
+            if _local_file_oid_abs(Path(pair_map[rel]), follow_symlinks=follow_symlinks) != repo_oid:
+                update.append(rel)
+            elif repo_mode != GIT_FILEMODE_LINK and _mode_from_disk(pair_map[rel]) != repo_mode:
                 update.append(rel)
 
         if ignore_existing:
@@ -537,11 +549,11 @@ def copy_from_repo_dry_run(
             else:
                 pair_map[rel] = repo_path
 
-        repo_files: dict[str, bytes] = {}
+        repo_files: dict[str, tuple[bytes, int]] = {}
         for rel, rp in pair_map.items():
             entry = _entry_at_path(fs._store._repo, fs._tree_oid, rp)
             if entry is not None:
-                repo_files[rel] = entry[0]._sha
+                repo_files[rel] = (entry[0]._sha, entry[1])
 
         local_paths = _walk_local_paths(dest) if base.exists() else set()
         source_rels = set(pair_map.keys())
@@ -552,8 +564,12 @@ def copy_from_repo_dry_run(
 
         update: list[str] = []
         for rel in both:
-            if rel in repo_files and _local_file_oid(base, rel) != repo_files[rel]:
-                update.append(rel)
+            if rel in repo_files:
+                repo_oid, repo_mode = repo_files[rel]
+                if _local_file_oid(base, rel) != repo_oid:
+                    update.append(rel)
+                elif repo_mode != GIT_FILEMODE_LINK and _mode_from_disk(str(base / rel)) != repo_mode:
+                    update.append(rel)
 
         if ignore_existing:
             update = []
@@ -611,23 +627,26 @@ def sync_to_repo(
         )
     except (FileNotFoundError, NotADirectoryError):
         # Nonexistent local path → treat as empty source (delete everything)
-        new_fs, delete_rels = _sync_delete_all_in_repo(fs, repo_path, message=message)
+        new_fs, delete_rels, is_file = _sync_delete_all_in_repo(fs, repo_path, message=message)
         if not delete_rels:
             new_fs._report = None
             return new_fs
         # Convert string list to FileEntry list
-        report = CopyReport(delete=_make_entries_from_repo(fs, delete_rels, repo_path))
+        # For file deletes, rels are full paths (base=""); for dirs, relative to repo_path
+        base = "" if is_file else repo_path
+        report = CopyReport(delete=_make_entries_from_repo(fs, delete_rels, base))
         new_fs._report = report
         return new_fs
 
 
 def _sync_delete_all_in_repo(
     fs: FS, repo_path: str, *, message: str | None = None,
-) -> tuple[FS, list[str]]:
+) -> tuple[FS, list[str], bool]:
     """Delete all files under *repo_path* (used when sync source is empty).
 
-    Returns ``(new_fs, deleted_rels)`` where *deleted_rels* are relative
-    to *repo_path*.
+    Returns ``(new_fs, deleted_rels, is_file)`` where *deleted_rels* are
+    relative to *repo_path* for directories, or full paths for single files.
+    *is_file* is ``True`` when *repo_path* was a single file.
     """
     dest = _normalize_path(repo_path) if repo_path else ""
     repo_files = _walk_repo(fs, dest)
@@ -636,13 +655,13 @@ def _sync_delete_all_in_repo(
         if dest and fs.exists(dest) and not fs.is_dir(dest):
             with fs.batch(message=message, operation="cp") as b:
                 b.remove(dest)
-            return b.fs, [""]
-        return fs, []
+            return b.fs, [dest], True
+        return fs, [], False
     with fs.batch(message=message) as b:
         for rel in sorted(repo_files):
             full = f"{dest}/{rel}" if dest else rel
             b.remove(full)
-    return b.fs, sorted(repo_files.keys())
+    return b.fs, sorted(repo_files.keys()), False
 
 
 def sync_from_repo(
@@ -692,8 +711,9 @@ def sync_to_repo_dry_run(
         dest = _normalize_path(repo_path) if repo_path else ""
         repo_files = _walk_repo(fs, dest)
         if not repo_files and dest and fs.exists(dest) and not fs.is_dir(dest):
-            # B1 fix: dest is a single file — relative path within dest is ""
-            return CopyReport(delete=[FileEntry("", "B")])
+            entry = _entry_at_path(fs._store._repo, fs._tree_oid, dest)
+            file_entry = FileEntry.from_mode(dest, entry[1]) if entry else FileEntry(dest, "B")
+            return CopyReport(delete=[file_entry])
         delete_list = sorted(repo_files.keys())
         delete_entries = _make_entries_from_repo(fs, delete_list, dest)
         return _finalize_report(CopyReport(delete=delete_entries))

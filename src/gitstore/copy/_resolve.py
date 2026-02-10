@@ -69,14 +69,15 @@ def _walk_local_paths(local_path: str, follow_symlinks: bool = False) -> set[str
     return result
 
 
-def _walk_repo(fs: FS, repo_path: str) -> dict[str, bytes]:
-    """Build {relative_path: oid_hex_bytes} for all files under *repo_path*.
+def _walk_repo(fs: FS, repo_path: str) -> dict[str, tuple[bytes, int]]:
+    """Build {relative_path: (oid_hex_bytes, filemode)} for files under *repo_path*.
 
-    The values are the raw OID hex bytes from the repo (not file content),
+    The OID values are the raw hex bytes from the repo (not file content),
     suitable for comparison against ``_local_file_oid()`` results.
+    The filemode is the git filemode (e.g. 0o100644, 0o100755, 0o120000).
     Returns an empty dict if *repo_path* does not exist or is not a directory.
     """
-    result: dict[str, bytes] = {}
+    result: dict[str, tuple[bytes, int]] = {}
     if repo_path:
         if not fs.exists(repo_path):
             return result
@@ -92,7 +93,7 @@ def _walk_repo(fs: FS, repo_path: str) -> dict[str, bytes]:
                 rel = store_path
             entry = _entry_at_path(fs._store._repo, fs._tree_oid, store_path)
             if entry is not None:
-                result[rel] = entry[0]._sha  # raw hex bytes
+                result[rel] = (entry[0]._sha, entry[1])
     return result
 
 

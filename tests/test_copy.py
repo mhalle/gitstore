@@ -432,6 +432,50 @@ class TestCopySymlinks:
         assert os.readlink(out / "mylink") == "target.txt"
 
 
+class TestFollowSymlinksDeleteMode:
+    """follow_symlinks=True in delete mode must hash content, not link targets."""
+
+    def test_follow_symlinks_no_perpetual_update(self, store_and_fs):
+        """Symlinked file with follow_symlinks=True shouldn't cause perpetual updates."""
+        _, fs, tmp_path = store_and_fs
+        local = tmp_path / "src"
+        local.mkdir()
+        target = tmp_path / "target.txt"
+        target.write_text("content")
+        (local / "link.txt").symlink_to(str(target))
+        (local / "regular.txt").write_text("regular")
+
+        fs1 = copy_to_repo(fs, [str(local) + "/"], "data",
+                            follow_symlinks=True, delete=True)
+        # Content should be stored, not symlink target
+        assert fs1.read("data/link.txt") == b"content"
+
+        # Second sync should find no changes
+        plan = copy_to_repo_dry_run(fs1, [str(local) + "/"], "data",
+                                     follow_symlinks=True, delete=True)
+        assert plan is None
+
+    def test_follow_symlinks_content_change_detected(self, store_and_fs):
+        """With follow_symlinks=True, changing the target file is detected."""
+        _, fs, tmp_path = store_and_fs
+        local = tmp_path / "src"
+        local.mkdir()
+        target = tmp_path / "target.txt"
+        target.write_text("version1")
+        (local / "link.txt").symlink_to(str(target))
+
+        fs1 = copy_to_repo(fs, [str(local) + "/"], "data",
+                            follow_symlinks=True, delete=True)
+
+        # Change the target content
+        target.write_text("version2")
+
+        plan = copy_to_repo_dry_run(fs1, [str(local) + "/"], "data",
+                                     follow_symlinks=True, delete=True)
+        assert plan is not None
+        assert "link.txt" in paths(plan.update)
+
+
 # ---------------------------------------------------------------------------
 # Delete tests
 # ---------------------------------------------------------------------------

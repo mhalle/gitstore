@@ -130,7 +130,7 @@ fs = fs.write("data/nested/file.bin", b"\x00\x01\x02")  # directories created au
 fs = fs.write("script.sh", b"#!/bin/sh\n", mode=0o100755)  # executable
 fs = fs.write("config.json", b"{}", message="Reset config")  # custom commit message
 
-# Write from a file on disk (avoids loading into Python memory)
+# Write from a file on disk
 fs = fs.write_from("big-dataset.bin", "/data/dataset.bin")
 
 # Preserves executable bit from disk permissions

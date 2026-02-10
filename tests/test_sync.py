@@ -1117,6 +1117,68 @@ class TestSyncSymlinkEdgeCases:
 
 
 # ---------------------------------------------------------------------------
+# Symlinks in-sync: mode comparison must not flag symlinks as updates
+# ---------------------------------------------------------------------------
+
+class TestSyncSymlinksInSync:
+    """Symlinks already in sync must not be reported as updates."""
+
+    def test_file_symlink_in_sync_to_repo(self, fs, tmp_path):
+        """A file symlink synced to repo and re-synced produces no updates."""
+        local = tmp_path / "local"
+        local.mkdir()
+        (local / "link").symlink_to("target")
+        (local / "file.txt").write_text("hello")
+
+        fs1 = sync_to_repo(fs, str(local), "data")
+        plan = sync_to_repo_dry_run(fs1, str(local), "data")
+        assert plan is None
+
+    def test_dir_symlink_in_sync_to_repo(self, fs, tmp_path):
+        """A directory symlink synced to repo and re-synced produces no updates."""
+        target_dir = tmp_path / "target_dir"
+        target_dir.mkdir()
+        (target_dir / "child.txt").write_text("child")
+
+        local = tmp_path / "local"
+        local.mkdir()
+        (local / "linked_dir").symlink_to(str(target_dir))
+
+        fs1 = sync_to_repo(fs, str(local), "data")
+        plan = sync_to_repo_dry_run(fs1, str(local), "data")
+        assert plan is None
+
+    def test_file_symlink_in_sync_from_repo(self, fs, tmp_path):
+        """A file symlink synced from repo and re-synced produces no updates."""
+        fs = fs.write_symlink("data/link", "target")
+        fs = fs.write("data/file.txt", b"hello")
+
+        out = tmp_path / "output"
+        out.mkdir()
+        sync_from_repo(fs, "data", str(out))
+
+        plan = sync_from_repo_dry_run(fs, "data", str(out))
+        assert plan is None
+
+    def test_dir_symlink_from_repo_no_false_update(self, fs, tmp_path):
+        """A dir-targeting symlink from repo doesn't raise IsADirectoryError."""
+        target_dir = tmp_path / "target_dir"
+        target_dir.mkdir()
+        (target_dir / "child.txt").write_text("child")
+
+        fs = fs.write_symlink("data/linked_dir", str(target_dir))
+        fs = fs.write("data/file.txt", b"hello")
+
+        out = tmp_path / "output"
+        out.mkdir()
+        sync_from_repo(fs, "data", str(out))
+
+        # Re-sync should produce no changes
+        plan = sync_from_repo_dry_run(fs, "data", str(out))
+        assert plan is None
+
+
+# ---------------------------------------------------------------------------
 # Unicode / special character filenames
 # ---------------------------------------------------------------------------
 
@@ -1420,14 +1482,11 @@ class TestSyncDeleteFileAtRepoPath:
         """Dry-run reports delete when repo_path is a file and local is empty."""
         fs = fs.write("data", b"I am a file at 'data'")
         plan = sync_to_repo_dry_run(fs, "/nonexistent/path", "data")
-        # B1 fix: the delete entry is "" (relative path within "data" region)
-        assert "" in paths(plan.delete)
+        assert "data" in paths(plan.delete)
 
     def test_sync_to_repo_dry_run_file_delete_plan_path(self, fs):
-        """Verify delete path for file-at-dest is '' not the dest name."""
+        """Verify delete path for file-at-dest uses the actual file path."""
         fs = fs.write("data", b"I am a file at 'data'")
         plan = sync_to_repo_dry_run(fs, "/nonexistent/path", "data")
         assert plan is not None
-        assert sorted(paths(plan.delete)) == [""]
-        # Verify that 'data' is NOT in the delete list (was the old bug)
-        assert "data" not in paths(plan.delete)
+        assert sorted(paths(plan.delete)) == ["data"]

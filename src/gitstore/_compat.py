@@ -15,6 +15,7 @@ from dulwich.objects import Tag as _DTag
 from dulwich.objects import Tree as _DTree
 from dulwich.porcelain import ls_remote as _ls_remote
 from dulwich.protocol import ZERO_SHA as _ZERO_SHA
+from dulwich.reflog import format_reflog_line as _format_reflog_line
 from dulwich.repo import Repo as _DRepo
 
 # ---------------------------------------------------------------------------
@@ -196,6 +197,25 @@ def _wrap(dulwich_obj, repo: Repository) -> _WrappedObject:
 # References
 # ---------------------------------------------------------------------------
 
+def _write_reflog_entry(repo_path: str, ref_name: bytes, old_sha: bytes, new_sha: bytes, committer: bytes, message: bytes):
+    """Write a reflog entry for a ref update."""
+    import os
+
+    # Convert ref name to path: refs/heads/main -> logs/refs/heads/main
+    ref_str = ref_name.decode() if isinstance(ref_name, bytes) else ref_name
+    reflog_path = os.path.join(repo_path, "logs", ref_str)
+
+    # Create parent directories
+    os.makedirs(os.path.dirname(reflog_path), exist_ok=True)
+
+    # Format and write entry
+    timestamp = int(_time.time())
+    line = _format_reflog_line(old_sha, new_sha, committer, timestamp, 0, message)
+
+    with open(reflog_path, 'ab') as f:
+        f.write(line + b'\n')
+
+
 class _Reference:
     """Mimics a pygit2 reference."""
 
@@ -212,8 +232,25 @@ class _Reference:
     def target(self) -> Oid:
         return Oid(self._refs[self._name])
 
-    def set_target(self, oid: Oid):
+    def set_target(self, oid: Oid, message: bytes | None = None):
+        # Get old value for reflog
+        try:
+            old_sha = self._refs[self._name]
+        except KeyError:
+            old_sha = _ZERO_SHA
+
+        # Update ref
         self._refs[self._name] = oid.raw
+
+        # Write reflog entry
+        if message is None:
+            message = b"update ref"
+        committer = b"gitstore <gitstore@localhost>"
+        _write_reflog_entry(
+            self._repo.path, self._name,
+            old_sha, oid.raw,
+            committer, message
+        )
 
 
 class _References:
@@ -237,9 +274,21 @@ class _References:
         for ref_bytes in self._refs.allkeys():
             yield ref_bytes.decode()
 
-    def create(self, name: str, oid: Oid):
+    def create(self, name: str, oid: Oid, message: bytes | None = None):
         ref_bytes = name.encode() if isinstance(name, str) else name
+
+        # Update ref
         self._refs[ref_bytes] = oid.raw
+
+        # Write reflog entry
+        if message is None:
+            message = b"create ref"
+        committer = b"gitstore <gitstore@localhost>"
+        _write_reflog_entry(
+            self._dulwich_repo.path, ref_bytes,
+            _ZERO_SHA, oid.raw,
+            committer, message
+        )
 
     def delete(self, name: str):
         ref_bytes = name.encode() if isinstance(name, str) else name
@@ -328,6 +377,11 @@ class Repository:
         return Oid(blob.id)
 
     def create_blob_fromdisk(self, path: str) -> Oid:
+        """Create a blob from a file on disk.
+
+        Note: reads the entire file into memory because dulwich requires
+        the full data to compute the SHA-1 hash and store the object.
+        """
         with open(path, "rb") as f:
             data = f.read()
         return self.create_blob(data)

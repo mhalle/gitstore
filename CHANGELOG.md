@@ -4,6 +4,29 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.29.0 (2026-02-09)
+
+**Bug fixes:**
+
+- Preserve executable bit (0o755) when extracting files from repo via `copy_from_repo` and `fs.dump`
+- Fix stale-snapshot check bypass when `_commit_changes` produces an identical tree (no-op write on a moved branch now raises `StaleSnapshotError`)
+- Add stale-snapshot check to `fs.undo()` and `fs.redo()` to prevent overwriting concurrent branch updates
+- Fix `sync_to_repo` delete-file path: report now shows the actual file path instead of `""`
+- Fix file-to-directory conflicts in non-delete `copy_from_repo` (clear blocking parent files before `mkdir`)
+- Detect mode-only changes (e.g. exec-bit flip) in delete-mode sync/copy, both directions
+- Fix symlink mode regression: symlinks already in sync no longer reported as false updates
+- Fix `follow_symlinks=True` in delete-mode copy: hash file content instead of link target to avoid perpetual updates
+- Add base guard to path-clearing in `_write_files_to_disk` to prevent deleting files above the destination root
+
+**Documentation:**
+
+- Fix README comment claiming `write_from` avoids loading files into memory (dulwich requires full data for SHA-1)
+- Add docstring to `create_blob_fromdisk` documenting memory limitation
+
+**Tests:**
+
+- Add 6 tests: symlink in-sync (4), follow_symlinks delete-mode (2)
+
 ## v0.28.0 (2026-02-09)
 
 **New features:**
