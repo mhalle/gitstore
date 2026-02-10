@@ -119,18 +119,6 @@ class FS:
             return False
         return entry[1] == GIT_FILEMODE_TREE
 
-    def _ls_typed(self, path: str | None) -> list[tuple[str, bool]]:
-        """Return [(name, is_dir), ...] for entries at *path*."""
-        repo = self._store._repo
-        if path is None or _is_root_path(path):
-            tree = repo[self._tree_oid]
-        else:
-            path = _normalize_path(path)
-            tree = _walk_to(repo, self._tree_oid, path)
-            if tree.type != GIT_OBJECT_TREE:
-                raise NotADirectoryError(path)
-        return [(e.name, e.filemode == GIT_FILEMODE_TREE) for e in tree]
-
     def iglob(self, pattern: str) -> Iterator[str]:
         """Expand a glob pattern against the repo tree, yielding unique matches.
 
@@ -142,7 +130,7 @@ class FS:
         if not pattern:
             return
         seen: set[str] = set()
-        for path in self._iglob_walk(pattern.split("/"), None):
+        for path in self._iglob_walk(pattern.split("/"), None, self._tree_oid):
             if path not in seen:
                 seen.add(path)
                 yield path
@@ -158,61 +146,101 @@ class FS:
         """
         return list(self.iglob(pattern))
 
-    def _iglob_walk(self, segments: list[str], prefix: str | None) -> Iterator[str]:
-        """Recursive glob generator."""
+    def _iglob_entries(self, tree_oid) -> list[tuple[str, bool, object]]:
+        """Return [(name, is_dir, oid), ...] for entries in a tree."""
+        repo = self._store._repo
+        tree = repo[tree_oid]
+        return [(e.name, e.filemode == GIT_FILEMODE_TREE, e.id) for e in tree]
+
+    def _iglob_walk(self, segments: list[str], prefix: str | None, tree_oid) -> Iterator[str]:
+        """Recursive glob generator — carries tree OID to avoid root walks."""
         if not segments:
             return
         seg = segments[0]
         rest = segments[1:]
+        repo = self._store._repo
 
         if seg == "**":
             try:
-                entries = self._ls_typed(prefix)
-            except (FileNotFoundError, NotADirectoryError):
+                entries = self._iglob_entries(tree_oid)
+            except (KeyError, TypeError):
                 return
             if rest:
-                # Zero dirs: try rest at current level
-                yield from self._iglob_walk(rest, prefix)
+                # Zero dirs: match rest[0] against entries we already have
+                yield from self._iglob_match_entries(rest, prefix, entries)
             else:
                 # ** alone at end: yield non-dot entries at this level
-                for name, _is_dir in entries:
+                for name, _is_dir, _oid in entries:
                     if name.startswith("."):
                         continue
-                    full = f"{prefix}/{name}" if prefix else name
-                    yield full
+                    yield f"{prefix}/{name}" if prefix else name
             # One+ dirs: recurse into non-dot subdirs
-            for name, entry_is_dir in entries:
+            for name, entry_is_dir, oid in entries:
                 if name.startswith("."):
                     continue
                 full = f"{prefix}/{name}" if prefix else name
                 if entry_is_dir:
-                    yield from self._iglob_walk(segments, full)  # keep **
+                    yield from self._iglob_walk(segments, full, oid)  # keep **
             return
 
         has_wild = "*" in seg or "?" in seg
 
         if has_wild:
-            # List entries at current level
             try:
-                entries = self.ls(prefix)
-            except (FileNotFoundError, NotADirectoryError):
+                entries = self._iglob_entries(tree_oid)
+            except (KeyError, TypeError):
                 return
-            for name in entries:
+            for name, _is_dir, oid in entries:
                 if not _glob_match(seg, name):
                     continue
                 full = f"{prefix}/{name}" if prefix else name
                 if rest:
-                    yield from self._iglob_walk(rest, full)
+                    yield from self._iglob_walk(rest, full, oid)
                 else:
                     yield full
         else:
-            # Literal segment — just descend
+            # Literal segment — look up directly in current tree
+            try:
+                tree = repo[tree_oid]
+                entry = tree[seg]
+            except (KeyError, TypeError):
+                return
             full = f"{prefix}/{seg}" if prefix else seg
             if rest:
-                yield from self._iglob_walk(rest, full)
+                yield from self._iglob_walk(rest, full, entry.id)
             else:
-                if self.exists(full):
+                yield full
+
+    def _iglob_match_entries(
+        self,
+        segments: list[str],
+        prefix: str | None,
+        entries: list[tuple[str, bool, object]],
+    ) -> Iterator[str]:
+        """Match segments against already-fetched entries (avoids re-listing)."""
+        seg = segments[0]
+        rest = segments[1:]
+        has_wild = "*" in seg or "?" in seg
+
+        if has_wild:
+            for name, _is_dir, oid in entries:
+                if not _glob_match(seg, name):
+                    continue
+                full = f"{prefix}/{name}" if prefix else name
+                if rest:
+                    yield from self._iglob_walk(rest, full, oid)
+                else:
                     yield full
+        else:
+            # Literal — look up in entries
+            for name, _is_dir, oid in entries:
+                if name == seg:
+                    full = f"{prefix}/{seg}" if prefix else seg
+                    if rest:
+                        yield from self._iglob_walk(rest, full, oid)
+                    else:
+                        yield full
+                    return
 
     def readlink(self, path: str | os.PathLike[str]) -> str:
         """Read the target of a symlink."""

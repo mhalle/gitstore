@@ -4,6 +4,18 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.38.1 (2026-02-10)
+
+**Performance:**
+
+- Pass tree OIDs down `_iglob_walk` recursion — each directory is now read directly via `repo[oid]` instead of re-walking from root
+- Avoid double directory reads for `**` + rest patterns (e.g. `**/*.py`)
+- Drop sorting from CLI `ls` output
+
+**Cleanup:**
+
+- Remove dead `_ls_typed` method (no longer called after iglob refactor)
+
 ## v0.38.0 (2026-02-10)
 
 **New features:**
