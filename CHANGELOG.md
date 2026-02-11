@@ -4,6 +4,19 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.40.0 (2026-02-11)
+
+**New features:**
+
+- Add `--back N` option to all read-oriented CLI commands (`ls`, `cat`, `log`, `cp`, `sync`, `zip`, `tar`, `archive`) — walk back N commits from HEAD before reading
+- Add `FS.back(n)` API method — return the FS at the nth ancestor commit
+
+**Internal:**
+
+- Add `_resolve_fs()` CLI helper — consolidates branch/ref + snapshot filter + `--back` resolution into a single call
+- Refactor `branch hash --back` to use `FS.back()` instead of inline loop
+- Drop deprecated `--at` option from `zip` and `tar` commands
+
 ## v0.39.1 (2026-02-10)
 
 **Enhancements:**

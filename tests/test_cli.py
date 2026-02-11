@@ -359,6 +359,20 @@ class TestCp:
         assert result.exit_code == 0, result.output
         assert (dest / "hello.txt").read_text() == "hello world\n"
 
+    def test_back(self, runner, initialized_repo, tmp_path):
+        f = tmp_path / "f.txt"
+        f.write_text("old")
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":f.txt"])
+        f.write_text("new")
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":f.txt"])
+        # cp from --back 1 should get the old content
+        dest = tmp_path / "out.txt"
+        result = runner.invoke(main, [
+            "cp", "--repo", initialized_repo, "--back", "1", ":f.txt", str(dest)
+        ])
+        assert result.exit_code == 0, result.output
+        assert dest.read_text() == "old"
+
 
 # ---------------------------------------------------------------------------
 # TestCpDirectories
@@ -832,6 +846,15 @@ class TestLs:
         assert result.exit_code == 0
         assert "data.bin" in result.output
 
+    def test_back(self, runner, repo_with_files):
+        # --back 1 should show state before data/ was added (only hello.txt)
+        result = runner.invoke(main, [
+            "ls", "--repo", repo_with_files, "--back", "1"
+        ])
+        assert result.exit_code == 0
+        assert "hello.txt" in result.output
+        assert "data" not in result.output
+
 
 # ---------------------------------------------------------------------------
 # TestLsRecursive
@@ -1043,6 +1066,19 @@ class TestCat:
         result = runner.invoke(main, ["cat", "--repo", repo_with_files, ":data"])
         assert result.exit_code != 0
         assert "directory" in result.output.lower()
+
+    def test_back(self, runner, initialized_repo, tmp_path):
+        f = tmp_path / "f.txt"
+        f.write_text("version1")
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":f.txt"])
+        f.write_text("version2")
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":f.txt"])
+        # --back 1 should read the previous version
+        result = runner.invoke(main, [
+            "cat", "--repo", initialized_repo, "--back", "1", ":f.txt"
+        ])
+        assert result.exit_code == 0
+        assert result.output == "version1"
 
 
 # ---------------------------------------------------------------------------
@@ -1259,6 +1295,17 @@ class TestLog:
             entry = json.loads(line)
             assert "hash" in entry
             assert "message" in entry
+
+    def test_back(self, runner, repo_with_files):
+        # repo_with_files has: init + write hello.txt + write data/
+        # --back 1 should start log from the "write hello.txt" commit
+        result = runner.invoke(main, [
+            "log", "--repo", repo_with_files, "--back", "1"
+        ])
+        assert result.exit_code == 0
+        lines = result.output.strip().split("\n")
+        # Should have 2 commits (hello.txt write + init), not 3
+        assert len(lines) == 2
 
 
 # ---------------------------------------------------------------------------

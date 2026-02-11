@@ -22,6 +22,7 @@ from ._helpers import (
     _get_branch_fs,
     _get_fs,
     _parse_before,
+    _resolve_fs,
     _resolve_snapshot,
     _detect_archive_format,
     _tag_option,
@@ -243,19 +244,18 @@ def _do_import(ctx, store, branch: str, filename: str, message: str | None, fmt:
 @click.option("--branch", "-b", default="main", help="Branch to export from.")
 @click.option("--ref", "ref", default=None, help="Branch, tag, or commit hash to export from.")
 @click.option("--path", "at_path", default=None, help="Use latest commit that changed this path.")
-@click.option("--at", "deprecated_at", default=None, hidden=True)
 @click.option("--match", "match_pattern", default=None, help="Use latest commit matching this message pattern (* and ?).")
 @click.option("--before", "before", default=None, help="Use latest commit on or before this date (ISO 8601).")
+@click.option("--back", type=int, default=0, help="Walk back N commits.")
 @click.pass_context
-def zip_cmd(ctx, filename, branch, ref, at_path, deprecated_at, match_pattern, before):
+def zip_cmd(ctx, filename, branch, ref, at_path, match_pattern, before, back):
     """Export repo contents to a zip file.
 
     FILENAME is the output zip path on disk.  Use '-' to write to stdout.
     """
-    at_path = at_path or deprecated_at
-    before = _parse_before(before)
     store = _open_store(_require_repo(ctx))
-    fs = _resolve_snapshot(_get_fs(store, branch, ref), at_path, match_pattern, before)
+    fs = _resolve_fs(store, branch, ref, at_path=at_path,
+                     match_pattern=match_pattern, before=before, back=back)
     _do_export(ctx, fs, filename, "zip")
 
 
@@ -293,20 +293,19 @@ def unzip_cmd(ctx, filename, branch, message, no_create, tag, force_tag):
 @click.option("--branch", "-b", default="main", help="Branch to export from.")
 @click.option("--ref", "ref", default=None, help="Branch, tag, or commit hash to export from.")
 @click.option("--path", "at_path", default=None, help="Use latest commit that changed this path.")
-@click.option("--at", "deprecated_at", default=None, hidden=True)
 @click.option("--match", "match_pattern", default=None, help="Use latest commit matching this message pattern (* and ?).")
 @click.option("--before", "before", default=None, help="Use latest commit on or before this date (ISO 8601).")
+@click.option("--back", type=int, default=0, help="Walk back N commits.")
 @click.pass_context
-def tar_cmd(ctx, filename, branch, ref, at_path, deprecated_at, match_pattern, before):
+def tar_cmd(ctx, filename, branch, ref, at_path, match_pattern, before, back):
     """Export repo contents to a tar archive.
 
     FILENAME is the output tar path on disk.  Use '-' to write to stdout.
     Compression is auto-detected from the filename extension (.tar.gz, .tar.bz2, .tar.xz).
     """
-    at_path = at_path or deprecated_at
-    before = _parse_before(before)
     store = _open_store(_require_repo(ctx))
-    fs = _resolve_snapshot(_get_fs(store, branch, ref), at_path, match_pattern, before)
+    fs = _resolve_fs(store, branch, ref, at_path=at_path,
+                     match_pattern=match_pattern, before=before, back=back)
     _do_export(ctx, fs, filename, "tar")
 
 
@@ -349,8 +348,9 @@ def untar_cmd(ctx, filename, branch, message, no_create, tag, force_tag):
 @click.option("--path", "at_path", default=None, help="Use latest commit that changed this path.")
 @click.option("--match", "match_pattern", default=None, help="Use latest commit matching this message pattern (* and ?).")
 @click.option("--before", "before", default=None, help="Use latest commit on or before this date (ISO 8601).")
+@click.option("--back", type=int, default=0, help="Walk back N commits.")
 @click.pass_context
-def archive_cmd(ctx, filename, fmt, branch, ref, at_path, match_pattern, before):
+def archive_cmd(ctx, filename, fmt, branch, ref, at_path, match_pattern, before, back):
     """Export repo contents to an archive file.
 
     Format is auto-detected from FILENAME extension (.zip, .tar, .tar.gz, etc.).
@@ -360,9 +360,9 @@ def archive_cmd(ctx, filename, fmt, branch, ref, at_path, match_pattern, before)
         if filename == "-":
             raise click.ClickException("Use --format with stdout (-)")
         fmt = _detect_archive_format(filename)
-    before = _parse_before(before)
     store = _open_store(_require_repo(ctx))
-    fs = _resolve_snapshot(_get_fs(store, branch, ref), at_path, match_pattern, before)
+    fs = _resolve_fs(store, branch, ref, at_path=at_path,
+                     match_pattern=match_pattern, before=before, back=back)
     _do_export(ctx, fs, filename, fmt)
 
 

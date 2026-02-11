@@ -24,6 +24,7 @@ from ._helpers import (
     _get_fs,
     _normalize_at_path,
     _parse_before,
+    _resolve_fs,
     _resolve_snapshot,
     _log_entry_dict,
     _no_create_option,
@@ -99,8 +100,9 @@ def destroy(ctx, force):
 @click.option("--path", "at_path", default=None, help="Use latest commit that changed this path.")
 @click.option("--match", "match_pattern", default=None, help="Use latest commit matching this message pattern (* and ?).")
 @click.option("--before", "before", default=None, help="Use latest commit on or before this date (ISO 8601).")
+@click.option("--back", type=int, default=0, help="Walk back N commits.")
 @click.pass_context
-def ls(ctx, paths, branch, recursive, ref, at_path, match_pattern, before):
+def ls(ctx, paths, branch, recursive, ref, at_path, match_pattern, before, back):
     """List files/directories at PATH(s) (or root).
 
     Accepts multiple paths and glob patterns.  Results are coalesced and
@@ -116,8 +118,8 @@ def ls(ctx, paths, branch, recursive, ref, at_path, match_pattern, before):
         gitstore ls -R :src :docs           # recursive under multiple dirs
     """
     store = _open_store(_require_repo(ctx))
-    before = _parse_before(before)
-    fs = _resolve_snapshot(_get_fs(store, branch, ref), at_path, match_pattern, before)
+    fs = _resolve_fs(store, branch, ref, at_path=at_path,
+                     match_pattern=match_pattern, before=before, back=back)
 
     # No args → list root (single implicit path)
     if not paths:
@@ -186,12 +188,13 @@ def ls(ctx, paths, branch, recursive, ref, at_path, match_pattern, before):
 @click.option("--path", "at_path", default=None, help="Use latest commit that changed this path.")
 @click.option("--match", "match_pattern", default=None, help="Use latest commit matching this message pattern (* and ?).")
 @click.option("--before", "before", default=None, help="Use latest commit on or before this date (ISO 8601).")
+@click.option("--back", type=int, default=0, help="Walk back N commits.")
 @click.pass_context
-def cat(ctx, paths, branch, ref, at_path, match_pattern, before):
+def cat(ctx, paths, branch, ref, at_path, match_pattern, before, back):
     """Concatenate file contents to stdout."""
     store = _open_store(_require_repo(ctx))
-    before = _parse_before(before)
-    fs = _resolve_snapshot(_get_fs(store, branch, ref), at_path, match_pattern, before)
+    fs = _resolve_fs(store, branch, ref, at_path=at_path,
+                     match_pattern=match_pattern, before=before, back=back)
 
     for path in paths:
         repo_path = _normalize_repo_path(_strip_colon(path))
@@ -311,15 +314,21 @@ def write(ctx, path, branch, message, no_create, tag, force_tag):
 @click.option("--before", "before", default=None, help="Show only commits on or before this date (ISO 8601).")
 @click.option("--branch", "-b", default="main", help="Branch to show log for.")
 @click.option("--ref", "ref", default=None, help="Branch, tag, or commit hash to start from.")
+@click.option("--back", type=int, default=0, help="Walk back N commits before showing log.")
 @click.option("--format", "fmt", default="text",
               type=click.Choice(["text", "json", "jsonl"]),
               help="Output format.")
 @click.pass_context
-def log(ctx, at_path, deprecated_at, match_pattern, before, branch, ref, fmt):
+def log(ctx, at_path, deprecated_at, match_pattern, before, branch, ref, back, fmt):
     """Show commit log, optionally filtered by path and/or message pattern."""
     at_path = at_path or deprecated_at
     store = _open_store(_require_repo(ctx))
     fs = _get_fs(store, branch, ref)
+    if back:
+        try:
+            fs = fs.back(back)
+        except ValueError as e:
+            raise click.ClickException(str(e))
 
     before = _parse_before(before)
     at_path = _normalize_at_path(at_path)

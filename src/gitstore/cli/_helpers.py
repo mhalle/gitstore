@@ -178,6 +178,20 @@ def _resolve_snapshot(fs, at_path: str | None, match_pattern: str | None, before
     return fs
 
 
+def _resolve_fs(store, branch, ref=None, *,
+                at_path=None, match_pattern=None, before=None, back=0):
+    """Resolve an FS from branch/ref + snapshot filters + --back."""
+    fs = _get_fs(store, branch, ref)
+    before = _parse_before(before)
+    fs = _resolve_snapshot(fs, at_path, match_pattern, before)
+    if back:
+        try:
+            fs = fs.back(back)
+        except ValueError as e:
+            raise click.ClickException(str(e))
+    return fs
+
+
 def _detect_archive_format(filename: str) -> str:
     """Detect archive format from filename extension. Returns 'zip' or 'tar'."""
     lower = filename.lower()

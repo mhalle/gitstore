@@ -140,12 +140,11 @@ def branch_hash(ctx, name, back, at_path, match_pattern, before):
         raise click.ClickException(f"Branch not found: {name}")
     before = _parse_before(before)
     fs = _resolve_snapshot(fs, at_path, match_pattern, before)
-    for _ in range(back):
-        p = fs.parent
-        if p is None:
-            raise click.ClickException(
-                f"Cannot go back {back} commits — history too short")
-        fs = p
+    if back:
+        try:
+            fs = fs.back(back)
+        except ValueError as e:
+            raise click.ClickException(str(e))
     click.echo(fs.hash)
 
 

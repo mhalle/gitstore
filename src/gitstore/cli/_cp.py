@@ -20,6 +20,7 @@ from ._helpers import (
     _open_or_create_store,
     _get_fs,
     _parse_before,
+    _resolve_fs,
     _resolve_snapshot,
     _tag_option,
     _apply_tag,
@@ -34,6 +35,7 @@ from ._helpers import (
 @click.option("--path", "at_path", default=None, help="Use latest commit that changed this path.")
 @click.option("--match", "match_pattern", default=None, help="Use latest commit matching this message pattern (* and ?).")
 @click.option("--before", "before", default=None, help="Use latest commit on or before this date (ISO 8601).")
+@click.option("--back", type=int, default=0, help="Walk back N commits.")
 @click.option("-m", "--message", default=None, help="Commit message. Use {default} to include auto-generated message.")
 @click.option("--mode", type=click.Choice(["644", "755"]), default=None,
               help="File mode (default: 644).")
@@ -52,7 +54,7 @@ from ._helpers import (
 @_no_create_option
 @_tag_option
 @click.pass_context
-def cp(ctx, args, branch, ref, at_path, match_pattern, before, message, mode, follow_symlinks, dry_run, ignore_existing, delete, ignore_errors, checksum, no_create, tag, force_tag):
+def cp(ctx, args, branch, ref, at_path, match_pattern, before, back, message, mode, follow_symlinks, dry_run, ignore_existing, delete, ignore_errors, checksum, no_create, tag, force_tag):
     """Copy files and directories between disk and repo.
 
     Requires --repo or GITSTORE_REPO environment variable.
@@ -100,7 +102,7 @@ def cp(ctx, args, branch, ref, at_path, match_pattern, before, message, mode, fo
             "Neither sources nor DEST is a repo path — prefix repo paths with ':'"
         )
 
-    has_snapshot_filters = ref or at_path or match_pattern or before
+    has_snapshot_filters = ref or at_path or match_pattern or before or back
     if has_snapshot_filters and not src_is_repo:
         raise click.ClickException(
             "--ref/--path/--match/--before only apply when reading from repo"
@@ -115,8 +117,8 @@ def cp(ctx, args, branch, ref, at_path, match_pattern, before, message, mode, fo
         store = _open_or_create_store(repo_path, branch)
     else:
         store = _open_store(repo_path)
-    before = _parse_before(before)
-    fs = _resolve_snapshot(_get_fs(store, branch, ref), at_path, match_pattern, before)
+    fs = _resolve_fs(store, branch, ref, at_path=at_path,
+                     match_pattern=match_pattern, before=before, back=back)
 
     filemode = (GIT_FILEMODE_BLOB_EXECUTABLE if mode == "755"
                 else GIT_FILEMODE_BLOB) if mode else None

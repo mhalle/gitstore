@@ -449,6 +449,22 @@ class FS:
             return None
         return FS(self._store, commit.parents[0].id, branch=self._branch)
 
+    def back(self, n: int) -> FS:
+        """Return the FS at the *n*-th ancestor commit.
+
+        Raises ValueError if *n* < 0 or history is too short.
+        """
+        if n < 0:
+            raise ValueError(f"back() requires n >= 0, got {n}")
+        fs = self
+        for _ in range(n):
+            p = fs.parent
+            if p is None:
+                raise ValueError(
+                    f"Cannot go back {n} commits — history too short")
+            fs = p
+        return fs
+
     def undo(self, steps: int = 1) -> FS:
         """Move branch back N commits.
 

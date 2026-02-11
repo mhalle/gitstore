@@ -36,6 +36,30 @@ class TestParent:
         assert p2.parent is None
 
 
+class TestBack:
+    def test_back_zero(self, repo_with_history):
+        _, fs = repo_with_history
+        assert fs.back(0).hash == fs.hash
+
+    def test_back_one(self, repo_with_history):
+        _, fs = repo_with_history
+        assert fs.back(1).hash == fs.parent.hash
+
+    def test_back_n(self, repo_with_history):
+        _, fs = repo_with_history
+        assert fs.back(2).hash == fs.parent.parent.hash
+
+    def test_back_too_far(self, repo_with_history):
+        _, fs = repo_with_history
+        with pytest.raises(ValueError, match="history too short"):
+            fs.back(100)
+
+    def test_back_negative(self, repo_with_history):
+        _, fs = repo_with_history
+        with pytest.raises(ValueError, match="n >= 0"):
+            fs.back(-1)
+
+
 class TestLog:
     def test_log_length(self, repo_with_history):
         _, fs = repo_with_history
