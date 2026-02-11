@@ -161,7 +161,7 @@ def ls(ctx, paths, branch, recursive, ref, at_path, match_pattern, before, back)
             except FileNotFoundError:
                 raise click.ClickException(f"Path not found: {repo_path}")
             except NotADirectoryError:
-                raise click.ClickException(f"Not a directory: {repo_path}")
+                results.add(repo_path)
 
         else:
             repo_path = None
@@ -174,7 +174,7 @@ def ls(ctx, paths, branch, recursive, ref, at_path, match_pattern, before, back)
             except FileNotFoundError:
                 raise click.ClickException(f"Path not found: {repo_path}")
             except NotADirectoryError:
-                raise click.ClickException(f"Not a directory: {repo_path}")
+                results.add(repo_path)
 
     for entry in results:
         click.echo(entry)

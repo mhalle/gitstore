@@ -892,8 +892,8 @@ class TestLsRecursive:
 
     def test_file_not_a_directory(self, runner, repo_with_tree):
         result = runner.invoke(main, ["ls", "-R", "--repo", repo_with_tree, ":readme.txt"])
-        assert result.exit_code != 0
-        assert "not a directory" in result.output.lower()
+        assert result.exit_code == 0
+        assert result.output.strip() == "readme.txt"
 
     def test_empty_branch(self, runner, tmp_path):
         p = str(tmp_path / "empty.git")
@@ -1857,6 +1857,16 @@ class TestPathNormalization:
         result_none = runner.invoke(main, ["ls", "--repo", repo_with_files])
         assert result_bare.exit_code == 0
         assert result_bare.output == result_none.output
+
+    def test_ls_single_file(self, runner, repo_with_files):
+        result = runner.invoke(main, ["ls", "--repo", repo_with_files, ":hello.txt"])
+        assert result.exit_code == 0
+        assert result.output.strip() == "hello.txt"
+
+    def test_ls_single_file_recursive(self, runner, repo_with_files):
+        result = runner.invoke(main, ["ls", "-R", "--repo", repo_with_files, ":hello.txt"])
+        assert result.exit_code == 0
+        assert result.output.strip() == "hello.txt"
 
 
 class TestResolveRef:
