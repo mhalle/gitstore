@@ -3492,3 +3492,69 @@ class TestCpRepoPivot:
         ])
         assert r.exit_code == 0, r.output
         assert "file.txt" in r.output
+
+
+class TestDiff:
+    def test_diff_no_changes(self, runner, repo_with_files):
+        """diff --back 0 compares HEAD to itself — no output."""
+        r = runner.invoke(main, ["diff", "--repo", repo_with_files, "--back", "0"])
+        assert r.exit_code == 0, r.output
+        assert r.output == ""
+
+    def test_diff_added_file(self, runner, repo_with_files, tmp_path):
+        """New file shows as A (added)."""
+        new = tmp_path / "new.txt"
+        new.write_text("new content")
+        r = runner.invoke(main, ["cp", "--repo", repo_with_files, str(new), ":new.txt"])
+        assert r.exit_code == 0, r.output
+
+        r = runner.invoke(main, ["diff", "--repo", repo_with_files, "--back", "1"])
+        assert r.exit_code == 0, r.output
+        assert "A  new.txt" in r.output
+
+    def test_diff_modified_file(self, runner, repo_with_files, tmp_path):
+        """Modified file shows as M."""
+        updated = tmp_path / "hello.txt"
+        updated.write_text("changed content")
+        r = runner.invoke(main, ["cp", "--repo", repo_with_files, str(updated), ":hello.txt"])
+        assert r.exit_code == 0, r.output
+
+        r = runner.invoke(main, ["diff", "--repo", repo_with_files, "--back", "1"])
+        assert r.exit_code == 0, r.output
+        assert "M  hello.txt" in r.output
+
+    def test_diff_deleted_file(self, runner, repo_with_files):
+        """Deleted file shows as D."""
+        r = runner.invoke(main, ["rm", "--repo", repo_with_files, ":hello.txt"])
+        assert r.exit_code == 0, r.output
+
+        r = runner.invoke(main, ["diff", "--repo", repo_with_files, "--back", "1"])
+        assert r.exit_code == 0, r.output
+        assert "D  hello.txt" in r.output
+
+    def test_diff_mixed(self, runner, repo_with_files, tmp_path):
+        """Add + modify + delete in one commit shows all three prefixes."""
+        from gitstore import GitStore
+        store = GitStore.open(repo_with_files, create=False)
+        fs = store.branches["main"]
+        fs = fs.write("hello.txt", b"changed")
+        fs = fs.write("added.txt", b"new")
+        fs = fs.remove("data/data.bin")
+
+        r = runner.invoke(main, ["diff", "--repo", repo_with_files, "--back", "3"])
+        assert r.exit_code == 0, r.output
+        assert "A  added.txt" in r.output
+        assert "M  hello.txt" in r.output
+        assert "D  data/data.bin" in r.output
+
+    def test_diff_reverse(self, runner, repo_with_files, tmp_path):
+        """--reverse swaps A and D."""
+        new = tmp_path / "new.txt"
+        new.write_text("new content")
+        r = runner.invoke(main, ["cp", "--repo", repo_with_files, str(new), ":new.txt"])
+        assert r.exit_code == 0, r.output
+
+        r = runner.invoke(main, ["diff", "--repo", repo_with_files, "--back", "1", "--reverse"])
+        assert r.exit_code == 0, r.output
+        assert "D  new.txt" in r.output
+        assert "A" not in r.output or "A  new.txt" not in r.output

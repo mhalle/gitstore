@@ -4,6 +4,12 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.43.0 (2026-02-11)
+
+**New features:**
+
+- Add `diff` CLI command — compare HEAD against a baseline snapshot with git-style `A`/`M`/`D` output; supports all snapshot options (`--ref`, `--back`, `--before`, `--path`, `--match`) and `--reverse` to swap direction
+
 ## v0.42.0 (2026-02-11)
 
 **New features:**

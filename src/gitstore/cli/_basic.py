@@ -9,6 +9,7 @@ import sys
 
 import click
 
+from ..copy._resolve import _walk_repo
 from ..exceptions import StaleSnapshotError
 from ..repo import GitStore
 from ..tree import _normalize_path
@@ -363,6 +364,38 @@ def log(ctx, at_path, deprecated_at, match_pattern, before, branch, ref, back, f
     else:
         for entry in entries:
             click.echo(f"{entry.hash[:7]}  {entry.time.isoformat()}  {entry.message}")
+
+
+# ---------------------------------------------------------------------------
+# diff
+# ---------------------------------------------------------------------------
+
+@main.command()
+@_repo_option
+@_branch_option
+@_snapshot_options
+@click.option("--reverse", is_flag=True, help="Swap comparison direction.")
+@click.pass_context
+def diff(ctx, branch, ref, at_path, match_pattern, before, back, reverse):
+    """Show files that differ between HEAD and another snapshot."""
+    store = _open_store(_require_repo(ctx))
+    branch = branch or _default_branch(store)
+    head_fs = _get_fs(store, branch, None)
+    other_fs = _resolve_fs(store, branch, ref, at_path=at_path,
+                           match_pattern=match_pattern, before=before, back=back)
+    if head_fs.hash == other_fs.hash:
+        return
+    new_files = _walk_repo(head_fs, "")
+    old_files = _walk_repo(other_fs, "")
+    if reverse:
+        new_files, old_files = old_files, new_files
+    for p in sorted(set(new_files) - set(old_files)):
+        click.echo(f"A  {p}")
+    for p in sorted(set(new_files) & set(old_files)):
+        if new_files[p] != old_files[p]:
+            click.echo(f"M  {p}")
+    for p in sorted(set(old_files) - set(new_files)):
+        click.echo(f"D  {p}")
 
 
 # ---------------------------------------------------------------------------
