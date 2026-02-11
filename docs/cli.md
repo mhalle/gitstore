@@ -140,6 +140,20 @@ gitstore sync :data ./local --ref v1.0        # from tag
 | `--no-create` | Don't auto-create the repo. |
 | `--tag` | Create a tag at the resulting commit (disk→repo only). |
 | `--force-tag` | Overwrite tag if it already exists. |
+| `--watch` | Watch for changes and sync continuously (disk→repo only). |
+| `--debounce MS` | Debounce delay in ms for `--watch` (default: 2000). |
+
+#### Watch mode
+
+With `--watch`, continuously watches the local directory and syncs on changes:
+
+```bash
+gitstore sync --watch ./dir :data
+gitstore sync --watch --debounce 5000 ./dir
+gitstore sync --watch -c ./src :code       # checksum mode
+```
+
+Requires: `pip install gitstore[watch]`
 
 ### ls
 

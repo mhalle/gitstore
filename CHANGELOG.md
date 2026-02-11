@@ -4,6 +4,21 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.45.0 (2026-02-11)
+
+**New features:**
+
+- Add `--watch` flag to `sync` command — continuously monitors a local directory for filesystem changes and auto-syncs to repo after a debounce delay (default 2s); uses `watchfiles` (Rust-based FSEvents/inotify); install via `pip install gitstore[watch]`
+- Add `--debounce` option to `sync --watch` — configurable debounce delay in milliseconds (minimum 100ms)
+
+**Tests:**
+
+- Add 16 tests for watch mode: unit tests for import fallback, summary formatting, sync cycles, error recovery; CLI validation tests for incompatible flag combos
+
+**Docs:**
+
+- Document `--watch` and `--debounce` options in CLI reference
+
 ## v0.44.1 (2026-02-11)
 
 **Bug fixes:**

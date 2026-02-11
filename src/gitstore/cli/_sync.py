@@ -42,8 +42,12 @@ from ._helpers import (
 @_checksum_option
 @_no_create_option
 @_tag_option
+@click.option("--watch", "watch", is_flag=True, default=False,
+              help="Watch for changes and sync continuously (disk→repo only).")
+@click.option("--debounce", type=int, default=2000,
+              help="Debounce delay in ms for --watch (default: 2000).")
 @click.pass_context
-def sync(ctx, args, branch, ref, at_path, match_pattern, before, back, message, dry_run, ignore_errors, checksum, no_create, tag, force_tag):
+def sync(ctx, args, branch, ref, at_path, match_pattern, before, back, message, dry_run, ignore_errors, checksum, no_create, tag, force_tag, watch, debounce):
     """Make one path identical to another (like rsync --delete).
 
     Requires --repo or GITSTORE_REPO environment variable.
@@ -106,6 +110,15 @@ def sync(ctx, args, branch, ref, at_path, match_pattern, before, back, message, 
             "--tag only applies when writing to repo (disk → repo)"
         )
 
+    # --watch validation
+    if watch:
+        if dry_run:
+            raise click.ClickException("--watch and --dry-run are incompatible")
+        if direction == "from_repo":
+            raise click.ClickException("--watch only supports disk → repo")
+        if debounce < 100:
+            raise click.ClickException("--debounce must be at least 100 ms")
+
     repo_path = _require_repo(ctx)
     if direction == "to_repo" and not dry_run and not no_create:
         store = _open_or_create_store(repo_path, branch or "main")
@@ -113,6 +126,14 @@ def sync(ctx, args, branch, ref, at_path, match_pattern, before, back, message, 
     else:
         store = _open_store(repo_path)
         branch = branch or _default_branch(store)
+
+    if watch:
+        from ._watch import watch_and_sync
+        watch_and_sync(store, branch, local_path, repo_dest,
+                       debounce=debounce, message=message,
+                       ignore_errors=ignore_errors, checksum=checksum)
+        return
+
     fs = _resolve_fs(store, branch, ref, at_path=at_path,
                      match_pattern=match_pattern, before=before, back=back)
 

@@ -3279,6 +3279,36 @@ class TestSync:
         r = runner.invoke(main, ["log", "--repo", initialized_repo])
         assert "custom sync message" in r.output
 
+    def test_sync_watch_dry_run_incompatible(self, runner, initialized_repo, tmp_path):
+        """--watch and --dry-run are incompatible."""
+        src = tmp_path / "src"
+        src.mkdir()
+        result = runner.invoke(main, [
+            "sync", "--repo", initialized_repo, "--watch", "-n", str(src),
+        ])
+        assert result.exit_code != 0
+        assert "--watch and --dry-run are incompatible" in result.output
+
+    def test_sync_watch_from_repo_incompatible(self, runner, repo_with_files, tmp_path):
+        """--watch with repo->disk direction errors."""
+        dest = tmp_path / "out"
+        result = runner.invoke(main, [
+            "sync", "--repo", repo_with_files, "--watch", ":data", str(dest),
+        ])
+        assert result.exit_code != 0
+        assert "--watch only supports disk" in result.output
+
+    def test_sync_watch_debounce_too_low(self, runner, initialized_repo, tmp_path):
+        """--debounce below 100 errors."""
+        src = tmp_path / "src"
+        src.mkdir()
+        result = runner.invoke(main, [
+            "sync", "--repo", initialized_repo, "--watch", "--debounce", "50", str(src),
+        ])
+        assert result.exit_code != 0
+        assert "--debounce must be at least 100" in result.output
+
+
 
 class TestChecksumMode:
     """Tests for the mtime-based (default) vs checksum change detection."""

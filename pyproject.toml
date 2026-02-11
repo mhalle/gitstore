@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "gitstore"
-version = "0.44.1"
+version = "0.45.0"
 requires-python = ">=3.10"
 license = "Apache-2.0"
 dependencies = [
@@ -15,6 +15,9 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
+]
+watch = [
+    "watchfiles>=1.0.0",
 ]
 
 [project.scripts]
