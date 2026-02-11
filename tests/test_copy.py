@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from gitstore import GitStore, copy_to_repo, copy_from_repo, CopyPlan, CopyReport, FileEntry
+from gitstore import remove_from_repo, remove_from_repo_dry_run
 from gitstore.copy import (
     copy_to_repo_dry_run, copy_from_repo_dry_run,
     _expand_disk_glob,
@@ -1280,3 +1281,80 @@ class TestCopyFromRepoPivot:
         out.mkdir()
         with pytest.raises(FileNotFoundError):
             copy_from_repo(fs, ["base/./sub/*.xyz"], str(out))
+
+
+# ---------------------------------------------------------------------------
+# TestRemoveFromRepo
+# ---------------------------------------------------------------------------
+
+class TestRemoveFromRepo:
+    def test_remove_single_file(self, store_and_fs):
+        _, fs, tmp_path = store_and_fs
+        new_fs = remove_from_repo(fs, ["existing.txt"])
+        assert not new_fs.exists("existing.txt")
+        assert new_fs.exists("dir/a.txt")
+
+    def test_remove_glob(self, store_and_fs):
+        _, fs, tmp_path = store_and_fs
+        new_fs = remove_from_repo(fs, ["dir/*.txt"])
+        assert not new_fs.exists("dir/a.txt")
+        assert not new_fs.exists("dir/b.txt")
+        # dotfiles are not matched by *
+        assert new_fs.exists("dir/.dotfile")
+
+    def test_remove_glob_recursive(self, store_and_fs):
+        _, fs, tmp_path = store_and_fs
+        new_fs = remove_from_repo(fs, ["**/*.txt"])
+        assert not new_fs.exists("existing.txt")
+        assert not new_fs.exists("dir/a.txt")
+        assert not new_fs.exists("dir/b.txt")
+        assert not new_fs.exists("other/c.txt")
+        # dotfile still there
+        assert new_fs.exists("dir/.dotfile")
+
+    def test_remove_directory_requires_recursive(self, store_and_fs):
+        _, fs, tmp_path = store_and_fs
+        with pytest.raises(IsADirectoryError):
+            remove_from_repo(fs, ["dir"])
+
+    def test_remove_directory_recursive(self, store_and_fs):
+        _, fs, tmp_path = store_and_fs
+        new_fs = remove_from_repo(fs, ["dir"], recursive=True)
+        assert not new_fs.exists("dir/a.txt")
+        assert not new_fs.exists("dir/b.txt")
+        assert not new_fs.exists("dir/.dotfile")
+        assert new_fs.exists("existing.txt")
+
+    def test_remove_no_match(self, store_and_fs):
+        _, fs, tmp_path = store_and_fs
+        with pytest.raises(FileNotFoundError):
+            remove_from_repo(fs, ["nonexistent.xyz"])
+
+    def test_remove_dry_run(self, store_and_fs):
+        _, fs, tmp_path = store_and_fs
+        report = remove_from_repo_dry_run(fs, ["existing.txt"])
+        assert report is not None
+        assert paths(report.delete) == {"existing.txt"}
+        # FS is unchanged
+        assert fs.exists("existing.txt")
+
+    def test_remove_multiple_patterns(self, store_and_fs):
+        _, fs, tmp_path = store_and_fs
+        new_fs = remove_from_repo(fs, ["existing.txt", "other/c.txt"])
+        assert not new_fs.exists("existing.txt")
+        assert not new_fs.exists("other/c.txt")
+        assert new_fs.exists("dir/a.txt")
+
+    def test_remove_report_attached(self, store_and_fs):
+        _, fs, tmp_path = store_and_fs
+        new_fs = remove_from_repo(fs, ["existing.txt"])
+        report = new_fs.report
+        assert report is not None
+        assert paths(report.delete) == {"existing.txt"}
+        assert not report.add
+        assert not report.update
+
+    def test_remove_glob_no_match(self, store_and_fs):
+        _, fs, tmp_path = store_and_fs
+        with pytest.raises(FileNotFoundError):
+            remove_from_repo(fs, ["*.xyz"])

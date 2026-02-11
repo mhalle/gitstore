@@ -4,6 +4,20 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.39.0 (2026-02-10)
+
+**Breaking changes:**
+
+- `branch create` no longer accepts `--from` or snapshot filters — it only creates empty branches
+- `tag create` renamed to `tag fork`; `--from` renamed to `--ref` (defaults to `main`)
+
+**New features:**
+
+- Add `branch fork NAME` — create a new branch from an existing ref (`--ref` defaults to `main`, `-f`/`--force` to overwrite)
+- Add `branch set NAME --ref REF` — point a branch at an existing ref (creates or updates)
+- Add `tag fork NAME` — create a new tag from an existing ref (`--ref` defaults to `main`)
+- Add `tag set NAME --ref REF` — point a tag at an existing ref (creates or updates)
+
 ## v0.38.1 (2026-02-10)
 
 **Performance:**

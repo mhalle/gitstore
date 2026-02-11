@@ -90,6 +90,53 @@ def _make_entries_from_repo_dict(fs: FS, rel_paths: list[str], rel_to_repo: dict
 
 
 # ---------------------------------------------------------------------------
+# Common executor
+# ---------------------------------------------------------------------------
+
+def _apply_plan(
+    fs: FS,
+    write_pairs: list[tuple[str, str]],
+    delete_paths: list[str],
+    report: CopyReport,
+    *,
+    message: str | None = None,
+    operation: str | None = None,
+    follow_symlinks: bool = False,
+    mode: int | None = None,
+    ignore_errors: bool = False,
+) -> FS:
+    """Execute a batch of writes and deletes, attach *report* to the result.
+
+    Shared by ``copy_to_repo`` and ``remove_from_repo``.
+    """
+    if not write_pairs and not delete_paths:
+        if ignore_errors and report.errors:
+            raise RuntimeError(f"All files failed to copy: {report.errors}")
+        fs._report = _finalize_report(report)
+        return fs
+
+    with fs.batch(message=message, operation=operation) as b:
+        if write_pairs:
+            _write_files_to_repo(b, write_pairs, follow_symlinks=follow_symlinks,
+                                 mode=mode, ignore_errors=ignore_errors,
+                                 errors=report.errors)
+        for path in delete_paths:
+            try:
+                b.remove(path)
+            except OSError as exc:
+                if not ignore_errors:
+                    raise
+                report.errors.append(CopyError(path=path, error=str(exc)))
+    result_fs = b.fs
+
+    if ignore_errors and report.errors and result_fs.hash == fs.hash:
+        raise RuntimeError(f"All files failed to copy: {report.errors}")
+
+    result_fs._report = _finalize_report(report)
+    return result_fs
+
+
+# ---------------------------------------------------------------------------
 # Public API: Copy
 # ---------------------------------------------------------------------------
 
@@ -208,37 +255,16 @@ def copy_to_repo(
 
         write_path_set = set(write_rels)
         safe_deletes = _filter_tree_conflicts(write_path_set, delete_rels)
+        delete_full = [f"{dest}/{rel}" if dest else rel for rel in safe_deletes]
 
-        with fs.batch(message=message, operation="cp") as b:
-            _write_files_to_repo(b, write_pairs, follow_symlinks=follow_symlinks,
-                                 mode=mode, ignore_errors=ignore_errors,
-                                 errors=report.errors)
-            for rel in safe_deletes:
-                full_repo_path = f"{dest}/{rel}" if dest else rel
-                try:
-                    b.remove(full_repo_path)
-                except OSError as exc:
-                    if not ignore_errors:
-                        raise
-                    report.errors.append(CopyError(path=full_repo_path, error=str(exc)))
-        result_fs = b.fs
-
-        if ignore_errors and report.errors and result_fs.hash == fs.hash:
-            raise RuntimeError(
-                f"All files failed to copy: {report.errors}"
-            )
-
-        # Convert path lists to FileEntry lists with type information
-        # For writes, check local filesystem for modes
         report.add = _make_entries_from_disk(add_rels, pair_map, follow_symlinks)
         report.update = _make_entries_from_disk(update_rels, pair_map, follow_symlinks)
-        # For deletes, check repo for modes
         report.delete = _make_entries_from_repo(fs, safe_deletes, dest)
 
-        # Attach the proper report to result_fs
-        final_report = _finalize_report(report)
-        result_fs._report = final_report
-        return result_fs
+        return _apply_plan(fs, write_pairs, delete_full, report,
+                           message=message, operation="cp",
+                           follow_symlinks=follow_symlinks, mode=mode,
+                           ignore_errors=ignore_errors)
     else:
         # Non-delete mode: classify written pairs as add vs update
         if ignore_existing:
@@ -267,25 +293,13 @@ def copy_to_repo(
             else:
                 add_rels.append(rel)
 
-        with fs.batch(message=message, operation="cp") as b:
-            _write_files_to_repo(b, pairs, follow_symlinks=follow_symlinks,
-                                 mode=mode, ignore_errors=ignore_errors,
-                                 errors=report.errors)
-        result_fs = b.fs
-
-        if ignore_errors and report.errors and result_fs.hash == fs.hash:
-            raise RuntimeError(
-                f"All files failed to copy: {report.errors}"
-            )
-
-        # Convert to FileEntry lists
         report.add = _make_entries_from_disk(add_rels, pair_map, follow_symlinks)
         report.update = _make_entries_from_disk(update_rels, pair_map, follow_symlinks)
 
-        # Attach the proper report to result_fs
-        final_report = _finalize_report(report)
-        result_fs._report = final_report
-        return result_fs
+        return _apply_plan(fs, pairs, [], report,
+                           message=message, operation="cp",
+                           follow_symlinks=follow_symlinks, mode=mode,
+                           ignore_errors=ignore_errors)
 
 
 def copy_from_repo(
@@ -662,6 +676,85 @@ def copy_from_repo_dry_run(
         add_entries = _make_entries_from_repo_dict(fs, sorted(add), repo_rel_to_path)
         update_entries = _make_entries_from_repo_dict(fs, sorted(update), repo_rel_to_path)
         return _finalize_report(CopyReport(add=add_entries, update=update_entries))
+
+
+# ---------------------------------------------------------------------------
+# Public API: Remove
+# ---------------------------------------------------------------------------
+
+def _collect_remove_paths(
+    fs: FS,
+    patterns: list[str],
+    *,
+    recursive: bool = False,
+) -> list[str]:
+    """Resolve *patterns* against the repo and return full paths to delete.
+
+    Raises ``FileNotFoundError`` when a pattern matches nothing and
+    ``IsADirectoryError`` when a directory is matched without *recursive*.
+    """
+    resolved = _resolve_repo_sources(fs, patterns)
+    delete_paths: list[str] = []
+    for repo_path, mode, _prefix in resolved:
+        if mode == "file":
+            delete_paths.append(repo_path)
+        elif mode in ("dir", "contents"):
+            if not recursive:
+                raise IsADirectoryError(
+                    f"{repo_path} is a directory (use recursive=True)"
+                )
+            walk_root = repo_path or None
+            for dirpath, _dirs, files in fs.walk(walk_root):
+                for fname in files:
+                    full = f"{dirpath}/{fname}" if dirpath else fname
+                    delete_paths.append(full)
+    return sorted(set(delete_paths))
+
+
+def remove_from_repo(
+    fs: FS,
+    patterns: list[str],
+    *,
+    recursive: bool = False,
+    message: str | None = None,
+) -> FS:
+    """Remove files matching *patterns* from the repo. Returns new ``FS``.
+
+    Patterns support globs, directories, and ``/./`` pivots — the same
+    syntax accepted by ``copy_from_repo`` sources.
+
+    With ``recursive=True``, directories are removed recursively. Without
+    it, matching a directory raises ``IsADirectoryError``.
+
+    The operation report is available via ``fs.report``.
+    """
+    delete_paths = _collect_remove_paths(fs, patterns, recursive=recursive)
+    if not delete_paths:
+        raise FileNotFoundError(f"No matches for patterns: {patterns}")
+
+    report = CopyReport()
+    rel_to_repo = {p: p for p in delete_paths}
+    report.delete = _make_entries_from_repo_dict(fs, delete_paths, rel_to_repo)
+
+    return _apply_plan(fs, [], delete_paths, report,
+                       message=message, operation="rm")
+
+
+def remove_from_repo_dry_run(
+    fs: FS,
+    patterns: list[str],
+    *,
+    recursive: bool = False,
+) -> CopyReport | None:
+    """Compute what ``remove_from_repo`` would do. Returns a ``CopyReport`` or ``None``."""
+    delete_paths = _collect_remove_paths(fs, patterns, recursive=recursive)
+    if not delete_paths:
+        raise FileNotFoundError(f"No matches for patterns: {patterns}")
+
+    report = CopyReport()
+    rel_to_repo = {p: p for p in delete_paths}
+    report.delete = _make_entries_from_repo_dict(fs, delete_paths, rel_to_repo)
+    return _finalize_report(report)
 
 
 # ---------------------------------------------------------------------------

@@ -325,7 +325,7 @@ class TestCp:
 
     def test_custom_branch(self, runner, initialized_repo, tmp_path):
         # Create a dev branch
-        runner.invoke(main, ["branch", "--repo", initialized_repo, "create", "dev", "--from", "main"])
+        runner.invoke(main, ["branch", "--repo", initialized_repo, "fork", "dev"])
         f = tmp_path / "dev.txt"
         f.write_text("dev content")
         result = runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":dev.txt", "-b", "dev"])
@@ -1039,7 +1039,7 @@ class TestCat:
 class TestRm:
     def test_removes_file(self, runner, repo_with_files):
         result = runner.invoke(main, ["rm", "--repo", repo_with_files, ":hello.txt"])
-        assert result.exit_code == 0
+        assert result.exit_code == 0, result.output
 
         result = runner.invoke(main, ["ls", "--repo", repo_with_files])
         assert "hello.txt" not in result.output
@@ -1053,19 +1053,59 @@ class TestRm:
         result = runner.invoke(main, ["rm", "--repo", repo_with_files, ":data"])
         assert result.exit_code != 0
         assert "directory" in result.output.lower()
+        assert "-R" in result.output
 
     def test_without_colon(self, runner, repo_with_files):
         result = runner.invoke(main, ["rm", "--repo", repo_with_files, "hello.txt"])
-        assert result.exit_code == 0
+        assert result.exit_code == 0, result.output
         result = runner.invoke(main, ["ls", "--repo", repo_with_files])
         assert "hello.txt" not in result.output
 
     def test_custom_message(self, runner, repo_with_files):
         result = runner.invoke(main, ["rm", "--repo", repo_with_files, ":hello.txt", "-m", "bye bye"])
-        assert result.exit_code == 0
+        assert result.exit_code == 0, result.output
 
         result = runner.invoke(main, ["log", "--repo", repo_with_files])
         assert "bye bye" in result.output
+
+    def test_rm_glob(self, runner, repo_with_files):
+        # Add a second txt file first
+        from pathlib import Path
+        extra = Path(repo_with_files).parent / "extra.txt"
+        extra.write_text("extra")
+        result = runner.invoke(main, ["cp", "--repo", repo_with_files, str(extra), ":"])
+        assert result.exit_code == 0, result.output
+
+        result = runner.invoke(main, ["rm", "--repo", repo_with_files, ":*.txt"])
+        assert result.exit_code == 0, result.output
+
+        result = runner.invoke(main, ["ls", "--repo", repo_with_files])
+        assert "hello.txt" not in result.output
+        assert "extra.txt" not in result.output
+
+    def test_rm_recursive(self, runner, repo_with_files):
+        result = runner.invoke(main, ["rm", "-R", "--repo", repo_with_files, ":data"])
+        assert result.exit_code == 0, result.output
+
+        result = runner.invoke(main, ["ls", "-R", "--repo", repo_with_files])
+        assert "data.bin" not in result.output
+
+    def test_rm_dry_run(self, runner, repo_with_files):
+        result = runner.invoke(main, ["rm", "-n", "--repo", repo_with_files, ":hello.txt"])
+        assert result.exit_code == 0, result.output
+        assert "- :hello.txt" in result.output
+
+        # File still exists
+        result = runner.invoke(main, ["ls", "--repo", repo_with_files])
+        assert "hello.txt" in result.output
+
+    def test_rm_multiple_paths(self, runner, repo_with_files):
+        result = runner.invoke(main, ["rm", "-R", "--repo", repo_with_files, ":hello.txt", ":data"])
+        assert result.exit_code == 0, result.output
+
+        result = runner.invoke(main, ["ls", "-R", "--repo", repo_with_files])
+        assert "hello.txt" not in result.output
+        assert "data.bin" not in result.output
 
 
 # ---------------------------------------------------------------------------
@@ -1224,29 +1264,23 @@ class TestBranch:
         assert "main" in result.output
 
     def test_create(self, runner, initialized_repo):
-        result = runner.invoke(main, ["branch", "--repo", initialized_repo, "create", "dev", "--from", "main"])
+        result = runner.invoke(main, ["branch", "--repo", initialized_repo, "create", "dev"])
         assert result.exit_code == 0
         result = runner.invoke(main, ["branch", "--repo", initialized_repo, "list"])
         assert "dev" in result.output
+        # Empty branch should have no files
+        result = runner.invoke(main, ["ls", "--repo", initialized_repo, "-b", "dev"])
+        assert result.exit_code == 0
+        assert result.output.strip() == ""
 
     def test_duplicate_error(self, runner, initialized_repo):
-        runner.invoke(main, ["branch", "--repo", initialized_repo, "create", "dup", "--from", "main"])
-        result = runner.invoke(main, ["branch", "--repo", initialized_repo, "create", "dup", "--from", "main"])
+        runner.invoke(main, ["branch", "--repo", initialized_repo, "create", "dup"])
+        result = runner.invoke(main, ["branch", "--repo", initialized_repo, "create", "dup"])
         assert result.exit_code != 0
         assert "already exists" in result.output.lower()
 
-    def test_create_from_tag(self, runner, initialized_repo):
-        runner.invoke(main, ["tag", "--repo", initialized_repo, "create", "v1", "--from", "main"])
-        result = runner.invoke(main, ["branch", "--repo", initialized_repo, "create", "from-tag", "--from", "v1"])
-        assert result.exit_code == 0
-
-    def test_unknown_ref_error(self, runner, initialized_repo):
-        result = runner.invoke(main, ["branch", "--repo", initialized_repo, "create", "bad", "--from", "nonexistent"])
-        assert result.exit_code != 0
-        assert "Unknown ref" in result.output
-
     def test_delete(self, runner, initialized_repo):
-        runner.invoke(main, ["branch", "--repo", initialized_repo, "create", "todel", "--from", "main"])
+        runner.invoke(main, ["branch", "--repo", initialized_repo, "create", "todel"])
         result = runner.invoke(main, ["branch", "--repo", initialized_repo, "delete", "todel"])
         assert result.exit_code == 0
         result = runner.invoke(main, ["branch", "--repo", initialized_repo, "list"])
@@ -1256,45 +1290,6 @@ class TestBranch:
         result = runner.invoke(main, ["branch", "--repo", initialized_repo, "delete", "ghost"])
         assert result.exit_code != 0
         assert "not found" in result.output.lower()
-
-    def test_at_flag(self, runner, repo_with_files):
-        result = runner.invoke(main, [
-            "branch", "--repo", repo_with_files, "create", "at-test",
-            "--from", "main", "--path", "hello.txt"
-        ])
-        assert result.exit_code == 0
-
-    def test_at_nonexistent_path(self, runner, initialized_repo):
-        result = runner.invoke(main, [
-            "branch", "--repo", initialized_repo, "create", "bad-at",
-            "--from", "main", "--path", "nonexistent.txt"
-        ])
-        assert result.exit_code != 0
-        assert "No matching commits" in result.output
-
-    def test_create_empty(self, runner, initialized_repo):
-        result = runner.invoke(main, ["branch", "--repo", initialized_repo, "create", "empty"])
-        assert result.exit_code == 0
-        result = runner.invoke(main, ["branch", "--repo", initialized_repo, "list"])
-        assert "empty" in result.output
-        result = runner.invoke(main, ["ls", "--repo", initialized_repo, "-b", "empty"])
-        assert result.exit_code == 0
-        assert result.output.strip() == ""
-
-    def test_at_without_from_error(self, runner, initialized_repo):
-        result = runner.invoke(main, [
-            "branch", "--repo", initialized_repo, "create", "bad", "--path", "x.txt"
-        ])
-        assert result.exit_code != 0
-        assert "require --from" in result.output
-
-    def test_at_dotdot_rejected(self, runner, initialized_repo):
-        result = runner.invoke(main, [
-            "branch", "--repo", initialized_repo, "create", "bad",
-            "--from", "main", "--path", "../escape"
-        ])
-        assert result.exit_code != 0
-        assert "invalid" in result.output.lower()
 
     def test_hash(self, runner, repo_with_files):
         from gitstore import GitStore
@@ -1343,6 +1338,126 @@ class TestBranch:
 
 
 # ---------------------------------------------------------------------------
+# TestBranchFork
+# ---------------------------------------------------------------------------
+
+class TestBranchFork:
+    def test_fork_default_ref(self, runner, repo_with_files):
+        result = runner.invoke(main, [
+            "branch", "--repo", repo_with_files, "fork", "dev"
+        ])
+        assert result.exit_code == 0, result.output
+        result = runner.invoke(main, ["branch", "--repo", repo_with_files, "list"])
+        assert "dev" in result.output
+
+    def test_fork_explicit_ref(self, runner, repo_with_files):
+        result = runner.invoke(main, [
+            "branch", "--repo", repo_with_files, "fork", "dev", "--ref", "main"
+        ])
+        assert result.exit_code == 0, result.output
+
+    def test_fork_from_tag(self, runner, initialized_repo):
+        runner.invoke(main, ["tag", "--repo", initialized_repo, "fork", "v1"])
+        result = runner.invoke(main, [
+            "branch", "--repo", initialized_repo, "fork", "from-tag", "--ref", "v1"
+        ])
+        assert result.exit_code == 0, result.output
+
+    def test_fork_has_content(self, runner, repo_with_files):
+        runner.invoke(main, [
+            "branch", "--repo", repo_with_files, "fork", "dev"
+        ])
+        result = runner.invoke(main, ["ls", "--repo", repo_with_files, "-b", "dev"])
+        assert result.exit_code == 0
+        assert "hello.txt" in result.output
+
+    def test_fork_duplicate_error(self, runner, repo_with_files):
+        runner.invoke(main, [
+            "branch", "--repo", repo_with_files, "fork", "dev"
+        ])
+        result = runner.invoke(main, [
+            "branch", "--repo", repo_with_files, "fork", "dev"
+        ])
+        assert result.exit_code != 0
+        assert "already exists" in result.output.lower()
+
+    def test_fork_force_overwrites(self, runner, repo_with_files):
+        runner.invoke(main, [
+            "branch", "--repo", repo_with_files, "fork", "dev"
+        ])
+        result = runner.invoke(main, [
+            "branch", "--repo", repo_with_files, "fork", "dev", "-f"
+        ])
+        assert result.exit_code == 0, result.output
+
+    def test_fork_unknown_ref_error(self, runner, initialized_repo):
+        result = runner.invoke(main, [
+            "branch", "--repo", initialized_repo, "fork", "bad", "--ref", "nonexistent"
+        ])
+        assert result.exit_code != 0
+        assert "Unknown ref" in result.output
+
+    def test_fork_path_filter(self, runner, repo_with_files):
+        result = runner.invoke(main, [
+            "branch", "--repo", repo_with_files, "fork", "at-test",
+            "--ref", "main", "--path", "hello.txt"
+        ])
+        assert result.exit_code == 0, result.output
+
+    def test_fork_path_with_default_ref(self, runner, repo_with_files):
+        result = runner.invoke(main, [
+            "branch", "--repo", repo_with_files, "fork", "at-test",
+            "--path", "hello.txt"
+        ])
+        assert result.exit_code == 0, result.output
+
+
+# ---------------------------------------------------------------------------
+# TestBranchSet
+# ---------------------------------------------------------------------------
+
+class TestBranchSet:
+    def test_set_existing_branch(self, runner, repo_with_files):
+        # Create a branch, then set it to main
+        runner.invoke(main, ["branch", "--repo", repo_with_files, "create", "dev"])
+        result = runner.invoke(main, [
+            "branch", "--repo", repo_with_files, "set", "dev", "--ref", "main"
+        ])
+        assert result.exit_code == 0, result.output
+        # Now dev should have main's content
+        result = runner.invoke(main, ["ls", "--repo", repo_with_files, "-b", "dev"])
+        assert "hello.txt" in result.output
+
+    def test_set_creates_new(self, runner, repo_with_files):
+        result = runner.invoke(main, [
+            "branch", "--repo", repo_with_files, "set", "newbranch", "--ref", "main"
+        ])
+        assert result.exit_code == 0, result.output
+        result = runner.invoke(main, ["branch", "--repo", repo_with_files, "list"])
+        assert "newbranch" in result.output
+
+    def test_set_from_tag(self, runner, initialized_repo):
+        runner.invoke(main, ["tag", "--repo", initialized_repo, "fork", "v1"])
+        result = runner.invoke(main, [
+            "branch", "--repo", initialized_repo, "set", "tagged", "--ref", "v1"
+        ])
+        assert result.exit_code == 0, result.output
+
+    def test_set_path_filter(self, runner, repo_with_files):
+        result = runner.invoke(main, [
+            "branch", "--repo", repo_with_files, "set", "filtered",
+            "--ref", "main", "--path", "hello.txt"
+        ])
+        assert result.exit_code == 0, result.output
+
+    def test_set_ref_required(self, runner, initialized_repo):
+        result = runner.invoke(main, [
+            "branch", "--repo", initialized_repo, "set", "bad"
+        ])
+        assert result.exit_code != 0
+
+
+# ---------------------------------------------------------------------------
 # TestTag
 # ---------------------------------------------------------------------------
 
@@ -1352,19 +1467,19 @@ class TestTag:
         assert result.exit_code == 0
 
     def test_create(self, runner, initialized_repo):
-        result = runner.invoke(main, ["tag", "--repo", initialized_repo, "create", "v1", "--from", "main"])
+        result = runner.invoke(main, ["tag", "--repo", initialized_repo, "fork", "v1"])
         assert result.exit_code == 0
         result = runner.invoke(main, ["tag", "--repo", initialized_repo, "list"])
         assert "v1" in result.output
 
     def test_duplicate_error(self, runner, initialized_repo):
-        runner.invoke(main, ["tag", "--repo", initialized_repo, "create", "v1", "--from", "main"])
-        result = runner.invoke(main, ["tag", "--repo", initialized_repo, "create", "v1", "--from", "main"])
+        runner.invoke(main, ["tag", "--repo", initialized_repo, "fork", "v1"])
+        result = runner.invoke(main, ["tag", "--repo", initialized_repo, "fork", "v1"])
         assert result.exit_code != 0
         assert "already exists" in result.output.lower()
 
     def test_delete(self, runner, initialized_repo):
-        runner.invoke(main, ["tag", "--repo", initialized_repo, "create", "v2", "--from", "main"])
+        runner.invoke(main, ["tag", "--repo", initialized_repo, "fork", "v2"])
         result = runner.invoke(main, ["tag", "--repo", initialized_repo, "delete", "v2"])
         assert result.exit_code == 0
         result = runner.invoke(main, ["tag", "--repo", initialized_repo, "list"])
@@ -1376,15 +1491,15 @@ class TestTag:
         assert "not found" in result.output.lower()
 
     def test_list_shows_all(self, runner, initialized_repo):
-        runner.invoke(main, ["tag", "--repo", initialized_repo, "create", "alpha", "--from", "main"])
-        runner.invoke(main, ["tag", "--repo", initialized_repo, "create", "beta", "--from", "main"])
+        runner.invoke(main, ["tag", "--repo", initialized_repo, "fork", "alpha"])
+        runner.invoke(main, ["tag", "--repo", initialized_repo, "fork", "beta"])
         result = runner.invoke(main, ["tag", "--repo", initialized_repo, "list"])
         assert "alpha" in result.output
         assert "beta" in result.output
 
     def test_at_flag(self, runner, repo_with_files):
         result = runner.invoke(main, [
-            "tag", "--repo", repo_with_files, "create", "v-at", "--from", "main",
+            "tag", "--repo", repo_with_files, "fork", "v-at",
             "--path", "hello.txt"
         ])
         assert result.exit_code == 0
@@ -1402,17 +1517,17 @@ class TestTag:
         full_hash = fs.hash
 
         result = runner.invoke(main, [
-            "tag", "--repo", repo_with_files, "create", "from-hash", "--from", full_hash
+            "tag", "--repo", repo_with_files, "fork", "from-hash", "--ref", full_hash
         ])
         assert result.exit_code == 0
 
     def test_default_invocation_lists(self, runner, initialized_repo):
-        runner.invoke(main, ["tag", "--repo", initialized_repo, "create", "t1", "--from", "main"])
+        runner.invoke(main, ["tag", "--repo", initialized_repo, "fork", "t1"])
         result = runner.invoke(main, ["tag", "--repo", initialized_repo])
         assert "t1" in result.output
 
     def test_hash(self, runner, initialized_repo):
-        runner.invoke(main, ["tag", "--repo", initialized_repo, "create", "v1", "--from", "main"])
+        runner.invoke(main, ["tag", "--repo", initialized_repo, "fork", "v1"])
         from gitstore import GitStore
         store = GitStore.open(initialized_repo, create=False)
         expected = store.tags["v1"].hash
@@ -1426,6 +1541,47 @@ class TestTag:
         result = runner.invoke(main, ["tag", "--repo", initialized_repo, "hash", "ghost"])
         assert result.exit_code != 0
         assert "not found" in result.output.lower()
+
+
+# ---------------------------------------------------------------------------
+# TestTagSet
+# ---------------------------------------------------------------------------
+
+class TestTagSet:
+    def test_set_creates_new(self, runner, initialized_repo):
+        result = runner.invoke(main, [
+            "tag", "--repo", initialized_repo, "set", "v1", "--ref", "main"
+        ])
+        assert result.exit_code == 0, result.output
+        result = runner.invoke(main, ["tag", "--repo", initialized_repo, "list"])
+        assert "v1" in result.output
+
+    def test_set_overwrites_existing(self, runner, initialized_repo):
+        runner.invoke(main, ["tag", "--repo", initialized_repo, "fork", "v1"])
+        result = runner.invoke(main, [
+            "tag", "--repo", initialized_repo, "set", "v1", "--ref", "main"
+        ])
+        assert result.exit_code == 0, result.output
+
+    def test_set_from_tag(self, runner, initialized_repo):
+        runner.invoke(main, ["tag", "--repo", initialized_repo, "fork", "v1"])
+        result = runner.invoke(main, [
+            "tag", "--repo", initialized_repo, "set", "v2", "--ref", "v1"
+        ])
+        assert result.exit_code == 0, result.output
+
+    def test_set_path_filter(self, runner, repo_with_files):
+        result = runner.invoke(main, [
+            "tag", "--repo", repo_with_files, "set", "v1",
+            "--ref", "main", "--path", "hello.txt"
+        ])
+        assert result.exit_code == 0, result.output
+
+    def test_set_ref_required(self, runner, initialized_repo):
+        result = runner.invoke(main, [
+            "tag", "--repo", initialized_repo, "set", "bad"
+        ])
+        assert result.exit_code != 0
 
 
 # ---------------------------------------------------------------------------
@@ -1618,7 +1774,7 @@ class TestResolveRef:
         # Get the tree OID (not a commit)
         tree_oid = str(fs._tree_oid)
         result = runner.invoke(main, [
-            "tag", "--repo", repo_with_files, "create", "bad-ref", "--from", tree_oid
+            "tag", "--repo", repo_with_files, "fork", "bad-ref", "--ref", tree_oid
         ])
         assert result.exit_code != 0
         assert "not a commit" in result.output.lower()
@@ -2608,7 +2764,7 @@ class TestHash:
 
     def test_cat_by_tag(self, runner, repo_with_files):
         # Create a tag first
-        runner.invoke(main, ["tag", "--repo", repo_with_files, "create", "v1.0", "--from", "main"])
+        runner.invoke(main, ["tag", "--repo", repo_with_files, "fork", "v1.0"])
         result = runner.invoke(main, [
             "cat", "--repo", repo_with_files, "hello.txt", "--ref", "v1.0"
         ])
@@ -2688,7 +2844,7 @@ class TestHash:
 
     def test_hash_overrides_branch(self, runner, repo_with_files):
         # Create a dev branch with different content
-        runner.invoke(main, ["branch", "--repo", repo_with_files, "create", "dev", "--from", "main"])
+        runner.invoke(main, ["branch", "--repo", repo_with_files, "fork", "dev"])
         commit_hash = self._get_commit_hash(repo_with_files)
         # Use --branch dev but --ref pointing to main's commit
         result = runner.invoke(main, [

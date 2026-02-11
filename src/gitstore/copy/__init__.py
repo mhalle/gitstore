@@ -43,6 +43,8 @@ from ._ops import (
     copy_from_repo,
     copy_to_repo_dry_run,
     copy_from_repo_dry_run,
+    remove_from_repo,
+    remove_from_repo_dry_run,
     sync_to_repo,
     sync_from_repo,
     sync_to_repo_dry_run,
@@ -59,6 +61,7 @@ __all__ = [
     # Public functions
     "copy_to_repo", "copy_from_repo",
     "copy_to_repo_dry_run", "copy_from_repo_dry_run",
+    "remove_from_repo", "remove_from_repo_dry_run",
     "sync_to_repo", "sync_from_repo",
     "sync_to_repo_dry_run", "sync_from_repo_dry_run",
     "format_commit_message",

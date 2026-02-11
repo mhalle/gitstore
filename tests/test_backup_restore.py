@@ -42,7 +42,7 @@ def repo_with_data(tmp_path, runner):
     r = runner.invoke(main, ["cp", "--repo", p, str(hello), ":hello.txt"])
     assert r.exit_code == 0, r.output
 
-    r = runner.invoke(main, ["tag", "--repo", p, "create", "v1", "--from", "main"])
+    r = runner.invoke(main, ["tag", "--repo", p, "fork", "v1"])
     assert r.exit_code == 0, r.output
 
     return p
@@ -147,8 +147,7 @@ class TestRestoreDryRun:
 
         # Create a new local-only branch
         r = runner.invoke(main, [
-            "branch", "--repo", repo_with_data, "create", "feature",
-            "--from", "main",
+            "branch", "--repo", repo_with_data, "fork", "feature",
         ])
         assert r.exit_code == 0, r.output
         refs_before = _get_refs(repo_with_data)
@@ -198,8 +197,7 @@ class TestRestoreDeletesLocalOnlyRefs:
 
         # Create a local-only branch
         r = runner.invoke(main, [
-            "branch", "--repo", repo_with_data, "create", "local-only",
-            "--from", "main",
+            "branch", "--repo", repo_with_data, "fork", "local-only",
         ])
         assert r.exit_code == 0, r.output
         assert "refs/heads/local-only" in _get_refs(repo_with_data)

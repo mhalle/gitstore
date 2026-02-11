@@ -211,31 +211,58 @@ def cat(ctx, path, branch, ref, at_path, match_pattern, before):
 
 @main.command()
 @_repo_option
-@click.argument("path")
+@click.argument("paths", nargs=-1, required=True)
+@click.option("-R", "--recursive", is_flag=True, default=False,
+              help="Remove directories recursively.")
+@click.option("-n", "--dry-run", is_flag=True, default=False,
+              help="Show what would be removed without writing.")
 @click.option("--branch", "-b", default="main", help="Branch to remove from.")
 @click.option("-m", "--message", default=None, help="Commit message. Use {default} to include auto-generated message.")
 @_tag_option
 @click.pass_context
-def rm(ctx, path, branch, message, tag, force_tag):
-    """Remove a file from the repo."""
+def rm(ctx, paths, recursive, dry_run, branch, message, tag, force_tag):
+    """Remove files from the repo.
+
+    Accepts multiple paths and glob patterns.  Quote glob patterns to
+    prevent shell expansion.  Directories require -R.
+
+    \b
+    Examples:
+        gitstore rm :file.txt
+        gitstore rm ':*.txt'
+        gitstore rm -R :dir
+        gitstore rm -n :file.txt         # dry run
+        gitstore rm :a.txt :b.txt        # multiple
+    """
+    from ..copy import remove_from_repo, remove_from_repo_dry_run
+
     store = _open_store(_require_repo(ctx))
     fs = _get_branch_fs(store, branch)
 
-    repo_path = _normalize_repo_path(_strip_colon(path))
+    patterns = [_normalize_repo_path(_strip_colon(p)) for p in paths]
 
     try:
-        new_fs = fs.remove(repo_path, message=message)
-    except FileNotFoundError:
-        raise click.ClickException(f"File not found: {repo_path}")
-    except IsADirectoryError:
-        raise click.ClickException(f"{repo_path} is a directory, not a file")
+        if dry_run:
+            report = remove_from_repo_dry_run(fs, patterns, recursive=recursive)
+            if report:
+                for action in report.actions():
+                    click.echo(f"- :{action.path}")
+        else:
+            new_fs = remove_from_repo(fs, patterns, recursive=recursive,
+                                      message=message)
+            if tag:
+                _apply_tag(store, new_fs, tag, force_tag)
+            report = new_fs.report
+            n = len(report.delete) if report else 0
+            _status(ctx, f"Removed {n} file(s)")
+    except FileNotFoundError as exc:
+        raise click.ClickException(str(exc))
+    except IsADirectoryError as exc:
+        raise click.ClickException(f"{exc} — use -R to remove recursively")
     except StaleSnapshotError:
         raise click.ClickException(
             "Branch modified concurrently — retry"
         )
-    if tag:
-        _apply_tag(store, new_fs, tag, force_tag)
-    _status(ctx, f"Removed :{repo_path}")
 
 
 # ---------------------------------------------------------------------------
