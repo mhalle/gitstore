@@ -1026,6 +1026,19 @@ class TestCat:
         assert result.exit_code == 0
         assert "hello world" in result.output
 
+    def test_multiple_files(self, runner, repo_with_files):
+        result = runner.invoke(main, [
+            "cat", "--repo", repo_with_files, ":hello.txt", ":hello.txt"
+        ])
+        assert result.exit_code == 0
+        assert result.output == "hello world\nhello world\n"
+
+    def test_multiple_stops_on_error(self, runner, repo_with_files):
+        result = runner.invoke(main, [
+            "cat", "--repo", repo_with_files, ":nope.txt", ":hello.txt"
+        ])
+        assert result.exit_code != 0
+
     def test_directory_error(self, runner, repo_with_files):
         result = runner.invoke(main, ["cat", "--repo", repo_with_files, ":data"])
         assert result.exit_code != 0

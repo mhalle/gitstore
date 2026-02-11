@@ -180,29 +180,28 @@ def ls(ctx, paths, branch, recursive, ref, at_path, match_pattern, before):
 
 @main.command()
 @_repo_option
-@click.argument("path")
+@click.argument("paths", nargs=-1, required=True)
 @click.option("--branch", "-b", default="main", help="Branch to read from.")
 @click.option("--ref", "ref", default=None, help="Branch, tag, or commit hash to read from.")
 @click.option("--path", "at_path", default=None, help="Use latest commit that changed this path.")
 @click.option("--match", "match_pattern", default=None, help="Use latest commit matching this message pattern (* and ?).")
 @click.option("--before", "before", default=None, help="Use latest commit on or before this date (ISO 8601).")
 @click.pass_context
-def cat(ctx, path, branch, ref, at_path, match_pattern, before):
-    """Print file contents to stdout."""
-    repo_path = _normalize_repo_path(_strip_colon(path))
-
+def cat(ctx, paths, branch, ref, at_path, match_pattern, before):
+    """Concatenate file contents to stdout."""
     store = _open_store(_require_repo(ctx))
     before = _parse_before(before)
     fs = _resolve_snapshot(_get_fs(store, branch, ref), at_path, match_pattern, before)
 
-    try:
-        data = fs.read(repo_path)
-    except FileNotFoundError:
-        raise click.ClickException(f"File not found: {repo_path}")
-    except IsADirectoryError:
-        raise click.ClickException(f"{repo_path} is a directory, not a file")
-
-    sys.stdout.buffer.write(data)
+    for path in paths:
+        repo_path = _normalize_repo_path(_strip_colon(path))
+        try:
+            data = fs.read(repo_path)
+        except FileNotFoundError:
+            raise click.ClickException(f"File not found: {repo_path}")
+        except IsADirectoryError:
+            raise click.ClickException(f"{repo_path} is a directory, not a file")
+        sys.stdout.buffer.write(data)
 
 
 # ---------------------------------------------------------------------------

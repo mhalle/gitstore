@@ -4,6 +4,12 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.39.1 (2026-02-10)
+
+**Enhancements:**
+
+- `cat` now accepts multiple paths and concatenates their output
+
 ## v0.39.0 (2026-02-10)
 
 **Breaking changes:**
