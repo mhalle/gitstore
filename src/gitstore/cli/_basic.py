@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import sys
@@ -278,9 +279,14 @@ def rm(ctx, paths, recursive, dry_run, branch, message, tag, force_tag):
 @_message_option
 @_no_create_option
 @_tag_option
+@click.option("-p", "--passthrough", is_flag=True, default=False,
+              help="Echo stdin to stdout (tee mode for pipelines).")
 @click.pass_context
-def write(ctx, path, branch, message, no_create, tag, force_tag):
+def write(ctx, path, branch, message, no_create, tag, force_tag, passthrough):
     """Write stdin to a file in the repo."""
+    from ..fs import retry_write
+
+    # Stage 1: open store, resolve branch name (no FS fetch yet)
     repo_path = _require_repo(ctx)
     if no_create:
         store = _open_store(repo_path)
@@ -288,17 +294,35 @@ def write(ctx, path, branch, message, no_create, tag, force_tag):
     else:
         store = _open_or_create_store(repo_path, branch=branch or "main")
         branch = branch or _default_branch(store)
-    fs = _get_branch_fs(store, branch)
 
     repo_path_norm = _normalize_repo_path(_strip_colon(path))
-    data = sys.stdin.buffer.read()
 
+    # Stage 2: read stdin (may take arbitrarily long — no stale FS held)
+    if passthrough:
+        buf = io.BytesIO()
+        stdout = sys.stdout.buffer
+        stdin = sys.stdin.buffer
+        _read = getattr(stdin, 'read1', stdin.read)
+        while True:
+            chunk = _read(8192)
+            if not chunk:
+                break
+            stdout.write(chunk)
+            stdout.flush()
+            buf.write(chunk)
+        data = buf.getvalue()
+    else:
+        data = sys.stdin.buffer.read()
+
+    # Stage 3: commit (fetches fresh FS internally, retries on stale)
     try:
-        new_fs = fs.write(repo_path_norm, data, message=message)
+        new_fs = retry_write(store, branch, repo_path_norm, data, message=message)
     except StaleSnapshotError:
         raise click.ClickException(
-            "Branch modified concurrently — retry"
+            "Branch modified concurrently — failed after retries"
         )
+    except KeyError:
+        raise click.ClickException(f"Branch not found: {branch}")
     if tag:
         _apply_tag(store, new_fs, tag, force_tag)
     _status(ctx, f"Wrote :{repo_path_norm}")

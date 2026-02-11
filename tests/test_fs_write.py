@@ -4,7 +4,7 @@ import stat
 
 import pytest
 
-from gitstore import GitStore, StaleSnapshotError
+from gitstore import GitStore, StaleSnapshotError, retry_write
 from gitstore.tree import GIT_FILEMODE_BLOB_EXECUTABLE, GIT_FILEMODE_LINK
 
 
@@ -602,3 +602,50 @@ class TestBranchesSet:
         # Should update the 'feature' branch
         assert fs2.branch == "feature"
         assert repo.branches["feature"].hash == fs2.hash
+
+
+class TestRetryWrite:
+    def test_retry_write_succeeds_on_first_try(self, repo_fs):
+        """Basic happy path — no contention."""
+        repo, fs = repo_fs
+        new_fs = retry_write(repo, "main", "file.txt", b"hello")
+        assert new_fs.read("file.txt") == b"hello"
+        assert repo.branches["main"].hash == new_fs.hash
+
+    def test_retry_write_retries_on_stale(self, repo_fs):
+        """Concurrent modification should be retried transparently."""
+        repo, fs = repo_fs
+        # Write once so the branch has content
+        fs.write("a.txt", b"a")
+
+        # Simulate: first attempt hits stale, second succeeds
+        call_count = 0
+        orig_write = type(fs).write
+
+        def patched_write(self, path, data, *, message=None, mode=None):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise StaleSnapshotError("simulated stale")
+            return orig_write(self, path, data, message=message, mode=mode)
+
+        import unittest.mock
+        with unittest.mock.patch.object(type(fs), 'write', patched_write):
+            new_fs = retry_write(repo, "main", "retried.txt", b"data", retries=3)
+
+        assert new_fs.read("retried.txt") == b"data"
+        assert call_count == 2
+
+    def test_retry_write_raises_after_exhaustion(self, repo_fs):
+        """All retries fail → StaleSnapshotError propagates."""
+        repo, _ = repo_fs
+
+        import unittest.mock
+
+        def always_stale(self, path, data, *, message=None, mode=None):
+            raise StaleSnapshotError("always stale")
+
+        from gitstore.fs import FS
+        with unittest.mock.patch.object(FS, 'write', always_stale):
+            with pytest.raises(StaleSnapshotError):
+                retry_write(repo, "main", "x.txt", b"x", retries=2)

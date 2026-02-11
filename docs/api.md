@@ -1,7 +1,7 @@
 # API Reference
 
 ```python
-from gitstore import GitStore, FS, StaleSnapshotError
+from gitstore import GitStore, FS, StaleSnapshotError, retry_write
 from gitstore import copy_to_repo, copy_from_repo, sync_to_repo, sync_from_repo
 from gitstore import CopyReport, CopyAction, CopyError, FileEntry, SyncDiff, RefChange
 ```
@@ -475,7 +475,48 @@ fs1 = fs.write("a.txt", b"a")     # branch advances
 fs.write("b.txt", b"b")           # StaleSnapshotError — fs is stale
 ```
 
-Fix: re-fetch `repo.branches["main"]` and retry.
+Fix: re-fetch `repo.branches["main"]` and retry — or use `retry_write` (below).
+
+---
+
+## retry_write
+
+Write a single file with automatic retry on concurrent modification.  Re-fetches the branch FS on each attempt and uses exponential backoff with jitter.
+
+### Synopsis
+
+```python
+retry_write(store, branch, path, data, *, message=None, mode=None, retries=5) -> FS
+```
+
+### Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `store` | `GitStore` | | Open repository. |
+| `branch` | `str` | | Branch name. |
+| `path` | `str \| PathLike` | | Destination path in the repo. |
+| `data` | `bytes` | | File contents. |
+| `message` | `str \| None` | `None` | Commit message. |
+| `mode` | `int \| None` | `None` | File mode (e.g. `0o100755`). |
+| `retries` | `int` | `5` | Maximum attempts before raising. |
+
+**Returns:** `FS` — new snapshot after successful write.
+
+**Raises:** `StaleSnapshotError` if all attempts are exhausted. `KeyError` if the branch does not exist.
+
+### Example
+
+```python
+from gitstore import GitStore, retry_write
+
+repo = GitStore.open("data.git")
+fs = retry_write(repo, "main", "log.txt", b"new data")
+```
+
+### Backoff strategy
+
+Base delay 10 ms, factor 2x, cap 200 ms, with uniform jitter. Delays per attempt: 0–10 ms, 0–20 ms, 0–40 ms, 0–80 ms, then raise.
 
 ---
 

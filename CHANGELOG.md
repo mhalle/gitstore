@@ -4,6 +4,25 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.42.0 (2026-02-11)
+
+**New features:**
+
+- Add `--passthrough`/`-p` flag to `write` CLI command — tee mode that echoes stdin to stdout for pipeline use (`cmd | gitstore write log.txt -p | grep error`)
+- Add `retry_write()` library function — writes a single file to a branch with automatic retry on concurrent modification (exponential backoff + jitter, 5 attempts by default)
+- `write` command now uses two-stage open: reads stdin before fetching the branch FS, minimizing the staleness window for long-running pipes
+
+**Docs:**
+
+- Fix `--hash` → `--ref` throughout README (matching actual CLI option name)
+- Fix `branch` docs: document `fork`, `set`, `default` subcommands (replacing outdated `create --from` syntax)
+- Fix `tag` docs: document `fork`, `set`, `hash` subcommands (replacing outdated `create` syntax)
+- Add `--back` to all command option tables and Snapshot Filters appendix
+- Add `-R/--recursive` and `-n/--dry-run` to `rm` options table
+- Add `-b/--branch` to `undo`/`redo` docs; add options table for `reflog`
+- Document `retry_write()` in API reference
+- Document `--no-create` for `restore` in README
+
 ## v0.41.1 (2026-02-11)
 
 **Internal:**

@@ -1193,6 +1193,40 @@ class TestWrite:
         assert result.exit_code == 0
         assert result.output == "abc"
 
+    def test_write_passthrough_echoes_to_stdout(self, runner, initialized_repo):
+        result = runner.invoke(
+            main,
+            ["write", "--repo", initialized_repo, "log.txt", "--passthrough"],
+            input=b"pipeline data\n",
+        )
+        assert result.exit_code == 0, result.output
+        # stdout should contain the piped-through data
+        assert "pipeline data\n" in result.output
+
+        # File should also be in the repo
+        result = runner.invoke(main, ["cat", "--repo", initialized_repo, "log.txt"])
+        assert result.exit_code == 0
+        assert result.output == "pipeline data\n"
+
+    def test_write_passthrough_short_flag(self, runner, initialized_repo):
+        result = runner.invoke(
+            main,
+            ["write", "--repo", initialized_repo, "log.txt", "-p"],
+            input=b"short flag\n",
+        )
+        assert result.exit_code == 0, result.output
+        assert "short flag\n" in result.output
+
+    def test_write_without_passthrough_no_stdout(self, runner, initialized_repo):
+        result = runner.invoke(
+            main,
+            ["write", "--repo", initialized_repo, "quiet.txt"],
+            input=b"silent data\n",
+        )
+        assert result.exit_code == 0, result.output
+        # Without passthrough, the input data should NOT appear in stdout
+        assert "silent data" not in result.output
+
 
 # ---------------------------------------------------------------------------
 # TestLog

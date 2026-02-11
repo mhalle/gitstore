@@ -33,6 +33,8 @@ from .tree import (
 if TYPE_CHECKING:
     from .repo import GitStore
 
+__all__ = ["FS", "retry_write"]
+
 
 class FS:
     """An immutable snapshot of a committed tree.
@@ -642,3 +644,35 @@ class FS:
                 continue
             yield current
             current = current.parent
+
+
+def retry_write(
+    store: GitStore,
+    branch: str,
+    path: str | os.PathLike[str],
+    data: bytes,
+    *,
+    message: str | None = None,
+    mode: int | None = None,
+    retries: int = 5,
+) -> FS:
+    """Write data to a branch with automatic retry on concurrent modification.
+
+    Re-fetches the branch FS on each attempt.  Uses exponential backoff
+    with jitter (base 10ms, factor 2x, cap 200ms) to avoid thundering-herd.
+
+    Raises ``StaleSnapshotError`` if all attempts are exhausted.
+    Raises ``KeyError`` if the branch does not exist.
+    """
+    import random
+    import time
+
+    for attempt in range(retries):
+        fs = store.branches[branch]
+        try:
+            return fs.write(path, data, message=message, mode=mode)
+        except StaleSnapshotError:
+            if attempt == retries - 1:
+                raise
+            delay = min(0.01 * (2 ** attempt), 0.2)
+            time.sleep(random.uniform(0, delay))

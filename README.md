@@ -334,6 +334,15 @@ except StaleSnapshotError:
     fs = repo.branches["main"]  # re-fetch and retry
 ```
 
+For single-file writes, `retry_write` handles the re-fetch-and-retry loop automatically with exponential backoff:
+
+```python
+from gitstore import retry_write
+
+# Fetches a fresh branch FS, writes, and retries on concurrent modification
+fs = retry_write(repo, "main", "file.txt", data)
+```
+
 **Guarantees and limitations:**
 
 - Single-machine, multi-process writes to the same branch are serialized by the file lock and will never silently lose commits.
@@ -360,7 +369,7 @@ except StaleSnapshotError:
 
 gitstore includes a command-line interface for working with bare repos without writing Python. Install the package to get the `gitstore` command.
 
-Specify the repository with `--repo`/`-r` or the `GITSTORE_REPO` environment variable. Use `--branch`/`-b` to select a branch (defaults to `main`). Use `--hash` to read from any branch, tag, or commit hash. For `cp`, prefix repo-side paths with `:` to distinguish them from local paths. For other commands (`ls`, `cat`, `rm`) the `:` prefix is optional.
+Specify the repository with `--repo`/`-r` or the `GITSTORE_REPO` environment variable. Use `--branch`/`-b` to select a branch (defaults to `main`). Use `--ref` to read from any branch, tag, or commit hash. For `cp`, prefix repo-side paths with `:` to distinguish them from local paths. For other commands (`ls`, `cat`, `rm`) the `:` prefix is optional.
 
 ```bash
 # Set once per session
@@ -433,6 +442,10 @@ gitstore ls
 gitstore ls subdir
 gitstore cat file.txt
 
+# Write stdin to repo
+echo "hello" | gitstore write file.txt
+cmd | gitstore write log.txt -p | grep error   # passthrough (tee mode)
+
 # Remove files
 gitstore rm old-file.txt
 
@@ -449,17 +462,22 @@ gitstore log --format jsonl               # one JSON object per line
 # Manage branches
 gitstore branch                           # list
 gitstore branch create dev                # empty orphan branch
-gitstore branch create dev --from main    # fork from existing ref
-gitstore branch create dev --from main --path config.json  # fork from commit that last changed a file
-gitstore branch create dev --from main --match "deploy*"   # fork from commit matching message
-gitstore branch create dev --from main --before 2024-06-01 # fork from commit as of a date
+gitstore branch fork dev                  # fork from default branch
+gitstore branch fork dev --ref main --path config.json  # fork from commit that last changed a file
+gitstore branch fork dev --ref main --match "deploy*"   # fork from commit matching message
+gitstore branch fork dev --ref main --before 2024-06-01 # fork from commit as of a date
+gitstore branch set dev --ref main        # point at an existing ref
+gitstore branch default                   # show default branch
+gitstore branch default -b dev            # set default branch
 gitstore branch delete dev
 
 # Manage tags
-gitstore tag create v1.0 main
-gitstore tag create v1.0-fix main --path bugfix.py         # tag the commit that last changed bugfix.py
-gitstore tag create v1.0 main --match "deploy*"            # tag the latest deploy commit
-gitstore tag create v1.0 main --before 2024-06-01          # tag the state as of a date
+gitstore tag fork v1.0                    # tag from default branch
+gitstore tag fork v1.0-fix --path bugfix.py         # tag the commit that last changed bugfix.py
+gitstore tag fork v1.0 --match "deploy*"            # tag the latest deploy commit
+gitstore tag fork v1.0 --before 2024-06-01          # tag the state as of a date
+gitstore tag set v1.0 --ref main          # point tag at a ref (creates or updates)
+gitstore tag hash v1.0                    # print commit SHA
 gitstore tag delete v1.0
 
 # Export to an archive (format auto-detected from extension)
@@ -551,21 +569,29 @@ gitstore tag -r /path/to/repo.git list   # v1
 ```bash
 # Browse at a specific commit
 gitstore log --path file.txt                # find the commit hash
-gitstore cat file.txt --hash abc1234...   # read file at that commit
-gitstore ls --hash abc1234...             # list files at that commit
+gitstore cat file.txt --ref abc1234...   # read file at that commit
+gitstore ls --ref abc1234...             # list files at that commit
 
 # Works with tags too
-gitstore cat file.txt --hash v1.0
+gitstore cat file.txt --ref v1.0
 
 # Export a snapshot at a specific commit
-gitstore zip archive.zip --hash abc1234...
-gitstore tar archive.tar --hash abc1234...
+gitstore zip archive.zip --ref abc1234...
+gitstore tar archive.tar --ref abc1234...
 
 # Copy from a specific commit
-gitstore cp :file.txt local.txt --hash abc1234...
+gitstore cp :file.txt local.txt --ref abc1234...
 ```
 
-Write commands (`cp`, `rm`, `unarchive`, `unzip`, `untar`) accept `-m` for custom commit messages. Use `-b` on any command to target a branch other than `main`. Read commands (`cat`, `ls`, `cp`, `archive`, `zip`, `tar`, `log`) accept `--hash` to read from any branch, tag, or full commit hash. `log`, `archive`, `zip`, and `tar` accept `--before` with an ISO 8601 date or datetime to filter to commits on or before that point in time. `cp` handles files, directories, trailing-slash "contents" mode, and glob patterns; pass `-n`/`--dry-run` to preview what would be copied without writing. `cp` accepts `--mode 644` or `--mode 755` to set file permissions, `--follow-symlinks` to dereference symlinks, `--ignore-existing` to skip files that already exist at the destination, `--delete` to remove destination files not present in the source (like rsync `--delete`), and `--ignore-errors` to skip failed files and continue copying. When copying directories, `cp` auto-detects executable permissions from disk and preserves symlinks by default; pass `--follow-symlinks` to dereference them instead. When copying repo→disk, `cp` recreates symlink entries as symlinks on disk. Pass `-v` before the command for status messages on stderr. `archive`, `zip`, and `tar` accept `-` as FILENAME to write to stdout; `unarchive` and `untar` read from stdin when no filename is given (or with `-`). `archive` and `unarchive` auto-detect the format from the filename extension; use `--format zip` or `--format tar` to override or when piping to/from stdout/stdin. The `zip`/`unzip`/`tar`/`untar` commands remain as aliases. `backup` and `restore` operate on the entire repository (all branches and tags) and accept `-n`/`--dry-run` to preview changes without transferring data.
+Write commands (`cp`, `rm`, `write`, `unarchive`, `unzip`, `untar`) accept `-m` for custom commit messages. Read commands (`cat`, `ls`, `cp`, `archive`, `zip`, `tar`, `log`) accept `--ref` to read from any branch, tag, or full commit hash. Pass `-v` before any command for status messages on stderr.
+
+`write` reads stdin and commits it to a file in the repo. Pass `-p`/`--passthrough` for tee mode where data flows through to stdout, useful in pipelines (e.g. `cmd | gitstore write log.txt -p | grep error`).
+
+`cp` handles files, directories, trailing-slash "contents" mode, and glob patterns; pass `-n`/`--dry-run` to preview what would be copied without writing. It accepts `--mode 644` or `--mode 755` to set file permissions, `--follow-symlinks` to dereference symlinks, `--ignore-existing` to skip files that already exist at the destination, `--delete` to remove destination files not present in the source (like rsync `--delete`), and `--ignore-errors` to skip failed files and continue copying. When copying directories, `cp` auto-detects executable permissions from disk and preserves symlinks by default; pass `--follow-symlinks` to dereference them instead. When copying repo→disk, `cp` recreates symlink entries as symlinks on disk.
+
+`log`, `archive`, `zip`, and `tar` accept `--before` with an ISO 8601 date or datetime to filter to commits on or before that point in time. `archive`, `zip`, and `tar` accept `-` as FILENAME to write to stdout; `unarchive` and `untar` read from stdin when no filename is given (or with `-`). `archive` and `unarchive` auto-detect the format from the filename extension; use `--format zip` or `--format tar` to override or when piping to/from stdout/stdin. The `zip`/`unzip`/`tar`/`untar` commands remain as aliases.
+
+`backup` and `restore` operate on the entire repository (all branches and tags) and accept `-n`/`--dry-run` to preview changes without transferring data. `restore` also accepts `--no-create` to require an existing repo.
 
 ## Documentation
 

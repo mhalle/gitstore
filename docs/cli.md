@@ -80,6 +80,7 @@ gitstore cp --ref v1.0 :data ./local          # from tag/branch/hash
 | `--path` | Latest commit that changed this path. |
 | `--match` | Latest commit matching message pattern (`*`, `?`). |
 | `--before` | Latest commit on or before this date (ISO 8601). |
+| `--back N` | Walk back N commits from tip. |
 | `-m`, `--message` | Commit message (supports [placeholders](#message-placeholders)). |
 | `--mode` | `644` (default) or `755`. |
 | `--follow-symlinks` | Dereference symlinks (disk→repo only). |
@@ -131,6 +132,7 @@ gitstore sync :data ./local --ref v1.0        # from tag
 | `--path` | Latest commit that changed this path. |
 | `--match` | Latest commit matching message pattern. |
 | `--before` | Latest commit on or before this date. |
+| `--back N` | Walk back N commits from tip. |
 | `-m`, `--message` | Commit message (supports [placeholders](#message-placeholders)). |
 | `-n`, `--dry-run` | Preview without writing. |
 | `--ignore-errors` | Skip failed files. |
@@ -162,7 +164,7 @@ gitstore ls -R 'src/*'                        # glob + recursive expansion
 |--------|-------------|
 | `-R`, `--recursive` | List all files recursively with full paths. |
 | `-b`, `--branch` | Branch (default: `main`). |
-| `--ref`, `--path`, `--match`, `--before` | Snapshot filters. |
+| `--ref`, `--path`, `--match`, `--before`, `--back` | Snapshot filters. |
 
 ### cat
 
@@ -176,19 +178,25 @@ gitstore cat file.txt --ref v1.0
 | Option | Description |
 |--------|-------------|
 | `-b`, `--branch` | Branch (default: `main`). |
-| `--ref`, `--path`, `--match`, `--before` | Snapshot filters. |
+| `--ref`, `--path`, `--match`, `--before`, `--back` | Snapshot filters. |
 
 ### rm
 
-Remove a file from the repo.
+Remove files from the repo. Accepts multiple paths and glob patterns. Directories require `-R`.
 
 ```bash
 gitstore rm old-file.txt
 gitstore rm old-file.txt -m "Clean up"
+gitstore rm ':*.txt'                     # glob (quote for shell)
+gitstore rm -R :dir                      # directory
+gitstore rm -n :file.txt                 # dry run
+gitstore rm :a.txt :b.txt               # multiple
 ```
 
 | Option | Description |
 |--------|-------------|
+| `-R`, `--recursive` | Remove directories recursively. |
+| `-n`, `--dry-run` | Show what would change without writing. |
 | `-b`, `--branch` | Branch (default: `main`). |
 | `-m`, `--message` | Commit message. |
 | `--tag` | Create a tag at the resulting commit. |
@@ -202,10 +210,15 @@ Write stdin to a file in the repo.
 echo "hello" | gitstore write file.txt
 cat data.json | gitstore write :config.json
 cat image.png | gitstore write :assets/logo.png -m "Add logo"
+
+# Passthrough (tee mode) — data flows to stdout AND into the repo
+cmd | gitstore write log.txt -p | grep error
+tail -f /var/log/app.log | gitstore write log.txt --passthrough
 ```
 
 | Option | Description |
 |--------|-------------|
+| `-p`, `--passthrough` | Echo stdin to stdout (tee mode for pipelines). |
 | `-b`, `--branch` | Branch (default: `main`). |
 | `-m`, `--message` | Commit message. |
 | `--no-create` | Don't auto-create the repo. |
@@ -235,6 +248,7 @@ gitstore log --format json                    # or jsonl
 | `--path` | Commits that changed this path. |
 | `--match` | Commits matching message pattern. |
 | `--before` | Commits on or before this date. |
+| `--back N` | Walk back N commits from tip. |
 | `--format` | `text` (default), `json`, `jsonl`. |
 
 Text format: `SHORT_HASH  ISO_TIMESTAMP  MESSAGE`
@@ -244,21 +258,39 @@ Text format: `SHORT_HASH  ISO_TIMESTAMP  MESSAGE`
 ```bash
 gitstore undo                                 # back 1 commit
 gitstore undo 3                               # back 3 commits
+gitstore undo -b dev                          # undo on 'dev' branch
 ```
+
+| Option | Description |
+|--------|-------------|
+| `-b`, `--branch` | Branch (default: `main`). |
 
 ### redo
 
 ```bash
 gitstore redo                                 # forward 1 reflog step
 gitstore redo 2                               # forward 2 steps
+gitstore redo -b dev                          # redo on 'dev' branch
 ```
+
+| Option | Description |
+|--------|-------------|
+| `-b`, `--branch` | Branch (default: `main`). |
 
 ### reflog
 
 ```bash
 gitstore reflog
+gitstore reflog -n 10                         # last 10 entries
+gitstore reflog -b dev                        # entries for 'dev' branch
 gitstore reflog --format json
 ```
+
+| Option | Description |
+|--------|-------------|
+| `-b`, `--branch` | Branch (default: `main`). |
+| `-n`, `--limit` | Limit number of entries shown. |
+| `--format` | `text` (default), `json`, `jsonl`. |
 
 ---
 
@@ -270,8 +302,13 @@ gitstore reflog --format json
 gitstore branch                               # list
 gitstore branch list                          # same
 gitstore branch create dev                    # empty orphan
-gitstore branch create dev --from main        # fork
-gitstore branch create dev --from main --path config.json
+gitstore branch fork dev                      # fork from default branch
+gitstore branch fork dev --ref main           # fork from specific ref
+gitstore branch fork dev --ref main --path config.json
+gitstore branch fork dev -f                   # overwrite existing
+gitstore branch set dev --ref main            # point at a ref (create or update)
+gitstore branch default                       # show default branch
+gitstore branch default -b dev                # set default branch
 gitstore branch delete dev
 gitstore branch hash main                     # tip commit SHA
 gitstore branch hash main --back 3            # 3 commits before tip
@@ -280,35 +317,53 @@ gitstore branch hash main --path config.json  # last commit that changed file
 
 #### branch create options
 
+Creates an empty orphan branch. No additional options.
+
+#### branch fork options
+
 | Option | Description |
 |--------|-------------|
-| `--from` | Ref to fork from. Without it, creates empty orphan. |
-| `--path`, `--match`, `--before` | Snapshot filters (require `--from`). |
+| `-b`, `--branch` | Source branch (default: repo default). |
+| `-f`, `--force` | Overwrite if branch already exists. |
+| `--ref`, `--path`, `--match`, `--before`, `--back` | Snapshot filters. |
+
+#### branch set options
+
+| Option | Description |
+|--------|-------------|
+| `--ref`, `--path`, `--match`, `--before`, `--back` | Snapshot filters. |
 
 #### branch hash options
 
 | Option | Description |
 |--------|-------------|
-| `--back N` | Walk back N parents (default: 0 = tip). |
-| `--path`, `--match`, `--before` | Snapshot filters. |
+| `--ref`, `--path`, `--match`, `--before`, `--back` | Snapshot filters. |
 
 ### tag
 
 ```bash
 gitstore tag                                  # list
 gitstore tag list                             # same
-gitstore tag create v1.0 --from main          # required --from
-gitstore tag create v1.0 --from main --before 2024-06-01
-gitstore tag delete v1.0
+gitstore tag fork v1.0                        # tag from default branch
+gitstore tag fork v1.0 --ref main             # tag from specific ref
+gitstore tag fork v1.0 --before 2024-06-01    # tag a historical commit
+gitstore tag set v1.0 --ref main              # create or update tag
 gitstore tag hash v1.0                        # commit SHA
+gitstore tag delete v1.0
 ```
 
-#### tag create options
+#### tag fork options
 
 | Option | Description |
 |--------|-------------|
-| `--from` | Ref to tag (required). |
-| `--path`, `--match`, `--before` | Snapshot filters. |
+| `-b`, `--branch` | Source branch (default: repo default). |
+| `--ref`, `--path`, `--match`, `--before`, `--back` | Snapshot filters. |
+
+#### tag set options
+
+| Option | Description |
+|--------|-------------|
+| `--ref`, `--path`, `--match`, `--before`, `--back` | Snapshot filters. |
 
 ---
 
@@ -333,7 +388,7 @@ gitstore unarchive --format tar < archive.tar        # stdin
 |--------|-------------|
 | `--format` | `zip` or `tar` (overrides auto-detect; required for stdout). |
 | `-b`, `--branch` | Branch (default: `main`). |
-| `--ref`, `--path`, `--match`, `--before` | Snapshot filters. |
+| `--ref`, `--path`, `--match`, `--before`, `--back` | Snapshot filters. |
 
 #### unarchive options
 
@@ -403,8 +458,9 @@ Several commands accept filters to select a specific commit:
 | `--path PATH` | Latest commit that changed this file. |
 | `--match PATTERN` | Latest commit matching message pattern (`*`, `?`). |
 | `--before DATE` | Latest commit on or before this date (ISO 8601). |
+| `--back N` | Walk back N commits from tip. |
 
-Filters combine with AND. Available on `cp`, `sync`, `ls`, `cat`, `log`, `branch create`, `branch hash`, `tag create`, `archive`, `zip`, `tar`.
+Filters combine with AND. Available on `cp`, `sync`, `ls`, `cat`, `log`, `branch fork`, `branch set`, `branch hash`, `tag fork`, `tag set`, `archive`, `zip`, `tar`.
 
 ### Dry-run output format
 
