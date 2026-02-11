@@ -4,6 +4,10 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.40.1 (2026-02-11)
+
+- `FS.back()` now defaults to `n=1`, matching `undo()`
+
 ## v0.40.0 (2026-02-11)
 
 **New features:**

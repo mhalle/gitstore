@@ -449,7 +449,7 @@ class FS:
             return None
         return FS(self._store, commit.parents[0].id, branch=self._branch)
 
-    def back(self, n: int) -> FS:
+    def back(self, n: int = 1) -> FS:
         """Return the FS at the *n*-th ancestor commit.
 
         Raises ValueError if *n* < 0 or history is too short.
