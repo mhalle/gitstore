@@ -4,6 +4,24 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.44.0 (2026-02-11)
+
+**Bug fixes:**
+
+- Fix TOCTOU race in `undo()`/`redo()` — stale check + ref update now run atomically under a single `repo_lock`, matching `_commit_changes`
+- Fix `dump()` O(n^2) performance — filemodes are now read from tree entries during the walk instead of re-traversing from root per file
+- Fix hardcoded reflog committer identity — reflog entries now use the actual `author`/`email` configured via `GitStore.open()` instead of `gitstore <gitstore@localhost>`
+- Remove misleading `skipped` counter from zip import path (was always 0)
+- Remove redundant local imports in `fs.py` and `repo.py`
+
+**Tests:**
+
+- Add 16 CLI tests: `TestUndo`, `TestRedo`, `TestReflogCLI`, `TestSnapshotFilterCombined`
+
+**Docs:**
+
+- Document `gitserve` command in CLI reference
+
 ## v0.43.1 (2026-02-11)
 
 **Docs:**

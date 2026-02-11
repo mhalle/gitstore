@@ -232,7 +232,7 @@ class _Reference:
     def target(self) -> Oid:
         return Oid(self._refs[self._name])
 
-    def set_target(self, oid: Oid, message: bytes | None = None):
+    def set_target(self, oid: Oid, message: bytes | None = None, committer: bytes | None = None):
         # Get old value for reflog
         try:
             old_sha = self._refs[self._name]
@@ -245,7 +245,8 @@ class _Reference:
         # Write reflog entry
         if message is None:
             message = b"update ref"
-        committer = b"gitstore <gitstore@localhost>"
+        if committer is None:
+            committer = b"gitstore <gitstore@localhost>"
         _write_reflog_entry(
             self._repo.path, self._name,
             old_sha, oid.raw,
@@ -274,7 +275,7 @@ class _References:
         for ref_bytes in self._refs.allkeys():
             yield ref_bytes.decode()
 
-    def create(self, name: str, oid: Oid, message: bytes | None = None):
+    def create(self, name: str, oid: Oid, message: bytes | None = None, committer: bytes | None = None):
         ref_bytes = name.encode() if isinstance(name, str) else name
 
         # Update ref
@@ -283,7 +284,8 @@ class _References:
         # Write reflog entry
         if message is None:
             message = b"create ref"
-        committer = b"gitstore <gitstore@localhost>"
+        if committer is None:
+            committer = b"gitstore <gitstore@localhost>"
         _write_reflog_entry(
             self._dulwich_repo.path, ref_bytes,
             _ZERO_SHA, oid.raw,

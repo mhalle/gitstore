@@ -141,6 +141,7 @@ class RefDict(MutableMapping):
         repo = self._store._repo
         ref_name = self._ref_name(name)
 
+        committer = self._store._signature._identity
         with repo_lock(repo.path):
             if ref_name in repo.references:
                 if self._is_tags:
@@ -149,12 +150,12 @@ class RefDict(MutableMapping):
                 commit = repo[fs._commit_oid]
                 msg_str = commit.message.splitlines()[0] if commit.message else ""
                 msg = f"branch: set to {msg_str}".encode()
-                repo.references[ref_name].set_target(fs._commit_oid, message=msg)
+                repo.references[ref_name].set_target(fs._commit_oid, message=msg, committer=committer)
             else:
                 commit = repo[fs._commit_oid]
                 msg_str = commit.message.splitlines()[0] if commit.message else ""
                 msg = f"branch: Created from {msg_str}".encode()
-                repo.references.create(ref_name, fs._commit_oid, message=msg)
+                repo.references.create(ref_name, fs._commit_oid, message=msg, committer=committer)
 
     def __delitem__(self, name: str):
         from ._lock import repo_lock
@@ -231,7 +232,6 @@ class RefDict(MutableMapping):
             >>> for e in entries:
             ...     print(f"{e['message']}: {e['new_sha'][:7]}")
         """
-        import os
         from dulwich import reflog as dreflog
 
         if self._is_tags:

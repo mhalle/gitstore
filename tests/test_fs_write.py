@@ -409,8 +409,8 @@ class TestReflog:
 
         entries = repo.branches.reflog("main")
         assert len(entries) >= 3
-        # Last entry should be the undo (branch: set to ...)
-        assert "branch:" in entries[-1]["message"]
+        # Last entry should be the undo
+        assert "undo:" in entries[-1]["message"]
 
     def test_reflog_nonexistent_branch_raises(self, repo_fs):
         """Reflog on nonexistent branch should raise KeyError."""

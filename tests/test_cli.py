@@ -3558,3 +3558,243 @@ class TestDiff:
         assert r.exit_code == 0, r.output
         assert "D  new.txt" in r.output
         assert "A" not in r.output or "A  new.txt" not in r.output
+
+
+# ---------------------------------------------------------------------------
+# TestUndo (CLI)
+# ---------------------------------------------------------------------------
+
+class TestUndo:
+    def test_basic_undo(self, runner, initialized_repo, tmp_path):
+        """Undo one commit via CLI."""
+        f = tmp_path / "a.txt"
+        f.write_text("v1")
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":a.txt", "-m", "add a"])
+        f.write_text("v2")
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":a.txt", "-m", "update a"])
+
+        r = runner.invoke(main, ["undo", "--repo", initialized_repo])
+        assert r.exit_code == 0, r.output
+        assert "Undid 1 commit" in r.output
+
+        # Branch should now be at v1
+        r = runner.invoke(main, ["cat", "--repo", initialized_repo, ":a.txt"])
+        assert r.output == "v1"
+
+    def test_multi_step_undo(self, runner, initialized_repo, tmp_path):
+        """Undo multiple commits at once."""
+        f = tmp_path / "a.txt"
+        for i in range(4):
+            f.write_text(f"v{i}")
+            runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":a.txt", "-m", f"v{i}"])
+
+        r = runner.invoke(main, ["undo", "--repo", initialized_repo, "3"])
+        assert r.exit_code == 0, r.output
+        assert "Undid 3 commits" in r.output
+
+        r = runner.invoke(main, ["cat", "--repo", initialized_repo, ":a.txt"])
+        assert r.output == "v0"
+
+    def test_undo_past_root_error(self, runner, initialized_repo):
+        """Undoing past the root commit errors out."""
+        r = runner.invoke(main, ["undo", "--repo", initialized_repo, "5"])
+        assert r.exit_code != 0
+        assert "Cannot undo" in r.output or "too short" in r.output.lower()
+
+    def test_undo_nonexistent_branch(self, runner, initialized_repo):
+        """Undo on a non-existent branch errors out."""
+        r = runner.invoke(main, ["undo", "--repo", initialized_repo, "-b", "nope"])
+        assert r.exit_code != 0
+        assert "not found" in r.output.lower()
+
+    def test_undo_custom_branch(self, runner, initialized_repo, tmp_path):
+        """Undo on a specific branch via -b."""
+        runner.invoke(main, ["branch", "--repo", initialized_repo, "fork", "dev"])
+        f = tmp_path / "a.txt"
+        f.write_text("dev-data")
+        runner.invoke(main, ["cp", "--repo", initialized_repo, "-b", "dev", str(f), ":a.txt"])
+
+        r = runner.invoke(main, ["undo", "--repo", initialized_repo, "-b", "dev"])
+        assert r.exit_code == 0, r.output
+        assert "Undid 1 commit" in r.output
+
+
+# ---------------------------------------------------------------------------
+# TestRedo (CLI)
+# ---------------------------------------------------------------------------
+
+class TestRedo:
+    def test_undo_then_redo(self, runner, initialized_repo, tmp_path):
+        """Undo then redo restores the original state."""
+        f = tmp_path / "a.txt"
+        f.write_text("v1")
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":a.txt", "-m", "add a"])
+        f.write_text("v2")
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":a.txt", "-m", "update a"])
+
+        # Undo
+        r = runner.invoke(main, ["undo", "--repo", initialized_repo])
+        assert r.exit_code == 0, r.output
+        r = runner.invoke(main, ["cat", "--repo", initialized_repo, ":a.txt"])
+        assert r.output == "v1"
+
+        # Redo
+        r = runner.invoke(main, ["redo", "--repo", initialized_repo])
+        assert r.exit_code == 0, r.output
+        assert "Redid 1 step" in r.output
+        r = runner.invoke(main, ["cat", "--repo", initialized_repo, ":a.txt"])
+        assert r.output == "v2"
+
+    def test_redo_past_available_steps_error(self, runner, initialized_repo, tmp_path):
+        """Redo more steps than available should fail."""
+        f = tmp_path / "a.txt"
+        f.write_text("data")
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":a.txt"])
+
+        # There are only a few reflog entries, so redo 100 should fail
+        r = runner.invoke(main, ["redo", "--repo", initialized_repo, "100"])
+        assert r.exit_code != 0
+        assert "Cannot redo" in r.output or "step" in r.output.lower()
+
+    def test_redo_nonexistent_branch(self, runner, initialized_repo):
+        """Redo on a non-existent branch errors out."""
+        r = runner.invoke(main, ["redo", "--repo", initialized_repo, "-b", "nope"])
+        assert r.exit_code != 0
+        assert "not found" in r.output.lower()
+
+
+# ---------------------------------------------------------------------------
+# TestReflogCLI
+# ---------------------------------------------------------------------------
+
+class TestReflogCLI:
+    def test_reflog_text(self, runner, initialized_repo, tmp_path):
+        """Default text format shows reflog entries."""
+        f = tmp_path / "a.txt"
+        f.write_text("data")
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":a.txt"])
+
+        r = runner.invoke(main, ["reflog", "--repo", initialized_repo])
+        assert r.exit_code == 0, r.output
+        assert "Reflog for branch" in r.output
+
+    def test_reflog_json(self, runner, initialized_repo, tmp_path):
+        """--format json outputs valid JSON array."""
+        import json
+
+        f = tmp_path / "a.txt"
+        f.write_text("data")
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":a.txt"])
+
+        r = runner.invoke(main, ["reflog", "--repo", initialized_repo, "--format", "json"])
+        assert r.exit_code == 0, r.output
+        data = json.loads(r.output)
+        assert isinstance(data, list)
+        assert len(data) >= 1
+        assert "new_sha" in data[0]
+        assert "message" in data[0]
+
+    def test_reflog_jsonl(self, runner, initialized_repo, tmp_path):
+        """--format jsonl outputs one JSON object per line."""
+        import json
+
+        f = tmp_path / "a.txt"
+        f.write_text("data")
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":a.txt"])
+
+        r = runner.invoke(main, ["reflog", "--repo", initialized_repo, "--format", "jsonl"])
+        assert r.exit_code == 0, r.output
+        lines = r.output.strip().split("\n")
+        assert len(lines) >= 1
+        for line in lines:
+            entry = json.loads(line)
+            assert "new_sha" in entry
+
+    def test_reflog_limit(self, runner, initialized_repo, tmp_path):
+        """--limit N shows at most N entries."""
+        f = tmp_path / "a.txt"
+        for i in range(5):
+            f.write_text(f"v{i}")
+            runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":a.txt", "-m", f"v{i}"])
+
+        r = runner.invoke(main, ["reflog", "--repo", initialized_repo, "--format", "json", "-n", "2"])
+        assert r.exit_code == 0, r.output
+        import json
+        data = json.loads(r.output)
+        assert len(data) == 2
+
+    def test_reflog_nonexistent_branch(self, runner, initialized_repo):
+        """Reflog on a non-existent branch errors out."""
+        r = runner.invoke(main, ["reflog", "--repo", initialized_repo, "-b", "nope"])
+        assert r.exit_code != 0
+        assert "not found" in r.output.lower()
+
+
+# ---------------------------------------------------------------------------
+# TestSnapshotFilterCombined (CLI)
+# ---------------------------------------------------------------------------
+
+class TestSnapshotFilterCombined:
+    def test_path_and_back(self, runner, initialized_repo, tmp_path):
+        """--path + --back together: back from the latest commit touching that path."""
+        f = tmp_path / "a.txt"
+        f.write_text("v1")
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":a.txt", "-m", "add a"])
+        f.write_text("v2")
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":a.txt", "-m", "update a"])
+        f.write_text("v3")
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":a.txt", "-m", "update a again"])
+
+        # --back 1 from tip gets "update a" commit
+        r = runner.invoke(main, ["log", "--repo", initialized_repo, "--back", "1"])
+        assert r.exit_code == 0, r.output
+        lines = r.output.strip().split("\n")
+        assert "update a again" not in r.output
+
+    def test_before_and_match(self, runner, initialized_repo, tmp_path):
+        """--before + --match together: only commits matching pattern before cutoff."""
+        import time
+        f = tmp_path / "a.txt"
+        f.write_text("v1")
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":a.txt", "-m", "deploy v1"])
+        time.sleep(1.1)
+        f.write_text("v2")
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":a.txt", "-m", "deploy v2"])
+
+        # Get timestamp between the two commits
+        from gitstore import GitStore
+        store = GitStore.open(initialized_repo, create=False)
+        fs = store.branches["main"]
+        entries = list(fs.log())
+        # entries[0] = deploy v2 (newest), entries[1] = deploy v1
+        cutoff = entries[0].time  # include both
+
+        r = runner.invoke(main, [
+            "log", "--repo", initialized_repo,
+            "--before", cutoff.isoformat(),
+            "--match", "deploy*"
+        ])
+        assert r.exit_code == 0, r.output
+        lines = [l for l in r.output.strip().split("\n") if l.strip()]
+        assert len(lines) == 2
+        assert all("deploy" in line for line in lines)
+
+    def test_back_and_match(self, runner, initialized_repo, tmp_path):
+        """--back + --match: start from ancestor, filter by message."""
+        f = tmp_path / "a.txt"
+        f.write_text("v1")
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":a.txt", "-m", "deploy v1"])
+        f.write_text("v2")
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":a.txt", "-m", "fix bug"])
+        f.write_text("v3")
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":a.txt", "-m", "deploy v3"])
+
+        # --back 1 starts from "fix bug" commit, --match "deploy*" should only match "deploy v1"
+        r = runner.invoke(main, [
+            "log", "--repo", initialized_repo,
+            "--back", "1", "--match", "deploy*"
+        ])
+        assert r.exit_code == 0, r.output
+        lines = [l for l in r.output.strip().split("\n") if l.strip()]
+        assert len(lines) == 1
+        assert "deploy v1" in lines[0]

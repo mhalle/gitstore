@@ -246,7 +246,6 @@ class FS:
 
     def readlink(self, path: str | os.PathLike[str]) -> str:
         """Read the target of a symlink."""
-        from .tree import _entry_at_path
         path = _normalize_path(path)
         entry = _entry_at_path(self._store._repo, self._tree_oid, path)
         if entry is None:
@@ -353,7 +352,7 @@ class FS:
                 [self._commit_oid],
             )
             # Pass commit message to reflog
-            ref.set_target(new_commit_oid, message=f"commit: {final_message}".encode())
+            ref.set_target(new_commit_oid, message=f"commit: {final_message}".encode(), committer=sig._identity)
 
         new_fs = FS(self._store, new_commit_oid, branch=self._branch)
         new_fs._report = report
@@ -423,23 +422,30 @@ class FS:
 
     def dump(self, path: str | Path) -> None:
         """Write the tree contents to a directory on the filesystem."""
-        from .tree import _entry_at_path
         path = Path(path)
+        repo = self._store._repo
         for dirpath, dirnames, filenames in self.walk():
             dir_on_disk = path / dirpath if dirpath else path
             dir_on_disk.mkdir(parents=True, exist_ok=True)
+            # Look up the tree for this directory once to get filemodes
+            if dirpath:
+                tree = repo[self._tree_oid]
+                for seg in dirpath.split("/"):
+                    tree = repo[tree[seg].id]
+            else:
+                tree = repo[self._tree_oid]
             for filename in filenames:
+                entry = tree[filename]
                 store_path = f"{dirpath}/{filename}" if dirpath else filename
-                entry = _entry_at_path(self._store._repo, self._tree_oid, store_path)
-                if entry and entry[1] == GIT_FILEMODE_LINK:
-                    target = self.readlink(store_path)
+                if entry.filemode == GIT_FILEMODE_LINK:
+                    target = repo[entry.id].data.decode()
                     dest = dir_on_disk / filename
                     if dest.exists() or dest.is_symlink():
                         dest.unlink()
                     os.symlink(target, dest)
                 else:
-                    (dir_on_disk / filename).write_bytes(self.read(store_path))
-                    if entry and entry[1] == GIT_FILEMODE_BLOB_EXECUTABLE:
+                    (dir_on_disk / filename).write_bytes(repo[entry.id].data)
+                    if entry.filemode == GIT_FILEMODE_BLOB_EXECUTABLE:
                         os.chmod(dir_on_disk / filename, 0o755)
 
     # --- History ---
@@ -491,15 +497,7 @@ class FS:
         if not self._writable:
             raise PermissionError("Cannot undo on a read-only snapshot")
 
-        # Verify we're at the branch head
-        ref_name = f"refs/heads/{self._branch}"
-        ref = self._store._repo.references[ref_name]
-        if ref.resolve().target != self._commit_oid:
-            raise StaleSnapshotError(
-                f"Branch {self._branch!r} has advanced since this snapshot"
-            )
-
-        # Walk back N parents
+        # Walk back N parents (safe to do outside the lock — read-only)
         current = self
         for i in range(steps):
             if current.parent is None:
@@ -508,8 +506,16 @@ class FS:
                 )
             current = current.parent
 
-        # Update the branch (this writes reflog automatically)
-        self._store.branches[self._branch] = current
+        # Atomic stale-check + ref update under a single lock
+        repo = self._store._repo
+        ref_name = f"refs/heads/{self._branch}"
+        with repo_lock(repo.path):
+            ref = repo.references[ref_name]
+            if ref.resolve().target != self._commit_oid:
+                raise StaleSnapshotError(
+                    f"Branch {self._branch!r} has advanced since this snapshot"
+                )
+            ref.set_target(current._commit_oid, message=b"undo: move back", committer=self._store._signature._identity)
 
         return current
 
@@ -540,7 +546,7 @@ class FS:
         if not self._writable:
             raise PermissionError("Cannot redo on a read-only snapshot")
 
-        # Verify we're at the branch head
+        # Early stale check (fast-fail; authoritative check under lock below)
         ref_name = f"refs/heads/{self._branch}"
         ref = self._store._repo.references[ref_name]
         if ref.resolve().target != self._commit_oid:
@@ -548,10 +554,9 @@ class FS:
                 f"Branch {self._branch!r} has advanced since this snapshot"
             )
 
-        # Read reflog for this branch
         from dulwich import reflog as dreflog
-        import os
 
+        # Read reflog for this branch (safe to do outside the lock — read-only)
         reflog_path = os.path.join(
             self._store._repo.path,
             "logs", "refs", "heads", self._branch
@@ -560,7 +565,6 @@ class FS:
         if not os.path.exists(reflog_path):
             raise ValueError(f"No reflog found for branch {self._branch!r}")
 
-        # Read all reflog entries
         with open(reflog_path, 'rb') as f:
             entries = list(dreflog.read_reflog(f))
 
@@ -592,18 +596,22 @@ class FS:
                 raise ValueError(
                     f"Cannot redo {steps} steps - only {step} step(s) available"
                 )
-
-            # Get where the branch was before this reflog entry
             target_sha = entries[index].old_sha
-
-            # Move back one reflog entry
             index -= 1
 
-        # Create FS at target and update branch
-        from . import _compat as pygit2
         target_oid = pygit2.Oid(target_sha)
         target_fs = FS(self._store, target_oid, branch=self._branch)
-        self._store.branches[self._branch] = target_fs
+
+        # Atomic stale-check + ref update under a single lock
+        repo = self._store._repo
+        ref_name = f"refs/heads/{self._branch}"
+        with repo_lock(repo.path):
+            ref = repo.references[ref_name]
+            if ref.resolve().target != self._commit_oid:
+                raise StaleSnapshotError(
+                    f"Branch {self._branch!r} has advanced since this snapshot"
+                )
+            ref.set_target(target_oid, message=b"redo: move forward", committer=self._store._signature._identity)
 
         return target_fs
 
@@ -632,7 +640,6 @@ class FS:
                     continue
                 past_cutoff = True
             if filter_path is not None:
-                from .tree import _entry_at_path
                 current_entry = _entry_at_path(repo, current._tree_oid, filter_path)
                 parent = current.parent
                 parent_entry = _entry_at_path(repo, parent._tree_oid, filter_path) if parent else None

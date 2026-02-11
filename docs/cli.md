@@ -466,6 +466,26 @@ gitstore restore -n https://github.com/user/repo.git  # dry run
 
 ---
 
+## Server
+
+### gitserve
+
+Serve the repository read-only over HTTP. Standard git clients can clone and fetch from the URL. Pushes are rejected.
+
+```bash
+gitstore gitserve                                # serve at 127.0.0.1:8000
+gitstore gitserve -p 9000                        # custom port
+gitstore gitserve --host 0.0.0.0 -p 8080         # bind all interfaces
+git clone http://127.0.0.1:8000/                 # clone from another terminal
+```
+
+| Option | Description |
+|--------|-------------|
+| `--host` | Bind address (default: `127.0.0.1`). |
+| `-p`, `--port` | Port to listen on (default: `8000`, use `0` for OS-assigned). |
+
+---
+
 ## Appendix
 
 ### The `:` prefix
