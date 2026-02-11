@@ -277,27 +277,35 @@ class FS:
         """Build CopyReport from writes and removes with type detection."""
         from .copy._types import CopyReport, FileEntry
 
+        repo = self._store._repo
         add_entries = []
         update_entries = []
 
         for path, value in writes.items():
-            # Extract mode from value
+            # Extract data/oid and mode from value
             if isinstance(value, tuple):
-                _, mode = value
+                data_or_oid, mode = value
             else:
-                mode = GIT_FILEMODE_BLOB
+                data_or_oid, mode = value, GIT_FILEMODE_BLOB
 
-            entry = FileEntry.from_mode(path, mode)
-
-            if self.exists(path):
-                update_entries.append(entry)
+            existing = _entry_at_path(repo, self._tree_oid, path)
+            if existing is not None:
+                # Compare OID + mode to skip unchanged files
+                existing_oid, existing_mode = existing
+                if isinstance(data_or_oid, bytes):
+                    new_oid = repo.create_blob(data_or_oid)
+                else:
+                    new_oid = data_or_oid
+                if new_oid == existing_oid and mode == existing_mode:
+                    continue  # identical — not a real update
+                update_entries.append(FileEntry.from_mode(path, mode))
             else:
-                add_entries.append(entry)
+                add_entries.append(FileEntry.from_mode(path, mode))
 
         # For deletes, query the repo to get types before deletion
         delete_entries = []
         for path in removes:
-            entry = _entry_at_path(self._store._repo, self._tree_oid, path)
+            entry = _entry_at_path(repo, self._tree_oid, path)
             if entry:
                 file_entry = FileEntry.from_mode(path, entry[1])
                 delete_entries.append(file_entry)

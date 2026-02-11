@@ -4,6 +4,12 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.44.1 (2026-02-11)
+
+**Bug fixes:**
+
+- Fix inflated update counts in commit messages — `_build_report_from_changes` now compares new blob OID and filemode against the existing entry, so unchanged files are excluded from the report (e.g. re-importing 7 files with 1 changed now says `~ b.txt` instead of `~7`)
+
 ## v0.44.0 (2026-02-11)
 
 **Bug fixes:**
