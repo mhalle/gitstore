@@ -253,6 +253,30 @@ gitstore log --format json                    # or jsonl
 
 Text format: `SHORT_HASH  ISO_TIMESTAMP  MESSAGE`
 
+### diff
+
+Compare current branch HEAD against another snapshot. Output uses git-style `--name-status` format (old → new by default):
+
+```
+A  new-file.txt          # Added since baseline
+M  changed-file.txt      # Modified since baseline
+D  removed-file.txt      # Deleted since baseline
+```
+
+```bash
+gitstore diff --back 3                    # what changed in last 3 commits
+gitstore diff --ref other-branch          # what's different vs another branch
+gitstore diff --before 2025-01-01         # what changed since Jan 1
+gitstore diff --ref feature --back 2      # vs feature~2
+gitstore diff --back 3 --reverse          # swap direction (new → old)
+```
+
+| Option | Description |
+|--------|-------------|
+| `-b`, `--branch` | Branch (default: `main`). |
+| `--ref`, `--path`, `--match`, `--before`, `--back` | Snapshot filters (select baseline). |
+| `--reverse` | Swap comparison direction (A↔D flipped, M stays M). |
+
 ### undo
 
 ```bash
@@ -460,7 +484,7 @@ Several commands accept filters to select a specific commit:
 | `--before DATE` | Latest commit on or before this date (ISO 8601). |
 | `--back N` | Walk back N commits from tip. |
 
-Filters combine with AND. Available on `cp`, `sync`, `ls`, `cat`, `log`, `branch fork`, `branch set`, `branch hash`, `tag fork`, `tag set`, `archive`, `zip`, `tar`.
+Filters combine with AND. Available on `cp`, `sync`, `ls`, `cat`, `log`, `diff`, `branch fork`, `branch set`, `branch hash`, `tag fork`, `tag set`, `archive`, `zip`, `tar`.
 
 ### Dry-run output format
 

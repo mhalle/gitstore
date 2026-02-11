@@ -4,6 +4,13 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.43.1 (2026-02-11)
+
+**Docs:**
+
+- Document `diff` command in README and CLI reference
+- Add `diff` to snapshot filters appendix
+
 ## v0.43.0 (2026-02-11)
 
 **New features:**

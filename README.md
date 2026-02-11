@@ -459,6 +459,13 @@ gitstore log --before 2024-06-01T14:30:00 # date-time (ISO 8601)
 gitstore log --format json                # JSON array
 gitstore log --format jsonl               # one JSON object per line
 
+# Compare HEAD against another snapshot
+gitstore diff --back 3                    # what changed in last 3 commits
+gitstore diff --ref other-branch          # what's different vs another branch
+gitstore diff --before 2025-01-01         # what changed since Jan 1
+gitstore diff --ref feature --back 2      # vs feature~2
+gitstore diff --back 3 --reverse          # swap direction (new → old)
+
 # Manage branches
 gitstore branch                           # list
 gitstore branch create dev                # empty orphan branch
@@ -583,7 +590,9 @@ gitstore tar archive.tar --ref abc1234...
 gitstore cp :file.txt local.txt --ref abc1234...
 ```
 
-Write commands (`cp`, `rm`, `write`, `unarchive`, `unzip`, `untar`) accept `-m` for custom commit messages. Read commands (`cat`, `ls`, `cp`, `archive`, `zip`, `tar`, `log`) accept `--ref` to read from any branch, tag, or full commit hash. Pass `-v` before any command for status messages on stderr.
+Write commands (`cp`, `rm`, `write`, `unarchive`, `unzip`, `untar`) accept `-m` for custom commit messages. Read commands (`cat`, `ls`, `cp`, `archive`, `zip`, `tar`, `log`, `diff`) accept `--ref` to read from any branch, tag, or full commit hash. Pass `-v` before any command for status messages on stderr.
+
+`diff` compares the current branch HEAD against another snapshot using git-style `A`/`M`/`D` output (added, modified, deleted). It accepts all snapshot filters (`--ref`, `--back`, `--before`, `--path`, `--match`) to select the baseline. Pass `--reverse` to swap the comparison direction.
 
 `write` reads stdin and commits it to a file in the repo. Pass `-p`/`--passthrough` for tee mode where data flows through to stdout, useful in pipelines (e.g. `cmd | gitstore write log.txt -p | grep error`).
 
