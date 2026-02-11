@@ -38,6 +38,12 @@ from ._helpers import (
 @_snapshot_options
 @_message_option
 @_dry_run_option
+@click.option("--exclude", multiple=True,
+              help="Exclude files matching pattern (gitignore syntax, repeatable).")
+@click.option("--exclude-from", "exclude_from", type=click.Path(exists=True),
+              help="Read exclude patterns from file.")
+@click.option("--gitignore", "use_gitignore", is_flag=True, default=False,
+              help="Read .gitignore files from source tree (disk→repo only).")
 @_ignore_errors_option
 @_checksum_option
 @_no_create_option
@@ -47,7 +53,7 @@ from ._helpers import (
 @click.option("--debounce", type=int, default=2000,
               help="Debounce delay in ms for --watch (default: 2000).")
 @click.pass_context
-def sync(ctx, args, branch, ref, at_path, match_pattern, before, back, message, dry_run, ignore_errors, checksum, no_create, tag, force_tag, watch, debounce):
+def sync(ctx, args, branch, ref, at_path, match_pattern, before, back, message, dry_run, exclude, exclude_from, use_gitignore, ignore_errors, checksum, no_create, tag, force_tag, watch, debounce):
     """Make one path identical to another (like rsync --delete).
 
     Requires --repo or GITSTORE_REPO environment variable.
@@ -64,6 +70,7 @@ def sync(ctx, args, branch, ref, at_path, match_pattern, before, back, message, 
     from ..copy import (
         sync_to_repo, sync_from_repo,
         sync_to_repo_dry_run, sync_from_repo_dry_run,
+        ExcludeFilter,
     )
 
     if len(args) == 1:
@@ -109,6 +116,20 @@ def sync(ctx, args, branch, ref, at_path, match_pattern, before, back, message, 
         raise click.ClickException(
             "--tag only applies when writing to repo (disk → repo)"
         )
+    if (exclude or exclude_from) and direction == "from_repo":
+        raise click.ClickException(
+            "--exclude/--exclude-from only apply when syncing from disk to repo"
+        )
+    if use_gitignore and direction == "from_repo":
+        raise click.ClickException(
+            "--gitignore only applies when syncing from disk to repo"
+        )
+
+    # Build exclude filter (disk→repo only)
+    excl = None
+    if exclude or exclude_from or use_gitignore:
+        excl = ExcludeFilter(patterns=exclude, exclude_from=exclude_from,
+                             gitignore=use_gitignore)
 
     # --watch validation
     if watch:
@@ -131,7 +152,8 @@ def sync(ctx, args, branch, ref, at_path, match_pattern, before, back, message, 
         from ._watch import watch_and_sync
         watch_and_sync(store, branch, local_path, repo_dest,
                        debounce=debounce, message=message,
-                       ignore_errors=ignore_errors, checksum=checksum)
+                       ignore_errors=ignore_errors, checksum=checksum,
+                       exclude=excl)
         return
 
     fs = _resolve_fs(store, branch, ref, at_path=at_path,
@@ -141,7 +163,8 @@ def sync(ctx, args, branch, ref, at_path, match_pattern, before, back, message, 
         if direction == "to_repo":
             if dry_run:
                 report = sync_to_repo_dry_run(fs, local_path, repo_dest,
-                                                     checksum=checksum)
+                                                     checksum=checksum,
+                                                     exclude=excl)
                 if report:
                     for w in report.warnings:
                         click.echo(f"WARNING: {w.path}: {w.error}", err=True)
@@ -155,7 +178,7 @@ def sync(ctx, args, branch, ref, at_path, match_pattern, before, back, message, 
                 _new_fs = sync_to_repo(
                     fs, local_path, repo_dest,
                     message=message, ignore_errors=ignore_errors,
-                    checksum=checksum,
+                    checksum=checksum, exclude=excl,
                 )
                 report = _new_fs.report
                 if report:

@@ -49,12 +49,16 @@ from ._helpers import (
               help="Skip files that already exist at the destination.")
 @click.option("--delete", is_flag=True, default=False,
               help="Delete destination files not present in source (like rsync --delete).")
+@click.option("--exclude", multiple=True,
+              help="Exclude files matching pattern (gitignore syntax, repeatable).")
+@click.option("--exclude-from", "exclude_from", type=click.Path(exists=True),
+              help="Read exclude patterns from file.")
 @_ignore_errors_option
 @_checksum_option
 @_no_create_option
 @_tag_option
 @click.pass_context
-def cp(ctx, args, branch, ref, at_path, match_pattern, before, back, message, mode, follow_symlinks, dry_run, ignore_existing, delete, ignore_errors, checksum, no_create, tag, force_tag):
+def cp(ctx, args, branch, ref, at_path, match_pattern, before, back, message, mode, follow_symlinks, dry_run, ignore_existing, delete, ignore_errors, checksum, no_create, tag, force_tag, exclude, exclude_from):
     """Copy files and directories between disk and repo.
 
     Requires --repo or GITSTORE_REPO environment variable.
@@ -78,6 +82,7 @@ def cp(ctx, args, branch, ref, at_path, match_pattern, before, back, message, mo
     from ..copy import (
         copy_to_repo, copy_from_repo,
         copy_to_repo_dry_run, copy_from_repo_dry_run,
+        ExcludeFilter,
     )
 
     if len(args) < 2:
@@ -111,6 +116,15 @@ def cp(ctx, args, branch, ref, at_path, match_pattern, before, back, message, mo
         raise click.ClickException(
             "--tag only applies when writing to repo (disk → repo)"
         )
+    if (exclude or exclude_from) and src_is_repo:
+        raise click.ClickException(
+            "--exclude/--exclude-from only apply when copying from disk to repo"
+        )
+
+    # Build exclude filter (disk→repo only)
+    excl = None
+    if exclude or exclude_from:
+        excl = ExcludeFilter(patterns=exclude, exclude_from=exclude_from)
 
     repo_path = _require_repo(ctx)
     if not src_is_repo and not dry_run and not no_create:
@@ -151,6 +165,9 @@ def cp(ctx, args, branch, ref, at_path, match_pattern, before, back, message, mo
                 raise click.ClickException(
                     "Cannot use --delete with a single file source."
                 )
+            # Check exclude filter for single-file mode
+            if excl is not None and excl.active and excl.is_excluded(os.path.basename(src_raw)):
+                return
             # Single file: dest is the exact repo path, unless dest is an
             # existing directory — then place the file inside it.
             local = Path(src_raw)
@@ -189,6 +206,7 @@ def cp(ctx, args, branch, ref, at_path, match_pattern, before, back, message, mo
                         ignore_existing=ignore_existing,
                         delete=delete,
                         checksum=checksum,
+                        exclude=excl,
                     )
                     if report:
                         for w in report.warnings:
@@ -208,6 +226,7 @@ def cp(ctx, args, branch, ref, at_path, match_pattern, before, back, message, mo
                         delete=delete,
                         ignore_errors=ignore_errors,
                         checksum=checksum,
+                        exclude=excl,
                     )
                     report = _new_fs.report
                     if report:

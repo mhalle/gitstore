@@ -87,6 +87,8 @@ gitstore cp --ref v1.0 :data ./local          # from tag/branch/hash
 | `-n`, `--dry-run` | Preview without writing. |
 | `--ignore-existing` | Skip existing destination files. |
 | `--delete` | Delete dest files not in source (rsync `--delete`). |
+| `--exclude PATTERN` | Exclude files matching pattern (gitignore syntax, repeatable; disk→repo only). |
+| `--exclude-from FILE` | Read exclude patterns from file (disk→repo only). |
 | `--ignore-errors` | Skip failed files and continue. |
 | `-c`, `--checksum` | Compare files by checksum instead of mtime (slower, exact). |
 | `--no-create` | Don't auto-create the repo. |
@@ -135,6 +137,9 @@ gitstore sync :data ./local --ref v1.0        # from tag
 | `--back N` | Walk back N commits from tip. |
 | `-m`, `--message` | Commit message (supports [placeholders](#message-placeholders)). |
 | `-n`, `--dry-run` | Preview without writing. |
+| `--exclude PATTERN` | Exclude files matching pattern (gitignore syntax, repeatable; disk→repo only). |
+| `--exclude-from FILE` | Read exclude patterns from file (disk→repo only). |
+| `--gitignore` | Read `.gitignore` files from source tree (disk→repo only). |
 | `--ignore-errors` | Skip failed files. |
 | `-c`, `--checksum` | Compare files by checksum instead of mtime (slower, exact). |
 | `--no-create` | Don't auto-create the repo. |
@@ -547,6 +552,22 @@ gitstore sync ./src :code -m "Sync {total_count} files"
 ```
 
 A message without `{` is used as-is. Unknown placeholders raise an error.
+
+### Exclude patterns
+
+The `--exclude` and `--exclude-from` options use gitignore syntax:
+
+| Pattern | Matches |
+|---------|---------|
+| `*.pyc` | Any `.pyc` file at any depth |
+| `build/` | Directories named `build` (not files) |
+| `/build` | `build` at root only (anchored) |
+| `!important.log` | Negation — un-excludes a previously excluded file |
+| `__pycache__/` | `__pycache__` directories and all their contents |
+
+Multiple `--exclude` flags combine. `--exclude-from` reads one pattern per line (blank lines and `#` comments are skipped).
+
+The `--gitignore` flag (sync only) automatically reads `.gitignore` files from the source directory tree. Each `.gitignore` applies to files in its own directory and below. When active, `.gitignore` files themselves are excluded from the repo.
 
 ### Copy behavior table
 

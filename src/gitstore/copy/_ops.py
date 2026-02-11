@@ -26,6 +26,7 @@ from ._io import (
 )
 
 if TYPE_CHECKING:
+    from .._exclude import ExcludeFilter
     from ..fs import FS
 
 
@@ -152,6 +153,7 @@ def copy_to_repo(
     delete: bool = False,
     ignore_errors: bool = False,
     checksum: bool = True,
+    exclude: ExcludeFilter | None = None,
 ) -> FS:
     """Copy local files/dirs/globs into the repo. Returns new ``FS``.
 
@@ -180,7 +182,8 @@ def copy_to_repo(
     else:
         resolved = _resolve_disk_sources(sources)
 
-    pairs = _enum_disk_to_repo(resolved, dest, follow_symlinks=follow_symlinks)
+    pairs = _enum_disk_to_repo(resolved, dest, follow_symlinks=follow_symlinks,
+                               exclude=exclude)
 
     if delete:
         # Hash-based comparison: build plan then execute
@@ -499,10 +502,12 @@ def copy_to_repo_dry_run(
     ignore_existing: bool = False,
     delete: bool = False,
     checksum: bool = True,
+    exclude: ExcludeFilter | None = None,
 ) -> CopyReport | None:
     """Compute what copy_to_repo would do. Returns a ``CopyReport`` or ``None``."""
     resolved = _resolve_disk_sources(sources)
-    pairs = _enum_disk_to_repo(resolved, dest, follow_symlinks=follow_symlinks)
+    pairs = _enum_disk_to_repo(resolved, dest, follow_symlinks=follow_symlinks,
+                               exclude=exclude)
 
     if delete:
         report = CopyReport()
@@ -771,6 +776,7 @@ def sync_to_repo(
     message: str | None = None,
     ignore_errors: bool = False,
     checksum: bool = True,
+    exclude: ExcludeFilter | None = None,
 ) -> FS:
     """Make *repo_path* identical to *local_path*. Returns new ``FS``.
 
@@ -780,7 +786,7 @@ def sync_to_repo(
         return copy_to_repo(
             fs, [_ensure_trailing_slash(local_path)], repo_path,
             message=message, delete=True, ignore_errors=ignore_errors,
-            checksum=checksum,
+            checksum=checksum, exclude=exclude,
         )
     except (FileNotFoundError, NotADirectoryError):
         # Nonexistent local path → treat as empty source (delete everything)
@@ -859,12 +865,13 @@ def _sync_delete_all_local(local_path: str) -> list[str]:
 def sync_to_repo_dry_run(
     fs: FS, local_path: str, repo_path: str, *,
     checksum: bool = True,
+    exclude: ExcludeFilter | None = None,
 ) -> CopyReport | None:
     """Compute what ``sync_to_repo`` would do without writing."""
     try:
         return copy_to_repo_dry_run(
             fs, [_ensure_trailing_slash(local_path)], repo_path, delete=True,
-            checksum=checksum,
+            checksum=checksum, exclude=exclude,
         )
     except (FileNotFoundError, NotADirectoryError):
         # Nonexistent local path → everything in repo is a delete

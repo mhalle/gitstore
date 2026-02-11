@@ -7,6 +7,7 @@ Sync operations (``sync_to_repo``, ``sync_from_repo``) make a repo path
 identical to a local directory or vice versa, including deletes.
 """
 
+from .._exclude import ExcludeFilter
 from ._types import (
     CopyAction,
     CopyError,
@@ -56,7 +57,7 @@ from ._ops import (
 
 __all__ = [
     # Public types
-    "CopyAction", "CopyError", "CopyReport", "FileEntry",
+    "CopyAction", "CopyError", "CopyReport", "ExcludeFilter", "FileEntry",
     "CopyPlan", "SyncAction", "SyncPlan",
     # Public functions
     "copy_to_repo", "copy_from_repo",

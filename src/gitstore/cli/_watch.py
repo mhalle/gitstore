@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import datetime
+from typing import TYPE_CHECKING
 
 import click
 
 from ..exceptions import StaleSnapshotError
+
+if TYPE_CHECKING:
+    from .._exclude import ExcludeFilter
 
 
 def _import_watchfiles():
@@ -34,7 +38,8 @@ def _format_summary(report) -> str:
 
 
 def _run_sync_cycle(store, branch, local_path, repo_dest, *,
-                    message, ignore_errors, checksum):
+                    message, ignore_errors, checksum,
+                    exclude: ExcludeFilter | None = None):
     """Run one sync-to-repo cycle with a fresh FS."""
     from ..copy import sync_to_repo
 
@@ -42,7 +47,7 @@ def _run_sync_cycle(store, branch, local_path, repo_dest, *,
     new_fs = sync_to_repo(
         fs, local_path, repo_dest,
         message=message, ignore_errors=ignore_errors,
-        checksum=checksum,
+        checksum=checksum, exclude=exclude,
     )
     report = new_fs.report
     now = datetime.datetime.now().strftime("%H:%M:%S")
@@ -59,7 +64,8 @@ def _run_sync_cycle(store, branch, local_path, repo_dest, *,
 
 
 def watch_and_sync(store, branch, local_path, repo_dest, *,
-                   debounce, message, ignore_errors, checksum):
+                   debounce, message, ignore_errors, checksum,
+                   exclude: ExcludeFilter | None = None):
     """Watch *local_path* and sync to repo on every change batch."""
     watchfiles = _import_watchfiles()
 
@@ -68,7 +74,7 @@ def watch_and_sync(store, branch, local_path, repo_dest, *,
     try:
         _run_sync_cycle(store, branch, local_path, repo_dest,
                         message=message, ignore_errors=ignore_errors,
-                        checksum=checksum)
+                        checksum=checksum, exclude=exclude)
     except StaleSnapshotError:
         click.echo("WARNING: Stale snapshot on initial sync, will retry", err=True)
     except Exception as exc:
@@ -80,7 +86,7 @@ def watch_and_sync(store, branch, local_path, repo_dest, *,
             try:
                 _run_sync_cycle(store, branch, local_path, repo_dest,
                                 message=message, ignore_errors=ignore_errors,
-                                checksum=checksum)
+                                checksum=checksum, exclude=exclude)
             except StaleSnapshotError:
                 click.echo("WARNING: Stale snapshot, will retry on next change", err=True)
             except Exception as exc:

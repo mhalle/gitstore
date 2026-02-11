@@ -4,6 +4,24 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.46.0 (2026-02-11)
+
+**New features:**
+
+- Add `--exclude PATTERN` option to `cp` and `sync` — gitignore-style pattern matching, repeatable (disk→repo only)
+- Add `--exclude-from FILE` option to `cp` and `sync` — read exclude patterns from a file (disk→repo only)
+- Add `--gitignore` flag to `sync` — auto-reads `.gitignore` files from source tree with nested directory scoping; `.gitignore` files themselves are excluded (disk→repo only)
+- New `ExcludeFilter` class in public API (`gitstore.copy.ExcludeFilter`) using `dulwich.ignore.IgnoreFilter`
+
+**Tests:**
+
+- Add 30 tests: 17 unit tests for `ExcludeFilter` and `_walk_local_paths` integration, 13 CLI tests for exclude/gitignore options
+
+**Docs:**
+
+- Document `--exclude`, `--exclude-from`, `--gitignore` options in CLI reference
+- Add "Exclude patterns" section explaining gitignore syntax
+
 ## v0.45.0 (2026-02-11)
 
 **New features:**

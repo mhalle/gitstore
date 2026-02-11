@@ -3828,3 +3828,262 @@ class TestSnapshotFilterCombined:
         lines = [l for l in r.output.strip().split("\n") if l.strip()]
         assert len(lines) == 1
         assert "deploy v1" in lines[0]
+
+
+# ---------------------------------------------------------------------------
+# TestExcludeCLI
+# ---------------------------------------------------------------------------
+
+class TestExcludeCLI:
+    def test_cp_exclude(self, runner, initialized_repo, tmp_path):
+        """--exclude '*.pyc' skips .pyc files."""
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "app.py").write_text("code")
+        (src / "app.pyc").write_text("compiled")
+
+        r = runner.invoke(main, [
+            "cp", "--repo", initialized_repo,
+            "--exclude", "*.pyc",
+            str(src) + "/", ":",
+        ])
+        assert r.exit_code == 0, r.output
+
+        r = runner.invoke(main, ["ls", "--repo", initialized_repo, "-R"])
+        assert "app.py" in r.output
+        assert "app.pyc" not in r.output
+
+    def test_cp_exclude_multiple(self, runner, initialized_repo, tmp_path):
+        """Multiple --exclude patterns all apply."""
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "app.py").write_text("code")
+        (src / "app.pyc").write_text("compiled")
+        (src / "debug.log").write_text("log")
+
+        r = runner.invoke(main, [
+            "cp", "--repo", initialized_repo,
+            "--exclude", "*.pyc",
+            "--exclude", "*.log",
+            str(src) + "/", ":",
+        ])
+        assert r.exit_code == 0, r.output
+
+        r = runner.invoke(main, ["ls", "--repo", initialized_repo, "-R"])
+        assert "app.py" in r.output
+        assert "app.pyc" not in r.output
+        assert "debug.log" not in r.output
+
+    def test_cp_exclude_from(self, runner, initialized_repo, tmp_path):
+        """--exclude-from reads patterns from file."""
+        pfile = tmp_path / "excludes.txt"
+        pfile.write_text("*.pyc\n*.log\n")
+
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "app.py").write_text("code")
+        (src / "app.pyc").write_text("compiled")
+        (src / "debug.log").write_text("log")
+
+        r = runner.invoke(main, [
+            "cp", "--repo", initialized_repo,
+            "--exclude-from", str(pfile),
+            str(src) + "/", ":",
+        ])
+        assert r.exit_code == 0, r.output
+
+        r = runner.invoke(main, ["ls", "--repo", initialized_repo, "-R"])
+        assert "app.py" in r.output
+        assert "app.pyc" not in r.output
+        assert "debug.log" not in r.output
+
+    def test_cp_exclude_repo_to_disk_error(self, runner, repo_with_files, tmp_path):
+        """--exclude on repo->disk errors."""
+        dest = tmp_path / "out"
+        r = runner.invoke(main, [
+            "cp", "--repo", repo_with_files,
+            "--exclude", "*.txt",
+            ":hello.txt", str(dest),
+        ])
+        assert r.exit_code != 0
+        assert "--exclude" in r.output
+
+    def test_sync_exclude(self, runner, initialized_repo, tmp_path):
+        """--exclude on sync command."""
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "app.py").write_text("code")
+        (src / "app.pyc").write_text("compiled")
+
+        r = runner.invoke(main, [
+            "sync", "--repo", initialized_repo,
+            "--exclude", "*.pyc",
+            str(src),
+        ])
+        assert r.exit_code == 0, r.output
+
+        r = runner.invoke(main, ["ls", "--repo", initialized_repo, "-R"])
+        assert "app.py" in r.output
+        assert "app.pyc" not in r.output
+
+    def test_sync_gitignore(self, runner, initialized_repo, tmp_path):
+        """--gitignore reads .gitignore from source tree."""
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / ".gitignore").write_text("*.pyc\n__pycache__/\n")
+        (src / "app.py").write_text("code")
+        (src / "app.pyc").write_text("compiled")
+        cache = src / "__pycache__"
+        cache.mkdir()
+        (cache / "mod.cpython-312.pyc").write_text("compiled")
+
+        r = runner.invoke(main, [
+            "sync", "--repo", initialized_repo,
+            "--gitignore",
+            str(src),
+        ])
+        assert r.exit_code == 0, r.output
+
+        r = runner.invoke(main, ["ls", "--repo", initialized_repo, "-R"])
+        assert "app.py" in r.output
+        assert "app.pyc" not in r.output
+        assert "__pycache__" not in r.output
+        # .gitignore itself should be excluded
+        assert ".gitignore" not in r.output
+
+    def test_sync_gitignore_from_repo_error(self, runner, repo_with_files, tmp_path):
+        """--gitignore with repo->disk errors."""
+        dest = tmp_path / "out"
+        r = runner.invoke(main, [
+            "sync", "--repo", repo_with_files,
+            "--gitignore",
+            ":data", str(dest),
+        ])
+        assert r.exit_code != 0
+        assert "--gitignore" in r.output
+
+    def test_sync_exclude_from_repo_error(self, runner, repo_with_files, tmp_path):
+        """--exclude with repo->disk sync errors."""
+        dest = tmp_path / "out"
+        r = runner.invoke(main, [
+            "sync", "--repo", repo_with_files,
+            "--exclude", "*.txt",
+            ":data", str(dest),
+        ])
+        assert r.exit_code != 0
+        assert "--exclude" in r.output
+
+    def test_cp_exclude_with_delete(self, runner, initialized_repo, tmp_path):
+        """--exclude + --delete: excluded files not copied, existing files remain."""
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "app.py").write_text("code")
+        (src / "app.pyc").write_text("compiled")
+        (src / "lib.py").write_text("lib")
+
+        # First copy without exclude
+        r = runner.invoke(main, [
+            "cp", "--repo", initialized_repo,
+            str(src) + "/", ":",
+        ])
+        assert r.exit_code == 0, r.output
+
+        # Now sync with exclude and delete — excluded files not in enumeration,
+        # so they're treated as "not in source" and get deleted
+        r = runner.invoke(main, [
+            "cp", "--repo", initialized_repo, "--delete",
+            "--exclude", "*.pyc",
+            str(src) + "/", ":",
+        ])
+        assert r.exit_code == 0, r.output
+
+        r = runner.invoke(main, ["ls", "--repo", initialized_repo, "-R"])
+        assert "app.py" in r.output
+        assert "lib.py" in r.output
+        assert "app.pyc" not in r.output
+
+    def test_sync_gitignore_dry_run(self, runner, initialized_repo, tmp_path):
+        """--gitignore works with dry-run."""
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / ".gitignore").write_text("*.pyc\n")
+        (src / "app.py").write_text("code")
+        (src / "app.pyc").write_text("compiled")
+
+        r = runner.invoke(main, [
+            "sync", "--repo", initialized_repo, "-n",
+            "--gitignore",
+            str(src),
+        ])
+        assert r.exit_code == 0, r.output
+        assert "app.py" in r.output
+        assert "app.pyc" not in r.output
+        assert ".gitignore" not in r.output
+
+    def test_cp_exclude_single_file(self, runner, initialized_repo, tmp_path):
+        """--exclude applies to single-file cp too."""
+        f = tmp_path / "app.pyc"
+        f.write_text("compiled")
+
+        r = runner.invoke(main, [
+            "cp", "--repo", initialized_repo,
+            "--exclude", "*.pyc",
+            str(f), ":",
+        ])
+        assert r.exit_code == 0, r.output
+
+        r = runner.invoke(main, ["ls", "--repo", initialized_repo, "-R"])
+        assert "app.pyc" not in r.output
+
+    def test_cp_exclude_glob_source(self, runner, initialized_repo, tmp_path):
+        """--exclude filters files from glob-expanded sources."""
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "app.py").write_text("code")
+        (src / "app.pyc").write_text("compiled")
+        (src / "lib.py").write_text("lib")
+
+        r = runner.invoke(main, [
+            "cp", "--repo", initialized_repo,
+            "--exclude", "*.pyc",
+            str(src) + "/*", ":",
+        ])
+        assert r.exit_code == 0, r.output
+
+        r = runner.invoke(main, ["ls", "--repo", initialized_repo, "-R"])
+        assert "app.py" in r.output
+        assert "lib.py" in r.output
+        assert "app.pyc" not in r.output
+
+    def test_sync_gitignore_nested(self, runner, initialized_repo, tmp_path):
+        """Nested .gitignore is scoped to its subdirectory."""
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / ".gitignore").write_text("*.log\n")
+        (src / "app.py").write_text("code")
+        (src / "root.log").write_text("log")
+
+        sub = src / "sub"
+        sub.mkdir()
+        (sub / ".gitignore").write_text("*.tmp\n")
+        (sub / "mod.py").write_text("code")
+        (sub / "cache.tmp").write_text("tmp")
+        (sub / "sub.log").write_text("log")
+
+        r = runner.invoke(main, [
+            "sync", "--repo", initialized_repo,
+            "--gitignore",
+            str(src),
+        ])
+        assert r.exit_code == 0, r.output
+
+        r = runner.invoke(main, ["ls", "--repo", initialized_repo, "-R"])
+        assert "app.py" in r.output
+        assert "sub/mod.py" in r.output
+        # Root .gitignore excludes *.log everywhere
+        assert "root.log" not in r.output
+        assert "sub.log" not in r.output
+        # Sub .gitignore excludes *.tmp only in sub/
+        assert "cache.tmp" not in r.output
+        # .gitignore files excluded
+        assert ".gitignore" not in r.output

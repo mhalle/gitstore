@@ -10,6 +10,7 @@ from .._glob import _glob_match
 from ..tree import _entry_at_path, _normalize_path
 
 if TYPE_CHECKING:
+    from .._exclude import ExcludeFilter
     from ..fs import FS
 
 
@@ -17,7 +18,10 @@ if TYPE_CHECKING:
 # Directory walking
 # ---------------------------------------------------------------------------
 
-def _walk_local_paths(local_path: str, follow_symlinks: bool = False) -> set[str]:
+def _walk_local_paths(
+    local_path: str, follow_symlinks: bool = False,
+    exclude: ExcludeFilter | None = None,
+) -> set[str]:
     """Return the set of relative paths under *local_path*.
 
     Only collects path names — does not read file content.
@@ -36,6 +40,7 @@ def _walk_local_paths(local_path: str, follow_symlinks: bool = False) -> set[str
     """
     result: set[str] = set()
     base = Path(local_path)
+    _excl = exclude is not None and exclude.active
 
     if follow_symlinks:
         seen_realpaths: set[str] = set()
@@ -46,22 +51,50 @@ def _walk_local_paths(local_path: str, follow_symlinks: bool = False) -> set[str
                 continue
             seen_realpaths.add(real)
             dp = Path(dirpath)
+            rel_dir = str(dp.relative_to(base)).replace(os.sep, "/")
+            if rel_dir == ".":
+                rel_dir = ""
+
+            if _excl:
+                exclude.enter_directory(dp, rel_dir)
+                dirnames[:] = [
+                    d for d in dirnames
+                    if not exclude.is_excluded_in_walk(
+                        f"{rel_dir}/{d}" if rel_dir else d, is_dir=True,
+                    )
+                ]
+
             for fname in filenames:
-                full = dp / fname
-                rel_str = str(full.relative_to(base)).replace(os.sep, "/")
+                rel_str = f"{rel_dir}/{fname}" if rel_dir else fname
+                if _excl and exclude.is_excluded_in_walk(rel_str):
+                    continue
                 result.add(rel_str)
     else:
         for dirpath, _dirnames, filenames in os.walk(base):
             dp = Path(dirpath)
+            rel_dir = str(dp.relative_to(base)).replace(os.sep, "/")
+            if rel_dir == ".":
+                rel_dir = ""
+
+            if _excl:
+                exclude.enter_directory(dp, rel_dir)
+                _dirnames[:] = [
+                    d for d in _dirnames
+                    if not exclude.is_excluded_in_walk(
+                        f"{rel_dir}/{d}" if rel_dir else d, is_dir=True,
+                    )
+                ]
+
             for fname in filenames:
-                full = dp / fname
-                rel_str = str(full.relative_to(base)).replace(os.sep, "/")
+                rel_str = f"{rel_dir}/{fname}" if rel_dir else fname
+                if _excl and exclude.is_excluded_in_walk(rel_str):
+                    continue
                 result.add(rel_str)
             symlinked = []
             for dname in _dirnames:
                 full = dp / dname
                 if full.is_symlink():
-                    rel_str = str(full.relative_to(base)).replace(os.sep, "/")
+                    rel_str = f"{rel_dir}/{dname}" if rel_dir else dname
                     result.add(rel_str)
                     symlinked.append(dname)
             for dname in symlinked:
@@ -379,6 +412,7 @@ def _resolve_repo_sources(fs: FS, sources: list[str]) -> list[tuple[str, str, st
 def _enum_disk_to_repo(
     resolved: list[tuple[str, str, str]], dest: str,
     *, follow_symlinks: bool = False,
+    exclude: ExcludeFilter | None = None,
 ) -> list[tuple[str, str]]:
     """Build ``(local_path, repo_path)`` pairs for disk → repo copy."""
     pairs: list[tuple[str, str]] = []
@@ -388,6 +422,9 @@ def _enum_disk_to_repo(
 
         if mode == "file":
             name = os.path.basename(local_path)
+            # Post-filter single files against base patterns
+            if exclude is not None and exclude.active and exclude.is_excluded(name):
+                continue
             repo_file = f"{_dest}/{name}" if _dest else name
             pairs.append((local_path, _normalize_path(repo_file)))
         elif mode == "dir":
@@ -398,12 +435,12 @@ def _enum_disk_to_repo(
             if not follow_symlinks and Path(local_path).is_symlink():
                 pairs.append((local_path, _normalize_path(target)))
             else:
-                for rel in sorted(_walk_local_paths(local_path, follow_symlinks)):
+                for rel in sorted(_walk_local_paths(local_path, follow_symlinks, exclude=exclude)):
                     full = os.path.join(local_path, rel)
                     repo_file = f"{target}/{rel}"
                     pairs.append((full, _normalize_path(repo_file)))
         elif mode == "contents":
-            for rel in sorted(_walk_local_paths(local_path, follow_symlinks)):
+            for rel in sorted(_walk_local_paths(local_path, follow_symlinks, exclude=exclude)):
                 full = os.path.join(local_path, rel)
                 repo_file = f"{_dest}/{rel}" if _dest else rel
                 pairs.append((full, _normalize_path(repo_file)))
