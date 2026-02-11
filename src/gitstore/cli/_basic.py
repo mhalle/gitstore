@@ -20,6 +20,7 @@ from ._helpers import (
     _normalize_repo_path,
     _open_store,
     _open_or_create_store,
+    _default_branch,
     _get_branch_fs,
     _get_fs,
     _normalize_at_path,
@@ -94,7 +95,7 @@ def destroy(ctx, force):
 @main.command()
 @_repo_option
 @click.argument("paths", nargs=-1)
-@click.option("--branch", "-b", default="main", help="Branch to list.")
+@click.option("--branch", "-b", default=None, help="Branch to list (defaults to repo's default branch).")
 @click.option("-R", "--recursive", is_flag=True, help="List all files recursively with full paths.")
 @click.option("--ref", "ref", default=None, help="Branch, tag, or commit hash to read from.")
 @click.option("--path", "at_path", default=None, help="Use latest commit that changed this path.")
@@ -118,6 +119,7 @@ def ls(ctx, paths, branch, recursive, ref, at_path, match_pattern, before, back)
         gitstore ls -R :src :docs           # recursive under multiple dirs
     """
     store = _open_store(_require_repo(ctx))
+    branch = branch or _default_branch(store)
     fs = _resolve_fs(store, branch, ref, at_path=at_path,
                      match_pattern=match_pattern, before=before, back=back)
 
@@ -183,7 +185,7 @@ def ls(ctx, paths, branch, recursive, ref, at_path, match_pattern, before, back)
 @main.command()
 @_repo_option
 @click.argument("paths", nargs=-1, required=True)
-@click.option("--branch", "-b", default="main", help="Branch to read from.")
+@click.option("--branch", "-b", default=None, help="Branch to read from (defaults to repo's default branch).")
 @click.option("--ref", "ref", default=None, help="Branch, tag, or commit hash to read from.")
 @click.option("--path", "at_path", default=None, help="Use latest commit that changed this path.")
 @click.option("--match", "match_pattern", default=None, help="Use latest commit matching this message pattern (* and ?).")
@@ -193,6 +195,7 @@ def ls(ctx, paths, branch, recursive, ref, at_path, match_pattern, before, back)
 def cat(ctx, paths, branch, ref, at_path, match_pattern, before, back):
     """Concatenate file contents to stdout."""
     store = _open_store(_require_repo(ctx))
+    branch = branch or _default_branch(store)
     fs = _resolve_fs(store, branch, ref, at_path=at_path,
                      match_pattern=match_pattern, before=before, back=back)
 
@@ -218,7 +221,7 @@ def cat(ctx, paths, branch, ref, at_path, match_pattern, before, back):
               help="Remove directories recursively.")
 @click.option("-n", "--dry-run", is_flag=True, default=False,
               help="Show what would be removed without writing.")
-@click.option("--branch", "-b", default="main", help="Branch to remove from.")
+@click.option("--branch", "-b", default=None, help="Branch to remove from (defaults to repo's default branch).")
 @click.option("-m", "--message", default=None, help="Commit message. Use {default} to include auto-generated message.")
 @_tag_option
 @click.pass_context
@@ -239,6 +242,7 @@ def rm(ctx, paths, recursive, dry_run, branch, message, tag, force_tag):
     from ..copy import remove_from_repo, remove_from_repo_dry_run
 
     store = _open_store(_require_repo(ctx))
+    branch = branch or _default_branch(store)
     fs = _get_branch_fs(store, branch)
 
     patterns = [_normalize_repo_path(_strip_colon(p)) for p in paths]
@@ -274,7 +278,7 @@ def rm(ctx, paths, recursive, dry_run, branch, message, tag, force_tag):
 @main.command()
 @_repo_option
 @click.argument("path")
-@click.option("--branch", "-b", default="main", help="Branch to write to.")
+@click.option("--branch", "-b", default=None, help="Branch to write to (defaults to repo's default branch).")
 @click.option("-m", "--message", default=None, help="Commit message.")
 @_no_create_option
 @_tag_option
@@ -284,8 +288,10 @@ def write(ctx, path, branch, message, no_create, tag, force_tag):
     repo_path = _require_repo(ctx)
     if no_create:
         store = _open_store(repo_path)
+        branch = branch or _default_branch(store)
     else:
-        store = _open_or_create_store(repo_path, branch=branch)
+        store = _open_or_create_store(repo_path, branch=branch or "main")
+        branch = branch or _default_branch(store)
     fs = _get_branch_fs(store, branch)
 
     repo_path_norm = _normalize_repo_path(_strip_colon(path))
@@ -312,7 +318,7 @@ def write(ctx, path, branch, message, no_create, tag, force_tag):
 @click.option("--at", "deprecated_at", default=None, hidden=True)
 @click.option("--match", "match_pattern", default=None, help="Show only commits matching this message pattern (* and ?).")
 @click.option("--before", "before", default=None, help="Show only commits on or before this date (ISO 8601).")
-@click.option("--branch", "-b", default="main", help="Branch to show log for.")
+@click.option("--branch", "-b", default=None, help="Branch to show log for (defaults to repo's default branch).")
 @click.option("--ref", "ref", default=None, help="Branch, tag, or commit hash to start from.")
 @click.option("--back", type=int, default=0, help="Walk back N commits before showing log.")
 @click.option("--format", "fmt", default="text",
@@ -323,6 +329,7 @@ def log(ctx, at_path, deprecated_at, match_pattern, before, branch, ref, back, f
     """Show commit log, optionally filtered by path and/or message pattern."""
     at_path = at_path or deprecated_at
     store = _open_store(_require_repo(ctx))
+    branch = branch or _default_branch(store)
     fs = _get_fs(store, branch, ref)
     if back:
         try:
@@ -350,7 +357,7 @@ def log(ctx, at_path, deprecated_at, match_pattern, before, branch, ref, back, f
 
 @main.command()
 @_repo_option
-@click.option("--branch", "-b", default="main", help="Branch to undo (default: main).")
+@click.option("--branch", "-b", default=None, help="Branch to undo (defaults to repo's default branch).")
 @click.argument("steps", type=int, default=1, required=False)
 @click.pass_context
 def undo(ctx, branch, steps):
@@ -368,6 +375,7 @@ def undo(ctx, branch, steps):
 
     try:
         repo = GitStore.open(repo_path, create=False)
+        branch = branch or _default_branch(repo)
         fs = repo.branches[branch]
 
         # Perform undo
@@ -394,7 +402,7 @@ def undo(ctx, branch, steps):
 
 @main.command()
 @_repo_option
-@click.option("--branch", "-b", default="main", help="Branch to redo (default: main).")
+@click.option("--branch", "-b", default=None, help="Branch to redo (defaults to repo's default branch).")
 @click.argument("steps", type=int, default=1, required=False)
 @click.pass_context
 def redo(ctx, branch, steps):
@@ -412,6 +420,7 @@ def redo(ctx, branch, steps):
 
     try:
         repo = GitStore.open(repo_path, create=False)
+        branch = branch or _default_branch(repo)
         fs = repo.branches[branch]
 
         # Perform redo
@@ -440,7 +449,7 @@ def redo(ctx, branch, steps):
 
 @main.command()
 @_repo_option
-@click.option("--branch", "-b", default="main", help="Branch to show reflog for (default: main).")
+@click.option("--branch", "-b", default=None, help="Branch to show reflog for (defaults to repo's default branch).")
 @click.option("-n", "--limit", type=int, help="Limit number of entries shown.")
 @click.option("--format", "fmt", default="text",
               type=click.Choice(["text", "json", "jsonl"]),
@@ -464,6 +473,7 @@ def reflog(ctx, branch, limit, fmt):
 
     try:
         repo = GitStore.open(repo_path, create=False)
+        branch = branch or _default_branch(repo)
         entries = repo.branches.reflog(branch)
 
         # Apply limit if specified

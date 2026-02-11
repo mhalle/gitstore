@@ -66,6 +66,7 @@ class GitStore:
                 tree_oid,
                 [],
             )
+            repo.set_head_branch(branch)
 
         return store
 

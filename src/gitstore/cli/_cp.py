@@ -18,6 +18,7 @@ from ._helpers import (
     _normalize_repo_path,
     _open_store,
     _open_or_create_store,
+    _default_branch,
     _get_fs,
     _parse_before,
     _resolve_fs,
@@ -30,7 +31,7 @@ from ._helpers import (
 @main.command()
 @_repo_option
 @click.argument("args", nargs=-1, required=True)
-@click.option("--branch", "-b", default="main", help="Branch to operate on.")
+@click.option("--branch", "-b", default=None, help="Branch to operate on (defaults to repo's default branch).")
 @click.option("--ref", "ref", default=None, help="Branch, tag, or commit hash to read from.")
 @click.option("--path", "at_path", default=None, help="Use latest commit that changed this path.")
 @click.option("--match", "match_pattern", default=None, help="Use latest commit matching this message pattern (* and ?).")
@@ -114,9 +115,11 @@ def cp(ctx, args, branch, ref, at_path, match_pattern, before, back, message, mo
 
     repo_path = _require_repo(ctx)
     if not src_is_repo and not dry_run and not no_create:
-        store = _open_or_create_store(repo_path, branch)
+        store = _open_or_create_store(repo_path, branch or "main")
+        branch = branch or _default_branch(store)
     else:
         store = _open_store(repo_path)
+        branch = branch or _default_branch(store)
     fs = _resolve_fs(store, branch, ref, at_path=at_path,
                      match_pattern=match_pattern, before=before, back=back)
 

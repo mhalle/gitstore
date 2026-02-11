@@ -11,6 +11,7 @@ from ._helpers import (
     _require_repo,
     _status,
     _open_store,
+    _default_branch,
     _parse_before,
     _resolve_snapshot,
     _resolve_ref,
@@ -56,8 +57,8 @@ def branch_create(ctx, name):
 @branch.command("fork")
 @_repo_option
 @click.argument("name")
-@click.option("--ref", default="main",
-              help="Ref to fork from (branch, tag, or commit hash). Default: main.")
+@click.option("--ref", default=None,
+              help="Ref to fork from (branch, tag, or commit hash). Defaults to repo's default branch.")
 @click.option("-f", "--force", is_flag=True, default=False,
               help="Overwrite if branch already exists.")
 @click.option("--path", "at_path", default=None,
@@ -70,6 +71,7 @@ def branch_create(ctx, name):
 def branch_fork(ctx, name, ref, force, at_path, match_pattern, before):
     """Create a new branch NAME forked from an existing ref."""
     store = _open_store(_require_repo(ctx))
+    ref = ref or _default_branch(store)
 
     if name in store.branches and not force:
         raise click.ClickException(f"Branch already exists: {name}")
@@ -165,8 +167,8 @@ def tag_list(ctx):
 @tag.command("fork")
 @_repo_option
 @click.argument("name")
-@click.option("--ref", default="main",
-              help="Ref to tag (branch, tag, or commit hash). Default: main.")
+@click.option("--ref", default=None,
+              help="Ref to tag (branch, tag, or commit hash). Defaults to repo's default branch.")
 @click.option("--path", "at_path", default=None,
               help="Use latest commit that changed this path.")
 @click.option("--match", "match_pattern", default=None,
@@ -178,6 +180,7 @@ def tag_fork(ctx, name, ref, at_path, match_pattern, before):
     """Create a new tag NAME from an existing ref."""
     before = _parse_before(before)
     store = _open_store(_require_repo(ctx))
+    ref = ref or _default_branch(store)
 
     if name in store.tags:
         raise click.ClickException(f"Tag already exists: {name}")
@@ -242,6 +245,30 @@ def tag_hash(ctx, name):
     except KeyError:
         raise click.ClickException(f"Tag not found: {name}")
     click.echo(fs.hash)
+
+
+@branch.command("default")
+@_repo_option
+@click.option("--branch", "-b", default=None,
+              help="Set the default branch to this name.")
+@click.pass_context
+def branch_default(ctx, branch):
+    """Show or set the repository's default branch.
+
+    Without -b, prints the current default branch.
+    With -b NAME, sets the default branch to NAME (must exist).
+    """
+    store = _open_store(_require_repo(ctx))
+    if branch is None:
+        name = store._repo.get_head_branch()
+        if name is None:
+            raise click.ClickException("HEAD does not point to an existing branch")
+        click.echo(name)
+    else:
+        if branch not in store.branches:
+            raise click.ClickException(f"Branch not found: {branch}")
+        store._repo.set_head_branch(branch)
+        _status(ctx, f"Default branch set to {branch}")
 
 
 # Wire up the default subcommand references in _helpers

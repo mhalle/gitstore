@@ -4,6 +4,20 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.41.0 (2026-02-11)
+
+**New features:**
+
+- Add `branch default` subcommand — show or set the repo's default branch (`gitstore branch default`, `gitstore branch default -b dev`)
+- HEAD is now set at repo creation to match the initial branch, fixing `git clone` and tools that read HEAD
+- All CLI `--branch/-b` and `--ref` options now default to the repo's HEAD branch instead of hardcoded "main"
+
+**Internal:**
+
+- Add `get_head_branch()` / `set_head_branch()` helpers to `_compat.py` Repository
+- Add `_default_branch()` CLI helper for HEAD-based branch resolution
+- Simplify `_fix_head` in `_serve.py` to use new `_compat` helpers
+
 ## v0.40.1 (2026-02-11)
 
 - `FS.back()` now defaults to `n=1`, matching `undo()`

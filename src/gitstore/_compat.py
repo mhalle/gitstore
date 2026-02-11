@@ -455,6 +455,24 @@ class Repository:
     def references(self) -> _References:
         return _References(self._repo)
 
+    def get_head_branch(self) -> str | None:
+        """Return the branch name HEAD points to, or None if dangling."""
+        symrefs = self._repo.refs.get_symrefs()
+        target = symrefs.get(b"HEAD")
+        if target is None:
+            return None
+        prefix = b"refs/heads/"
+        if target.startswith(prefix):
+            name = target[len(prefix):].decode()
+            # Check the branch actually exists
+            if target in self._repo.refs:
+                return name
+        return None
+
+    def set_head_branch(self, name: str):
+        """Set HEAD to point at refs/heads/{name}."""
+        self._repo.refs.set_symbolic_ref(b"HEAD", f"refs/heads/{name}".encode())
+
     @property
     def object_store(self):
         """Direct access to dulwich object_store (for tests)."""

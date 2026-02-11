@@ -85,6 +85,11 @@ def _require_repo(ctx) -> str:
     return repo
 
 
+def _default_branch(store: GitStore) -> str:
+    """Return the repo's HEAD branch, falling back to 'main'."""
+    return store._repo.get_head_branch() or "main"
+
+
 def _open_store(repo_path: str) -> GitStore:
     try:
         return GitStore.open(repo_path, create=False)

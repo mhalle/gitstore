@@ -19,6 +19,7 @@ from ._helpers import (
     _clean_archive_path,
     _open_store,
     _open_or_create_store,
+    _default_branch,
     _get_branch_fs,
     _get_fs,
     _parse_before,
@@ -241,7 +242,7 @@ def _do_import(ctx, store, branch: str, filename: str, message: str | None, fmt:
 @main.command("zip")
 @_repo_option
 @click.argument("filename", type=click.Path())
-@click.option("--branch", "-b", default="main", help="Branch to export from.")
+@click.option("--branch", "-b", default=None, help="Branch to export from (defaults to repo's default branch).")
 @click.option("--ref", "ref", default=None, help="Branch, tag, or commit hash to export from.")
 @click.option("--path", "at_path", default=None, help="Use latest commit that changed this path.")
 @click.option("--match", "match_pattern", default=None, help="Use latest commit matching this message pattern (* and ?).")
@@ -254,6 +255,7 @@ def zip_cmd(ctx, filename, branch, ref, at_path, match_pattern, before, back):
     FILENAME is the output zip path on disk.  Use '-' to write to stdout.
     """
     store = _open_store(_require_repo(ctx))
+    branch = branch or _default_branch(store)
     fs = _resolve_fs(store, branch, ref, at_path=at_path,
                      match_pattern=match_pattern, before=before, back=back)
     _do_export(ctx, fs, filename, "zip")
@@ -266,7 +268,7 @@ def zip_cmd(ctx, filename, branch, ref, at_path, match_pattern, before, back):
 @main.command("unzip")
 @_repo_option
 @click.argument("filename", type=click.Path(exists=True))
-@click.option("--branch", "-b", default="main", help="Branch to import into.")
+@click.option("--branch", "-b", default=None, help="Branch to import into (defaults to repo's default branch).")
 @click.option("-m", "--message", default=None, help="Commit message. Use {default} to include auto-generated message.")
 @_no_create_option
 @_tag_option
@@ -277,7 +279,11 @@ def unzip_cmd(ctx, filename, branch, message, no_create, tag, force_tag):
     FILENAME is the path to the zip file on disk.
     """
     repo_path = _require_repo(ctx)
-    store = _open_store(repo_path) if no_create else _open_or_create_store(repo_path, branch)
+    if no_create:
+        store = _open_store(repo_path)
+    else:
+        store = _open_or_create_store(repo_path, branch or "main")
+    branch = branch or _default_branch(store)
     new_fs = _do_import(ctx, store, branch, filename, message, "zip")
     if tag:
         _apply_tag(store, new_fs, tag, force_tag)
@@ -290,7 +296,7 @@ def unzip_cmd(ctx, filename, branch, message, no_create, tag, force_tag):
 @main.command("tar")
 @_repo_option
 @click.argument("filename", type=click.Path())
-@click.option("--branch", "-b", default="main", help="Branch to export from.")
+@click.option("--branch", "-b", default=None, help="Branch to export from (defaults to repo's default branch).")
 @click.option("--ref", "ref", default=None, help="Branch, tag, or commit hash to export from.")
 @click.option("--path", "at_path", default=None, help="Use latest commit that changed this path.")
 @click.option("--match", "match_pattern", default=None, help="Use latest commit matching this message pattern (* and ?).")
@@ -304,6 +310,7 @@ def tar_cmd(ctx, filename, branch, ref, at_path, match_pattern, before, back):
     Compression is auto-detected from the filename extension (.tar.gz, .tar.bz2, .tar.xz).
     """
     store = _open_store(_require_repo(ctx))
+    branch = branch or _default_branch(store)
     fs = _resolve_fs(store, branch, ref, at_path=at_path,
                      match_pattern=match_pattern, before=before, back=back)
     _do_export(ctx, fs, filename, "tar")
@@ -316,7 +323,7 @@ def tar_cmd(ctx, filename, branch, ref, at_path, match_pattern, before, back):
 @main.command("untar")
 @_repo_option
 @click.argument("filename", type=click.Path(), default="-")
-@click.option("--branch", "-b", default="main", help="Branch to import into.")
+@click.option("--branch", "-b", default=None, help="Branch to import into (defaults to repo's default branch).")
 @click.option("-m", "--message", default=None, help="Commit message. Use {default} to include auto-generated message.")
 @_no_create_option
 @_tag_option
@@ -328,7 +335,11 @@ def untar_cmd(ctx, filename, branch, message, no_create, tag, force_tag):
     (the default).  Compression is auto-detected.
     """
     repo_path = _require_repo(ctx)
-    store = _open_store(repo_path) if no_create else _open_or_create_store(repo_path, branch)
+    if no_create:
+        store = _open_store(repo_path)
+    else:
+        store = _open_or_create_store(repo_path, branch or "main")
+    branch = branch or _default_branch(store)
     new_fs = _do_import(ctx, store, branch, filename, message, "tar")
     if tag:
         _apply_tag(store, new_fs, tag, force_tag)
@@ -343,7 +354,7 @@ def untar_cmd(ctx, filename, branch, message, no_create, tag, force_tag):
 @click.argument("filename", type=click.Path())
 @click.option("--format", "fmt", type=click.Choice(["zip", "tar"]), default=None,
               help="Archive format (auto-detected from extension if omitted).")
-@click.option("--branch", "-b", default="main", help="Branch to export from.")
+@click.option("--branch", "-b", default=None, help="Branch to export from (defaults to repo's default branch).")
 @click.option("--ref", "ref", default=None, help="Branch, tag, or commit hash.")
 @click.option("--path", "at_path", default=None, help="Use latest commit that changed this path.")
 @click.option("--match", "match_pattern", default=None, help="Use latest commit matching this message pattern (* and ?).")
@@ -361,6 +372,7 @@ def archive_cmd(ctx, filename, fmt, branch, ref, at_path, match_pattern, before,
             raise click.ClickException("Use --format with stdout (-)")
         fmt = _detect_archive_format(filename)
     store = _open_store(_require_repo(ctx))
+    branch = branch or _default_branch(store)
     fs = _resolve_fs(store, branch, ref, at_path=at_path,
                      match_pattern=match_pattern, before=before, back=back)
     _do_export(ctx, fs, filename, fmt)
@@ -371,7 +383,7 @@ def archive_cmd(ctx, filename, fmt, branch, ref, at_path, match_pattern, before,
 @click.argument("filename", type=click.Path(), default=None, required=False)
 @click.option("--format", "fmt", type=click.Choice(["zip", "tar"]), default=None,
               help="Archive format (auto-detected from extension if omitted).")
-@click.option("--branch", "-b", default="main", help="Branch to import into.")
+@click.option("--branch", "-b", default=None, help="Branch to import into (defaults to repo's default branch).")
 @click.option("-m", "--message", default=None, help="Commit message. Use {default} to include auto-generated message.")
 @_no_create_option
 @_tag_option
@@ -391,7 +403,11 @@ def unarchive_cmd(ctx, filename, fmt, branch, message, no_create, tag, force_tag
         if fmt is None:
             fmt = _detect_archive_format(filename)
     repo_path = _require_repo(ctx)
-    store = _open_store(repo_path) if no_create else _open_or_create_store(repo_path, branch)
+    if no_create:
+        store = _open_store(repo_path)
+    else:
+        store = _open_or_create_store(repo_path, branch or "main")
+    branch = branch or _default_branch(store)
     new_fs = _do_import(ctx, store, branch, filename, message, fmt)
     if tag:
         _apply_tag(store, new_fs, tag, force_tag)
