@@ -115,6 +115,21 @@ def _no_create_option(f):
     )(f)
 
 
+def _snapshot_options(f):
+    """Shared snapshot filter options: --ref, --path, --match, --before, --back."""
+    f = click.option("--back", type=int, default=0,
+                     help="Walk back N commits.")(f)
+    f = click.option("--before", "before", default=None,
+                     help="Use latest commit on or before this date (ISO 8601).")(f)
+    f = click.option("--match", "match_pattern", default=None,
+                     help="Use latest commit matching this message pattern (* and ?).")(f)
+    f = click.option("--path", "at_path", default=None,
+                     help="Use latest commit that changed this path.")(f)
+    f = click.option("--ref", "ref", default=None,
+                     help="Branch, tag, or commit hash to read from.")(f)
+    return f
+
+
 def _tag_option(f):
     """Shared --tag / --force-tag options for write commands."""
     f = click.option("--force-tag", is_flag=True, default=False,
@@ -122,6 +137,63 @@ def _tag_option(f):
     f = click.option("--tag", default=None,
                      help="Create a tag at the resulting commit.")(f)
     return f
+
+
+def _branch_option(f):
+    """Shared --branch/-b option for commands that operate on a branch."""
+    return click.option(
+        "--branch", "-b", default=None,
+        help="Branch (defaults to repo's default branch).",
+    )(f)
+
+
+def _message_option(f):
+    """Shared -m/--message option for write commands."""
+    return click.option(
+        "-m", "--message", default=None,
+        help="Commit message. Use {default} to include auto-generated message.",
+    )(f)
+
+
+def _dry_run_option(f):
+    """Shared -n/--dry-run option."""
+    return click.option(
+        "-n", "--dry-run", "dry_run", is_flag=True, default=False,
+        help="Show what would change without writing.",
+    )(f)
+
+
+def _checksum_option(f):
+    """Shared -c/--checksum option for cp/sync."""
+    return click.option(
+        "-c", "--checksum", is_flag=True, default=False,
+        help="Compare files by checksum instead of mtime (slower, exact).",
+    )(f)
+
+
+def _ignore_errors_option(f):
+    """Shared --ignore-errors option for cp/sync."""
+    return click.option(
+        "--ignore-errors", is_flag=True, default=False,
+        help="Skip files that fail and continue.",
+    )(f)
+
+
+def _format_option(f):
+    """Shared --format option for log/reflog output."""
+    return click.option(
+        "--format", "fmt", default="text",
+        type=click.Choice(["text", "json", "jsonl"]),
+        help="Output format.",
+    )(f)
+
+
+def _archive_format_option(f):
+    """Shared --format option for archive/unarchive."""
+    return click.option(
+        "--format", "fmt", type=click.Choice(["zip", "tar"]), default=None,
+        help="Archive format (auto-detected from extension if omitted).",
+    )(f)
 
 
 def _apply_tag(store: GitStore, new_fs, tag: str, force_tag: bool):
@@ -183,10 +255,8 @@ def _resolve_snapshot(fs, at_path: str | None, match_pattern: str | None, before
     return fs
 
 
-def _resolve_fs(store, branch, ref=None, *,
-                at_path=None, match_pattern=None, before=None, back=0):
-    """Resolve an FS from branch/ref + snapshot filters + --back."""
-    fs = _get_fs(store, branch, ref)
+def _apply_snapshot_filters(fs, *, at_path=None, match_pattern=None, before=None, back=0):
+    """Apply --path / --match / --before / --back filters to an already-resolved FS."""
     before = _parse_before(before)
     fs = _resolve_snapshot(fs, at_path, match_pattern, before)
     if back:
@@ -195,6 +265,14 @@ def _resolve_fs(store, branch, ref=None, *,
         except ValueError as e:
             raise click.ClickException(str(e))
     return fs
+
+
+def _resolve_fs(store, branch, ref=None, *,
+                at_path=None, match_pattern=None, before=None, back=0):
+    """Resolve an FS from branch/ref + snapshot filters + --back."""
+    fs = _get_fs(store, branch, ref)
+    return _apply_snapshot_filters(fs, at_path=at_path, match_pattern=match_pattern,
+                                   before=before, back=back)
 
 
 def _detect_archive_format(filename: str) -> str:

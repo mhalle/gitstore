@@ -4,6 +4,14 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.41.1 (2026-02-11)
+
+**Internal:**
+
+- Factor out all repeated CLI options into shared decorators in `_helpers.py`: `_branch_option`, `_message_option`, `_dry_run_option`, `_checksum_option`, `_ignore_errors_option`, `_format_option`, `_archive_format_option`
+- Switch `branch set`, `tag set`, and `branch hash` to use `_snapshot_options` (adds `--back` support for free)
+- No user-facing behavior changes
+
 ## v0.41.0 (2026-02-11)
 
 **New features:**

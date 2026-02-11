@@ -14,6 +14,10 @@ from ..tree import _normalize_path
 from ._helpers import (
     main,
     _repo_option,
+    _branch_option,
+    _message_option,
+    _dry_run_option,
+    _format_option,
     _require_repo,
     _status,
     _strip_colon,
@@ -29,6 +33,7 @@ from ._helpers import (
     _resolve_snapshot,
     _log_entry_dict,
     _no_create_option,
+    _snapshot_options,
     _tag_option,
     _apply_tag,
 )
@@ -95,13 +100,9 @@ def destroy(ctx, force):
 @main.command()
 @_repo_option
 @click.argument("paths", nargs=-1)
-@click.option("--branch", "-b", default=None, help="Branch to list (defaults to repo's default branch).")
+@_branch_option
 @click.option("-R", "--recursive", is_flag=True, help="List all files recursively with full paths.")
-@click.option("--ref", "ref", default=None, help="Branch, tag, or commit hash to read from.")
-@click.option("--path", "at_path", default=None, help="Use latest commit that changed this path.")
-@click.option("--match", "match_pattern", default=None, help="Use latest commit matching this message pattern (* and ?).")
-@click.option("--before", "before", default=None, help="Use latest commit on or before this date (ISO 8601).")
-@click.option("--back", type=int, default=0, help="Walk back N commits.")
+@_snapshot_options
 @click.pass_context
 def ls(ctx, paths, branch, recursive, ref, at_path, match_pattern, before, back):
     """List files/directories at PATH(s) (or root).
@@ -185,12 +186,8 @@ def ls(ctx, paths, branch, recursive, ref, at_path, match_pattern, before, back)
 @main.command()
 @_repo_option
 @click.argument("paths", nargs=-1, required=True)
-@click.option("--branch", "-b", default=None, help="Branch to read from (defaults to repo's default branch).")
-@click.option("--ref", "ref", default=None, help="Branch, tag, or commit hash to read from.")
-@click.option("--path", "at_path", default=None, help="Use latest commit that changed this path.")
-@click.option("--match", "match_pattern", default=None, help="Use latest commit matching this message pattern (* and ?).")
-@click.option("--before", "before", default=None, help="Use latest commit on or before this date (ISO 8601).")
-@click.option("--back", type=int, default=0, help="Walk back N commits.")
+@_branch_option
+@_snapshot_options
 @click.pass_context
 def cat(ctx, paths, branch, ref, at_path, match_pattern, before, back):
     """Concatenate file contents to stdout."""
@@ -219,10 +216,9 @@ def cat(ctx, paths, branch, ref, at_path, match_pattern, before, back):
 @click.argument("paths", nargs=-1, required=True)
 @click.option("-R", "--recursive", is_flag=True, default=False,
               help="Remove directories recursively.")
-@click.option("-n", "--dry-run", is_flag=True, default=False,
-              help="Show what would be removed without writing.")
-@click.option("--branch", "-b", default=None, help="Branch to remove from (defaults to repo's default branch).")
-@click.option("-m", "--message", default=None, help="Commit message. Use {default} to include auto-generated message.")
+@_dry_run_option
+@_branch_option
+@_message_option
 @_tag_option
 @click.pass_context
 def rm(ctx, paths, recursive, dry_run, branch, message, tag, force_tag):
@@ -278,8 +274,8 @@ def rm(ctx, paths, recursive, dry_run, branch, message, tag, force_tag):
 @main.command()
 @_repo_option
 @click.argument("path")
-@click.option("--branch", "-b", default=None, help="Branch to write to (defaults to repo's default branch).")
-@click.option("-m", "--message", default=None, help="Commit message.")
+@_branch_option
+@_message_option
 @_no_create_option
 @_tag_option
 @click.pass_context
@@ -314,16 +310,10 @@ def write(ctx, path, branch, message, no_create, tag, force_tag):
 
 @main.command()
 @_repo_option
-@click.option("--path", "at_path", default=None, help="Show only commits that changed this path.")
 @click.option("--at", "deprecated_at", default=None, hidden=True)
-@click.option("--match", "match_pattern", default=None, help="Show only commits matching this message pattern (* and ?).")
-@click.option("--before", "before", default=None, help="Show only commits on or before this date (ISO 8601).")
-@click.option("--branch", "-b", default=None, help="Branch to show log for (defaults to repo's default branch).")
-@click.option("--ref", "ref", default=None, help="Branch, tag, or commit hash to start from.")
-@click.option("--back", type=int, default=0, help="Walk back N commits before showing log.")
-@click.option("--format", "fmt", default="text",
-              type=click.Choice(["text", "json", "jsonl"]),
-              help="Output format.")
+@_branch_option
+@_snapshot_options
+@_format_option
 @click.pass_context
 def log(ctx, at_path, deprecated_at, match_pattern, before, branch, ref, back, fmt):
     """Show commit log, optionally filtered by path and/or message pattern."""
@@ -357,7 +347,7 @@ def log(ctx, at_path, deprecated_at, match_pattern, before, branch, ref, back, f
 
 @main.command()
 @_repo_option
-@click.option("--branch", "-b", default=None, help="Branch to undo (defaults to repo's default branch).")
+@_branch_option
 @click.argument("steps", type=int, default=1, required=False)
 @click.pass_context
 def undo(ctx, branch, steps):
@@ -402,7 +392,7 @@ def undo(ctx, branch, steps):
 
 @main.command()
 @_repo_option
-@click.option("--branch", "-b", default=None, help="Branch to redo (defaults to repo's default branch).")
+@_branch_option
 @click.argument("steps", type=int, default=1, required=False)
 @click.pass_context
 def redo(ctx, branch, steps):
@@ -449,11 +439,9 @@ def redo(ctx, branch, steps):
 
 @main.command()
 @_repo_option
-@click.option("--branch", "-b", default=None, help="Branch to show reflog for (defaults to repo's default branch).")
+@_branch_option
 @click.option("-n", "--limit", type=int, help="Limit number of entries shown.")
-@click.option("--format", "fmt", default="text",
-              type=click.Choice(["text", "json", "jsonl"]),
-              help="Output format.")
+@_format_option
 @click.pass_context
 def reflog(ctx, branch, limit, fmt):
     """Show reflog entries for a branch.

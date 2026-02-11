@@ -13,6 +13,9 @@ from ..tree import GIT_FILEMODE_BLOB_EXECUTABLE, GIT_FILEMODE_LINK
 from ._helpers import (
     main,
     _repo_option,
+    _branch_option,
+    _message_option,
+    _archive_format_option,
     _no_create_option,
     _require_repo,
     _status,
@@ -25,6 +28,7 @@ from ._helpers import (
     _parse_before,
     _resolve_fs,
     _resolve_snapshot,
+    _snapshot_options,
     _detect_archive_format,
     _tag_option,
     _apply_tag,
@@ -242,12 +246,8 @@ def _do_import(ctx, store, branch: str, filename: str, message: str | None, fmt:
 @main.command("zip")
 @_repo_option
 @click.argument("filename", type=click.Path())
-@click.option("--branch", "-b", default=None, help="Branch to export from (defaults to repo's default branch).")
-@click.option("--ref", "ref", default=None, help="Branch, tag, or commit hash to export from.")
-@click.option("--path", "at_path", default=None, help="Use latest commit that changed this path.")
-@click.option("--match", "match_pattern", default=None, help="Use latest commit matching this message pattern (* and ?).")
-@click.option("--before", "before", default=None, help="Use latest commit on or before this date (ISO 8601).")
-@click.option("--back", type=int, default=0, help="Walk back N commits.")
+@_branch_option
+@_snapshot_options
 @click.pass_context
 def zip_cmd(ctx, filename, branch, ref, at_path, match_pattern, before, back):
     """Export repo contents to a zip file.
@@ -268,8 +268,8 @@ def zip_cmd(ctx, filename, branch, ref, at_path, match_pattern, before, back):
 @main.command("unzip")
 @_repo_option
 @click.argument("filename", type=click.Path(exists=True))
-@click.option("--branch", "-b", default=None, help="Branch to import into (defaults to repo's default branch).")
-@click.option("-m", "--message", default=None, help="Commit message. Use {default} to include auto-generated message.")
+@_branch_option
+@_message_option
 @_no_create_option
 @_tag_option
 @click.pass_context
@@ -296,12 +296,8 @@ def unzip_cmd(ctx, filename, branch, message, no_create, tag, force_tag):
 @main.command("tar")
 @_repo_option
 @click.argument("filename", type=click.Path())
-@click.option("--branch", "-b", default=None, help="Branch to export from (defaults to repo's default branch).")
-@click.option("--ref", "ref", default=None, help="Branch, tag, or commit hash to export from.")
-@click.option("--path", "at_path", default=None, help="Use latest commit that changed this path.")
-@click.option("--match", "match_pattern", default=None, help="Use latest commit matching this message pattern (* and ?).")
-@click.option("--before", "before", default=None, help="Use latest commit on or before this date (ISO 8601).")
-@click.option("--back", type=int, default=0, help="Walk back N commits.")
+@_branch_option
+@_snapshot_options
 @click.pass_context
 def tar_cmd(ctx, filename, branch, ref, at_path, match_pattern, before, back):
     """Export repo contents to a tar archive.
@@ -323,8 +319,8 @@ def tar_cmd(ctx, filename, branch, ref, at_path, match_pattern, before, back):
 @main.command("untar")
 @_repo_option
 @click.argument("filename", type=click.Path(), default="-")
-@click.option("--branch", "-b", default=None, help="Branch to import into (defaults to repo's default branch).")
-@click.option("-m", "--message", default=None, help="Commit message. Use {default} to include auto-generated message.")
+@_branch_option
+@_message_option
 @_no_create_option
 @_tag_option
 @click.pass_context
@@ -352,14 +348,9 @@ def untar_cmd(ctx, filename, branch, message, no_create, tag, force_tag):
 @main.command("archive")
 @_repo_option
 @click.argument("filename", type=click.Path())
-@click.option("--format", "fmt", type=click.Choice(["zip", "tar"]), default=None,
-              help="Archive format (auto-detected from extension if omitted).")
-@click.option("--branch", "-b", default=None, help="Branch to export from (defaults to repo's default branch).")
-@click.option("--ref", "ref", default=None, help="Branch, tag, or commit hash.")
-@click.option("--path", "at_path", default=None, help="Use latest commit that changed this path.")
-@click.option("--match", "match_pattern", default=None, help="Use latest commit matching this message pattern (* and ?).")
-@click.option("--before", "before", default=None, help="Use latest commit on or before this date (ISO 8601).")
-@click.option("--back", type=int, default=0, help="Walk back N commits.")
+@_archive_format_option
+@_branch_option
+@_snapshot_options
 @click.pass_context
 def archive_cmd(ctx, filename, fmt, branch, ref, at_path, match_pattern, before, back):
     """Export repo contents to an archive file.
@@ -381,10 +372,9 @@ def archive_cmd(ctx, filename, fmt, branch, ref, at_path, match_pattern, before,
 @main.command("unarchive")
 @_repo_option
 @click.argument("filename", type=click.Path(), default=None, required=False)
-@click.option("--format", "fmt", type=click.Choice(["zip", "tar"]), default=None,
-              help="Archive format (auto-detected from extension if omitted).")
-@click.option("--branch", "-b", default=None, help="Branch to import into (defaults to repo's default branch).")
-@click.option("-m", "--message", default=None, help="Commit message. Use {default} to include auto-generated message.")
+@_archive_format_option
+@_branch_option
+@_message_option
 @_no_create_option
 @_tag_option
 @click.pass_context

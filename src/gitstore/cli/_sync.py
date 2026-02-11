@@ -10,6 +10,11 @@ from ..exceptions import StaleSnapshotError
 from ._helpers import (
     main,
     _repo_option,
+    _branch_option,
+    _message_option,
+    _dry_run_option,
+    _checksum_option,
+    _ignore_errors_option,
     _no_create_option,
     _require_repo,
     _status,
@@ -20,6 +25,7 @@ from ._helpers import (
     _parse_before,
     _resolve_fs,
     _resolve_snapshot,
+    _snapshot_options,
     _tag_option,
     _apply_tag,
 )
@@ -28,19 +34,12 @@ from ._helpers import (
 @main.command()
 @_repo_option
 @click.argument("args", nargs=-1, required=True)
-@click.option("--branch", "-b", default=None, help="Branch to operate on (defaults to repo's default branch).")
-@click.option("--ref", "ref", default=None, help="Branch, tag, or commit hash to read from.")
-@click.option("--path", "at_path", default=None, help="Use latest commit that changed this path.")
-@click.option("--match", "match_pattern", default=None, help="Use latest commit matching this message pattern (* and ?).")
-@click.option("--before", "before", default=None, help="Use latest commit on or before this date (ISO 8601).")
-@click.option("--back", type=int, default=0, help="Walk back N commits.")
-@click.option("-m", "--message", default=None, help="Commit message. Use {default} to include auto-generated message.")
-@click.option("-n", "--dry-run", "dry_run", is_flag=True, default=False,
-              help="Show what would change without writing.")
-@click.option("--ignore-errors", is_flag=True, default=False,
-              help="Skip files that fail and continue.")
-@click.option("-c", "--checksum", is_flag=True, default=False,
-              help="Compare files by checksum instead of mtime (slower, exact).")
+@_branch_option
+@_snapshot_options
+@_message_option
+@_dry_run_option
+@_ignore_errors_option
+@_checksum_option
 @_no_create_option
 @_tag_option
 @click.pass_context

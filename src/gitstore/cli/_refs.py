@@ -8,13 +8,15 @@ from ._helpers import (
     branch,
     tag,
     _repo_option,
+    _branch_option,
     _require_repo,
     _status,
     _open_store,
     _default_branch,
-    _parse_before,
-    _resolve_snapshot,
+    _apply_snapshot_filters,
+    _resolve_fs,
     _resolve_ref,
+    _snapshot_options,
 )
 import gitstore.cli._helpers as _helpers
 
@@ -57,27 +59,21 @@ def branch_create(ctx, name):
 @branch.command("fork")
 @_repo_option
 @click.argument("name")
-@click.option("--ref", default=None,
-              help="Ref to fork from (branch, tag, or commit hash). Defaults to repo's default branch.")
+@_branch_option
 @click.option("-f", "--force", is_flag=True, default=False,
               help="Overwrite if branch already exists.")
-@click.option("--path", "at_path", default=None,
-              help="Use latest commit that changed this path.")
-@click.option("--match", "match_pattern", default=None,
-              help="Use latest commit matching this message pattern (* and ?).")
-@click.option("--before", "before", default=None,
-              help="Use latest commit on or before this date (ISO 8601).")
+@_snapshot_options
 @click.pass_context
-def branch_fork(ctx, name, ref, force, at_path, match_pattern, before):
+def branch_fork(ctx, name, branch, force, ref, at_path, match_pattern, before, back):
     """Create a new branch NAME forked from an existing ref."""
     store = _open_store(_require_repo(ctx))
-    ref = ref or _default_branch(store)
+    branch = branch or _default_branch(store)
 
     if name in store.branches and not force:
         raise click.ClickException(f"Branch already exists: {name}")
 
-    before = _parse_before(before)
-    source_fs = _resolve_snapshot(_resolve_ref(store, ref), at_path, match_pattern, before)
+    source_fs = _resolve_fs(store, branch, ref=ref, at_path=at_path,
+                            match_pattern=match_pattern, before=before, back=back)
     from ..fs import FS
     new_fs = FS(store, source_fs._commit_oid, branch=name)
     store.branches[name] = new_fs
@@ -87,21 +83,17 @@ def branch_fork(ctx, name, ref, force, at_path, match_pattern, before):
 @branch.command("set")
 @_repo_option
 @click.argument("name")
-@click.option("--ref", required=True,
-              help="Ref to set branch to (branch, tag, or commit hash).")
-@click.option("--path", "at_path", default=None,
-              help="Use latest commit that changed this path.")
-@click.option("--match", "match_pattern", default=None,
-              help="Use latest commit matching this message pattern (* and ?).")
-@click.option("--before", "before", default=None,
-              help="Use latest commit on or before this date (ISO 8601).")
+@_snapshot_options
 @click.pass_context
-def branch_set(ctx, name, ref, at_path, match_pattern, before):
+def branch_set(ctx, name, ref, at_path, match_pattern, before, back):
     """Point branch NAME at an existing ref (creates if new)."""
+    if not ref:
+        raise click.ClickException("--ref is required for this command")
     store = _open_store(_require_repo(ctx))
 
-    before = _parse_before(before)
-    source_fs = _resolve_snapshot(_resolve_ref(store, ref), at_path, match_pattern, before)
+    source_fs = _apply_snapshot_filters(
+        _resolve_ref(store, ref), at_path=at_path,
+        match_pattern=match_pattern, before=before, back=back)
     from ..fs import FS
     new_fs = FS(store, source_fs._commit_oid, branch=name)
     store.branches[name] = new_fs
@@ -125,28 +117,17 @@ def branch_delete(ctx, name):
 @branch.command("hash")
 @_repo_option
 @click.argument("name")
-@click.option("--back", type=int, default=0, help="Walk back N commits.")
-@click.option("--path", "at_path", default=None,
-              help="Use latest commit that changed this path.")
-@click.option("--match", "match_pattern", default=None,
-              help="Use latest commit matching this message pattern (* and ?).")
-@click.option("--before", "before", default=None,
-              help="Use latest commit on or before this date (ISO 8601).")
+@_snapshot_options
 @click.pass_context
-def branch_hash(ctx, name, back, at_path, match_pattern, before):
+def branch_hash(ctx, name, ref, at_path, match_pattern, before, back):
     """Print the commit hash of branch NAME."""
     store = _open_store(_require_repo(ctx))
     try:
         fs = store.branches[name]
     except KeyError:
         raise click.ClickException(f"Branch not found: {name}")
-    before = _parse_before(before)
-    fs = _resolve_snapshot(fs, at_path, match_pattern, before)
-    if back:
-        try:
-            fs = fs.back(back)
-        except ValueError as e:
-            raise click.ClickException(str(e))
+    fs = _apply_snapshot_filters(fs, at_path=at_path, match_pattern=match_pattern,
+                                 before=before, back=back)
     click.echo(fs.hash)
 
 
@@ -167,25 +148,19 @@ def tag_list(ctx):
 @tag.command("fork")
 @_repo_option
 @click.argument("name")
-@click.option("--ref", default=None,
-              help="Ref to tag (branch, tag, or commit hash). Defaults to repo's default branch.")
-@click.option("--path", "at_path", default=None,
-              help="Use latest commit that changed this path.")
-@click.option("--match", "match_pattern", default=None,
-              help="Use latest commit matching this message pattern (* and ?).")
-@click.option("--before", "before", default=None,
-              help="Use latest commit on or before this date (ISO 8601).")
+@_branch_option
+@_snapshot_options
 @click.pass_context
-def tag_fork(ctx, name, ref, at_path, match_pattern, before):
+def tag_fork(ctx, name, branch, ref, at_path, match_pattern, before, back):
     """Create a new tag NAME from an existing ref."""
-    before = _parse_before(before)
     store = _open_store(_require_repo(ctx))
-    ref = ref or _default_branch(store)
+    branch = branch or _default_branch(store)
 
     if name in store.tags:
         raise click.ClickException(f"Tag already exists: {name}")
 
-    source_fs = _resolve_snapshot(_resolve_ref(store, ref), at_path, match_pattern, before)
+    source_fs = _resolve_fs(store, branch, ref=ref, at_path=at_path,
+                            match_pattern=match_pattern, before=before, back=back)
 
     from ..fs import FS
     new_fs = FS(store, source_fs._commit_oid, branch=None)
@@ -196,21 +171,17 @@ def tag_fork(ctx, name, ref, at_path, match_pattern, before):
 @tag.command("set")
 @_repo_option
 @click.argument("name")
-@click.option("--ref", required=True,
-              help="Ref to set tag to (branch, tag, or commit hash).")
-@click.option("--path", "at_path", default=None,
-              help="Use latest commit that changed this path.")
-@click.option("--match", "match_pattern", default=None,
-              help="Use latest commit matching this message pattern (* and ?).")
-@click.option("--before", "before", default=None,
-              help="Use latest commit on or before this date (ISO 8601).")
+@_snapshot_options
 @click.pass_context
-def tag_set(ctx, name, ref, at_path, match_pattern, before):
+def tag_set(ctx, name, ref, at_path, match_pattern, before, back):
     """Point tag NAME at an existing ref (creates or updates)."""
+    if not ref:
+        raise click.ClickException("--ref is required for this command")
     store = _open_store(_require_repo(ctx))
 
-    before = _parse_before(before)
-    source_fs = _resolve_snapshot(_resolve_ref(store, ref), at_path, match_pattern, before)
+    source_fs = _apply_snapshot_filters(
+        _resolve_ref(store, ref), at_path=at_path,
+        match_pattern=match_pattern, before=before, back=back)
     from ..fs import FS
     new_fs = FS(store, source_fs._commit_oid, branch=None)
     if name in store.tags:

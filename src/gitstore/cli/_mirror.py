@@ -7,6 +7,7 @@ import click
 from ._helpers import (
     main,
     _repo_option,
+    _dry_run_option,
     _no_create_option,
     _require_repo,
     _status,
@@ -22,7 +23,7 @@ from ._helpers import (
 @main.command("backup")
 @_repo_option
 @click.argument("url")
-@click.option("-n", "--dry-run", is_flag=True, help="Show what would change without transferring data.")
+@_dry_run_option
 @click.pass_context
 def backup_cmd(ctx, url, dry_run):
     """Push all refs to a remote URL, creating an exact mirror.
@@ -47,7 +48,7 @@ def backup_cmd(ctx, url, dry_run):
 @main.command("restore")
 @_repo_option
 @click.argument("url")
-@click.option("-n", "--dry-run", is_flag=True, help="Show what would change without transferring data.")
+@_dry_run_option
 @_no_create_option
 @click.pass_context
 def restore_cmd(ctx, url, dry_run, no_create):
