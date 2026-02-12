@@ -56,11 +56,11 @@ class TestCp:
         result = runner.invoke(main, ["log", "--repo", initialized_repo])
         assert "my custom msg" in result.output
 
-    def test_mode_755(self, runner, initialized_repo, tmp_path):
+    def test_type_executable(self, runner, initialized_repo, tmp_path):
         f = tmp_path / "script.sh"
         f.write_text("#!/bin/sh\necho hi")
         result = runner.invoke(main, [
-            "cp", "--repo", initialized_repo, str(f), ":script.sh", "--mode", "755"
+            "cp", "--repo", initialized_repo, str(f), ":script.sh", "--type", "executable"
         ])
         assert result.exit_code == 0, result.output
         # Verify mode via library
@@ -71,11 +71,11 @@ class TestCp:
         entry = tree["script.sh"]
         assert entry.filemode == 0o100755
 
-    def test_mode_644_explicit(self, runner, initialized_repo, tmp_path):
+    def test_type_blob_explicit(self, runner, initialized_repo, tmp_path):
         f = tmp_path / "plain.txt"
         f.write_text("text")
         result = runner.invoke(main, [
-            "cp", "--repo", initialized_repo, str(f), ":plain.txt", "--mode", "644"
+            "cp", "--repo", initialized_repo, str(f), ":plain.txt", "--type", "blob"
         ])
         assert result.exit_code == 0, result.output
         from gitstore import GitStore
@@ -85,7 +85,7 @@ class TestCp:
         entry = tree["plain.txt"]
         assert entry.filemode == 0o100644
 
-    def test_mode_default_is_644(self, runner, initialized_repo, tmp_path):
+    def test_type_default_is_blob(self, runner, initialized_repo, tmp_path):
         f = tmp_path / "default.txt"
         f.write_text("text")
         result = runner.invoke(main, [
@@ -98,6 +98,20 @@ class TestCp:
         tree = store._repo[fs._tree_oid]
         entry = tree["default.txt"]
         assert entry.filemode == 0o100644
+
+    def test_deprecated_mode_755_still_works(self, runner, initialized_repo, tmp_path):
+        f = tmp_path / "legacy.sh"
+        f.write_text("#!/bin/sh\necho hi")
+        result = runner.invoke(main, [
+            "cp", "--repo", initialized_repo, str(f), ":legacy.sh", "--mode", "755"
+        ])
+        assert result.exit_code == 0, result.output
+        from gitstore import GitStore
+        store = GitStore.open(initialized_repo, create=False)
+        fs = store.branches["main"]
+        tree = store._repo[fs._tree_oid]
+        entry = tree["legacy.sh"]
+        assert entry.filemode == 0o100755
 
     def test_missing_local_file(self, runner, initialized_repo):
         result = runner.invoke(main, ["cp", "--repo", initialized_repo, "/nonexistent", ":dest.txt"])

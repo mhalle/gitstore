@@ -70,7 +70,7 @@ class TestZip:
         f = tmp_path / "run.sh"
         f.write_text("#!/bin/sh\necho hi")
         result = runner.invoke(main, [
-            "cp", "--repo", initialized_repo, str(f), ":run.sh", "--mode", "755"
+            "cp", "--repo", initialized_repo, str(f), ":run.sh", "--type", "executable"
         ])
         assert result.exit_code == 0, result.output
 
@@ -185,7 +185,7 @@ class TestUnzip:
         """Zip then unzip preserves executable bit."""
         f = tmp_path / "run.sh"
         f.write_text("#!/bin/sh")
-        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":run.sh", "--mode", "755"])
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":run.sh", "--type", "executable"])
         f2 = tmp_path / "data.txt"
         f2.write_text("plain")
         runner.invoke(main, ["cp", "--repo", initialized_repo, str(f2), ":data.txt"])
@@ -359,7 +359,7 @@ class TestTar:
         f = tmp_path / "run.sh"
         f.write_text("#!/bin/sh\necho hi")
         result = runner.invoke(main, [
-            "cp", "--repo", initialized_repo, str(f), ":run.sh", "--mode", "755"
+            "cp", "--repo", initialized_repo, str(f), ":run.sh", "--type", "executable"
         ])
         assert result.exit_code == 0, result.output
 
@@ -484,7 +484,7 @@ class TestUntar:
         """Tar then untar preserves executable bit."""
         f = tmp_path / "run.sh"
         f.write_text("#!/bin/sh")
-        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":run.sh", "--mode", "755"])
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":run.sh", "--type", "executable"])
         f2 = tmp_path / "data.txt"
         f2.write_text("plain")
         runner.invoke(main, ["cp", "--repo", initialized_repo, str(f2), ":data.txt"])

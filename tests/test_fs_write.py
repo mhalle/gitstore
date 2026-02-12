@@ -234,7 +234,7 @@ class TestSymlink:
     def test_write_symlink_default_message(self, repo_fs):
         _, fs = repo_fs
         fs2 = fs.write_symlink("link.txt", "target.txt")
-        assert fs2.message == "+ link.txt (L)"
+        assert fs2.message == "+ link.txt (link)"
 
     def test_write_symlink_on_tag_raises(self, tmp_path):
         repo = GitStore.open(tmp_path / "test.git")

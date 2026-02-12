@@ -10,9 +10,15 @@ import sys
 import click
 
 from ..copy._resolve import _walk_repo
+from ..copy._types import FileType
 from ..exceptions import StaleSnapshotError
 from ..repo import GitStore
-from ..tree import _normalize_path
+from ..tree import (
+    WalkEntry,
+    _entry_at_path,
+    _normalize_path,
+    list_entries_at_path,
+)
 from ._helpers import (
     main,
     RefPath,
@@ -144,14 +150,96 @@ def gc(ctx):
 # ls
 # ---------------------------------------------------------------------------
 
+def _read_link_target(object_store, oid) -> str:
+    """Read symlink target from the blob."""
+    return object_store[oid.raw].data.decode()
+
+
+def _ls_entry_dict(name, we, size, object_store):
+    """Build a JSON-ready dict for a single ls -l entry."""
+    if we is not None and we.file_type == FileType.LINK:
+        target = _read_link_target(object_store, we.oid)
+        return {"name": name, "size": size, "type": "link", "target": target}
+    if we is not None and we.file_type != FileType.TREE:
+        return {"name": name, "size": size, "type": str(we.file_type)}
+    return {"name": name, "type": "tree"}
+
+
+def _format_ls_output(results, long, fmt, object_store):
+    """Format and emit ls results.
+
+    *results* is ``dict[str, WalkEntry | None]`` when *long* is True,
+    else ``dict[str, None]``.
+    """
+    sorted_names = sorted(results)
+
+    if fmt == "text" and not long:
+        for name in sorted_names:
+            click.echo(name)
+
+    elif fmt == "text" and long:
+        from .._objsize import ObjectSizer
+        rows = []
+        with ObjectSizer(object_store) as sizer:
+            for name in sorted_names:
+                we = results[name]
+                if we is not None and we.file_type == FileType.LINK:
+                    size = sizer.size(we.oid.raw)
+                    target = _read_link_target(object_store, we.oid)
+                    rows.append((str(size), f"{name} -> {target}"))
+                elif we is not None and we.file_type != FileType.TREE:
+                    size = sizer.size(we.oid.raw)
+                    rows.append((str(size), name))
+                else:
+                    rows.append(("", name))
+        width = max((len(s) for s, _ in rows if s), default=0)
+        for size_str, display in rows:
+            click.echo(f"{size_str:>{width}}  {display}")
+
+    elif fmt == "json" and not long:
+        click.echo(json.dumps(sorted_names))
+
+    elif fmt == "json" and long:
+        entries = []
+        from .._objsize import ObjectSizer
+        with ObjectSizer(object_store) as sizer:
+            for name in sorted_names:
+                we = results[name]
+                if we is not None and we.file_type != FileType.TREE:
+                    size = sizer.size(we.oid.raw)
+                else:
+                    size = None
+                entries.append(_ls_entry_dict(name, we, size, object_store))
+        click.echo(json.dumps(entries))
+
+    elif fmt == "jsonl" and not long:
+        for name in sorted_names:
+            click.echo(json.dumps(name))
+
+    elif fmt == "jsonl" and long:
+        from .._objsize import ObjectSizer
+        with ObjectSizer(object_store) as sizer:
+            for name in sorted_names:
+                we = results[name]
+                if we is not None and we.file_type != FileType.TREE:
+                    size = sizer.size(we.oid.raw)
+                else:
+                    size = None
+                click.echo(json.dumps(
+                    _ls_entry_dict(name, we, size, object_store)
+                ))
+
+
 @main.command()
 @_repo_option
 @click.argument("paths", nargs=-1)
 @_branch_option
 @click.option("-R", "--recursive", is_flag=True, help="List all files recursively with full paths.")
+@click.option("-l", "--long", "long_", is_flag=True, help="Show file sizes, types, and modes.")
+@_format_option
 @_snapshot_options
 @click.pass_context
-def ls(ctx, paths, branch, recursive, ref, at_path, match_pattern, before, back):
+def ls(ctx, paths, branch, recursive, long_, fmt, ref, at_path, match_pattern, before, back):
     """List files/directories at PATH(s) (or root).
 
     Accepts multiple paths and glob patterns.  Results are coalesced and
@@ -165,6 +253,8 @@ def ls(ctx, paths, branch, recursive, ref, at_path, match_pattern, before, back)
         gitstore ls :src :docs              # multiple directories
         gitstore ls -R                      # all files recursively
         gitstore ls -R :src :docs           # recursive under multiple dirs
+        gitstore ls -l                      # long listing with sizes
+        gitstore ls --format json           # JSON output
     """
     store = _open_store(_require_repo(ctx))
 
@@ -184,7 +274,8 @@ def ls(ctx, paths, branch, recursive, ref, at_path, match_pattern, before, back)
     if not paths:
         paths = (None,)
 
-    results: set[str] = set()
+    # results: name → WalkEntry | None
+    results: dict[str, WalkEntry | None] = {}
 
     for i, path in enumerate(paths):
         # Resolve per-path ref
@@ -211,11 +302,29 @@ def ls(ctx, paths, branch, recursive, ref, at_path, match_pattern, before, back)
                     if fs.is_dir(m):
                         for dp, _, fnames in fs.walk(m):
                             for fe in fnames:
-                                results.add(f"{dp}/{fe.name}" if dp else fe.name)
+                                name = f"{dp}/{fe.name}" if dp else fe.name
+                                results.setdefault(name, fe if long_ else None)
                     else:
-                        results.add(m)
+                        if long_ and m not in results:
+                            entry = _entry_at_path(store._repo, fs._tree_oid, m)
+                            if entry:
+                                oid, fm = entry
+                                results[m] = WalkEntry(m.rsplit("/", 1)[-1], oid, fm)
+                            else:
+                                results[m] = None
+                        else:
+                            results.setdefault(m, None)
             else:
-                results.update(matches)
+                for m in matches:
+                    if long_ and m not in results:
+                        entry = _entry_at_path(store._repo, fs._tree_oid, m)
+                        if entry:
+                            oid, fm = entry
+                            results[m] = WalkEntry(m.rsplit("/", 1)[-1], oid, fm)
+                        else:
+                            results[m] = None
+                    else:
+                        results.setdefault(m, None)
 
         elif recursive:
             rp_norm = None
@@ -224,25 +333,50 @@ def ls(ctx, paths, branch, recursive, ref, at_path, match_pattern, before, back)
             try:
                 for dp, _, fnames in fs.walk(rp_norm if rp_norm else None):
                     for fe in fnames:
-                        results.add(f"{dp}/{fe.name}" if dp else fe.name)
+                        name = f"{dp}/{fe.name}" if dp else fe.name
+                        results.setdefault(name, fe if long_ else None)
             except FileNotFoundError:
                 raise click.ClickException(f"Path not found: {rp_norm}")
             except NotADirectoryError:
-                results.add(rp_norm)
+                if long_ and rp_norm not in results:
+                    entry = _entry_at_path(store._repo, fs._tree_oid, rp_norm)
+                    if entry:
+                        oid, fm = entry
+                        results[rp_norm] = WalkEntry(rp_norm.rsplit("/", 1)[-1], oid, fm)
+                    else:
+                        results[rp_norm] = None
+                else:
+                    results.setdefault(rp_norm, None)
 
         else:
             rp_norm = None
             if repo_path:
                 rp_norm = _normalize_repo_path(repo_path)
             try:
-                results.update(fs.ls(rp_norm if rp_norm else None))
+                if long_:
+                    entries = list_entries_at_path(store._repo, fs._tree_oid, rp_norm)
+                    for we in entries:
+                        if we.file_type == FileType.TREE:
+                            results.setdefault(we.name + "/", we)
+                        else:
+                            results.setdefault(we.name, we)
+                else:
+                    for name in fs.ls(rp_norm if rp_norm else None):
+                        results.setdefault(name, None)
             except FileNotFoundError:
                 raise click.ClickException(f"Path not found: {rp_norm}")
             except NotADirectoryError:
-                results.add(rp_norm)
+                if long_ and rp_norm not in results:
+                    entry = _entry_at_path(store._repo, fs._tree_oid, rp_norm)
+                    if entry:
+                        oid, fm = entry
+                        results[rp_norm] = WalkEntry(rp_norm.rsplit("/", 1)[-1], oid, fm)
+                    else:
+                        results[rp_norm] = None
+                else:
+                    results.setdefault(rp_norm, None)
 
-    for entry in results:
-        click.echo(entry)
+    _format_ls_output(results, long_, fmt, store._repo.object_store)
 
 
 # ---------------------------------------------------------------------------

@@ -5,17 +5,42 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 
-from ..tree import GIT_FILEMODE_BLOB_EXECUTABLE, GIT_FILEMODE_LINK
+from ..tree import (
+    GIT_FILEMODE_BLOB,
+    GIT_FILEMODE_BLOB_EXECUTABLE,
+    GIT_FILEMODE_LINK,
+    GIT_FILEMODE_TREE,
+)
 
 
 class FileType(str, Enum):
     """File type stored in a :class:`FileEntry`."""
-    BLOB = "B"
-    EXECUTABLE = "E"
-    LINK = "L"
+    BLOB = "blob"
+    EXECUTABLE = "executable"
+    LINK = "link"
+    TREE = "tree"
 
     def __str__(self) -> str:          # noqa: D105
         return self.value
+
+    @classmethod
+    def from_filemode(cls, mode: int) -> FileType:
+        """Convert a git filemode integer to a :class:`FileType`."""
+        return _MODE_TO_TYPE[mode]
+
+    @property
+    def filemode(self) -> int:
+        """Return the git filemode integer for this type."""
+        return _TYPE_TO_MODE[self]
+
+
+_MODE_TO_TYPE = {
+    GIT_FILEMODE_BLOB: FileType.BLOB,
+    GIT_FILEMODE_BLOB_EXECUTABLE: FileType.EXECUTABLE,
+    GIT_FILEMODE_LINK: FileType.LINK,
+    GIT_FILEMODE_TREE: FileType.TREE,
+}
+_TYPE_TO_MODE = {v: k for k, v in _MODE_TO_TYPE.items()}
 
 
 @dataclass
@@ -28,12 +53,7 @@ class FileEntry:
     @classmethod
     def from_mode(cls, path: str, mode: int, src: str | None = None) -> FileEntry:
         """Create FileEntry from path and git filemode."""
-        if mode == GIT_FILEMODE_LINK:
-            return cls(path, FileType.LINK, src)
-        elif mode == GIT_FILEMODE_BLOB_EXECUTABLE:
-            return cls(path, FileType.EXECUTABLE, src)
-        else:
-            return cls(path, FileType.BLOB, src)
+        return cls(path, FileType.from_filemode(mode), src)
 
 
 @dataclass

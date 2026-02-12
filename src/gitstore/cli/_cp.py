@@ -7,9 +7,10 @@ from pathlib import Path
 
 import click
 
-from ..exceptions import StaleSnapshotError
-from ..tree import GIT_FILEMODE_BLOB, GIT_FILEMODE_BLOB_EXECUTABLE, GIT_FILEMODE_LINK, _entry_at_path
 from ..copy._io import _copy_blob_to_batch
+from ..copy._types import FileType
+from ..exceptions import StaleSnapshotError
+from ..tree import GIT_FILEMODE_LINK, _entry_at_path
 from ._helpers import (
     main,
     _parse_ref_path,
@@ -45,8 +46,10 @@ from ._helpers import (
 @_branch_option
 @_snapshot_options
 @_message_option
-@click.option("--mode", type=click.Choice(["644", "755"]), default=None,
-              help="File mode (default: 644).")
+@click.option("--type", "file_type", type=click.Choice(["blob", "executable"]),
+              default=None, help="File type (default: auto-detect from disk).")
+@click.option("--mode", "deprecated_mode", type=click.Choice(["644", "755"]),
+              default=None, hidden=True)
 @click.option("--follow-symlinks", is_flag=True, default=False,
               help="Follow symlinks instead of preserving them (disk→repo only).")
 @_dry_run_option
@@ -63,7 +66,7 @@ from ._helpers import (
 @_no_create_option
 @_tag_option
 @click.pass_context
-def cp(ctx, args, branch, ref, at_path, match_pattern, before, back, message, mode, follow_symlinks, dry_run, ignore_existing, delete, ignore_errors, checksum, no_create, tag, force_tag, exclude, exclude_from):
+def cp(ctx, args, branch, ref, at_path, match_pattern, before, back, message, file_type, deprecated_mode, follow_symlinks, dry_run, ignore_existing, delete, ignore_errors, checksum, no_create, tag, force_tag, exclude, exclude_from):
     """Copy files and directories between disk and repo, or between repo refs.
 
     Requires --repo or GITSTORE_REPO environment variable.
@@ -154,8 +157,12 @@ def cp(ctx, args, branch, ref, at_path, match_pattern, before, back, message, mo
 
     repo_path = _require_repo(ctx)
 
-    filemode = (GIT_FILEMODE_BLOB_EXECUTABLE if mode == "755"
-                else GIT_FILEMODE_BLOB) if mode else None
+    if file_type:
+        filemode = FileType(file_type).filemode
+    elif deprecated_mode:
+        filemode = FileType.EXECUTABLE.filemode if deprecated_mode == "755" else FileType.BLOB.filemode
+    else:
+        filemode = None
 
     # Detect single-plain-file case (no glob, no trailing slash, no directory,
     # no /./  pivot).  In this case, like standard `cp`, the dest is the exact

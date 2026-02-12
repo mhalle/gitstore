@@ -21,6 +21,12 @@ class WalkEntry(NamedTuple):
     oid: pygit2.Oid
     filemode: int
 
+    @property
+    def file_type(self):
+        """Return the :class:`~gitstore.copy._types.FileType` for this entry."""
+        from .copy._types import FileType
+        return FileType.from_filemode(self.filemode)
+
 
 GIT_FILEMODE_TREE = 0o040000
 GIT_FILEMODE_BLOB = 0o100644
@@ -228,6 +234,17 @@ def list_tree_at_path(
     repo: pygit2.Repository, tree_oid: pygit2.Oid, path: str | os.PathLike[str] | None = None
 ) -> list[str]:
     """List entries at the given path (or root if path is None)."""
+    return [e.name for e in list_entries_at_path(repo, tree_oid, path)]
+
+
+def list_entries_at_path(
+    repo: pygit2.Repository, tree_oid: pygit2.Oid, path: str | os.PathLike[str] | None = None
+) -> list[WalkEntry]:
+    """List entries at the given path (or root if path is None).
+
+    Returns :class:`WalkEntry` objects with *name*, *oid*, and *filemode*.
+    Directories have ``filemode == GIT_FILEMODE_TREE``.
+    """
     if path is None or _is_root_path(path):
         tree = repo[tree_oid]
     else:
@@ -236,7 +253,7 @@ def list_tree_at_path(
         if obj.type != GIT_OBJECT_TREE:
             raise NotADirectoryError(path)
         tree = obj
-    return [entry.name for entry in tree]
+    return [WalkEntry(entry.name, entry.id, entry.filemode) for entry in tree]
 
 
 def walk_tree(

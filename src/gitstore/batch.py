@@ -33,6 +33,9 @@ class Batch:
             raise RuntimeError("Batch is closed")
 
     def write(self, path: str | os.PathLike[str], data: bytes, *, mode: int | None = None) -> None:
+        from .copy._types import FileType
+        if isinstance(mode, FileType):
+            mode = mode.filemode
         self._check_open()
         path = _normalize_path(path)
         self._removes.discard(path)
@@ -40,6 +43,9 @@ class Batch:
         self._writes[path] = (blob_oid, mode) if mode is not None else blob_oid
 
     def write_from_file(self, path: str | os.PathLike[str], local_path: str | os.PathLike[str], *, mode: int | None = None) -> None:
+        from .copy._types import FileType
+        if isinstance(mode, FileType):
+            mode = mode.filemode
         self._check_open()
         path = _normalize_path(path)
         local_path = os.fspath(local_path)

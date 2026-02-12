@@ -1,5 +1,7 @@
 """Tests for the gitstore CLI — ls and cat commands."""
 
+import json
+
 import pytest
 from click.testing import CliRunner
 
@@ -241,3 +243,119 @@ class TestCat:
         ])
         assert result.exit_code == 0
         assert result.output == "version1"
+
+
+class TestLsLong:
+    def test_ls_l_shows_sizes(self, runner, repo_with_tree):
+        result = runner.invoke(main, ["ls", "-l", "--repo", repo_with_tree])
+        assert result.exit_code == 0, result.output
+        lines = result.output.strip().splitlines()
+        # Should have entries with sizes for files
+        found_file = False
+        for line in lines:
+            stripped = line.strip()
+            # File lines have a number followed by two spaces and name
+            if stripped and stripped[0].isdigit():
+                found_file = True
+                parts = line.split()
+                assert int(parts[0]) > 0  # size is positive
+        assert found_file
+
+    def test_ls_l_recursive(self, runner, repo_with_tree):
+        result = runner.invoke(main, ["ls", "-l", "-R", "--repo", repo_with_tree])
+        assert result.exit_code == 0, result.output
+        lines = result.output.strip().splitlines()
+        # Should contain full paths like src/main.py with sizes
+        names = [line.split()[-1] for line in lines if line.strip()]
+        assert "src/main.py" in names
+        assert "src/sub/deep.txt" in names
+        assert "readme.txt" in names
+
+    def test_ls_l_directory_no_size(self, runner, repo_with_tree):
+        result = runner.invoke(main, ["ls", "-l", "--repo", repo_with_tree])
+        assert result.exit_code == 0, result.output
+        lines = result.output.strip().splitlines()
+        # Directory entries should have trailing / and no size
+        dir_lines = [l for l in lines if l.rstrip().endswith("/")]
+        assert len(dir_lines) > 0  # at least src/ or docs/
+        for dl in dir_lines:
+            # The size field should be empty — leading spaces only
+            assert dl.lstrip().startswith("docs/") or dl.lstrip().startswith("src/")
+
+    def test_ls_l_json(self, runner, repo_with_tree):
+        result = runner.invoke(main, ["ls", "-l", "--format", "json", "--repo", repo_with_tree])
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert isinstance(data, list)
+        # Find a file entry
+        file_entries = [e for e in data if e.get("type") != "tree"]
+        assert len(file_entries) > 0
+        for e in file_entries:
+            assert "name" in e
+            assert "size" in e
+            assert "type" in e
+            assert isinstance(e["size"], int)
+        # Find a dir entry
+        dir_entries = [e for e in data if e.get("type") == "tree"]
+        assert len(dir_entries) > 0
+        for e in dir_entries:
+            assert "name" in e
+            assert "type" in e
+            assert "size" not in e
+
+    def test_ls_l_jsonl(self, runner, repo_with_tree):
+        result = runner.invoke(main, ["ls", "-l", "--format", "jsonl", "--repo", repo_with_tree])
+        assert result.exit_code == 0, result.output
+        lines = result.output.strip().splitlines()
+        assert len(lines) > 0
+        for line in lines:
+            obj = json.loads(line)
+            assert "name" in obj
+            assert "type" in obj
+
+    def test_ls_json_without_l(self, runner, repo_with_tree):
+        result = runner.invoke(main, ["ls", "--format", "json", "--repo", repo_with_tree])
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert isinstance(data, list)
+        # Without -l, should be an array of strings
+        for item in data:
+            assert isinstance(item, str)
+        assert "readme.txt" in data
+
+    def test_ls_jsonl_without_l(self, runner, repo_with_tree):
+        result = runner.invoke(main, ["ls", "--format", "jsonl", "--repo", repo_with_tree])
+        assert result.exit_code == 0, result.output
+        lines = result.output.strip().splitlines()
+        assert len(lines) > 0
+        # Each line should be a JSON string
+        names = [json.loads(line) for line in lines]
+        for name in names:
+            assert isinstance(name, str)
+        assert "readme.txt" in names
+
+    def test_ls_l_symlink_text(self, runner, repo_with_tree):
+        from gitstore.repo import GitStore
+        store = GitStore.open(repo_with_tree, create=False)
+        fs = store.branches["main"]
+        fs.write_symlink("shortcut", "readme.txt")
+
+        result = runner.invoke(main, ["ls", "-l", "--repo", repo_with_tree])
+        assert result.exit_code == 0, result.output
+        # Should show "shortcut -> readme.txt"
+        assert "shortcut -> readme.txt" in result.output
+
+    def test_ls_l_symlink_json(self, runner, repo_with_tree):
+        from gitstore.repo import GitStore
+        store = GitStore.open(repo_with_tree, create=False)
+        fs = store.branches["main"]
+        fs.write_symlink("shortcut", "readme.txt")
+
+        result = runner.invoke(main, ["ls", "-l", "--format", "json", "--repo", repo_with_tree])
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        link_entries = [e for e in data if e.get("type") == "link"]
+        assert len(link_entries) == 1
+        assert link_entries[0]["name"] == "shortcut"
+        assert link_entries[0]["target"] == "readme.txt"
+        assert "size" in link_entries[0]

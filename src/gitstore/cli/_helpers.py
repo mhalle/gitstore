@@ -13,10 +13,6 @@ from gitstore import _compat as pygit2
 from ..exceptions import StaleSnapshotError
 from ..repo import GitStore
 from ..tree import (
-    GIT_FILEMODE_BLOB,
-    GIT_FILEMODE_BLOB_EXECUTABLE,
-    GIT_FILEMODE_LINK,
-    GIT_FILEMODE_TREE,
     _entry_at_path,
     _normalize_path,
 )

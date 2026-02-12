@@ -2,15 +2,15 @@
 
 import pytest
 
-from gitstore.copy._types import ChangeReport, FileEntry, format_commit_message
+from gitstore.copy._types import ChangeReport, FileEntry, FileType, format_commit_message
 
 
 def _report(add=0, update=0, delete=0):
     """Build a ChangeReport with the given number of files."""
     return ChangeReport(
-        add=[FileEntry(f"a{i}.txt", "B") for i in range(add)],
-        update=[FileEntry(f"u{i}.txt", "B") for i in range(update)],
-        delete=[FileEntry(f"d{i}.txt", "B") for i in range(delete)],
+        add=[FileEntry(f"a{i}.txt", FileType.BLOB) for i in range(add)],
+        update=[FileEntry(f"u{i}.txt", FileType.BLOB) for i in range(update)],
+        delete=[FileEntry(f"d{i}.txt", FileType.BLOB) for i in range(delete)],
     )
 
 

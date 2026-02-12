@@ -26,13 +26,14 @@ from .tree import (
     _walk_to,
     read_blob_at_path,
     list_tree_at_path,
+    list_entries_at_path,
     walk_tree,
     exists_at_path,
     rebuild_tree,
 )
 
 if TYPE_CHECKING:
-    from .copy._types import ChangeReport
+    from .copy._types import ChangeReport, FileType
     from .repo import GitStore
 
 __all__ = ["FS", "retry_write"]
@@ -377,8 +378,11 @@ class FS:
         data: bytes,
         *,
         message: str | None = None,
-        mode: int | None = None,
+        mode: FileType | int | None = None,
     ) -> FS:
+        from .copy._types import FileType
+        if isinstance(mode, FileType):
+            mode = mode.filemode
         path = _normalize_path(path)
         value: bytes | tuple[bytes, int] = (data, mode) if mode is not None else data
         return self._commit_changes({path: value}, set(), message)
@@ -399,8 +403,11 @@ class FS:
         local_path: str | os.PathLike[str],
         *,
         message: str | None = None,
-        mode: int | None = None,
+        mode: FileType | int | None = None,
     ) -> FS:
+        from .copy._types import FileType
+        if isinstance(mode, FileType):
+            mode = mode.filemode
         path = _normalize_path(path)
         local_path = os.fspath(local_path)
         detected_mode = _mode_from_disk(local_path)
@@ -684,7 +691,7 @@ def retry_write(
     data: bytes,
     *,
     message: str | None = None,
-    mode: int | None = None,
+    mode: FileType | int | None = None,
     retries: int = 5,
 ) -> FS:
     """Write data to a branch with automatic retry on concurrent modification.
