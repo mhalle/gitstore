@@ -321,19 +321,25 @@ def rm(ctx, paths, recursive, dry_run, branch, message, tag, force_tag):
 @_tag_option
 @click.option("-p", "--passthrough", is_flag=True, default=False,
               help="Echo stdin to stdout (tee mode for pipelines).")
+@click.option("--tx", "tx_id", default=None,
+              help="Write to a transaction instead of committing directly.")
 @click.pass_context
-def write(ctx, path, branch, message, no_create, tag, force_tag, passthrough):
+def write(ctx, path, branch, message, no_create, tag, force_tag, passthrough, tx_id):
     """Write stdin to a file in the repo."""
     from ..fs import retry_write
 
-    # Stage 1: open store, resolve branch name (no FS fetch yet)
+    # Stage 1: open store, resolve target branch
     repo_path = _require_repo(ctx)
-    if no_create:
+    if tx_id:
+        # Transaction mode: repo must exist, write to the tx branch
         store = _open_store(repo_path)
-        branch = branch or _default_branch(store)
+        target_branch = tx_id
+    elif no_create:
+        store = _open_store(repo_path)
+        target_branch = branch or _default_branch(store)
     else:
         store = _open_or_create_store(repo_path, branch=branch or "main")
-        branch = branch or _default_branch(store)
+        target_branch = branch or _default_branch(store)
 
     repo_path_norm = _normalize_repo_path(_strip_colon(path))
 
@@ -356,13 +362,15 @@ def write(ctx, path, branch, message, no_create, tag, force_tag, passthrough):
 
     # Stage 3: commit (fetches fresh FS internally, retries on stale)
     try:
-        new_fs = retry_write(store, branch, repo_path_norm, data, message=message)
+        new_fs = retry_write(store, target_branch, repo_path_norm, data, message=message)
     except StaleSnapshotError:
         raise click.ClickException(
             "Branch modified concurrently — failed after retries"
         )
     except KeyError:
-        raise click.ClickException(f"Branch not found: {branch}")
+        if tx_id:
+            raise click.ClickException(f"Transaction not found: {tx_id}")
+        raise click.ClickException(f"Branch not found: {target_branch}")
     if tag:
         _apply_tag(store, new_fs, tag, force_tag)
     _status(ctx, f"Wrote :{repo_path_norm}")
