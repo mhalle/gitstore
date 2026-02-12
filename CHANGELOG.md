@@ -4,6 +4,40 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.50.0 (2026-02-12)
+
+**Breaking changes:**
+
+- Rename public API for clarity and consistency:
+  - `FS.hash` → `FS.commit_hash`
+  - `FS.report` → `FS.changes` (returns `ChangeReport | None`)
+  - `FS.dump()` → `FS.export_tree()`
+  - `FS.write_from()` → `FS.write_from_file()`
+  - `CopyReport` → `ChangeReport`, `CopyAction` → `ChangeAction`, `CopyError` → `ChangeError`
+  - `SyncDiff` → `MirrorDiff`
+  - `remove_from_repo()` → `remove_in_repo()` (param `patterns` → `sources`)
+  - `move_from_repo()` → `move_in_repo()`
+- CLI is now an optional dependency — `pip install gitstore` installs the core library only (`dulwich`); `pip install gitstore[cli]` adds `click` and `watchfiles`
+
+**New features:**
+
+- Add `read_text()` and `write_text()` convenience methods to `FS` and `Batch`
+- Add `WalkEntry` named tuple with `name`, `oid`, `filemode` fields and `file_type` property — returned by `FS.walk()` file entries
+- Add `ObjectSizer` for efficient blob size queries without full object reads
+- Add `FileType` enum (`BLOB`, `EXECUTABLE`, `LINK`, `TREE`) — unifies file type representation across the API
+- Add `branch exists` and `tag exists` CLI subcommands
+
+**Improvements:**
+
+- Consolidate `branch` and `tag` CLI into single `set` commands (replaces `fork`/`set` split)
+- `FileEntry.file_type` now uses `FileType` enum instead of single-character strings
+
+**Documentation:**
+
+- Rewrite `docs/api.md` to match current v0.50 API (all names, signatures, data types)
+- Rewrite `README.md` — updated API examples, trimmed CLI section, added new features
+- Update `docs/cli.md` install instructions for `gitstore[cli]`
+
 ## v0.49.1 (2026-02-12)
 
 **Internal:**
