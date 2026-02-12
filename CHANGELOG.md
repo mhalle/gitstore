@@ -4,6 +4,15 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.49.0 (2026-02-12)
+
+**Features:**
+
+- `mv` command — move/rename files within a branch in one atomic commit
+  - POSIX mv semantics: single-file rename, directory rename, multi-source move into directory
+  - Supports globs, `-R` for directories, `-n` dry run, `ref:path` syntax
+  - Same-branch only — cross-branch moves are rejected with a clear error
+
 ## v0.48.0 (2026-02-12)
 
 **Features:**
