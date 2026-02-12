@@ -7,9 +7,10 @@ from typing import TYPE_CHECKING
 
 from . import _compat as pygit2
 
-from .tree import GIT_FILEMODE_BLOB, GIT_FILEMODE_BLOB_EXECUTABLE, GIT_FILEMODE_LINK, GIT_OBJECT_TREE, _mode_from_disk, _normalize_path, _walk_to, exists_at_path
+from .tree import GIT_FILEMODE_BLOB, GIT_FILEMODE_LINK, GIT_OBJECT_TREE, _mode_from_disk, _normalize_path, _walk_to, exists_at_path
 
 if TYPE_CHECKING:
+    from .copy._types import FileType
     from .fs import FS
 
 
@@ -32,7 +33,7 @@ class Batch:
         if self._closed:
             raise RuntimeError("Batch is closed")
 
-    def write(self, path: str | os.PathLike[str], data: bytes, *, mode: int | None = None) -> None:
+    def write(self, path: str | os.PathLike[str], data: bytes, *, mode: FileType | int | None = None) -> None:
         from .copy._types import FileType
         if isinstance(mode, FileType):
             mode = mode.filemode
@@ -42,7 +43,7 @@ class Batch:
         blob_oid = self._repo.create_blob(data)
         self._writes[path] = (blob_oid, mode) if mode is not None else blob_oid
 
-    def write_from_file(self, path: str | os.PathLike[str], local_path: str | os.PathLike[str], *, mode: int | None = None) -> None:
+    def write_from_file(self, path: str | os.PathLike[str], local_path: str | os.PathLike[str], *, mode: FileType | int | None = None) -> None:
         from .copy._types import FileType
         if isinstance(mode, FileType):
             mode = mode.filemode

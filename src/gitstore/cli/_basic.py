@@ -1,4 +1,4 @@
-"""Basic commands: init, destroy, ls, cat, rm, mv, write, log."""
+"""Basic commands: init, destroy, gc, ls, cat, rm, mv, write, log, diff, undo, redo, reflog."""
 
 from __future__ import annotations
 
@@ -44,7 +44,6 @@ from ._helpers import (
     _normalize_at_path,
     _parse_before,
     _resolve_fs,
-    _resolve_snapshot,
     _log_entry_dict,
     _no_create_option,
     _snapshot_options,
@@ -640,7 +639,7 @@ def write(ctx, path, branch, message, no_create, tag, force_tag, passthrough):
         new_fs = retry_write(store, branch, repo_path_norm, data, message=message)
     except StaleSnapshotError:
         raise click.ClickException(
-            "Branch modified concurrently — failed after retries"
+            "Branch modified concurrently — retry"
         )
     except KeyError:
         raise click.ClickException(f"Branch not found: {branch}")
@@ -798,9 +797,9 @@ def undo(ctx, branch, steps):
         gitstore --repo data.git undo -b dev 2  # Undo 2 on 'dev' branch
     """
     repo_path = _require_repo(ctx)
+    repo = _open_store(repo_path)
 
     try:
-        repo = GitStore.open(repo_path, create=False)
         branch = branch or _default_branch(repo)
         fs = repo.branches[branch]
 
@@ -808,14 +807,12 @@ def undo(ctx, branch, steps):
         new_fs = fs.undo(steps)
 
         # Show what happened
-        if steps == 1:
-            click.echo(f"Undid 1 commit on '{branch}'")
-        else:
-            click.echo(f"Undid {steps} commits on '{branch}'")
+        step_word = "step" if steps == 1 else "steps"
+        _status(ctx, f"Undid {steps} {step_word} on '{branch}'")
         click.echo(f"Branch now at: {new_fs.commit_hash[:7]} - {new_fs.message}")
 
     except KeyError:
-        raise click.ClickException(f"Branch {branch!r} not found")
+        raise click.ClickException(f"Branch not found: {branch}")
     except ValueError as e:
         raise click.ClickException(str(e))
     except PermissionError as e:
@@ -843,9 +840,9 @@ def redo(ctx, branch, steps):
         gitstore --repo data.git redo -b dev  # Redo on 'dev' branch
     """
     repo_path = _require_repo(ctx)
+    repo = _open_store(repo_path)
 
     try:
-        repo = GitStore.open(repo_path, create=False)
         branch = branch or _default_branch(repo)
         fs = repo.branches[branch]
 
@@ -853,14 +850,12 @@ def redo(ctx, branch, steps):
         new_fs = fs.redo(steps)
 
         # Show what happened
-        if steps == 1:
-            click.echo(f"Redid 1 step on '{branch}'")
-        else:
-            click.echo(f"Redid {steps} steps on '{branch}'")
+        step_word = "step" if steps == 1 else "steps"
+        _status(ctx, f"Redid {steps} {step_word} on '{branch}'")
         click.echo(f"Branch now at: {new_fs.commit_hash[:7]} - {new_fs.message}")
 
     except KeyError:
-        raise click.ClickException(f"Branch {branch!r} not found")
+        raise click.ClickException(f"Branch not found: {branch}")
     except ValueError as e:
         raise click.ClickException(str(e))
     except PermissionError as e:
@@ -872,6 +867,18 @@ def redo(ctx, branch, steps):
 # ---------------------------------------------------------------------------
 # reflog
 # ---------------------------------------------------------------------------
+
+def _reflog_entry_dict(entry) -> dict:
+    from datetime import datetime as _dt
+    return {
+        "old_sha": entry.old_sha,
+        "new_sha": entry.new_sha,
+        "committer": entry.committer,
+        "timestamp": entry.timestamp,
+        "time": _dt.fromtimestamp(entry.timestamp).isoformat(),
+        "message": entry.message,
+    }
+
 
 @main.command()
 @_repo_option
@@ -894,9 +901,9 @@ def reflog(ctx, branch, limit, fmt):
         gitstore --repo data.git reflog --format jsonl  # JSON Lines output
     """
     repo_path = _require_repo(ctx)
+    repo = _open_store(repo_path)
 
     try:
-        repo = GitStore.open(repo_path, create=False)
         branch = branch or _default_branch(repo)
         entries = repo.branches.reflog(branch)
 
@@ -916,15 +923,13 @@ def reflog(ctx, branch, limit, fmt):
 
         # Output in requested format
         if fmt == "json":
-            from dataclasses import asdict
-            click.echo(json.dumps([asdict(e) for e in entries], indent=2))
+            click.echo(json.dumps([_reflog_entry_dict(e) for e in entries], indent=2))
         elif fmt == "jsonl":
-            from dataclasses import asdict
             for entry in entries:
-                click.echo(json.dumps(asdict(entry)))
+                click.echo(json.dumps(_reflog_entry_dict(entry)))
         else:
             # Text format (default)
-            import datetime
+            from datetime import datetime as _dt
             click.echo(f"Reflog for branch '{branch}' ({len(entries)} entries):\n")
 
             for i, entry in enumerate(entries):
@@ -932,7 +937,7 @@ def reflog(ctx, branch, limit, fmt):
                 msg = entry.message
 
                 # Format timestamp
-                ts = datetime.datetime.fromtimestamp(entry.timestamp)
+                ts = _dt.fromtimestamp(entry.timestamp)
                 time_str = ts.strftime("%Y-%m-%d %H:%M:%S")
 
                 click.echo(f"  [{i}] {new} ({time_str})")
@@ -940,6 +945,6 @@ def reflog(ctx, branch, limit, fmt):
                 click.echo()
 
     except KeyError:
-        raise click.ClickException(f"Branch {branch!r} not found")
+        raise click.ClickException(f"Branch not found: {branch}")
     except FileNotFoundError as e:
         raise click.ClickException(str(e))

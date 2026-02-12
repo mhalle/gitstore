@@ -110,7 +110,7 @@ def _apply_plan(
 ) -> FS:
     """Execute a batch of writes and deletes, attach *changes* to the result.
 
-    Shared by ``copy_to_repo`` and ``remove_from_repo``.
+    Shared by ``copy_to_repo`` and ``remove_in_repo``.
     """
     if not write_pairs and not delete_paths:
         if ignore_errors and changes.errors:

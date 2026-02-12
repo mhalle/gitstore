@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Iterator, MutableMapping
+from collections.abc import Callable, Iterator, MutableMapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from . import _compat as pygit2
 from .mirror import RefChange, MirrorDiff
+
+if TYPE_CHECKING:
+    from .fs import FS
 
 
 @dataclass
@@ -88,7 +92,7 @@ class GitStore:
 
         return store
 
-    def backup(self, url, *, dry_run=False, progress=None) -> MirrorDiff:
+    def backup(self, url: str, *, dry_run: bool = False, progress: Callable | None = None) -> MirrorDiff:
         """Push all refs to *url*, creating an exact mirror.
 
         Returns a `MirrorDiff` describing what changed (or would change).
@@ -96,7 +100,7 @@ class GitStore:
         from .mirror import backup
         return backup(self, url, dry_run=dry_run, progress=progress)
 
-    def restore(self, url, *, dry_run=False, progress=None) -> MirrorDiff:
+    def restore(self, url: str, *, dry_run: bool = False, progress: Callable | None = None) -> MirrorDiff:
         """Fetch all refs from *url*, overwriting local state.
 
         Returns a `MirrorDiff` describing what changed (or would change).
@@ -123,7 +127,7 @@ class RefDict(MutableMapping):
     def _ref_name(self, name: str) -> str:
         return f"{self._prefix}{name}"
 
-    def __getitem__(self, name: str):
+    def __getitem__(self, name: str) -> FS:
         from .fs import FS
 
         repo = self._store._repo
@@ -143,7 +147,7 @@ class RefDict(MutableMapping):
         else:
             return FS(self._store, oid, branch=name)
 
-    def __setitem__(self, name: str, fs):
+    def __setitem__(self, name: str, fs: FS):
         from ._lock import repo_lock
         from .fs import FS
 
@@ -202,7 +206,7 @@ class RefDict(MutableMapping):
     def __len__(self) -> int:
         return sum(1 for _ in self)
 
-    def set(self, name: str, fs) -> FS:
+    def set(self, name: str, fs: FS) -> FS:
         """Set branch to FS snapshot and return writable FS bound to it.
 
         This is a convenience method that combines setting and getting:

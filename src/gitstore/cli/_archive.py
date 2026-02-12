@@ -8,8 +8,8 @@ import zipfile
 
 import click
 
+from ..copy._types import FileType
 from ..exceptions import StaleSnapshotError
-from ..tree import GIT_FILEMODE_BLOB_EXECUTABLE, GIT_FILEMODE_LINK
 from ._helpers import (
     main,
     _repo_option,
@@ -24,10 +24,7 @@ from ._helpers import (
     _open_or_create_store,
     _default_branch,
     _get_branch_fs,
-    _get_fs,
-    _parse_before,
     _resolve_fs,
-    _resolve_snapshot,
     _snapshot_options,
     _detect_archive_format,
     _tag_option,
@@ -51,7 +48,7 @@ def _do_export(ctx, fs, filename: str, fmt: str):
                     info = zipfile.ZipInfo(repo_path)
                     info.compress_type = zipfile.ZIP_DEFLATED
                     info.create_system = 3  # Unix
-                    if fe.filemode == GIT_FILEMODE_LINK:
+                    if fe.file_type == FileType.LINK:
                         info.external_attr = 0o120000 << 16
                         raw = fs.read(repo_path)
                         try:
@@ -88,7 +85,7 @@ def _do_export(ctx, fs, filename: str, fmt: str):
             for dirpath, _dirs, files in fs.walk():
                 for fe in files:
                     repo_path = f"{dirpath}/{fe.name}" if dirpath else fe.name
-                    if fe.filemode == GIT_FILEMODE_LINK:
+                    if fe.file_type == FileType.LINK:
                         info = tarfile.TarInfo(name=repo_path)
                         info.type = tarfile.SYMTYPE
                         raw = fs.read(repo_path)
@@ -144,7 +141,7 @@ def _do_import(ctx, store, branch: str, filename: str, message: str | None, fmt:
                             b.write_symlink(repo_path, target)
                         else:
                             data = zf.read(info.filename)
-                            fm = GIT_FILEMODE_BLOB_EXECUTABLE if unix_mode & 0o111 else None
+                            fm = FileType.EXECUTABLE.filemode if unix_mode & 0o111 else None
                             b.write(repo_path, data, mode=fm)
                         count += 1
                 if count == 0:
@@ -200,14 +197,14 @@ def _do_import(ctx, store, branch: str, filename: str, message: str | None, fmt:
                             data = target.read()
                             target_name = _clean_archive_path(member.linkname)
                             target_mode = member_info.get(target_name, member.mode)
-                            fm = GIT_FILEMODE_BLOB_EXECUTABLE if target_mode & 0o111 else None
+                            fm = FileType.EXECUTABLE.filemode if target_mode & 0o111 else None
                             b.write(repo_path, data, mode=fm)
                             count += 1
                         elif member.isfile():
                             repo_path = _clean_archive_path(member.name)
                             member_info[repo_path] = member.mode
                             data = tf.extractfile(member).read()
-                            fm = GIT_FILEMODE_BLOB_EXECUTABLE if member.mode & 0o111 else None
+                            fm = FileType.EXECUTABLE.filemode if member.mode & 0o111 else None
                             b.write(repo_path, data, mode=fm)
                             count += 1
                 if count == 0:

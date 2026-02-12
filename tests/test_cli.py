@@ -788,7 +788,7 @@ class TestUndo:
 
         r = runner.invoke(main, ["undo", "--repo", initialized_repo])
         assert r.exit_code == 0, r.output
-        assert "Undid 1 commit" in r.output
+        assert "Branch now at:" in r.output
 
         # Branch should now be at v1
         r = runner.invoke(main, ["cat", "--repo", initialized_repo, ":a.txt"])
@@ -803,7 +803,7 @@ class TestUndo:
 
         r = runner.invoke(main, ["undo", "--repo", initialized_repo, "3"])
         assert r.exit_code == 0, r.output
-        assert "Undid 3 commits" in r.output
+        assert "Branch now at:" in r.output
 
         r = runner.invoke(main, ["cat", "--repo", initialized_repo, ":a.txt"])
         assert r.output == "v0"
@@ -829,7 +829,7 @@ class TestUndo:
 
         r = runner.invoke(main, ["undo", "--repo", initialized_repo, "-b", "dev"])
         assert r.exit_code == 0, r.output
-        assert "Undid 1 commit" in r.output
+        assert "Branch now at:" in r.output
 
 
 # ---------------------------------------------------------------------------
@@ -854,7 +854,7 @@ class TestRedo:
         # Redo
         r = runner.invoke(main, ["redo", "--repo", initialized_repo])
         assert r.exit_code == 0, r.output
-        assert "Redid 1 step" in r.output
+        assert "Branch now at:" in r.output
         r = runner.invoke(main, ["cat", "--repo", initialized_repo, ":a.txt"])
         assert r.output == "v2"
 

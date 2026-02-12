@@ -394,8 +394,9 @@ class FS:
         *,
         encoding: str = "utf-8",
         message: str | None = None,
+        mode: FileType | int | None = None,
     ) -> FS:
-        return self.write(path, text.encode(encoding), message=message)
+        return self.write(path, text.encode(encoding), message=message, mode=mode)
 
     def write_from_file(
         self,
@@ -450,19 +451,20 @@ class FS:
 
     # --- Export ---
 
-    def export_tree(self, path: str | Path) -> None:
+    def export_tree(self, path: str | os.PathLike[str]) -> None:
         """Write the tree contents to a directory on the filesystem.
 
         The destination directory should be empty or non-existent.
         Collisions with existing files or directories are not handled.
         """
+        from .copy._types import FileType
         path = Path(path)
         repo = self._store._repo
         for dirpath, dirnames, files in self.walk():
             dir_on_disk = path / dirpath if dirpath else path
             dir_on_disk.mkdir(parents=True, exist_ok=True)
             for fe in files:
-                if fe.filemode == GIT_FILEMODE_LINK:
+                if fe.file_type == FileType.LINK:
                     target = repo[fe.oid].data.decode()
                     dest = dir_on_disk / fe.name
                     if dest.exists() or dest.is_symlink():
@@ -470,7 +472,7 @@ class FS:
                     os.symlink(target, dest)
                 else:
                     (dir_on_disk / fe.name).write_bytes(repo[fe.oid].data)
-                    if fe.filemode == GIT_FILEMODE_BLOB_EXECUTABLE:
+                    if fe.file_type == FileType.EXECUTABLE:
                         os.chmod(dir_on_disk / fe.name, 0o755)
 
     # --- History ---
@@ -650,13 +652,10 @@ class FS:
         self,
         path: str | os.PathLike[str] | None = None,
         *,
-        at: str | os.PathLike[str] | None = None,
         match: str | None = None,
         before: datetime | None = None,
     ) -> Iterator[FS]:
-        # `path` is the primary parameter (positional or keyword).
-        # `at` is a deprecated alias kept for backward compatibility.
-        filter_path = path if path is not None else at
+        filter_path = path
         if filter_path is not None:
             filter_path = _normalize_path(filter_path)
         repo = self._store._repo

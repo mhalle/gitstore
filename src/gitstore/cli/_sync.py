@@ -6,6 +6,7 @@ import os
 
 import click
 
+from ..copy._io import _copy_blob_to_batch
 from ..exceptions import StaleSnapshotError
 from ..tree import _entry_at_path
 from ._helpers import (
@@ -23,14 +24,10 @@ from ._helpers import (
     _no_create_option,
     _require_repo,
     _status,
-    _normalize_repo_path,
     _open_store,
     _open_or_create_store,
     _default_branch,
-    _get_fs,
-    _parse_before,
     _resolve_fs,
-    _resolve_snapshot,
     _snapshot_options,
     _tag_option,
     _apply_tag,
@@ -311,12 +308,7 @@ def _sync_repo_to_repo(ctx, store, src_fs, dest_fs, src_repo_path, dest_repo_pat
                 for p in sorted(to_add | to_update):
                     src_full = f"{src_repo_path}/{p}" if src_repo_path else p
                     dest_full = f"{dest_repo_path}/{p}" if dest_repo_path else p
-                    entry = _entry_at_path(src_fs._store._repo, src_fs._tree_oid, src_full)
-                    if entry is None:
-                        continue
-                    blob_oid, fmode = entry[0], entry[1]
-                    data = src_fs._store._repo[blob_oid].data
-                    b.write(dest_full, data, mode=fmode)
+                    _copy_blob_to_batch(b, src_fs, src_full, dest_full)
 
             _status(ctx, f"Synced -> :{dest_repo_path or '/'}")
     except (FileNotFoundError, NotADirectoryError) as exc:

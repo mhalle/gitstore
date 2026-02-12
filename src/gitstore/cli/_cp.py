@@ -10,7 +10,7 @@ import click
 from ..copy._io import _copy_blob_to_batch
 from ..copy._types import FileType
 from ..exceptions import StaleSnapshotError
-from ..tree import GIT_FILEMODE_LINK, _entry_at_path
+from ..tree import _entry_at_path
 from ._helpers import (
     main,
     _parse_ref_path,
@@ -30,10 +30,7 @@ from ._helpers import (
     _open_store,
     _open_or_create_store,
     _default_branch,
-    _get_fs,
-    _parse_before,
     _resolve_fs,
-    _resolve_snapshot,
     _snapshot_options,
     _tag_option,
     _apply_tag,
@@ -143,7 +140,7 @@ def cp(ctx, args, branch, ref, at_path, match_pattern, before, back, message, fi
         )
     if tag and direction != "disk_to_repo":
         raise click.ClickException(
-            "--tag only applies when writing to repo (disk → repo)"
+            "--tag only applies when writing to repo (disk -> repo)"
         )
     if (exclude or exclude_from) and direction != "disk_to_repo":
         raise click.ClickException(
@@ -443,7 +440,7 @@ def _cp_single_repo_to_disk(ctx, fs, src_raw, dest_path, dry_run,
         try:
             out.parent.mkdir(parents=True, exist_ok=True)
             entry = _entry_at_path(fs._store._repo, fs._tree_oid, src_path)
-            if entry and entry[1] == GIT_FILEMODE_LINK:
+            if entry and FileType.from_filemode(entry[1]) == FileType.LINK:
                 target = fs.readlink(src_path)
                 out.symlink_to(target)
             else:
