@@ -14,10 +14,10 @@ from gitstore.repo import GitStore
 # WSGI test helper
 # ---------------------------------------------------------------------------
 
-def _wsgi_get(app, path="/", accept=None):
-    """Call the WSGI app with a GET request, return (status, headers, body)."""
+def _wsgi_get(app, path="/", accept=None, method="GET"):
+    """Call the WSGI app with a request, return (status, headers, body)."""
     environ = {
-        "REQUEST_METHOD": "GET",
+        "REQUEST_METHOD": method,
         "PATH_INFO": path,
         "SERVER_NAME": "localhost",
         "SERVER_PORT": "8000",
@@ -484,6 +484,151 @@ class TestMimeTypes:
 
 
 # ---------------------------------------------------------------------------
+# CORS tests
+# ---------------------------------------------------------------------------
+
+class TestCORS:
+    def test_cors_disabled_by_default(self, store_with_files):
+        fs = store_with_files.branches["main"]
+        app = _make_app(store_with_files, fs=fs, ref_label="main")
+        _, headers, _ = _wsgi_get(app, "/hello.txt")
+        assert "Access-Control-Allow-Origin" not in headers
+
+    def test_cors_adds_headers(self, store_with_files):
+        fs = store_with_files.branches["main"]
+        app = _make_app(store_with_files, fs=fs, ref_label="main", cors=True)
+        _, headers, _ = _wsgi_get(app, "/hello.txt")
+        assert headers["Access-Control-Allow-Origin"] == "*"
+        assert "GET" in headers["Access-Control-Allow-Methods"]
+        assert "ETag" in headers["Access-Control-Expose-Headers"]
+
+    def test_cors_on_json_response(self, store_with_files):
+        fs = store_with_files.branches["main"]
+        app = _make_app(store_with_files, fs=fs, ref_label="main", cors=True)
+        _, headers, _ = _wsgi_get(app, "/", accept="application/json")
+        assert headers["Access-Control-Allow-Origin"] == "*"
+
+    def test_cors_on_404(self, store_with_files):
+        fs = store_with_files.branches["main"]
+        app = _make_app(store_with_files, fs=fs, ref_label="main", cors=True)
+        status, headers, _ = _wsgi_get(app, "/nonexistent.txt")
+        assert status == "404 Not Found"
+        assert headers["Access-Control-Allow-Origin"] == "*"
+
+    def test_cors_options_preflight(self, store_with_files):
+        fs = store_with_files.branches["main"]
+        app = _make_app(store_with_files, fs=fs, ref_label="main", cors=True)
+        status, headers, body = _wsgi_get(app, "/hello.txt", method="OPTIONS")
+        assert status == "204 No Content"
+        assert headers["Access-Control-Allow-Origin"] == "*"
+        assert body == b""
+
+    def test_cors_multi_ref(self, store_with_files):
+        app = _make_app(store_with_files, cors=True)
+        _, headers, _ = _wsgi_get(app, "/main/hello.txt")
+        assert headers["Access-Control-Allow-Origin"] == "*"
+
+
+# ---------------------------------------------------------------------------
+# No-cache tests
+# ---------------------------------------------------------------------------
+
+class TestNoCache:
+    def test_no_cache_disabled_by_default(self, store_with_files):
+        fs = store_with_files.branches["main"]
+        app = _make_app(store_with_files, fs=fs, ref_label="main")
+        _, headers, _ = _wsgi_get(app, "/hello.txt")
+        assert "Cache-Control" not in headers
+
+    def test_no_cache_adds_header(self, store_with_files):
+        fs = store_with_files.branches["main"]
+        app = _make_app(store_with_files, fs=fs, ref_label="main", no_cache=True)
+        _, headers, _ = _wsgi_get(app, "/hello.txt")
+        assert headers["Cache-Control"] == "no-store"
+
+    def test_no_cache_on_dir(self, store_with_files):
+        fs = store_with_files.branches["main"]
+        app = _make_app(store_with_files, fs=fs, ref_label="main", no_cache=True)
+        _, headers, _ = _wsgi_get(app, "/data")
+        assert headers["Cache-Control"] == "no-store"
+
+    def test_no_cache_on_404(self, store_with_files):
+        fs = store_with_files.branches["main"]
+        app = _make_app(store_with_files, fs=fs, ref_label="main", no_cache=True)
+        status, headers, _ = _wsgi_get(app, "/nonexistent.txt")
+        assert status == "404 Not Found"
+        assert headers["Cache-Control"] == "no-store"
+
+    def test_no_cache_combined_with_cors(self, store_with_files):
+        fs = store_with_files.branches["main"]
+        app = _make_app(store_with_files, fs=fs, ref_label="main",
+                        cors=True, no_cache=True)
+        _, headers, _ = _wsgi_get(app, "/hello.txt")
+        assert headers["Cache-Control"] == "no-store"
+        assert headers["Access-Control-Allow-Origin"] == "*"
+
+
+# ---------------------------------------------------------------------------
+# Base-path tests
+# ---------------------------------------------------------------------------
+
+class TestBasePath:
+    def test_base_path_file(self, store_with_files):
+        fs = store_with_files.branches["main"]
+        app = _make_app(store_with_files, fs=fs, ref_label="main",
+                        base_path="/data")
+        status, _, body = _wsgi_get(app, "/data/hello.txt")
+        assert status == "200 OK"
+        assert body == b"hello world\n"
+
+    def test_base_path_root(self, store_with_files):
+        fs = store_with_files.branches["main"]
+        app = _make_app(store_with_files, fs=fs, ref_label="main",
+                        base_path="/data")
+        status, headers, body = _wsgi_get(app, "/data/")
+        assert status == "200 OK"
+        assert "text/html" in headers["Content-Type"]
+        html = body.decode()
+        assert "hello.txt" in html
+
+    def test_base_path_404_outside_prefix(self, store_with_files):
+        fs = store_with_files.branches["main"]
+        app = _make_app(store_with_files, fs=fs, ref_label="main",
+                        base_path="/data")
+        status, _, _ = _wsgi_get(app, "/hello.txt")
+        assert status == "404 Not Found"
+
+    def test_base_path_links_include_prefix(self, store_with_files):
+        fs = store_with_files.branches["main"]
+        app = _make_app(store_with_files, fs=fs, ref_label="main",
+                        base_path="/data")
+        _, _, body = _wsgi_get(app, "/data/")
+        html = body.decode()
+        assert 'href="/data/hello.txt"' in html
+
+    def test_base_path_multi_ref(self, store_with_files):
+        app = _make_app(store_with_files, base_path="/data")
+        status, _, body = _wsgi_get(app, "/data/main/hello.txt")
+        assert status == "200 OK"
+        assert body == b"hello world\n"
+
+    def test_base_path_multi_ref_root(self, store_with_files):
+        app = _make_app(store_with_files, base_path="/data")
+        status, headers, body = _wsgi_get(app, "/data/")
+        assert status == "200 OK"
+        assert "text/html" in headers["Content-Type"]
+        html = body.decode()
+        assert "main" in html
+
+    def test_base_path_combined_with_cors(self, store_with_files):
+        fs = store_with_files.branches["main"]
+        app = _make_app(store_with_files, fs=fs, ref_label="main",
+                        base_path="/data", cors=True)
+        _, headers, _ = _wsgi_get(app, "/data/hello.txt")
+        assert headers["Access-Control-Allow-Origin"] == "*"
+
+
+# ---------------------------------------------------------------------------
 # CLI command registration
 # ---------------------------------------------------------------------------
 
@@ -499,3 +644,8 @@ class TestServeCommand:
         assert "--ref" in result.output
         assert "--back" in result.output
         assert "--all" in result.output
+        assert "--cors" in result.output
+        assert "--no-cache" in result.output
+        assert "--base-path" in result.output
+        assert "--open" in result.output
+        assert "--quiet" in result.output
