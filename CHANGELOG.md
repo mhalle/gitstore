@@ -4,6 +4,12 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.47.4 (2026-02-11)
+
+**Improvements:**
+
+- `serve` now resolves snapshots live on each request — branches, `--back`, `--before`, `--path`, and `--match` all track the moving branch tip instead of pinning at startup
+
 ## v0.47.3 (2026-02-11)
 
 **Improvements:**
