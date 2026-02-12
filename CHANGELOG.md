@@ -4,6 +4,19 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.47.0 (2026-02-11)
+
+**New features:**
+
+- Add `gitstore serve` command — HTTP file server for repo contents using stdlib `wsgiref`
+- Content negotiation: `Accept: application/json` returns JSON metadata, otherwise raw bytes with MIME types or HTML directory listings
+- Default: single-ref mode on HEAD branch, with shared `--branch`/`--ref`/`--back`/`--before`/`--match`/`--path` snapshot options
+- `--all` flag enables multi-ref mode exposing all branches and tags via `/<ref>/<path>`
+
+**Tests:**
+
+- Add 27 tests for `serve` WSGI app covering single-ref mode, multi-ref mode, content negotiation, 404s, symlinks, MIME types, and CLI registration
+
 ## v0.46.0 (2026-02-11)
 
 **New features:**
