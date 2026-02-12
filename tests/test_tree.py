@@ -180,12 +180,12 @@ class TestWalkTree:
         # Root
         assert result[0][0] == ""
         assert sorted(result[0][1]) == ["d"]
-        assert sorted(result[0][2]) == ["a.txt"]
+        assert sorted(e.name for e in result[0][2]) == ["a.txt"]
         # d/
         d_entry = [r for r in result if r[0] == "d"][0]
         assert sorted(d_entry[1]) == ["sub"]
-        assert sorted(d_entry[2]) == ["x.txt"]
+        assert sorted(e.name for e in d_entry[2]) == ["x.txt"]
         # d/sub/
         sub_entry = [r for r in result if r[0] == "d/sub"][0]
         assert sub_entry[1] == []
-        assert sub_entry[2] == ["y.txt"]
+        assert sorted(e.name for e in sub_entry[2]) == ["y.txt"]

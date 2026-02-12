@@ -43,22 +43,15 @@ def _do_export(ctx, fs, filename: str, fmt: str):
     if fmt == "zip":
         to_stdout = filename == "-"
         dest = io.BytesIO() if to_stdout else filename
-        repo = fs._store._repo
-        root_tree = repo[fs._tree_oid]
         count = 0
         with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as zf:
             for dirpath, _dirs, files in fs.walk():
-                tree = root_tree
-                if dirpath:
-                    for seg in dirpath.split("/"):
-                        tree = repo[tree[seg].id]
-                for fname in files:
-                    repo_path = f"{dirpath}/{fname}" if dirpath else fname
-                    entry = tree[fname]
+                for fe in files:
+                    repo_path = f"{dirpath}/{fe.name}" if dirpath else fe.name
                     info = zipfile.ZipInfo(repo_path)
                     info.compress_type = zipfile.ZIP_DEFLATED
                     info.create_system = 3  # Unix
-                    if entry.filemode == GIT_FILEMODE_LINK:
+                    if fe.filemode == GIT_FILEMODE_LINK:
                         info.external_attr = 0o120000 << 16
                         raw = fs.read(repo_path)
                         try:
@@ -69,7 +62,7 @@ def _do_export(ctx, fs, filename: str, fmt: str):
                             )
                         zf.writestr(info, raw)
                     else:
-                        info.external_attr = entry.filemode << 16
+                        info.external_attr = fe.filemode << 16
                         zf.writestr(info, fs.read(repo_path))
                     count += 1
         if to_stdout:
@@ -90,19 +83,12 @@ def _do_export(ctx, fs, filename: str, fmt: str):
                 mode = "w:xz"
 
         dest = io.BytesIO() if to_stdout else filename
-        repo = fs._store._repo
-        root_tree = repo[fs._tree_oid]
         count = 0
         with tarfile.open(fileobj=dest, mode=mode) if to_stdout else tarfile.open(dest, mode=mode) as tf:
             for dirpath, _dirs, files in fs.walk():
-                tree = root_tree
-                if dirpath:
-                    for seg in dirpath.split("/"):
-                        tree = repo[tree[seg].id]
-                for fname in files:
-                    repo_path = f"{dirpath}/{fname}" if dirpath else fname
-                    entry = tree[fname]
-                    if entry.filemode == GIT_FILEMODE_LINK:
+                for fe in files:
+                    repo_path = f"{dirpath}/{fe.name}" if dirpath else fe.name
+                    if fe.filemode == GIT_FILEMODE_LINK:
                         info = tarfile.TarInfo(name=repo_path)
                         info.type = tarfile.SYMTYPE
                         raw = fs.read(repo_path)
@@ -117,7 +103,7 @@ def _do_export(ctx, fs, filename: str, fmt: str):
                         data = fs.read(repo_path)
                         info = tarfile.TarInfo(name=repo_path)
                         info.size = len(data)
-                        info.mode = entry.filemode & 0o7777
+                        info.mode = fe.filemode & 0o7777
                         tf.addfile(info, io.BytesIO(data))
                     count += 1
         if to_stdout:

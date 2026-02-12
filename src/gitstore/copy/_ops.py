@@ -713,8 +713,8 @@ def _collect_remove_paths(
                 )
             walk_root = repo_path or None
             for dirpath, _dirs, files in fs.walk(walk_root):
-                for fname in files:
-                    full = f"{dirpath}/{fname}" if dirpath else fname
+                for fe in files:
+                    full = f"{dirpath}/{fe.name}" if dirpath else fe.name
                     delete_paths.append(full)
     return sorted(set(delete_paths))
 

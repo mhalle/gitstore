@@ -118,15 +118,13 @@ def _walk_repo(fs: FS, repo_path: str) -> dict[str, tuple[bytes, int]]:
             return result
     walk_path = repo_path or None
     for dirpath, _dirs, files in fs.walk(walk_path):
-        for fname in files:
-            store_path = f"{dirpath}/{fname}" if dirpath else fname
+        for fe in files:
+            store_path = f"{dirpath}/{fe.name}" if dirpath else fe.name
             if repo_path and store_path.startswith(repo_path + "/"):
                 rel = store_path[len(repo_path) + 1:]
             else:
                 rel = store_path
-            entry = _entry_at_path(fs._store._repo, fs._tree_oid, store_path)
-            if entry is not None:
-                result[rel] = (entry[0]._sha, entry[1])
+            result[rel] = (fe.oid._sha, fe.filemode)
     return result
 
 
@@ -463,8 +461,8 @@ def _enum_repo_to_disk(
             dirname = repo_path.rsplit("/", 1)[-1]
             target = os.path.join(_dest, dirname)
             for dirpath, _dirs, files in fs.walk(repo_path):
-                for fname in files:
-                    store_path = f"{dirpath}/{fname}" if dirpath else fname
+                for fe in files:
+                    store_path = f"{dirpath}/{fe.name}" if dirpath else fe.name
                     if repo_path and store_path.startswith(repo_path + "/"):
                         rel = store_path[len(repo_path) + 1:]
                     else:
@@ -474,8 +472,8 @@ def _enum_repo_to_disk(
         elif mode == "contents":
             walk_path = repo_path or None
             for dirpath, _dirs, files in fs.walk(walk_path):
-                for fname in files:
-                    store_path = f"{dirpath}/{fname}" if dirpath else fname
+                for fe in files:
+                    store_path = f"{dirpath}/{fe.name}" if dirpath else fe.name
                     if repo_path and store_path.startswith(repo_path + "/"):
                         rel = store_path[len(repo_path) + 1:]
                     else:
@@ -501,8 +499,8 @@ def _enum_repo_to_repo(
             dirname = repo_path.rsplit("/", 1)[-1]
             target = f"{_dest}/{dirname}" if _dest else dirname
             for dirpath, _dirs, files in fs.walk(repo_path):
-                for fname in files:
-                    store_path = f"{dirpath}/{fname}" if dirpath else fname
+                for fe in files:
+                    store_path = f"{dirpath}/{fe.name}" if dirpath else fe.name
                     if repo_path and store_path.startswith(repo_path + "/"):
                         rel = store_path[len(repo_path) + 1:]
                     else:
@@ -512,8 +510,8 @@ def _enum_repo_to_repo(
         elif mode == "contents":
             walk_path = repo_path or None
             for dirpath, _dirs, files in fs.walk(walk_path):
-                for fname in files:
-                    store_path = f"{dirpath}/{fname}" if dirpath else fname
+                for fe in files:
+                    store_path = f"{dirpath}/{fe.name}" if dirpath else fe.name
                     if repo_path and store_path.startswith(repo_path + "/"):
                         rel = store_path[len(repo_path) + 1:]
                     else:

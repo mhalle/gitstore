@@ -18,6 +18,7 @@ from .tree import (
     GIT_FILEMODE_LINK,
     GIT_FILEMODE_TREE,
     GIT_OBJECT_TREE,
+    WalkEntry,
     _entry_at_path,
     _is_root_path,
     _mode_from_disk,
@@ -104,7 +105,7 @@ class FS:
     def ls(self, path: str | os.PathLike[str] | None = None) -> list[str]:
         return list_tree_at_path(self._store._repo, self._tree_oid, path)
 
-    def walk(self, path: str | os.PathLike[str] | None = None) -> Iterator[tuple[str, list[str], list[str]]]:
+    def walk(self, path: str | os.PathLike[str] | None = None) -> Iterator[tuple[str, list[str], list[WalkEntry]]]:
         if path is None or _is_root_path(path):
             yield from walk_tree(self._store._repo, self._tree_oid)
         else:
@@ -450,29 +451,20 @@ class FS:
         """
         path = Path(path)
         repo = self._store._repo
-        for dirpath, dirnames, filenames in self.walk():
+        for dirpath, dirnames, files in self.walk():
             dir_on_disk = path / dirpath if dirpath else path
             dir_on_disk.mkdir(parents=True, exist_ok=True)
-            # Look up the tree for this directory once to get filemodes
-            if dirpath:
-                tree = repo[self._tree_oid]
-                for seg in dirpath.split("/"):
-                    tree = repo[tree[seg].id]
-            else:
-                tree = repo[self._tree_oid]
-            for filename in filenames:
-                entry = tree[filename]
-                store_path = f"{dirpath}/{filename}" if dirpath else filename
-                if entry.filemode == GIT_FILEMODE_LINK:
-                    target = repo[entry.id].data.decode()
-                    dest = dir_on_disk / filename
+            for fe in files:
+                if fe.filemode == GIT_FILEMODE_LINK:
+                    target = repo[fe.oid].data.decode()
+                    dest = dir_on_disk / fe.name
                     if dest.exists() or dest.is_symlink():
                         dest.unlink()
                     os.symlink(target, dest)
                 else:
-                    (dir_on_disk / filename).write_bytes(repo[entry.id].data)
-                    if entry.filemode == GIT_FILEMODE_BLOB_EXECUTABLE:
-                        os.chmod(dir_on_disk / filename, 0o755)
+                    (dir_on_disk / fe.name).write_bytes(repo[fe.oid].data)
+                    if fe.filemode == GIT_FILEMODE_BLOB_EXECUTABLE:
+                        os.chmod(dir_on_disk / fe.name, 0o755)
 
     # --- History ---
 

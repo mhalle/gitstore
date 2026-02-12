@@ -9,9 +9,17 @@ from __future__ import annotations
 import os
 import stat
 from collections import defaultdict
-from typing import Iterator
+from typing import Iterator, NamedTuple
 
 from . import _compat as pygit2
+
+
+class WalkEntry(NamedTuple):
+    """A file entry yielded by :func:`walk_tree`."""
+
+    name: str
+    oid: pygit2.Oid
+    filemode: int
 
 
 GIT_FILEMODE_TREE = 0o040000
@@ -235,11 +243,14 @@ def walk_tree(
     repo: pygit2.Repository,
     tree_oid: pygit2.Oid,
     prefix: str = "",
-) -> Iterator[tuple[str, list[str], list[str]]]:
-    """Walk the tree recursively, yielding (dirpath, dirnames, filenames)."""
+) -> Iterator[tuple[str, list[str], list[WalkEntry]]]:
+    """Walk the tree recursively, yielding (dirpath, dirnames, file_entries).
+
+    Each file entry is a :class:`WalkEntry` with *name*, *oid*, and *filemode*.
+    """
     tree = repo[tree_oid]
     dirs: list[str] = []
-    files: list[str] = []
+    files: list[WalkEntry] = []
     dir_oids: list[tuple[str, pygit2.Oid]] = []
 
     for entry in tree:
@@ -247,7 +258,7 @@ def walk_tree(
             dirs.append(entry.name)
             dir_oids.append((entry.name, entry.id))
         else:
-            files.append(entry.name)
+            files.append(WalkEntry(entry.name, entry.id, entry.filemode))
 
     yield (prefix, dirs, files)
 

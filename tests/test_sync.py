@@ -779,8 +779,8 @@ class TestDryRunExactMatch:
         # Snapshot repo files before
         repo_before = set()
         for dp, _, fnames in fs.walk("data"):
-            for f in fnames:
-                repo_before.add(f"{dp}/{f}" if dp else f)
+            for fe in fnames:
+                repo_before.add(f"{dp}/{fe.name}" if dp else fe.name)
 
         plan = sync_to_repo_dry_run(fs, str(local), "data")
         new_fs = sync_to_repo(fs, str(local), "data")
@@ -788,8 +788,8 @@ class TestDryRunExactMatch:
         # Snapshot repo files after
         repo_after = set()
         for dp, _, fnames in new_fs.walk("data"):
-            for f in fnames:
-                repo_after.add(f"{dp}/{f}" if dp else f)
+            for fe in fnames:
+                repo_after.add(f"{dp}/{fe.name}" if dp else fe.name)
 
         # Every add in plan should be new
         for p in paths(plan.add):

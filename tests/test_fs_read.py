@@ -71,13 +71,13 @@ class TestWalk:
         root = result[0]
         assert root[0] == ""
         assert sorted(root[1]) == ["src"]
-        assert sorted(root[2]) == ["hello.txt"]
+        assert sorted(e.name for e in root[2]) == ["hello.txt"]
 
     def test_walk_subdir(self, repo_with_files):
         _, fs = repo_with_files
         result = list(fs.walk("src"))
         assert result[0][0] == "src"
-        assert sorted(result[0][2]) == ["main.py"]
+        assert sorted(e.name for e in result[0][2]) == ["main.py"]
 
     def test_walk_on_file_raises(self, repo_with_files):
         _, fs = repo_with_files

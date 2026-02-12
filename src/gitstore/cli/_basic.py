@@ -210,8 +210,8 @@ def ls(ctx, paths, branch, recursive, ref, at_path, match_pattern, before, back)
                 for m in matches:
                     if fs.is_dir(m):
                         for dp, _, fnames in fs.walk(m):
-                            for f in fnames:
-                                results.add(f"{dp}/{f}" if dp else f)
+                            for fe in fnames:
+                                results.add(f"{dp}/{fe.name}" if dp else fe.name)
                     else:
                         results.add(m)
             else:
@@ -223,8 +223,8 @@ def ls(ctx, paths, branch, recursive, ref, at_path, match_pattern, before, back)
                 rp_norm = _normalize_repo_path(repo_path)
             try:
                 for dp, _, fnames in fs.walk(rp_norm if rp_norm else None):
-                    for f in fnames:
-                        results.add(f"{dp}/{f}" if dp else f)
+                    for fe in fnames:
+                        results.add(f"{dp}/{fe.name}" if dp else fe.name)
             except FileNotFoundError:
                 raise click.ClickException(f"Path not found: {rp_norm}")
             except NotADirectoryError:
