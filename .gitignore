@@ -5,3 +5,6 @@ __pycache__/
 
 # JediDB
 .jedidb/
+
+# Test repos
+data.git/
