@@ -610,7 +610,7 @@ Write commands (`cp`, `rm`, `write`, `unarchive`, `unzip`, `untar`) accept `-m` 
 
 `backup` and `restore` operate on the entire repository (all branches and tags) and accept `-n`/`--dry-run` to preview changes without transferring data. `restore` also accepts `--no-create` to require an existing repo.
 
-`serve` starts an HTTP file server for browsing repo contents. By default it serves the current branch; use `--all` to expose all branches and tags via `/<ref>/<path>`. Supports `--cors`, `--no-cache`, `--base-path` for mounting under a URL prefix, `--open` to launch a browser, and `-q`/`--quiet` to suppress request logs.
+`serve` starts an HTTP file server for browsing repo contents. Content is resolved live on each request, so new commits are visible immediately. Use `--all` to expose all branches and tags via `/<ref>/<path>`. Responses include `ETag` headers (commit hash) and `Cache-Control: no-cache`, so browsers revalidate on every request and get a lightweight 304 when nothing has changed. Supports `--cors`, `--no-cache` (disables caching entirely), `--base-path` for mounting under a URL prefix, `--open` to launch a browser, and `-q`/`--quiet` to suppress request logs.
 
 ## Documentation
 

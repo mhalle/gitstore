@@ -489,7 +489,7 @@ gitstore restore -n https://github.com/user/repo.git  # dry run
 
 ### serve
 
-Serve repository files over HTTP with content negotiation. Browsers see HTML directory listings and raw file contents; API clients requesting `Accept: application/json` get JSON metadata.
+Serve repository files over HTTP with content negotiation. Content is resolved live on each request — new commits are visible immediately. Browsers see HTML directory listings and raw file contents; API clients requesting `Accept: application/json` get JSON metadata.
 
 ```bash
 gitstore serve                                   # serve HEAD branch at http://127.0.0.1:8000/
@@ -511,7 +511,7 @@ gitstore serve -q                                # suppress per-request log outp
 | `--ref`, `--path`, `--match`, `--before`, `--back` | Snapshot filters. |
 | `--all` | Multi-ref mode: expose all branches and tags via `/<ref>/<path>`. |
 | `--cors` | Add `Access-Control-Allow-Origin: *` and related CORS headers. |
-| `--no-cache` | Send `Cache-Control: no-store` on every response. |
+| `--no-cache` | Send `Cache-Control: no-store` on every response (disables caching entirely). |
 | `--base-path PREFIX` | URL prefix to mount under (e.g. `/data`). |
 | `--open` | Open the URL in the default browser on start. |
 | `-q`, `--quiet` | Suppress per-request log output. |
@@ -525,6 +525,11 @@ gitstore serve -q                                # suppress per-request log outp
 
 - `Accept: application/json` returns JSON metadata (path, ref, size, type, entries).
 - Otherwise: raw file bytes with MIME types, or HTML directory listings.
+
+**Caching:**
+
+- All 200 responses include `ETag` (commit hash) and `Cache-Control: no-cache`, so browsers always revalidate but get a lightweight **304 Not Modified** when the content hasn't changed.
+- `--no-cache` overrides to `Cache-Control: no-store`, disabling caching entirely.
 
 **Response headers:**
 
