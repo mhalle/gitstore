@@ -100,17 +100,26 @@ def _base_path_middleware(app, prefix):
 # WSGI app
 # ---------------------------------------------------------------------------
 
-def _make_app(store, *, fs=None, ref_label=None,
+def _make_app(store, *, fs=None, resolver=None, ref_label=None,
               cors=False, no_cache=False, base_path=""):
     """Return a WSGI application serving *store* contents over HTTP.
 
-    If *fs* is given, operate in single-ref mode (all URLs are repo paths
-    within that snapshot).  Otherwise, multi-ref mode: first URL segment
-    selects the branch or tag.
+    Single-ref mode (one snapshot per request):
+      *resolver* — callable returning an FS, called on every request (live).
+      *fs* — fixed snapshot (convenience shorthand for tests).
+
+    If neither is given, multi-ref mode: first URL segment selects the
+    branch or tag.
 
     *ref_label* is the display name shown in JSON responses for single-ref
     mode (e.g. the branch name).
     """
+    single_ref = fs is not None or resolver is not None
+
+    def _get_fs():
+        if resolver is not None:
+            return resolver()
+        return fs
 
     def app(environ, start_response):
         path_info = environ.get("PATH_INFO", "/")
@@ -118,9 +127,10 @@ def _make_app(store, *, fs=None, ref_label=None,
         accept = environ.get("HTTP_ACCEPT", "")
         want_json = "application/json" in accept
 
-        if fs is not None:
+        if single_ref:
             # --- Single-ref mode ---
-            return _serve_path(start_response, fs, ref_label or "",
+            current_fs = _get_fs()
+            return _serve_path(start_response, current_fs, ref_label or "",
                                base_path, path, want_json)
         else:
             # --- Multi-ref mode ---
@@ -337,13 +347,16 @@ def serve(ctx, host, port, branch, ref, at_path, match_pattern, before, back,
         mode = "multi-ref"
     else:
         branch = branch or _default_branch(store)
-        fs = _resolve_fs(store, branch, ref,
-                         at_path=at_path, match_pattern=match_pattern,
-                         before=before, back=back)
         ref_label = ref or branch
-        app = _make_app(store, fs=fs, ref_label=ref_label,
+
+        def _resolve():
+            return _resolve_fs(store, branch, ref,
+                               at_path=at_path, match_pattern=match_pattern,
+                               before=before, back=back)
+
+        app = _make_app(store, resolver=_resolve, ref_label=ref_label,
                         cors=cors, no_cache=no_cache, base_path=base_path)
-        mode = f"ref {ref_label}"
+        mode = f"branch {branch} (live)"
         if back:
             mode += f" ~{back}"
 

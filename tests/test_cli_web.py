@@ -629,6 +629,59 @@ class TestBasePath:
 
 
 # ---------------------------------------------------------------------------
+# Live branch reload tests
+# ---------------------------------------------------------------------------
+
+class TestLiveBranch:
+    def test_resolver_sees_new_commits(self, store_with_files):
+        """resolver= re-resolves on each request, seeing new commits."""
+        app = _make_app(store_with_files,
+                        resolver=lambda: store_with_files.branches["main"],
+                        ref_label="main")
+        status, _, body = _wsgi_get(app, "/hello.txt")
+        assert status == "200 OK"
+        assert body == b"hello world\n"
+
+        # Write a new file after app was created
+        fs = store_with_files.branches["main"]
+        fs.write("new.txt", b"live content")
+
+        status, _, body = _wsgi_get(app, "/new.txt")
+        assert status == "200 OK"
+        assert body == b"live content"
+
+    def test_fixed_fs_does_not_see_new_commits(self, store_with_files):
+        """fs= mode uses a fixed snapshot, does not see new commits."""
+        fs = store_with_files.branches["main"]
+        app = _make_app(store_with_files, fs=fs, ref_label="main")
+
+        # Write a new file after app was created
+        fs.write("new.txt", b"new content")
+
+        status, _, _ = _wsgi_get(app, "/new.txt")
+        assert status == "404 Not Found"
+
+    def test_resolver_root_listing(self, store_with_files):
+        app = _make_app(store_with_files,
+                        resolver=lambda: store_with_files.branches["main"],
+                        ref_label="main")
+        status, headers, body = _wsgi_get(app, "/")
+        assert status == "200 OK"
+        assert "text/html" in headers["Content-Type"]
+        assert "hello.txt" in body.decode()
+
+    def test_resolver_json(self, store_with_files):
+        app = _make_app(store_with_files,
+                        resolver=lambda: store_with_files.branches["main"],
+                        ref_label="main")
+        status, _, body = _wsgi_get(app, "/hello.txt", accept="application/json")
+        assert status == "200 OK"
+        data = json.loads(body)
+        assert data["ref"] == "main"
+        assert data["type"] == "file"
+
+
+# ---------------------------------------------------------------------------
 # CLI command registration
 # ---------------------------------------------------------------------------
 
