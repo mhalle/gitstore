@@ -96,6 +96,45 @@ def destroy(ctx, force):
 
 
 # ---------------------------------------------------------------------------
+# gc
+# ---------------------------------------------------------------------------
+
+@main.command()
+@_repo_option
+@click.pass_context
+def gc(ctx):
+    """Run garbage collection on the repository.
+
+    Removes unreachable objects (orphaned blobs, etc.) and repacks
+    the object store.  Requires git to be installed.
+    """
+    import shutil
+    import subprocess
+
+    repo_path = _require_repo(ctx)
+    if not os.path.exists(repo_path):
+        raise click.ClickException(f"Repository not found: {repo_path}")
+
+    git = shutil.which("git")
+    if git is None:
+        raise click.ClickException(
+            "git is not installed or not on PATH — gc requires git"
+        )
+
+    result = subprocess.run(
+        [git, "gc"],
+        cwd=repo_path,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        msg = result.stderr.strip() or result.stdout.strip() or "unknown error"
+        raise click.ClickException(f"git gc failed: {msg}")
+
+    _status(ctx, f"gc: {repo_path}")
+
+
+# ---------------------------------------------------------------------------
 # ls
 # ---------------------------------------------------------------------------
 

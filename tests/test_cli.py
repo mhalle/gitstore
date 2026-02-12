@@ -60,6 +60,30 @@ class TestDestroy:
 
 
 # ---------------------------------------------------------------------------
+# TestGc
+# ---------------------------------------------------------------------------
+
+class TestGc:
+    def test_gc_succeeds(self, runner, repo_with_files):
+        import shutil
+        if shutil.which("git") is None:
+            pytest.skip("git not installed")
+        result = runner.invoke(main, ["gc", "--repo", repo_with_files])
+        assert result.exit_code == 0
+
+    def test_gc_missing_repo(self, runner, tmp_path):
+        bad_path = str(tmp_path / "nope.git")
+        result = runner.invoke(main, ["gc", "--repo", bad_path])
+        assert result.exit_code != 0
+        assert "not found" in result.output.lower()
+
+    def test_gc_help(self, runner):
+        result = runner.invoke(main, ["gc", "--help"])
+        assert result.exit_code == 0
+        assert "garbage collection" in result.output.lower()
+
+
+# ---------------------------------------------------------------------------
 # TestRm
 # ---------------------------------------------------------------------------
 
