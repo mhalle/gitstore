@@ -109,8 +109,9 @@ class TestGlobEdgeCases:
         result = fs_with_tree.glob("")
         assert result == []
 
-    def test_results_unsorted(self, fs_with_tree):
+    def test_results_sorted(self, fs_with_tree):
         result = fs_with_tree.glob("*")
+        assert result == sorted(result)
         assert set(result) == {"data.txt", "docs", "readme.txt", "setup.py", "src"}
 
 
@@ -174,6 +175,6 @@ class TestGlobDoublestar:
         result = fs_with_tree.glob("**/readme.txt")
         assert "readme.txt" in result
 
-    def test_doublestar_no_sort_guarantee(self, fs_with_tree):
+    def test_doublestar_sorted(self, fs_with_tree):
         result = fs_with_tree.glob("**")
-        assert len(result) == len(set(result))  # unique, but not necessarily sorted
+        assert result == sorted(result)  # sorted and unique

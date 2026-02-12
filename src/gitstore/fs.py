@@ -144,9 +144,9 @@ class FS:
         a leading ``.`` unless the pattern segment itself starts with ``.``.
         ``**`` matches zero or more directory levels, skipping directories
         whose names start with ``.``.
-        Returns a deduplicated list of matching paths (files and directories).
+        Returns a sorted, deduplicated list of matching paths (files and directories).
         """
-        return list(self.iglob(pattern))
+        return sorted(self.iglob(pattern))
 
     def _iglob_entries(self, tree_oid) -> list[tuple[str, bool, object]]:
         """Return [(name, is_dir, oid), ...] for entries in a tree."""
@@ -429,7 +429,11 @@ class FS:
     # --- Dump ---
 
     def dump(self, path: str | Path) -> None:
-        """Write the tree contents to a directory on the filesystem."""
+        """Write the tree contents to a directory on the filesystem.
+
+        The destination directory should be empty or non-existent.
+        Collisions with existing files or directories are not handled.
+        """
         path = Path(path)
         repo = self._store._repo
         for dirpath, dirnames, filenames in self.walk():
@@ -599,12 +603,18 @@ class FS:
         target_sha = current_sha
         index = current_index
 
+        from dulwich.protocol import ZERO_SHA as _ZERO_SHA
+
         for step in range(steps):
             if index < 0:
                 raise ValueError(
                     f"Cannot redo {steps} steps - only {step} step(s) available"
                 )
             target_sha = entries[index].old_sha
+            if target_sha == _ZERO_SHA:
+                raise ValueError(
+                    f"Cannot redo {steps} step(s) — reaches branch creation point (no prior commit)"
+                )
             index -= 1
 
         target_oid = pygit2.Oid(target_sha)

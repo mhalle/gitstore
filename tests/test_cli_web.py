@@ -94,6 +94,63 @@ def store_with_symlink(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# XSS escaping tests
+# ---------------------------------------------------------------------------
+
+class TestHtmlEscaping:
+    def test_file_name_escaped_in_dir_listing(self, tmp_path):
+        """Special chars in file names must be HTML-escaped in directory listings."""
+        store = GitStore.open(str(tmp_path / "test.git"), branch="main")
+        fs = store.branches["main"]
+        fs = fs.write("<script>alert(1)</script>.txt", b"xss")
+        fs = store.branches["main"]
+        app = _make_app(store, fs=fs, ref_label="main")
+        status, _, body = _wsgi_get(app, "/")
+        assert status == "200 OK"
+        text = body.decode()
+        assert "&lt;script&gt;" in text
+        assert "<script>alert(1)</script>" not in text
+
+    def test_dir_path_escaped_in_heading(self, tmp_path):
+        """Directory display path must be HTML-escaped in <h1>."""
+        store = GitStore.open(str(tmp_path / "test.git"), branch="main")
+        fs = store.branches["main"]
+        fs = fs.write("a&b/file.txt", b"data")
+        fs = store.branches["main"]
+        app = _make_app(store, fs=fs, ref_label="main")
+        status, _, body = _wsgi_get(app, "/a&b")
+        assert status == "200 OK"
+        text = body.decode()
+        assert "a&amp;b" in text
+
+    def test_href_attribute_escaped(self, tmp_path):
+        """Quote-breaking chars in filenames must be escaped in href attributes."""
+        store = GitStore.open(str(tmp_path / "test.git"), branch="main")
+        fs = store.branches["main"]
+        # A filename with a double-quote that could break href="..."
+        fs = fs.write('x"onmouseover=alert(1).txt', b"xss")
+        fs = store.branches["main"]
+        app = _make_app(store, fs=fs, ref_label="main")
+        _, _, body = _wsgi_get(app, "/")
+        text = body.decode()
+        # The raw double-quote must NOT appear unescaped inside an href="..." attr
+        assert 'x"onmouseover' not in text
+
+    def test_branch_name_escaped_in_ref_listing(self, tmp_path):
+        """Branch names with special chars must be escaped in multi-ref HTML."""
+        store = GitStore.open(str(tmp_path / "test.git"), branch="main")
+        fs = store.branches["main"]
+        fs.write("f.txt", b"data")
+        # Create a branch whose name contains HTML special chars
+        store.branches.set("<b>evil</b>", store.branches["main"])
+        app = _make_app(store)
+        _, _, body = _wsgi_get(app, "/")
+        text = body.decode()
+        assert "&lt;b&gt;evil&lt;/b&gt;" in text
+        assert "<b>evil</b>" not in text
+
+
+# ---------------------------------------------------------------------------
 # Single-ref mode tests (default)
 # ---------------------------------------------------------------------------
 

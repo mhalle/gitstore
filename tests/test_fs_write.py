@@ -499,6 +499,20 @@ class TestUndoRedoEdgeCases:
         assert fs_redo.message == "Initialize main"
         assert fs_redo.ls() == []
 
+    def test_redo_past_creation_raises(self, repo_fs):
+        """Redo past branch creation (zero-SHA reflog entry) raises ValueError."""
+        repo, fs = repo_fs
+        fs1 = fs.write("a.txt", b"a")
+
+        # Create a new branch — its reflog starts with a ZERO_SHA old entry
+        repo.branches.set("dev", fs1)
+        dev_fs = repo.branches["dev"]
+        dev_fs2 = dev_fs.write("b.txt", b"b")
+
+        # redo(2) reaches the create-ref entry whose old_sha is ZERO_SHA
+        with pytest.raises(ValueError, match="branch creation"):
+            dev_fs2.redo(2)
+
     def test_reflog_chronological_order(self, repo_fs):
         """Reflog entries should be in chronological order."""
         repo, fs = repo_fs

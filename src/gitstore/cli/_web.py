@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import html
 import json
 import mimetypes
+from urllib.parse import quote
 
 import click
 
@@ -38,6 +40,19 @@ def _guess_mime(path):
     if mime is None:
         return "application/octet-stream"
     return _MIME_OVERRIDES.get(mime, mime)
+
+
+def _href(*segments: str) -> str:
+    """Build an HTML-safe href from path segments.
+
+    Each segment is percent-encoded (preserving ``/`` within segments),
+    then the whole value is HTML-attribute-escaped.
+    """
+    parts = [quote(s, safe="/") for s in segments if s]
+    raw = "/".join(parts)
+    if not raw.startswith("/"):
+        raw = "/" + raw
+    return html.escape(raw, quote=True)
 
 
 # ---------------------------------------------------------------------------
@@ -184,12 +199,12 @@ def _serve_ref_listing(start_response, store, base_path, want_json):
     # HTML listing
     lines = ["<html><body>", "<h1>Branches</h1>", "<ul>"]
     for b in branches:
-        lines.append(f'<li><a href="{base_path}/{b}/">{b}</a></li>')
+        lines.append(f'<li><a href="{_href(base_path, b)}/">{html.escape(b)}</a></li>')
     lines.append("</ul>")
     lines.append("<h1>Tags</h1>")
     lines.append("<ul>")
     for t in tags:
-        lines.append(f'<li><a href="{base_path}/{t}/">{t}</a></li>')
+        lines.append(f'<li><a href="{_href(base_path, t)}/">{html.escape(t)}</a></li>')
     lines.append("</ul>")
     lines.append("</body></html>")
     body = "\n".join(lines).encode()
@@ -273,10 +288,10 @@ def _serve_dir(start_response, fs, ref_label, link_prefix, path, want_json, etag
 
     # HTML listing
     display_path = path or "/"
-    lines = ["<html><body>", f"<h1>{display_path}</h1>", "<ul>"]
+    lines = ["<html><body>", f"<h1>{html.escape(display_path)}</h1>", "<ul>"]
     for entry in sorted(entries):
-        href = f"{link_prefix}/{path}/{entry}" if path else f"{link_prefix}/{entry}"
-        lines.append(f'<li><a href="{href}">{entry}</a></li>')
+        href = _href(link_prefix, path, entry) if path else _href(link_prefix, entry)
+        lines.append(f'<li><a href="{href}">{html.escape(entry)}</a></li>')
     lines.append("</ul>")
     lines.append("</body></html>")
     body = "\n".join(lines).encode()

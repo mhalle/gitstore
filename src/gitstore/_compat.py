@@ -494,6 +494,22 @@ class Repository:
 
         # Auto-create remote for push if it's a local path that doesn't exist
         is_local = not any(url.startswith(proto) for proto in ["http://", "https://", "git://", "ssh://"])
+        if is_local and not url.startswith("file://"):
+            # Detect scp-style URLs: user@host:path or host:path
+            # Exclude Windows drive letters (single letter before colon).
+            if "@" in url and ":" in url.split("@", 1)[1]:
+                raise ValueError(
+                    f"scp-style URL not supported: {url!r} — use ssh:// format instead"
+                )
+            colon_idx = url.find(":")
+            # A colon after >1 chars with no path separator before it
+            # looks like host:path.  Treat both / and \ as separators
+            # to avoid rejecting Windows paths (e.g. \\?\C:\repo).
+            prefix = url[:colon_idx]
+            if colon_idx > 1 and "/" not in prefix and "\\" not in prefix:
+                raise ValueError(
+                    f"scp-style URL not supported: {url!r} — use ssh:// format instead"
+                )
         if is_local and direction == "push":
             local_path = url[7:] if url.startswith("file://") else url
             if not os.path.exists(local_path):
