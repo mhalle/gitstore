@@ -4,6 +4,20 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.47.2 (2026-02-11)
+
+**New features:**
+
+- `--cors` flag adds permissive CORS headers (`Access-Control-Allow-Origin: *`) to all responses
+- `--no-cache` flag sends `Cache-Control: no-store` on every response
+- `--base-path` mounts the server under a URL prefix (e.g. `/data`)
+- `--open` opens the URL in the default browser on start
+- `--quiet` / `-q` suppresses per-request log output
+
+**Tests:**
+
+- Add 17 tests: CORS middleware (6), no-cache middleware (5), base-path middleware (7), CLI help assertions for new flags (4 new checks)
+
 ## v0.47.1 (2026-02-11)
 
 **Bug fixes:**
