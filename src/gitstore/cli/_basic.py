@@ -321,8 +321,8 @@ def rm(ctx, paths, recursive, dry_run, branch, message, tag, force_tag):
 @_tag_option
 @click.option("-p", "--passthrough", is_flag=True, default=False,
               help="Echo stdin to stdout (tee mode for pipelines).")
-@click.option("--tx", "tx_id", default=None,
-              help="Write to a transaction instead of committing directly.")
+@click.option("--tx", "tx_id", default=None, envvar="GITSTORE_TX",
+              help="Write to a transaction instead of committing directly (or set GITSTORE_TX).")
 @click.pass_context
 def write(ctx, path, branch, message, no_create, tag, force_tag, passthrough, tx_id):
     """Write stdin to a file in the repo."""

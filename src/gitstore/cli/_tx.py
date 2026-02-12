@@ -26,6 +26,22 @@ from ._helpers import (
 )
 
 
+GITSTORE_TX_ENV = "GITSTORE_TX"
+
+
+def _resolve_tx_id(tx_id: str | None) -> str:
+    """Resolve transaction ID from argument or GITSTORE_TX env var."""
+    import os
+    if tx_id:
+        return tx_id
+    env_val = os.environ.get(GITSTORE_TX_ENV)
+    if env_val:
+        return env_val
+    raise click.ClickException(
+        "No transaction ID given. Pass TX_ID or set GITSTORE_TX."
+    )
+
+
 @main.group()
 def tx():
     """Transactions: accumulate writes, commit once.
@@ -35,32 +51,51 @@ def tx():
     then squash everything into a single commit:
 
     \b
-        TX=$(gitstore tx begin)
-        echo data1 | gitstore write --tx $TX :stage1.txt &
-        echo data2 | gitstore write --tx $TX :stage2.txt &
+        eval $(gitstore tx begin --export)
+        echo data1 | gitstore write :stage1.txt &
+        echo data2 | gitstore write :stage2.txt &
         wait
-        gitstore tx commit $TX -m "pipeline run"
+        gitstore tx commit -m "pipeline run"
+
+    \b
+    Or pass the ID explicitly:
+
+    \b
+        TX=$(gitstore tx begin)
+        echo data | gitstore write --tx $TX :file.txt
+        gitstore tx commit $TX -m "done"
     """
 
 
 @tx.command("begin")
 @_repo_option
 @_branch_option
+@click.option("--export", "export_mode", is_flag=True, default=False,
+              help="Print export statement for eval (sets GITSTORE_TX).")
 @click.pass_context
-def begin(ctx, branch):
-    """Start a transaction. Prints the transaction ID to stdout."""
+def begin(ctx, branch, export_mode):
+    """Start a transaction. Prints the transaction ID to stdout.
+
+    \b
+    With --export, prints a shell export statement:
+        eval $(gitstore tx begin --export)
+    This sets GITSTORE_TX so subsequent commands pick it up automatically.
+    """
     store = _open_store(_require_repo(ctx))
     branch = branch or _default_branch(store)
     try:
         tx_id = _tx_begin(store, branch)
     except KeyError as exc:
         raise click.ClickException(str(exc))
-    click.echo(tx_id)
+    if export_mode:
+        click.echo(f"export {GITSTORE_TX_ENV}={tx_id}")
+    else:
+        click.echo(tx_id)
 
 
 @tx.command("commit")
 @_repo_option
-@click.argument("tx_id")
+@click.argument("tx_id", required=False, default=None)
 @_message_option
 @_tag_option
 @click.pass_context
@@ -68,9 +103,11 @@ def commit(ctx, tx_id, message, tag, force_tag):
     """Squash transaction into a single commit on the source branch.
 
     TX_ID is the transaction identifier returned by 'tx begin'.
+    If omitted, reads from the GITSTORE_TX environment variable.
     """
     from ..exceptions import StaleSnapshotError
 
+    tx_id = _resolve_tx_id(tx_id)
     store = _open_store(_require_repo(ctx))
     try:
         source = _tx_source(tx_id)
@@ -92,13 +129,15 @@ def commit(ctx, tx_id, message, tag, force_tag):
 
 @tx.command("abort")
 @_repo_option
-@click.argument("tx_id")
+@click.argument("tx_id", required=False, default=None)
 @click.pass_context
 def abort(ctx, tx_id):
     """Abort a transaction, discarding all changes.
 
     TX_ID is the transaction identifier returned by 'tx begin'.
+    If omitted, reads from the GITSTORE_TX environment variable.
     """
+    tx_id = _resolve_tx_id(tx_id)
     store = _open_store(_require_repo(ctx))
     _tx_abort(store, tx_id)
     _status(ctx, "Transaction aborted")
@@ -106,13 +145,15 @@ def abort(ctx, tx_id):
 
 @tx.command("status")
 @_repo_option
-@click.argument("tx_id")
+@click.argument("tx_id", required=False, default=None)
 @click.pass_context
 def status(ctx, tx_id):
     """Show files accumulated in a transaction.
 
     TX_ID is the transaction identifier returned by 'tx begin'.
+    If omitted, reads from the GITSTORE_TX environment variable.
     """
+    tx_id = _resolve_tx_id(tx_id)
     store = _open_store(_require_repo(ctx))
     try:
         source = _tx_source(tx_id)
