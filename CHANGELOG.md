@@ -4,6 +4,12 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.47.5 (2026-02-11)
+
+**Improvements:**
+
+- Add `Cache-Control: no-cache` and 304 Not Modified support — browsers always revalidate via ETag and skip re-downloading unchanged content
+
 ## v0.47.4 (2026-02-11)
 
 **Improvements:**
