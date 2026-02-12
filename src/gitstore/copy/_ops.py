@@ -15,6 +15,7 @@ from ._resolve import (
     _resolve_repo_sources,
     _enum_disk_to_repo,
     _enum_repo_to_disk,
+    _enum_repo_to_repo,
 )
 from ._io import (
     _local_file_oid,
@@ -902,3 +903,127 @@ def sync_from_repo_dry_run(
         # For local files being deleted, we don't have type info, mark as blobs
         delete_entries = [FileEntry(p, "B") for p in local_paths]
         return _finalize_report(CopyReport(delete=delete_entries))
+
+
+# ---------------------------------------------------------------------------
+# Public API: Move (repo-internal)
+# ---------------------------------------------------------------------------
+
+def _resolve_move(
+    fs: FS,
+    sources: list[str],
+    dest: str,
+    *,
+    recursive: bool = False,
+) -> tuple[list[tuple[str, str]], list[str]]:
+    """Common resolution for move operations.
+
+    Returns ``(pairs, delete_paths)`` where *pairs* is a list of
+    ``(src_repo_path, dest_repo_path)`` and *delete_paths* is the
+    list of source paths to remove.
+
+    Implements POSIX mv semantics: when there is a single source file
+    and *dest* is not an existing directory and does not end with ``/``,
+    the dest is the exact target path (rename).  Otherwise files are
+    placed inside *dest*.
+    """
+    resolved = _resolve_repo_sources(fs, sources)
+
+    dest_norm = _normalize_path(dest.rstrip("/")) if dest.rstrip("/") else ""
+    dest_exists_as_dir = dest_norm and fs.is_dir(dest_norm)
+
+    # POSIX mv rename: single source, dest not ending with "/", dest not
+    # an existing directory → rename (file or directory).
+    is_rename = (
+        len(resolved) == 1
+        and resolved[0][1] in ("file", "dir")
+        and not dest.endswith("/")
+        and not dest_exists_as_dir
+    )
+
+    if is_rename and resolved[0][1] == "file":
+        src_path = resolved[0][0]
+        dest_path = dest_norm if dest_norm else src_path.rsplit("/", 1)[-1]
+        pairs = [(src_path, dest_path)]
+    elif is_rename and resolved[0][1] == "dir":
+        # Directory rename: treat as "contents of src" → dest
+        renamed = [(resolved[0][0], "contents", resolved[0][2])]
+        pairs = _enum_repo_to_repo(fs, renamed, dest_norm)
+    else:
+        # Multi-source or dest is existing dir or ends with "/"
+        enum_dest = dest_norm
+        pairs = _enum_repo_to_repo(fs, resolved, enum_dest)
+
+    if not pairs:
+        raise FileNotFoundError(f"No matches for patterns: {sources}")
+
+    # Validate: no src == dest
+    for src, dst in pairs:
+        if src == dst:
+            raise ValueError(f"Source and destination are the same: {src}")
+
+    # Collect all source paths for deletion
+    delete_paths = _collect_remove_paths(fs, sources, recursive=recursive)
+
+    return pairs, delete_paths
+
+
+def move_in_repo(
+    fs: FS,
+    sources: list[str],
+    dest: str,
+    *,
+    recursive: bool = False,
+    message: str | None = None,
+) -> FS:
+    """Move/rename files within the repo. Returns new ``FS``.
+
+    All *sources* and *dest* are repo paths. Directories require
+    ``recursive=True``. The operation is atomic — writes and deletes
+    happen in a single commit.
+
+    The operation report is available via ``fs.report``.
+    """
+    pairs, delete_paths = _resolve_move(fs, sources, dest, recursive=recursive)
+
+    # Build report
+    report = CopyReport()
+    dest_rel_to_repo = {dp: dp for _, dp in pairs}
+    report.add = _make_entries_from_repo_dict(fs, [dp for _, dp in pairs], dest_rel_to_repo)
+    src_rel_to_repo = {p: p for p in delete_paths}
+    report.delete = _make_entries_from_repo_dict(fs, delete_paths, src_rel_to_repo)
+
+    # Execute: write dest files from source blob data, then remove sources
+    with fs.batch(message=message, operation="mv") as b:
+        for src, dst in pairs:
+            entry = _entry_at_path(fs._store._repo, fs._tree_oid, src)
+            if entry is None:
+                continue
+            blob_oid, fmode = entry[0], entry[1]
+            data = fs._store._repo[blob_oid].data
+            b.write(dst, data, mode=fmode)
+        for path in delete_paths:
+            b.remove(path)
+
+    result_fs = b.fs
+    result_fs._report = _finalize_report(report)
+    return result_fs
+
+
+def move_in_repo_dry_run(
+    fs: FS,
+    sources: list[str],
+    dest: str,
+    *,
+    recursive: bool = False,
+) -> CopyReport | None:
+    """Compute what ``move_in_repo`` would do. Returns a ``CopyReport`` or ``None``."""
+    pairs, delete_paths = _resolve_move(fs, sources, dest, recursive=recursive)
+
+    # Build report
+    report = CopyReport()
+    dest_rel_to_repo = {dp: dp for _, dp in pairs}
+    report.add = _make_entries_from_repo_dict(fs, [dp for _, dp in pairs], dest_rel_to_repo)
+    src_rel_to_repo = {p: p for p in delete_paths}
+    report.delete = _make_entries_from_repo_dict(fs, delete_paths, src_rel_to_repo)
+    return _finalize_report(report)

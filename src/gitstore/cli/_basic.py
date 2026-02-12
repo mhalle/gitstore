@@ -1,4 +1,4 @@
-"""Basic commands: init, destroy, ls, cat, rm, write, log."""
+"""Basic commands: init, destroy, ls, cat, rm, mv, write, log."""
 
 from __future__ import annotations
 
@@ -355,6 +355,118 @@ def rm(ctx, paths, recursive, dry_run, branch, message, tag, force_tag):
         raise click.ClickException(str(exc))
     except IsADirectoryError as exc:
         raise click.ClickException(f"{exc} — use -R to remove recursively")
+    except StaleSnapshotError:
+        raise click.ClickException(
+            "Branch modified concurrently — retry"
+        )
+
+
+# ---------------------------------------------------------------------------
+# mv
+# ---------------------------------------------------------------------------
+
+@main.command()
+@_repo_option
+@click.argument("args", nargs=-1, required=True)
+@click.option("-R", "--recursive", is_flag=True, default=False,
+              help="Move directories recursively.")
+@_dry_run_option
+@_branch_option
+@_message_option
+@_tag_option
+@click.pass_context
+def mv(ctx, args, recursive, dry_run, branch, message, tag, force_tag):
+    """Move/rename files in the repo.
+
+    All arguments are repo paths (colon prefix required). The last
+    argument is the destination. Glob patterns and -R for directories.
+
+    \b
+    Examples:
+        gitstore mv :old.txt :new.txt               # rename
+        gitstore mv ':*.txt' :archive/               # move into dir
+        gitstore mv -R :src :backup/src              # move directory
+        gitstore mv :a.txt :b.txt :dest/             # multiple -> dir
+        gitstore mv -n :old.txt :new.txt             # dry run
+    """
+    from ..copy import move_in_repo, move_in_repo_dry_run
+
+    if len(args) < 2:
+        raise click.ClickException("mv requires at least two arguments (SRC... DEST)")
+
+    # Parse all args — all must be repo paths
+    parsed = [_parse_ref_path(p) for p in args]
+    for i, rp in enumerate(parsed):
+        if not rp.is_repo:
+            raise click.ClickException(
+                f"All paths must be repo paths (colon prefix required): {args[i]}"
+            )
+        if rp.back:
+            raise click.ClickException(
+                "Cannot move to/from a historical commit (remove ~N)"
+            )
+
+    # All explicit refs must resolve to the same branch
+    store = _open_store(_require_repo(ctx))
+    branch = branch or _default_branch(store)
+
+    explicit_ref = None  # first explicit ref seen
+    for i, rp in enumerate(parsed):
+        if rp.ref:
+            if rp.ref not in store.branches:
+                if rp.ref in store.tags:
+                    raise click.ClickException(f"Cannot move in tag '{rp.ref}' — use a branch")
+                raise click.ClickException(f"Branch not found: {rp.ref}")
+            if explicit_ref is not None and explicit_ref != rp.ref:
+                raise click.ClickException("All paths must target the same branch")
+            explicit_ref = rp.ref
+
+    if explicit_ref is not None:
+        branch = explicit_ref
+    fs = _get_branch_fs(store, branch)
+
+    source_patterns = [
+        _normalize_repo_path(rp.path) if rp.path else ""
+        for rp in parsed[:-1]
+    ]
+    dest_rp = parsed[-1]
+    dest_path = dest_rp.path
+    # Preserve trailing slash for directory semantics
+    if dest_path:
+        norm = _normalize_repo_path(dest_path.rstrip("/"))
+        if dest_path.endswith("/"):
+            dest_path = norm + "/" if norm else ""
+        else:
+            dest_path = norm
+    else:
+        dest_path = ""
+
+    try:
+        if dry_run:
+            report = move_in_repo_dry_run(
+                fs, source_patterns, dest_path, recursive=recursive,
+            )
+            if report:
+                for action in report.actions():
+                    prefix = {"add": "+", "delete": "-"}[action.action]
+                    click.echo(f"{prefix} :{action.path}")
+        else:
+            new_fs = move_in_repo(
+                fs, source_patterns, dest_path,
+                recursive=recursive, message=message,
+            )
+            if tag:
+                _apply_tag(store, new_fs, tag, force_tag)
+            report = new_fs.report
+            n_add = len(report.add) if report else 0
+            n_del = len(report.delete) if report else 0
+            _status(ctx, f"Moved {n_del} -> {n_add} file(s)")
+    except FileNotFoundError as exc:
+        raise click.ClickException(str(exc))
+    except IsADirectoryError as exc:
+        raise click.ClickException(f"{exc} — use -R to move recursively")
+    except ValueError as exc:
+        raise click.ClickException(str(exc))
     except StaleSnapshotError:
         raise click.ClickException(
             "Branch modified concurrently — retry"

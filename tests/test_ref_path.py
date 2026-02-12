@@ -612,3 +612,203 @@ class TestCpRefPath:
         ])
         assert result.exit_code == 0, result.output
         assert (dest / "hello.txt").read_text() == "hello world\n"
+
+
+class TestMv:
+    """Integration tests for the mv command."""
+
+    def test_rename_file(self, runner, repo_with_files):
+        """mv :old :new renames a file."""
+        result = runner.invoke(main, [
+            "mv", "--repo", repo_with_files, ":hello.txt", ":renamed.txt"
+        ])
+        assert result.exit_code == 0, result.output
+        # renamed.txt exists
+        r = runner.invoke(main, ["cat", "--repo", repo_with_files, ":renamed.txt"])
+        assert r.exit_code == 0
+        assert r.output == "hello world\n"
+        # hello.txt gone
+        r = runner.invoke(main, ["cat", "--repo", repo_with_files, ":hello.txt"])
+        assert r.exit_code != 0
+
+    def test_move_into_directory(self, runner, repo_with_files):
+        """mv :file :dir/ moves file into directory."""
+        # Create dest dir with a file first
+        runner.invoke(main, [
+            "write", "--repo", repo_with_files, ":archive/placeholder.txt"
+        ], input="x")
+        result = runner.invoke(main, [
+            "mv", "--repo", repo_with_files, ":hello.txt", ":archive/"
+        ])
+        assert result.exit_code == 0, result.output
+        # File moved into archive/
+        r = runner.invoke(main, ["cat", "--repo", repo_with_files, ":archive/hello.txt"])
+        assert r.exit_code == 0
+        assert r.output == "hello world\n"
+        # Original gone
+        r = runner.invoke(main, ["cat", "--repo", repo_with_files, ":hello.txt"])
+        assert r.exit_code != 0
+
+    def test_move_multiple_into_dir(self, runner, repo_with_files):
+        """mv :a :b :dir/ moves multiple files."""
+        # Add another file
+        runner.invoke(main, [
+            "write", "--repo", repo_with_files, ":extra.txt"
+        ], input="extra")
+        result = runner.invoke(main, [
+            "mv", "--repo", repo_with_files, ":hello.txt", ":extra.txt", ":archive/"
+        ])
+        assert result.exit_code == 0, result.output
+        r = runner.invoke(main, ["cat", "--repo", repo_with_files, ":archive/hello.txt"])
+        assert r.exit_code == 0
+        r = runner.invoke(main, ["cat", "--repo", repo_with_files, ":archive/extra.txt"])
+        assert r.exit_code == 0
+        # Originals gone
+        r = runner.invoke(main, ["cat", "--repo", repo_with_files, ":hello.txt"])
+        assert r.exit_code != 0
+        r = runner.invoke(main, ["cat", "--repo", repo_with_files, ":extra.txt"])
+        assert r.exit_code != 0
+
+    def test_move_directory_recursive(self, runner, repo_with_files):
+        """mv -R :dir :newdir renames a directory."""
+        result = runner.invoke(main, [
+            "mv", "--repo", repo_with_files, "-R", ":data", ":newdata"
+        ])
+        assert result.exit_code == 0, result.output
+        # File exists under new name
+        r = runner.invoke(main, ["cat", "--repo", repo_with_files, ":newdata/data.bin"])
+        assert r.exit_code == 0
+        # Old dir gone
+        r = runner.invoke(main, ["ls", "--repo", repo_with_files, ":newdata"])
+        assert r.exit_code == 0
+        r = runner.invoke(main, ["cat", "--repo", repo_with_files, ":data/data.bin"])
+        assert r.exit_code != 0
+
+    def test_move_glob(self, runner, repo_with_tree):
+        """mv ':*.txt' :archive/ moves glob matches."""
+        result = runner.invoke(main, [
+            "mv", "--repo", repo_with_tree, ":*.txt", ":archive/"
+        ])
+        assert result.exit_code == 0, result.output
+        # readme.txt moved to archive/
+        r = runner.invoke(main, ["cat", "--repo", repo_with_tree, ":archive/readme.txt"])
+        assert r.exit_code == 0
+        assert r.output == "readme"
+        # Original gone
+        r = runner.invoke(main, ["cat", "--repo", repo_with_tree, ":readme.txt"])
+        assert r.exit_code != 0
+        # Non-txt files still in place
+        r = runner.invoke(main, ["cat", "--repo", repo_with_tree, ":setup.py"])
+        assert r.exit_code == 0
+
+    def test_dry_run(self, runner, repo_with_files):
+        """mv -n shows plan without executing."""
+        result = runner.invoke(main, [
+            "mv", "--repo", repo_with_files, "-n", ":hello.txt", ":renamed.txt"
+        ])
+        assert result.exit_code == 0, result.output
+        assert "+" in result.output
+        assert "renamed.txt" in result.output
+        assert "-" in result.output
+        assert "hello.txt" in result.output
+        # Verify nothing changed
+        r = runner.invoke(main, ["cat", "--repo", repo_with_files, ":hello.txt"])
+        assert r.exit_code == 0
+
+    def test_source_equals_dest_error(self, runner, repo_with_files):
+        """mv :file :file is an error."""
+        result = runner.invoke(main, [
+            "mv", "--repo", repo_with_files, ":hello.txt", ":hello.txt"
+        ])
+        assert result.exit_code != 0
+        assert "same" in result.output.lower()
+
+    def test_nonexistent_source_error(self, runner, repo_with_files):
+        """mv :missing :dest errors."""
+        result = runner.invoke(main, [
+            "mv", "--repo", repo_with_files, ":missing.txt", ":dest.txt"
+        ])
+        assert result.exit_code != 0
+
+    def test_directory_without_recursive_error(self, runner, repo_with_files):
+        """mv :dir :newdir without -R errors."""
+        result = runner.invoke(main, [
+            "mv", "--repo", repo_with_files, ":data", ":newdata"
+        ])
+        assert result.exit_code != 0
+        assert "-R" in result.output or "recursive" in result.output.lower()
+
+    def test_local_path_rejected(self, runner, repo_with_files):
+        """mv without colon prefix errors."""
+        result = runner.invoke(main, [
+            "mv", "--repo", repo_with_files, "hello.txt", ":dest.txt"
+        ])
+        assert result.exit_code != 0
+        assert "colon" in result.output.lower() or "repo path" in result.output.lower()
+
+    def test_explicit_ref(self, runner, repo_with_files):
+        """mv dev:old.txt dev:new.txt works on explicit branch."""
+        runner.invoke(main, ["branch", "--repo", repo_with_files, "fork", "dev"])
+        runner.invoke(main, [
+            "write", "--repo", repo_with_files, "-b", "dev", ":devfile.txt"
+        ], input="dev content")
+        result = runner.invoke(main, [
+            "mv", "--repo", repo_with_files, "dev:devfile.txt", "dev:renamed.txt"
+        ])
+        assert result.exit_code == 0, result.output
+        r = runner.invoke(main, ["cat", "--repo", repo_with_files, "dev:renamed.txt"])
+        assert r.exit_code == 0
+        assert r.output == "dev content"
+
+    def test_cross_branch_error(self, runner, repo_with_files):
+        """mv main:file dev:file is an error."""
+        runner.invoke(main, ["branch", "--repo", repo_with_files, "fork", "dev"])
+        result = runner.invoke(main, [
+            "mv", "--repo", repo_with_files, "main:hello.txt", "dev:hello.txt"
+        ])
+        assert result.exit_code != 0
+        assert "same branch" in result.output.lower() or "same" in result.output.lower()
+
+    def test_ancestor_dest_error(self, runner, repo_with_files):
+        """mv :file main~1:file is an error (can't write to history)."""
+        result = runner.invoke(main, [
+            "mv", "--repo", repo_with_files, ":hello.txt", "main~1:renamed.txt"
+        ])
+        assert result.exit_code != 0
+        assert "historical" in result.output.lower()
+
+    def test_single_arg_error(self, runner, repo_with_files):
+        """mv :file with no dest errors."""
+        result = runner.invoke(main, [
+            "mv", "--repo", repo_with_files, ":hello.txt"
+        ])
+        assert result.exit_code != 0
+
+    def test_custom_message(self, runner, repo_with_files):
+        """mv -m 'msg' sets commit message."""
+        result = runner.invoke(main, [
+            "mv", "--repo", repo_with_files, ":hello.txt", ":renamed.txt",
+            "-m", "renamed hello"
+        ])
+        assert result.exit_code == 0, result.output
+        r = runner.invoke(main, ["log", "--repo", repo_with_files])
+        assert "renamed hello" in r.output
+
+    def test_atomicity(self, runner, repo_with_files):
+        """After mv, source is gone and dest exists in same commit."""
+        result = runner.invoke(main, [
+            "mv", "--repo", repo_with_files, ":hello.txt", ":moved.txt"
+        ])
+        assert result.exit_code == 0, result.output
+        # Check the latest commit has both changes
+        r = runner.invoke(main, ["cat", "--repo", repo_with_files, ":moved.txt"])
+        assert r.exit_code == 0
+        assert r.output == "hello world\n"
+        r = runner.invoke(main, ["cat", "--repo", repo_with_files, ":hello.txt"])
+        assert r.exit_code != 0
+        # Verify it's a single commit by checking ~1 still has original
+        r = runner.invoke(main, ["cat", "--repo", repo_with_files, "~1:hello.txt"])
+        assert r.exit_code == 0
+        assert r.output == "hello world\n"
+        r = runner.invoke(main, ["cat", "--repo", repo_with_files, "~1:moved.txt"])
+        assert r.exit_code != 0

@@ -229,6 +229,30 @@ gitstore rm :a.txt :b.txt               # multiple
 | `--tag` | Create a tag at the resulting commit. |
 | `--force-tag` | Overwrite tag if it already exists. |
 
+### mv
+
+Move/rename files within the repo. All arguments are repo paths (colon prefix required). The last argument is the destination.
+
+```bash
+gitstore mv :old.txt :new.txt               # rename
+gitstore mv ':*.txt' :archive/              # glob move
+gitstore mv -R :src :dest                   # move directory
+gitstore mv :a.txt :b.txt :dest/            # multiple -> dir
+gitstore mv -n :old.txt :new.txt            # dry run
+gitstore mv dev:old.txt dev:new.txt         # explicit branch
+```
+
+| Option | Description |
+|--------|-------------|
+| `-R`, `--recursive` | Move directories recursively. |
+| `-n`, `--dry-run` | Show what would change without writing. |
+| `-b`, `--branch` | Branch (default: `main`). |
+| `-m`, `--message` | Commit message. |
+| `--tag` | Create a tag at the resulting commit. |
+| `--force-tag` | Overwrite tag if it already exists. |
+
+All paths must target the same branch. Cross-branch moves are not supported — use `cp` + `rm` instead.
+
 ### write
 
 Write stdin to a file in the repo.
@@ -566,7 +590,7 @@ git clone http://127.0.0.1:8000/                 # clone from another terminal
 
 ### The `:` prefix
 
-For `cp` and `sync`, prefix repo-side paths with `:` to distinguish them from local paths. For other commands (`ls`, `cat`, `rm`, `write`) the `:` is optional.
+For `cp`, `sync`, and `mv`, prefix repo-side paths with `:` to distinguish them from local paths. For `mv`, all paths must be repo paths. For other commands (`ls`, `cat`, `rm`, `write`) the `:` is optional.
 
 ### Snapshot filters
 

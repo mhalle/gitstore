@@ -99,7 +99,8 @@ distinguishing `ref:path` from plain filenames that happen to contain colons
 
 ### Commands where `:` is required
 
-For `cp` and `sync`, source and destination may be either local or repo paths.
+For `cp`, `sync`, and `mv`, source and destination may be either local or repo
+paths (for `cp`/`sync`) or must all be repo paths (for `mv`).
 The colon prefix is what distinguishes them.
 
 ---
@@ -170,6 +171,34 @@ Tags and commit hashes are not writable:
 
 ```bash
 gitstore rm v1.0:file.txt               # ERROR -- cannot write to tag
+```
+
+Accepts glob patterns and `-R` for directories.
+
+---
+
+### mv
+
+```
+gitstore mv SOURCE... DEST
+```
+
+All arguments must be repo paths (colon prefix required). All paths **must
+target the same branch** — cross-branch moves are not supported.
+
+```bash
+gitstore mv :old.txt :new.txt               # rename
+gitstore mv ':*.txt' :archive/              # glob move
+gitstore mv -R :data :backup                # rename directory
+gitstore mv dev:old.txt dev:new.txt         # explicit branch
+gitstore mv main:a.txt dev:b.txt            # ERROR — cross-branch
+```
+
+Tags and ancestors are not writable:
+
+```bash
+gitstore mv v1.0:a.txt v1.0:b.txt          # ERROR — cannot write to tag
+gitstore mv :a.txt main~1:b.txt            # ERROR — can't write to history
 ```
 
 Accepts glob patterns and `-R` for directories.
@@ -458,7 +487,7 @@ hashes are read-only, and historical commits (via `~N`) are immutable.
 | `dev~1:path` | No (historical commit) |
 | `~1:path` | No (historical commit) |
 
-Commands that write (`rm`, `write`, `cp` destination, `sync` destination)
+Commands that write (`rm`, `mv`, `write`, `cp` destination, `sync` destination)
 validate this and produce a clear error:
 
 ```
