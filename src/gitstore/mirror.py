@@ -25,7 +25,7 @@ class RefChange:
 
 
 @dataclass
-class SyncDiff:
+class MirrorDiff:
     create: list[RefChange] = field(default_factory=list)
     update: list[RefChange] = field(default_factory=list)
     delete: list[RefChange] = field(default_factory=list)
@@ -43,8 +43,8 @@ class SyncDiff:
 # Core mirror functions
 # ---------------------------------------------------------------------------
 
-def _raw_diff_to_sync_diff(raw: dict) -> SyncDiff:
-    """Convert bytes-keyed diff dict from _compat to SyncDiff."""
+def _raw_diff_to_sync_diff(raw: dict) -> MirrorDiff:
+    """Convert bytes-keyed diff dict from _compat to MirrorDiff."""
     src, dest = raw["src"], raw["dest"]
 
     def _sha(b):
@@ -62,13 +62,13 @@ def _raw_diff_to_sync_diff(raw: dict) -> SyncDiff:
         RefChange(ref=ref.decode(), dest_sha=_sha(dest[ref]))
         for ref in raw["delete"]
     ]
-    return SyncDiff(create=create, update=update, delete=delete)
+    return MirrorDiff(create=create, update=update, delete=delete)
 
 
-def backup(store: GitStore, url: str, *, dry_run: bool = False, progress=None) -> SyncDiff:
+def backup(store: GitStore, url: str, *, dry_run: bool = False, progress=None) -> MirrorDiff:
     """Push all refs to *url*, creating an exact mirror.
 
-    Returns a `SyncDiff` describing what changed (or would change).
+    Returns a `MirrorDiff` describing what changed (or would change).
     """
     raw = store._repo.diff_refs(url, "push")
     diff = _raw_diff_to_sync_diff(raw)
@@ -77,10 +77,10 @@ def backup(store: GitStore, url: str, *, dry_run: bool = False, progress=None) -
     return diff
 
 
-def restore(store: GitStore, url: str, *, dry_run: bool = False, progress=None) -> SyncDiff:
+def restore(store: GitStore, url: str, *, dry_run: bool = False, progress=None) -> MirrorDiff:
     """Fetch all refs from *url*, overwriting local state.
 
-    Returns a `SyncDiff` describing what changed (or would change).
+    Returns a `MirrorDiff` describing what changed (or would change).
     """
     raw = store._repo.diff_refs(url, "pull")
     diff = _raw_diff_to_sync_diff(raw)
@@ -155,8 +155,8 @@ def resolve_credentials(url: str) -> str:
     return url
 
 
-def print_diff(diff: SyncDiff, direction: str) -> None:
-    """Pretty-print a SyncDiff to stdout."""
+def print_diff(diff: MirrorDiff, direction: str) -> None:
+    """Pretty-print a MirrorDiff to stdout."""
     import click
 
     verb = "push" if direction == "push" else "pull"

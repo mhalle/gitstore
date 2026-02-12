@@ -10,8 +10,8 @@ from gitstore import (
     sync_from_repo,
     sync_to_repo_dry_run,
     sync_from_repo_dry_run,
-    SyncPlan,
-    SyncAction,
+    ChangeReport,
+    ChangeAction,
     FileEntry,
 )
 
@@ -76,7 +76,7 @@ class TestSyncToRepo:
         fs1 = sync_to_repo(fs, str(local_dir), "data")
         fs2 = sync_to_repo(fs1, str(local_dir), "data")
         # Same commit — no new commit created
-        assert fs1.hash == fs2.hash
+        assert fs1.commit_hash == fs2.commit_hash
 
     def test_custom_message(self, fs, local_dir):
         new_fs = sync_to_repo(fs, str(local_dir), "data", message="my sync")
@@ -181,7 +181,7 @@ class TestSyncFromRepo:
 class TestSyncToRepoDryRun:
     def test_returns_correct_plan(self, fs, local_dir):
         plan = sync_to_repo_dry_run(fs, str(local_dir), "data")
-        assert isinstance(plan, SyncPlan)
+        assert isinstance(plan, ChangeReport)
         assert sorted(paths(plan.add)) == ["a.txt", "b.txt"]
         assert len(plan.update) == 0
         assert len(plan.delete) == 0
@@ -262,12 +262,12 @@ class TestSyncFromRepoDryRun:
 
 
 # ---------------------------------------------------------------------------
-# SyncPlan / SyncAction
+# ChangeReport / ChangeAction
 # ---------------------------------------------------------------------------
 
-class TestSyncPlanActions:
+class TestChangeReportActions:
     def test_actions_sorted_by_path(self):
-        plan = SyncPlan(
+        plan = ChangeReport(
             add=[FileEntry("c.txt", "B"), FileEntry("a.txt", "B")],
             update=[FileEntry("b.txt", "B")],
             delete=[FileEntry("d.txt", "B")],
@@ -280,7 +280,7 @@ class TestSyncPlanActions:
         assert actions[3].action == "delete"
 
     def test_empty_plan(self):
-        plan = SyncPlan()
+        plan = ChangeReport()
         assert plan.in_sync  # direct construction still works
         assert plan.total == 0
         assert plan.actions() == []
@@ -751,7 +751,7 @@ class TestSyncRoundTrip:
 
         fs1 = sync_to_repo(fs, str(local), "data")
         fs2 = sync_to_repo(fs1, str(local), "data")
-        assert fs1.hash == fs2.hash
+        assert fs1.commit_hash == fs2.commit_hash
 
 
 # ---------------------------------------------------------------------------

@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ..tree import GIT_FILEMODE_BLOB_EXECUTABLE, GIT_FILEMODE_LINK, _entry_at_path
-from ._types import CopyError
+from ._types import ChangeError
 
 if TYPE_CHECKING:
     from ..fs import FS
@@ -76,7 +76,7 @@ def _write_files_to_repo(batch, pairs, *, follow_symlinks=False, mode=None,
             if not ignore_errors:
                 raise
             if errors is not None:
-                errors.append(CopyError(path=local_path, error=str(exc)))
+                errors.append(ChangeError(path=local_path, error=str(exc)))
 
 
 def _write_files_to_disk(fs: FS, pairs, *, base: Path | None = None,
@@ -121,7 +121,7 @@ def _write_files_to_disk(fs: FS, pairs, *, base: Path | None = None,
             if not ignore_errors:
                 raise
             if errors is not None:
-                errors.append(CopyError(path=local_path, error=str(exc)))
+                errors.append(ChangeError(path=local_path, error=str(exc)))
 
 
 def _copy_blob_to_batch(batch, fs: FS, src: str, dst: str, *, filemode: int | None = None) -> None:

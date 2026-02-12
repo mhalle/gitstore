@@ -9,14 +9,12 @@ identical to a local directory or vice versa, including deletes.
 
 from .._exclude import ExcludeFilter
 from ._types import (
-    CopyAction,
-    CopyError,
-    CopyPlan,
-    CopyReport,
+    ChangeAction,
+    ChangeError,
+    ChangeReport,
     FileEntry,
-    SyncAction,
-    SyncPlan,
-    _finalize_report,
+    FileType,
+    _finalize_changes,
     format_commit_message,
 )
 from ._resolve import (
@@ -44,8 +42,8 @@ from ._ops import (
     copy_from_repo,
     copy_to_repo_dry_run,
     copy_from_repo_dry_run,
-    remove_from_repo,
-    remove_from_repo_dry_run,
+    remove_in_repo,
+    remove_in_repo_dry_run,
     move_in_repo,
     move_in_repo_dry_run,
     sync_to_repo,
@@ -59,16 +57,13 @@ from ._ops import (
 
 __all__ = [
     # Public types
-    "CopyAction", "CopyError", "CopyReport", "ExcludeFilter", "FileEntry",
-    "CopyPlan", "SyncAction", "SyncPlan",
+    "ChangeAction", "ChangeError", "ChangeReport", "ExcludeFilter",
+    "FileEntry", "FileType",
     # Public functions
     "copy_to_repo", "copy_from_repo",
     "copy_to_repo_dry_run", "copy_from_repo_dry_run",
-    "remove_from_repo", "remove_from_repo_dry_run",
+    "remove_in_repo", "remove_in_repo_dry_run",
     "move_in_repo", "move_in_repo_dry_run",
     "sync_to_repo", "sync_from_repo",
     "sync_to_repo_dry_run", "sync_from_repo_dry_run",
-    "format_commit_message",
-    # Private but used by tests
-    "_expand_disk_glob",
 ]

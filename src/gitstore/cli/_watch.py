@@ -25,15 +25,15 @@ def _import_watchfiles():
         )
 
 
-def _format_summary(report) -> str:
-    """One-line +N ~N -N summary from a CopyReport."""
+def _format_summary(changes) -> str:
+    """One-line +N ~N -N summary from a ChangeReport."""
     parts = []
-    if report.add:
-        parts.append(f"+{len(report.add)}")
-    if report.update:
-        parts.append(f"~{len(report.update)}")
-    if report.delete:
-        parts.append(f"-{len(report.delete)}")
+    if changes.add:
+        parts.append(f"+{len(changes.add)}")
+    if changes.update:
+        parts.append(f"~{len(changes.update)}")
+    if changes.delete:
+        parts.append(f"-{len(changes.delete)}")
     return " ".join(parts) if parts else "no changes"
 
 
@@ -49,15 +49,15 @@ def _run_sync_cycle(store, branch, local_path, repo_dest, *,
         message=message, ignore_errors=ignore_errors,
         checksum=checksum, exclude=exclude,
     )
-    report = new_fs.report
+    changes = new_fs.changes
     now = datetime.datetime.now().strftime("%H:%M:%S")
-    if report:
-        summary = _format_summary(report)
-        short_hash = new_fs.hash[:7] if new_fs.hash else ""
+    if changes:
+        summary = _format_summary(changes)
+        short_hash = new_fs.commit_hash[:7] if new_fs.commit_hash else ""
         click.echo(f"[{now}] Sync: {summary} (commit {short_hash})")
-        for w in report.warnings:
+        for w in changes.warnings:
             click.echo(f"WARNING: {w.path}: {w.error}", err=True)
-        for e in report.errors:
+        for e in changes.errors:
             click.echo(f"ERROR: {e.path}: {e.error}", err=True)
     else:
         click.echo(f"[{now}] Sync: no changes")

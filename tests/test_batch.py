@@ -28,7 +28,7 @@ class TestBatch:
         assert new_fs.read("x.txt") == b"x"
         assert new_fs.read("y.txt") == b"y"
         # Should be exactly one commit ahead
-        assert new_fs.parent.hash == fs.hash
+        assert new_fs.parent.commit_hash == fs.commit_hash
 
     def test_custom_message(self, repo_fs):
         _, fs = repo_fs
@@ -50,7 +50,7 @@ class TestBatch:
         _, fs = repo_fs
         with fs.batch() as b:
             pass
-        assert b.fs.hash == fs.hash
+        assert b.fs.commit_hash == fs.commit_hash
 
     def test_exception_no_commit(self, repo_fs):
         _, fs = repo_fs
@@ -259,4 +259,4 @@ class TestBatch:
         _, fs = repo_fs
         with fs.batch() as b:
             b.write("a.txt", b"a")
-        assert b.fs.hash == fs.hash
+        assert b.fs.commit_hash == fs.commit_hash

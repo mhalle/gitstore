@@ -5,12 +5,12 @@ from pathlib import Path
 
 import pytest
 
-from gitstore import GitStore, copy_to_repo, copy_from_repo, CopyPlan, CopyReport, FileEntry
-from gitstore import remove_from_repo, remove_from_repo_dry_run
+from gitstore import GitStore, copy_to_repo, copy_from_repo, ChangeReport, FileEntry
+from gitstore import remove_in_repo, remove_in_repo_dry_run
 from gitstore.copy import (
     copy_to_repo_dry_run, copy_from_repo_dry_run,
-    _expand_disk_glob,
 )
+from gitstore.copy._resolve import _expand_disk_glob
 
 
 def paths(entries):
@@ -516,7 +516,7 @@ class TestDelete:
         (d / ".dotfile").write_bytes(b"dot")
         # All content matches repo → should be no-op
         new_fs = copy_to_repo(fs, [str(d) + "/"], "dir", delete=True)
-        assert new_fs.hash == fs.hash  # no new commit
+        assert new_fs.commit_hash == fs.commit_hash  # no new commit
 
     def test_delete_with_ignore_existing(self, store_and_fs):
         """delete=True + ignore_existing=True: deletes extras, skips updates."""
@@ -540,7 +540,7 @@ class TestDelete:
         assert new_fs.read("data/keep.txt") == b"keep"
 
     def test_delete_dry_run_plan(self, store_and_fs):
-        """Dry run with delete=True returns categorized CopyPlan."""
+        """Dry run with delete=True returns categorized ChangeReport."""
         _, fs, tmp_path = store_and_fs
         fs = fs.write("data/keep.txt", b"keep")
         fs = fs.write("data/change.txt", b"old")
@@ -551,7 +551,7 @@ class TestDelete:
         (d / "change.txt").write_text("new")
         (d / "add.txt").write_text("added")
         plan = copy_to_repo_dry_run(fs, [str(d) + "/"], "data", delete=True)
-        assert isinstance(plan, CopyPlan)
+        assert isinstance(plan, ChangeReport)
         assert "add.txt" in paths(plan.add)
         assert "change.txt" in paths(plan.update)
         assert "extra.txt" in paths(plan.delete)
@@ -584,13 +584,13 @@ class TestDelete:
         assert not (out / "sub").exists()
 
     def test_delete_from_repo_dry_run(self, store_and_fs):
-        """Dry run with delete=True from repo returns CopyPlan."""
+        """Dry run with delete=True from repo returns ChangeReport."""
         _, fs, tmp_path = store_and_fs
         out = tmp_path / "output"
         out.mkdir()
         (out / "extra.txt").write_text("extra")
         plan = copy_from_repo_dry_run(fs, ["existing.txt"], str(out), delete=True)
-        assert isinstance(plan, CopyPlan)
+        assert isinstance(plan, ChangeReport)
         assert "existing.txt" in paths(plan.add)
         assert "extra.txt" in paths(plan.delete)
 
@@ -609,10 +609,10 @@ class TestIgnoreErrors:
         new_fs = copy_to_repo(
             fs, [str(good), bad], "dest", ignore_errors=True,
         )
-        report = new_fs.report
+        changes = new_fs.changes
         assert new_fs.read("dest/good.txt") == b"good"
-        assert len(report.errors) == 1
-        assert "nonexistent" in report.errors[0].path
+        assert len(changes.errors) == 1
+        assert "nonexistent" in changes.errors[0].path
 
     def test_ignore_errors_unreadable_file_continues(self, store_and_fs):
         """chmod 000 a file; others still copied to repo."""
@@ -627,10 +627,10 @@ class TestIgnoreErrors:
             new_fs = copy_to_repo(
                 fs, [str(d) + "/"], "dest", ignore_errors=True,
             )
-            report = new_fs.report
+            changes = new_fs.changes
             assert new_fs.read("dest/ok.txt") == b"ok"
-            assert len(report.errors) == 1
-            assert "nope.txt" in report.errors[0].path
+            assert len(changes.errors) == 1
+            assert "nope.txt" in changes.errors[0].path
         finally:
             bad.chmod(0o644)
 
@@ -650,16 +650,16 @@ class TestIgnoreErrors:
             copy_to_repo(fs, [str(tmp_path / "nope.txt")], "dest")
 
     def test_ignore_errors_success_no_errors(self, store_and_fs):
-        """All succeed -> report has no errors."""
+        """All succeed -> changes has no errors."""
         _, fs, tmp_path = store_and_fs
         f = tmp_path / "ok.txt"
         f.write_text("ok")
         new_fs = copy_to_repo(
             fs, [str(f)], "dest", ignore_errors=True,
         )
-        report = new_fs.report
-        assert report is not None
-        assert report.errors == []
+        changes = new_fs.changes
+        assert changes is not None
+        assert changes.errors == []
         assert new_fs.read("dest/ok.txt") == b"ok"
 
     def test_ignore_errors_from_repo_write_fail(self, store_and_fs):
@@ -669,11 +669,11 @@ class TestIgnoreErrors:
         out.mkdir()
         out.chmod(0o444)
         try:
-            report = copy_from_repo(
+            changes = copy_from_repo(
                 fs, ["existing.txt"], str(out), ignore_errors=True,
             )
-            assert report is not None
-            assert len(report.errors) >= 1
+            assert changes is not None
+            assert len(changes.errors) >= 1
         finally:
             out.chmod(0o755)
 
@@ -697,13 +697,13 @@ class TestIgnoreErrors:
         (sub / "locked.txt").write_text("locked")
         sub.chmod(0o555)
         try:
-            report = copy_from_repo(
+            changes = copy_from_repo(
                 fs, ["existing.txt"], str(out),
                 delete=True, ignore_errors=True,
             )
-            assert report is not None
+            assert changes is not None
             # The locked file should appear in errors
-            assert any("locked" in e.path for e in report.errors)
+            assert any("locked" in e.path for e in changes.errors)
             # The good file should still be written
             assert (out / "existing.txt").read_text() == "exists"
         finally:
@@ -771,10 +771,10 @@ class TestHashUnreadableIgnoreErrors:
                 fs, [str(d) + "/"], "dir",
                 delete=True, ignore_errors=True,
             )
-            report = new_fs.report
-            assert report is not None
+            changes = new_fs.changes
+            assert changes is not None
             # The unreadable file should appear in errors
-            assert any(".dotfile" in e.path for e in report.errors)
+            assert any(".dotfile" in e.path for e in changes.errors)
             # Other files should be synced
             assert new_fs.read("dir/a.txt") == b"new aaa"
         finally:
@@ -790,13 +790,13 @@ class TestHashUnreadableIgnoreErrors:
         existing.write_bytes(b"exists")
         existing.chmod(0o000)
         try:
-            report = copy_from_repo(
+            changes = copy_from_repo(
                 fs, ["existing.txt"], str(out),
                 delete=True, ignore_errors=True,
             )
-            assert report is not None
+            assert changes is not None
             # The unreadable file should appear in errors
-            assert any("existing.txt" in e.path for e in report.errors)
+            assert any("existing.txt" in e.path for e in changes.errors)
         finally:
             existing.chmod(0o644)
 
@@ -871,13 +871,13 @@ class TestOverlappingSources:
             "dest",
             delete=True,
         )
-        report = new_fs.report
+        changes = new_fs.changes
         # First source wins
         assert new_fs.read("dest/same.txt") == b"first"
         # Overlap warning in warnings (not errors)
-        assert report is not None
-        assert any("Overlapping" in w.error for w in report.warnings)
-        assert report.errors == []
+        assert changes is not None
+        assert any("Overlapping" in w.error for w in changes.warnings)
+        assert changes.errors == []
 
     def test_copy_from_repo_overlapping_sources_warns(self, store_and_fs):
         """Overlapping sources in from_repo go to warnings, not errors."""
@@ -887,15 +887,15 @@ class TestOverlappingSources:
         out = tmp_path / "output"
         out.mkdir()
         # dir/ and other/ both have a.txt → overlapping destination
-        report = copy_from_repo(
+        changes = copy_from_repo(
             fs, ["dir/", "other/"], str(out), delete=True,
         )
-        assert report is not None
-        assert any("Overlapping" in w.error for w in report.warnings)
-        assert report.errors == []
+        assert changes is not None
+        assert any("Overlapping" in w.error for w in changes.warnings)
+        assert changes.errors == []
 
     def test_copy_to_repo_dry_run_overlapping_sources_warns(self, store_and_fs):
-        """Dry run with overlapping sources puts warnings in report.warnings."""
+        """Dry run with overlapping sources puts warnings in changes.warnings."""
         _, fs, tmp_path = store_and_fs
         d1 = tmp_path / "dir1"
         d1.mkdir()
@@ -903,14 +903,14 @@ class TestOverlappingSources:
         d2 = tmp_path / "dir2"
         d2.mkdir()
         (d2 / "same.txt").write_text("second")
-        report = copy_to_repo_dry_run(
+        changes = copy_to_repo_dry_run(
             fs,
             [str(d1 / "same.txt"), str(d2 / "same.txt")],
             "dest",
             delete=True,
         )
-        assert report is not None
-        assert any("Overlapping" in w.error for w in report.warnings)
+        assert changes is not None
+        assert any("Overlapping" in w.error for w in changes.warnings)
 
 
 # ---------------------------------------------------------------------------
@@ -930,14 +930,14 @@ class TestCopyFromRepoDuplicateSources:
         (out / "shared.txt").write_bytes(b"from_dir")
 
         # dir/ is listed first → pair_map["shared.txt"] = "dir/shared.txt"
-        report = copy_from_repo(
+        changes = copy_from_repo(
             fs, ["dir/", "other/"], str(out), delete=True,
         )
-        assert report is not None
+        assert changes is not None
         # "shared.txt" should NOT be in update (content matches first source)
-        assert "shared.txt" not in paths(report.update)
+        assert "shared.txt" not in paths(changes.update)
         # The overlap warning should be present
-        assert any("Overlapping" in w.error for w in report.warnings)
+        assert any("Overlapping" in w.error for w in changes.warnings)
 
     def test_copy_from_repo_dry_run_delete_duplicate_sources_consistent(self, store_and_fs):
         """Dry-run with overlapping repo sources deduplicates and warns."""
@@ -948,14 +948,14 @@ class TestCopyFromRepoDuplicateSources:
         out.mkdir()
         (out / "shared.txt").write_bytes(b"from_dir")
 
-        report = copy_from_repo_dry_run(
+        changes = copy_from_repo_dry_run(
             fs, ["dir/", "other/"], str(out), delete=True,
         )
-        assert report is not None
+        assert changes is not None
         # "shared.txt" should NOT be in update (content matches first source)
-        assert "shared.txt" not in paths(report.update)
+        assert "shared.txt" not in paths(changes.update)
         # The overlap warning should be present
-        assert any("Overlapping" in w.error for w in report.warnings)
+        assert any("Overlapping" in w.error for w in changes.warnings)
 
 
 # ---------------------------------------------------------------------------
@@ -1000,12 +1000,12 @@ class TestContentsModeSymlinkedDir:
 
 
 # ---------------------------------------------------------------------------
-# CopyReport: return None when empty
+# ChangeReport: return None when empty
 # ---------------------------------------------------------------------------
 
-class TestCopyReportNone:
+class TestChangeReportNone:
     def test_copy_to_repo_returns_none_when_no_changes(self, store_and_fs):
-        """copy_to_repo returns None report when already in sync."""
+        """copy_to_repo returns None changes when already in sync."""
         _, fs, tmp_path = store_and_fs
         d = tmp_path / "src"
         d.mkdir()
@@ -1013,9 +1013,9 @@ class TestCopyReportNone:
         (d / "b.txt").write_bytes(b"bbb")
         (d / ".dotfile").write_bytes(b"dot")
         new_fs = copy_to_repo(fs, [str(d) + "/"], "dir", delete=True)
-        report = new_fs.report
-        assert report is None
-        assert new_fs.hash == fs.hash
+        changes = new_fs.changes
+        assert changes is None
+        assert new_fs.commit_hash == fs.commit_hash
 
     def test_copy_to_repo_dry_run_returns_none_when_in_sync(self, store_and_fs):
         """copy_to_repo_dry_run returns None when already in sync."""
@@ -1025,8 +1025,8 @@ class TestCopyReportNone:
         (d / "a.txt").write_bytes(b"aaa")
         (d / "b.txt").write_bytes(b"bbb")
         (d / ".dotfile").write_bytes(b"dot")
-        report = copy_to_repo_dry_run(fs, [str(d) + "/"], "dir", delete=True)
-        assert report is None
+        changes = copy_to_repo_dry_run(fs, [str(d) + "/"], "dir", delete=True)
+        assert changes is None
 
 
 # ---------------------------------------------------------------------------
@@ -1099,9 +1099,9 @@ class TestCopyToRepoPivot:
         base.mkdir(parents=True)
         (base / "p.txt").write_text("ppp")
         src = str(tmp_path / "base") + "/./sub/mydir"
-        report = copy_to_repo_dry_run(fs, [src], "dest")
-        assert report is not None
-        assert paths(report.add) == {"sub/mydir/p.txt"}
+        changes = copy_to_repo_dry_run(fs, [src], "dest")
+        assert changes is not None
+        assert paths(changes.add) == {"sub/mydir/p.txt"}
 
     def test_pivot_file_trailing_slash_error(self, store_and_fs):
         """cp /base/./file.txt/ :dest → NotADirectoryError"""
@@ -1221,9 +1221,9 @@ class TestCopyFromRepoPivot:
         _, fs, tmp_path = store_and_fs
         fs = fs.write("base/sub/mydir/p.txt", b"ppp")
         out = tmp_path / "output"
-        report = copy_from_repo_dry_run(fs, ["base/./sub/mydir"], str(out))
-        assert report is not None
-        assert paths(report.add) == {"sub/mydir/p.txt"}
+        changes = copy_from_repo_dry_run(fs, ["base/./sub/mydir"], str(out))
+        assert changes is not None
+        assert paths(changes.add) == {"sub/mydir/p.txt"}
 
     def test_pivot_not_found(self, store_and_fs):
         """cp :nope/./foo ./dest → FileNotFoundError"""
@@ -1290,13 +1290,13 @@ class TestCopyFromRepoPivot:
 class TestRemoveFromRepo:
     def test_remove_single_file(self, store_and_fs):
         _, fs, tmp_path = store_and_fs
-        new_fs = remove_from_repo(fs, ["existing.txt"])
+        new_fs = remove_in_repo(fs, ["existing.txt"])
         assert not new_fs.exists("existing.txt")
         assert new_fs.exists("dir/a.txt")
 
     def test_remove_glob(self, store_and_fs):
         _, fs, tmp_path = store_and_fs
-        new_fs = remove_from_repo(fs, ["dir/*.txt"])
+        new_fs = remove_in_repo(fs, ["dir/*.txt"])
         assert not new_fs.exists("dir/a.txt")
         assert not new_fs.exists("dir/b.txt")
         # dotfiles are not matched by *
@@ -1304,7 +1304,7 @@ class TestRemoveFromRepo:
 
     def test_remove_glob_recursive(self, store_and_fs):
         _, fs, tmp_path = store_and_fs
-        new_fs = remove_from_repo(fs, ["**/*.txt"])
+        new_fs = remove_in_repo(fs, ["**/*.txt"])
         assert not new_fs.exists("existing.txt")
         assert not new_fs.exists("dir/a.txt")
         assert not new_fs.exists("dir/b.txt")
@@ -1315,11 +1315,11 @@ class TestRemoveFromRepo:
     def test_remove_directory_requires_recursive(self, store_and_fs):
         _, fs, tmp_path = store_and_fs
         with pytest.raises(IsADirectoryError):
-            remove_from_repo(fs, ["dir"])
+            remove_in_repo(fs, ["dir"])
 
     def test_remove_directory_recursive(self, store_and_fs):
         _, fs, tmp_path = store_and_fs
-        new_fs = remove_from_repo(fs, ["dir"], recursive=True)
+        new_fs = remove_in_repo(fs, ["dir"], recursive=True)
         assert not new_fs.exists("dir/a.txt")
         assert not new_fs.exists("dir/b.txt")
         assert not new_fs.exists("dir/.dotfile")
@@ -1328,33 +1328,33 @@ class TestRemoveFromRepo:
     def test_remove_no_match(self, store_and_fs):
         _, fs, tmp_path = store_and_fs
         with pytest.raises(FileNotFoundError):
-            remove_from_repo(fs, ["nonexistent.xyz"])
+            remove_in_repo(fs, ["nonexistent.xyz"])
 
     def test_remove_dry_run(self, store_and_fs):
         _, fs, tmp_path = store_and_fs
-        report = remove_from_repo_dry_run(fs, ["existing.txt"])
-        assert report is not None
-        assert paths(report.delete) == {"existing.txt"}
+        changes = remove_in_repo_dry_run(fs, ["existing.txt"])
+        assert changes is not None
+        assert paths(changes.delete) == {"existing.txt"}
         # FS is unchanged
         assert fs.exists("existing.txt")
 
     def test_remove_multiple_patterns(self, store_and_fs):
         _, fs, tmp_path = store_and_fs
-        new_fs = remove_from_repo(fs, ["existing.txt", "other/c.txt"])
+        new_fs = remove_in_repo(fs, ["existing.txt", "other/c.txt"])
         assert not new_fs.exists("existing.txt")
         assert not new_fs.exists("other/c.txt")
         assert new_fs.exists("dir/a.txt")
 
     def test_remove_report_attached(self, store_and_fs):
         _, fs, tmp_path = store_and_fs
-        new_fs = remove_from_repo(fs, ["existing.txt"])
-        report = new_fs.report
-        assert report is not None
-        assert paths(report.delete) == {"existing.txt"}
-        assert not report.add
-        assert not report.update
+        new_fs = remove_in_repo(fs, ["existing.txt"])
+        changes = new_fs.changes
+        assert changes is not None
+        assert paths(changes.delete) == {"existing.txt"}
+        assert not changes.add
+        assert not changes.update
 
     def test_remove_glob_no_match(self, store_and_fs):
         _, fs, tmp_path = store_and_fs
         with pytest.raises(FileNotFoundError):
-            remove_from_repo(fs, ["*.xyz"])
+            remove_in_repo(fs, ["*.xyz"])

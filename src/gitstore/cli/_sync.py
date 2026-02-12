@@ -207,13 +207,13 @@ def sync(ctx, args, branch, ref, at_path, match_pattern, before, back, message, 
     try:
         if direction == "to_repo":
             if dry_run:
-                report = sync_to_repo_dry_run(fs, local_path, repo_dest,
+                changes = sync_to_repo_dry_run(fs, local_path, repo_dest,
                                                      checksum=checksum,
                                                      exclude=excl)
-                if report:
-                    for w in report.warnings:
+                if changes:
+                    for w in changes.warnings:
                         click.echo(f"WARNING: {w.path}: {w.error}", err=True)
-                    for action in report.actions():
+                    for action in changes.actions():
                         prefix = {"add": "+", "update": "~", "delete": "-"}[action.action]
                         if repo_dest and action.path:
                             click.echo(f"{prefix} :{repo_dest}/{action.path}")
@@ -225,40 +225,40 @@ def sync(ctx, args, branch, ref, at_path, match_pattern, before, back, message, 
                     message=message, ignore_errors=ignore_errors,
                     checksum=checksum, exclude=excl,
                 )
-                report = _new_fs.report
-                if report:
-                    for w in report.warnings:
+                changes = _new_fs.changes
+                if changes:
+                    for w in changes.warnings:
                         click.echo(f"WARNING: {w.path}: {w.error}", err=True)
-                    for e in report.errors:
+                    for e in changes.errors:
                         click.echo(f"ERROR: {e.path}: {e.error}", err=True)
                 if tag:
                     _apply_tag(store, _new_fs, tag, force_tag)
                 _status(ctx, f"Synced -> :{repo_dest or '/'}")
-                if report and report.errors:
+                if changes and changes.errors:
                     ctx.exit(1)
         else:
             if dry_run:
-                report = sync_from_repo_dry_run(fs, repo_dest, local_path,
+                changes = sync_from_repo_dry_run(fs, repo_dest, local_path,
                                                        checksum=checksum)
-                if report:
-                    for w in report.warnings:
+                if changes:
+                    for w in changes.warnings:
                         click.echo(f"WARNING: {w.path}: {w.error}", err=True)
-                    for action in report.actions():
+                    for action in changes.actions():
                         prefix = {"add": "+", "update": "~", "delete": "-"}[action.action]
                         click.echo(f"{prefix} {os.path.join(local_path, action.path)}")
             else:
-                report = sync_from_repo(
+                changes = sync_from_repo(
                     fs, repo_dest, local_path,
                     ignore_errors=ignore_errors,
                     checksum=checksum,
                 )
-                if report:
-                    for w in report.warnings:
+                if changes:
+                    for w in changes.warnings:
                         click.echo(f"WARNING: {w.path}: {w.error}", err=True)
-                    for e in report.errors:
+                    for e in changes.errors:
                         click.echo(f"ERROR: {e.path}: {e.error}", err=True)
                 _status(ctx, f"Synced -> {local_path}")
-                if report and report.errors:
+                if changes and changes.errors:
                     ctx.exit(1)
     except (FileNotFoundError, NotADirectoryError) as exc:
         raise click.ClickException(str(exc))

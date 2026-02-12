@@ -410,21 +410,21 @@ class TestETag:
         app = _make_app(store_with_files, fs=fs, ref_label="main")
         _, headers, _ = _wsgi_get(app, "/hello.txt")
         assert "ETag" in headers
-        assert headers["ETag"] == f'"{fs.hash}"'
+        assert headers["ETag"] == f'"{fs.commit_hash}"'
 
     def test_dir_has_etag(self, store_with_files):
         fs = store_with_files.branches["main"]
         app = _make_app(store_with_files, fs=fs, ref_label="main")
         _, headers, _ = _wsgi_get(app, "/data")
         assert "ETag" in headers
-        assert headers["ETag"] == f'"{fs.hash}"'
+        assert headers["ETag"] == f'"{fs.commit_hash}"'
 
     def test_json_has_etag(self, store_with_files):
         fs = store_with_files.branches["main"]
         app = _make_app(store_with_files, fs=fs, ref_label="main")
         _, headers, _ = _wsgi_get(app, "/hello.txt", accept="application/json")
         assert "ETag" in headers
-        assert headers["ETag"] == f'"{fs.hash}"'
+        assert headers["ETag"] == f'"{fs.commit_hash}"'
 
     def test_root_has_etag(self, store_with_files):
         fs = store_with_files.branches["main"]
@@ -437,7 +437,7 @@ class TestETag:
         _, headers, _ = _wsgi_get(app, "/main/hello.txt")
         assert "ETag" in headers
         fs = store_with_files.branches["main"]
-        assert headers["ETag"] == f'"{fs.hash}"'
+        assert headers["ETag"] == f'"{fs.commit_hash}"'
 
     def test_different_snapshots_different_etags(self, store_with_files):
         fs = store_with_files.branches["main"]
@@ -481,7 +481,7 @@ class TestCacheControl:
     def test_304_on_matching_etag(self, store_with_files):
         fs = store_with_files.branches["main"]
         app = _make_app(store_with_files, fs=fs, ref_label="main")
-        etag = f'"{fs.hash}"'
+        etag = f'"{fs.commit_hash}"'
         status, headers, body = _wsgi_get(app, "/hello.txt", if_none_match=etag)
         assert status == "304 Not Modified"
         assert body == b""
@@ -490,7 +490,7 @@ class TestCacheControl:
     def test_304_on_dir(self, store_with_files):
         fs = store_with_files.branches["main"]
         app = _make_app(store_with_files, fs=fs, ref_label="main")
-        etag = f'"{fs.hash}"'
+        etag = f'"{fs.commit_hash}"'
         status, _, body = _wsgi_get(app, "/data", if_none_match=etag)
         assert status == "304 Not Modified"
         assert body == b""
@@ -505,7 +505,7 @@ class TestCacheControl:
     def test_304_multi_ref(self, store_with_files):
         app = _make_app(store_with_files)
         fs = store_with_files.branches["main"]
-        etag = f'"{fs.hash}"'
+        etag = f'"{fs.commit_hash}"'
         status, _, body = _wsgi_get(app, "/main/hello.txt", if_none_match=etag)
         assert status == "304 Not Modified"
         assert body == b""

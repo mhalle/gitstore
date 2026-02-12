@@ -483,7 +483,7 @@ def _require_writable_ref(store: GitStore, rp: RefPath, default_branch: str) -> 
 
 def _log_entry_dict(entry) -> dict:
     return {
-        "hash": entry.hash,
+        "hash": entry.commit_hash,
         "message": entry.message,
         "time": entry.time.isoformat(),
         "author_name": entry.author_name,

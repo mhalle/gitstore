@@ -131,7 +131,7 @@ def branch_hash(ctx, name, ref, at_path, match_pattern, before, back):
         raise click.ClickException(f"Branch not found: {name}")
     fs = _apply_snapshot_filters(fs, at_path=at_path, match_pattern=match_pattern,
                                  before=before, back=back)
-    click.echo(fs.hash)
+    click.echo(fs.commit_hash)
 
 
 # ---------------------------------------------------------------------------
@@ -221,7 +221,7 @@ def tag_hash(ctx, name):
         fs = store.tags[name]
     except KeyError:
         raise click.ClickException(f"Tag not found: {name}")
-    click.echo(fs.hash)
+    click.echo(fs.commit_hash)
 
 
 @branch.command("default")

@@ -217,7 +217,7 @@ def _serve_ref_listing(start_response, store, base_path, want_json):
 
 def _serve_path(environ, start_response, fs, ref_label, link_prefix, path, want_json):
     """Serve a file or directory listing within a resolved FS."""
-    etag = f'"{fs.hash}"'
+    etag = f'"{fs.commit_hash}"'
 
     # 304 Not Modified if client ETag matches
     if_none_match = environ.get("HTTP_IF_NONE_MATCH")

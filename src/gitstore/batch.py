@@ -95,7 +95,7 @@ class Batch:
             self._closed = True
             return False
 
-        # Let _commit_changes build report and generate message
+        # Let _commit_changes build changes and generate message
         self.fs = self._fs._commit_changes(self._writes, self._removes, self._message, self._operation)
         self._closed = True
         return False

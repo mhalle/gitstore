@@ -233,7 +233,7 @@ def cp(ctx, args, branch, ref, at_path, match_pattern, before, back, message, mo
             source_paths = list(raw_sources)
             try:
                 if dry_run:
-                    report = copy_to_repo_dry_run(
+                    changes = copy_to_repo_dry_run(
                         fs, source_paths, dest_path,
                         follow_symlinks=follow_symlinks,
                         ignore_existing=ignore_existing,
@@ -241,10 +241,10 @@ def cp(ctx, args, branch, ref, at_path, match_pattern, before, back, message, mo
                         checksum=checksum,
                         exclude=excl,
                     )
-                    if report:
-                        for w in report.warnings:
+                    if changes:
+                        for w in changes.warnings:
                             click.echo(f"WARNING: {w.path}: {w.error}", err=True)
-                        for action in report.actions():
+                        for action in changes.actions():
                             prefix = {"add": "+", "update": "~", "delete": "-"}[action.action]
                             if dest_path and action.path:
                                 click.echo(f"{prefix} :{dest_path}/{action.path}")
@@ -261,16 +261,16 @@ def cp(ctx, args, branch, ref, at_path, match_pattern, before, back, message, mo
                         checksum=checksum,
                         exclude=excl,
                     )
-                    report = _new_fs.report
-                    if report:
-                        for w in report.warnings:
+                    changes = _new_fs.changes
+                    if changes:
+                        for w in changes.warnings:
                             click.echo(f"WARNING: {w.path}: {w.error}", err=True)
-                        for e in report.errors:
+                        for e in changes.errors:
                             click.echo(f"ERROR: {e.path}: {e.error}", err=True)
                     if tag:
                         _apply_tag(store, _new_fs, tag, force_tag)
                     _status(ctx, f"Copied -> :{dest_path or '/'}")
-                    if report and report.errors:
+                    if changes and changes.errors:
                         ctx.exit(1)
             except (FileNotFoundError, NotADirectoryError) as exc:
                 raise click.ClickException(str(exc))
@@ -459,33 +459,33 @@ def _cp_multi_repo_to_disk(ctx, fs, source_paths, dest_path, dry_run,
     """Handle multi-file repo → disk copy."""
     try:
         if dry_run:
-            report = copy_from_repo_dry_run(
+            changes = copy_from_repo_dry_run(
                 fs, source_paths, dest_path,
                 ignore_existing=ignore_existing,
                 delete=delete,
                 checksum=checksum,
             )
-            if report:
-                for w in report.warnings:
+            if changes:
+                for w in changes.warnings:
                     click.echo(f"WARNING: {w.path}: {w.error}", err=True)
-                for action in report.actions():
+                for action in changes.actions():
                     prefix = {"add": "+", "update": "~", "delete": "-"}[action.action]
                     click.echo(f"{prefix} {os.path.join(dest_path, action.path)}")
         else:
-            report = copy_from_repo(
+            changes = copy_from_repo(
                 fs, source_paths, dest_path,
                 ignore_existing=ignore_existing,
                 delete=delete,
                 ignore_errors=ignore_errors,
                 checksum=checksum,
             )
-            if report:
-                for w in report.warnings:
+            if changes:
+                for w in changes.warnings:
                     click.echo(f"WARNING: {w.path}: {w.error}", err=True)
-                for e in report.errors:
+                for e in changes.errors:
                     click.echo(f"ERROR: {e.path}: {e.error}", err=True)
             _status(ctx, f"Copied -> {dest_path}")
-            if report and report.errors:
+            if changes and changes.errors:
                 ctx.exit(1)
     except (FileNotFoundError, NotADirectoryError) as exc:
         raise click.ClickException(str(exc))

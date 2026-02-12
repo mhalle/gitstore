@@ -3,7 +3,7 @@
 import pytest
 from dulwich.repo import Repo as DulwichRepo
 
-from gitstore import GitStore, SyncDiff, RefChange
+from gitstore import GitStore, MirrorDiff, RefChange
 
 
 # ---------------------------------------------------------------------------
@@ -46,7 +46,7 @@ def _get_refs(repo_path):
 class TestBackupAPI:
     def test_backup_returns_sync_diff(self, store, remote):
         diff = store.backup(remote)
-        assert isinstance(diff, SyncDiff)
+        assert isinstance(diff, MirrorDiff)
         assert len(diff.create) > 0
         assert diff.total > 0
 
@@ -87,7 +87,7 @@ class TestRestoreAPI:
         with fs.batch(message="add new") as b:
             b.write("new.txt", b"new\n")
         diff = store.restore(remote)
-        assert isinstance(diff, SyncDiff)
+        assert isinstance(diff, MirrorDiff)
 
     def test_dry_run_does_not_modify_local(self, store, remote):
         store.backup(remote)
@@ -112,12 +112,12 @@ class TestRestoreAPI:
 
 
 # ---------------------------------------------------------------------------
-# TestSyncDiffStructure
+# TestMirrorDiffStructure
 # ---------------------------------------------------------------------------
 
-class TestSyncDiffStructure:
+class TestMirrorDiffStructure:
     def test_empty_diff_is_in_sync(self):
-        diff = SyncDiff()
+        diff = MirrorDiff()
         assert diff.in_sync
         assert diff.total == 0
 
@@ -128,7 +128,7 @@ class TestSyncDiffStructure:
         assert c.dest_sha is None
 
     def test_total_counts_all_categories(self):
-        diff = SyncDiff(
+        diff = MirrorDiff(
             create=[RefChange(ref="a", src_sha="1")],
             update=[RefChange(ref="b", src_sha="2", dest_sha="3")],
             delete=[RefChange(ref="c", dest_sha="4"), RefChange(ref="d", dest_sha="5")],

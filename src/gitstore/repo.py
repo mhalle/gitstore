@@ -4,10 +4,21 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterator, MutableMapping
+from dataclasses import dataclass
 from pathlib import Path
 
 from . import _compat as pygit2
-from .mirror import RefChange, SyncDiff
+from .mirror import RefChange, MirrorDiff
+
+
+@dataclass
+class ReflogEntry:
+    """A single reflog entry."""
+    old_sha: str
+    new_sha: str
+    committer: str
+    timestamp: float
+    message: str
 
 
 def _validate_ref_name(name: str) -> None:
@@ -77,18 +88,18 @@ class GitStore:
 
         return store
 
-    def backup(self, url, *, dry_run=False, progress=None) -> SyncDiff:
+    def backup(self, url, *, dry_run=False, progress=None) -> MirrorDiff:
         """Push all refs to *url*, creating an exact mirror.
 
-        Returns a `SyncDiff` describing what changed (or would change).
+        Returns a `MirrorDiff` describing what changed (or would change).
         """
         from .mirror import backup
         return backup(self, url, dry_run=dry_run, progress=progress)
 
-    def restore(self, url, *, dry_run=False, progress=None) -> SyncDiff:
+    def restore(self, url, *, dry_run=False, progress=None) -> MirrorDiff:
         """Fetch all refs from *url*, overwriting local state.
 
-        Returns a `SyncDiff` describing what changed (or would change).
+        Returns a `MirrorDiff` describing what changed (or would change).
         """
         from .mirror import restore
         return restore(self, url, dry_run=dry_run, progress=progress)
@@ -217,19 +228,14 @@ class RefDict(MutableMapping):
         self[name] = fs
         return self[name]
 
-    def reflog(self, name: str) -> list[dict]:
+    def reflog(self, name: str) -> list[ReflogEntry]:
         """Read reflog entries for a branch.
 
         Args:
             name: Branch name (e.g., "main")
 
         Returns:
-            List of reflog entries, each a dict with:
-                - old_sha: Previous commit hash
-                - new_sha: New commit hash
-                - committer: Name and email
-                - timestamp: Unix timestamp
-                - message: Reflog message
+            List of :class:`ReflogEntry` objects.
 
         Raises:
             KeyError: If branch doesn't exist
@@ -238,7 +244,7 @@ class RefDict(MutableMapping):
         Example:
             >>> entries = repo.branches.reflog("main")
             >>> for e in entries:
-            ...     print(f"{e['message']}: {e['new_sha'][:7]}")
+            ...     print(f"{e.message}: {e.new_sha[:7]}")
         """
         from dulwich import reflog as dreflog
 
@@ -263,11 +269,11 @@ class RefDict(MutableMapping):
         with open(reflog_path, 'rb') as f:
             entries = []
             for entry in dreflog.read_reflog(f):
-                entries.append({
-                    'old_sha': entry.old_sha.decode(),
-                    'new_sha': entry.new_sha.decode(),
-                    'committer': entry.committer.decode(),
-                    'timestamp': entry.timestamp,
-                    'message': entry.message.decode(),
-                })
+                entries.append(ReflogEntry(
+                    old_sha=entry.old_sha.decode(),
+                    new_sha=entry.new_sha.decode(),
+                    committer=entry.committer.decode(),
+                    timestamp=entry.timestamp,
+                    message=entry.message.decode(),
+                ))
             return entries

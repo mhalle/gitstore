@@ -19,7 +19,7 @@ class TestWrite:
     def test_write_returns_new_fs(self, repo_fs):
         _, fs = repo_fs
         fs2 = fs.write("a.txt", b"a")
-        assert fs2.hash != fs.hash
+        assert fs2.commit_hash != fs.commit_hash
 
     def test_old_fs_unchanged(self, repo_fs):
         _, fs = repo_fs
@@ -44,7 +44,7 @@ class TestWrite:
         fs2 = fs.write("a.txt", b"a")
         # Getting branch again should see latest commit
         latest = repo.branches["main"]
-        assert latest.hash == fs2.hash
+        assert latest.commit_hash == fs2.commit_hash
 
     def test_write_custom_message(self, repo_fs):
         _, fs = repo_fs
@@ -256,7 +256,7 @@ class TestNoOpCommit:
         _, fs = repo_fs
         fs2 = fs.write("a.txt", b"hello")
         fs3 = fs2.write("a.txt", b"hello")
-        assert fs3.hash == fs2.hash
+        assert fs3.commit_hash == fs2.commit_hash
 
     def test_write_identical_via_batch_no_new_commit(self, repo_fs):
         """Batch-writing identical content should not create a new commit."""
@@ -264,7 +264,7 @@ class TestNoOpCommit:
         fs2 = fs.write("a.txt", b"hello")
         with fs2.batch() as b:
             b.write("a.txt", b"hello")
-        assert b.fs.hash == fs2.hash
+        assert b.fs.commit_hash == fs2.commit_hash
 
 
 class TestUndo:
@@ -275,7 +275,7 @@ class TestUndo:
         fs2 = fs1.write("b.txt", b"b")
 
         fs_back = fs2.undo()
-        assert fs_back.hash == fs1.hash
+        assert fs_back.commit_hash == fs1.commit_hash
         assert fs_back.exists("a.txt")
         assert not fs_back.exists("b.txt")
 
@@ -287,7 +287,7 @@ class TestUndo:
         fs3 = fs2.write("c.txt", b"c")
 
         fs_back = fs3.undo(2)
-        assert fs_back.hash == fs1.hash
+        assert fs_back.commit_hash == fs1.commit_hash
         assert fs_back.exists("a.txt")
         assert not fs_back.exists("b.txt")
         assert not fs_back.exists("c.txt")
@@ -300,7 +300,7 @@ class TestUndo:
 
         fs_back = fs2.undo()
         latest = repo.branches["main"]
-        assert latest.hash == fs_back.hash
+        assert latest.commit_hash == fs_back.commit_hash
 
     def test_undo_too_many_raises(self, repo_fs):
         """Undo beyond history should raise ValueError."""
@@ -331,7 +331,7 @@ class TestRedo:
 
         fs_back = fs2.undo()
         fs_forward = fs_back.redo()
-        assert fs_forward.hash == fs2.hash
+        assert fs_forward.commit_hash == fs2.commit_hash
         assert fs_forward.exists("b.txt")
 
     def test_redo_multiple_steps(self, repo_fs):
@@ -347,7 +347,7 @@ class TestRedo:
 
         # Redo 2 steps should get us back to fs3
         fs_forward = fs_back2.redo(2)
-        assert fs_forward.hash == fs3.hash
+        assert fs_forward.commit_hash == fs3.commit_hash
         assert fs_forward.exists("c.txt")
 
     def test_redo_updates_branch(self, repo_fs):
@@ -359,7 +359,7 @@ class TestRedo:
         fs_back = fs2.undo()
         fs_forward = fs_back.redo()
         latest = repo.branches["main"]
-        assert latest.hash == fs_forward.hash
+        assert latest.commit_hash == fs_forward.commit_hash
 
     def test_redo_too_many_raises(self, repo_fs):
         """Redo beyond available history should raise ValueError."""
@@ -396,9 +396,9 @@ class TestReflog:
 
         entries = repo.branches.reflog("main")
         assert len(entries) >= 2
-        assert all("message" in e for e in entries)
-        assert all("new_sha" in e for e in entries)
-        assert all("old_sha" in e for e in entries)
+        assert all(hasattr(e, "message") for e in entries)
+        assert all(hasattr(e, "new_sha") for e in entries)
+        assert all(hasattr(e, "old_sha") for e in entries)
 
     def test_reflog_includes_undo(self, repo_fs):
         """Reflog should include undo operations."""
@@ -410,7 +410,7 @@ class TestReflog:
         entries = repo.branches.reflog("main")
         assert len(entries) >= 3
         # Last entry should be the undo
-        assert "undo:" in entries[-1]["message"]
+        assert "undo:" in entries[-1].message
 
     def test_reflog_nonexistent_branch_raises(self, repo_fs):
         """Reflog on nonexistent branch should raise KeyError."""
@@ -442,7 +442,7 @@ class TestUndoRedoEdgeCases:
 
         # Redo goes back through reflog, not to orphaned commits
         fs_redo = fs_new.redo()
-        assert fs_redo.hash == fs_back.hash
+        assert fs_redo.commit_hash == fs_back.commit_hash
         assert not fs_redo.exists("d.txt")
 
     def test_redo_after_normal_commit(self, repo_fs):
@@ -453,7 +453,7 @@ class TestUndoRedoEdgeCases:
 
         # Redo without undo goes to previous reflog entry
         fs_redo = fs2.redo()
-        assert fs_redo.hash == fs1.hash
+        assert fs_redo.commit_hash == fs1.commit_hash
         assert not fs_redo.exists("b.txt")
 
     def test_undo_redo_undo_sequence(self, repo_fs):
@@ -465,10 +465,10 @@ class TestUndoRedoEdgeCases:
 
         fs_undo1 = fs3.undo()
         fs_redo = fs_undo1.redo()
-        assert fs_redo.hash == fs3.hash
+        assert fs_redo.commit_hash == fs3.commit_hash
 
         fs_undo2 = fs_redo.undo()
-        assert fs_undo2.hash == fs2.hash
+        assert fs_undo2.commit_hash == fs2.commit_hash
 
     def test_multiple_undos_then_multiple_redos(self, repo_fs):
         """Multiple individual undos followed by multiple redo steps."""
@@ -482,11 +482,11 @@ class TestUndoRedoEdgeCases:
         fs_b1 = fs4.undo()
         fs_b2 = fs_b1.undo()
         fs_b3 = fs_b2.undo()
-        assert fs_b3.hash == fs1.hash
+        assert fs_b3.commit_hash == fs1.commit_hash
 
         # Redo 3 steps should get back to fs4
         fs_forward = fs_b3.redo(3)
-        assert fs_forward.hash == fs4.hash
+        assert fs_forward.commit_hash == fs4.commit_hash
         assert fs_forward.exists("d.txt")
 
     def test_redo_at_initial_commit(self, repo_fs):
@@ -521,7 +521,7 @@ class TestUndoRedoEdgeCases:
         fs2.undo()
 
         entries = repo.branches.reflog("main")
-        timestamps = [e["timestamp"] for e in entries]
+        timestamps = [e.timestamp for e in entries]
         assert timestamps == sorted(timestamps), "Timestamps should increase"
 
     def test_undo_redo_with_batch(self, repo_fs):
@@ -564,7 +564,7 @@ class TestBranchesSet:
         fs_new = repo.branches.set("feature", fs1)
 
         assert fs_new.branch == "feature"
-        assert fs_new.hash == fs1.hash
+        assert fs_new.commit_hash == fs1.commit_hash
         assert fs_new is not fs1  # New object
         assert fs_new._writable
 
@@ -576,7 +576,7 @@ class TestBranchesSet:
         fs_feature = repo.branches.set("feature", fs1)
 
         assert "feature" in repo.branches
-        assert repo.branches["feature"].hash == fs1.hash
+        assert repo.branches["feature"].commit_hash == fs1.commit_hash
 
     def test_set_updates_existing_branch(self, repo_fs):
         """branches.set() should update existing branch."""
@@ -587,7 +587,7 @@ class TestBranchesSet:
         repo.branches["feature"] = fs1
         fs_updated = repo.branches.set("feature", fs2)
 
-        assert fs_updated.hash == fs2.hash
+        assert fs_updated.commit_hash == fs2.commit_hash
         assert fs_updated.branch == "feature"
 
     def test_set_with_readonly_snapshot(self, repo_fs):
@@ -603,7 +603,7 @@ class TestBranchesSet:
 
         assert fs_branch.branch == "from-tag"
         assert fs_branch._writable
-        assert fs_branch.hash == tag_fs.hash
+        assert fs_branch.commit_hash == tag_fs.commit_hash
 
     def test_set_result_is_writable(self, repo_fs):
         """FS returned by set() should be writable."""
@@ -615,7 +615,7 @@ class TestBranchesSet:
 
         # Should update the 'feature' branch
         assert fs2.branch == "feature"
-        assert repo.branches["feature"].hash == fs2.hash
+        assert repo.branches["feature"].commit_hash == fs2.commit_hash
 
 
 class TestRetryWrite:
@@ -624,7 +624,7 @@ class TestRetryWrite:
         repo, fs = repo_fs
         new_fs = retry_write(repo, "main", "file.txt", b"hello")
         assert new_fs.read("file.txt") == b"hello"
-        assert repo.branches["main"].hash == new_fs.hash
+        assert repo.branches["main"].commit_hash == new_fs.commit_hash
 
     def test_retry_write_retries_on_stale(self, repo_fs):
         """Concurrent modification should be retried transparently."""

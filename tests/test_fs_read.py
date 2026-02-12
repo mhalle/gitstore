@@ -87,44 +87,44 @@ class TestExists:
         assert not fs.exists("nope.txt")
 
 
-class TestDump:
-    def test_dump_creates_files(self, repo_with_files, tmp_path):
+class TestExport:
+    def test_export_creates_files(self, repo_with_files, tmp_path):
         _, fs = repo_with_files
         out = tmp_path / "out"
-        fs.dump(out)
+        fs.export(out)
         assert (out / "hello.txt").read_bytes() == b"Hello!"
         assert (out / "src" / "main.py").read_bytes() == b"print('hi')"
         assert (out / "src" / "lib" / "util.py").read_bytes() == b"# util"
 
-    def test_dump_empty_tree(self, tmp_path):
+    def test_export_empty_tree(self, tmp_path):
         repo = GitStore.open(tmp_path / "test.git")
         fs = repo.branches["main"]
         out = tmp_path / "out"
-        fs.dump(out)
+        fs.export(out)
         assert out.is_dir()
         assert list(out.iterdir()) == []
 
-    def test_dump_overwrites_existing(self, repo_with_files, tmp_path):
+    def test_export_overwrites_existing(self, repo_with_files, tmp_path):
         _, fs = repo_with_files
         out = tmp_path / "out"
         out.mkdir()
         (out / "hello.txt").write_bytes(b"old")
-        fs.dump(out)
+        fs.export(out)
         assert (out / "hello.txt").read_bytes() == b"Hello!"
 
-    def test_dump_symlinks(self, tmp_path):
+    def test_export_symlinks(self, tmp_path):
         import os
         repo = GitStore.open(tmp_path / "test.git")
         fs = repo.branches["main"]
         fs = fs.write("target.txt", b"content")
         fs = fs.write_symlink("link.txt", "target.txt")
         out = tmp_path / "out"
-        fs.dump(out)
+        fs.export(out)
         assert (out / "target.txt").read_bytes() == b"content"
         assert (out / "link.txt").is_symlink()
         assert os.readlink(out / "link.txt") == "target.txt"
 
-    def test_dump_symlink_overwrites_existing_file(self, tmp_path):
+    def test_export_symlink_overwrites_existing_file(self, tmp_path):
         import os
         repo = GitStore.open(tmp_path / "test.git")
         fs = repo.branches["main"]
@@ -132,7 +132,7 @@ class TestDump:
         out = tmp_path / "out"
         out.mkdir()
         (out / "link.txt").write_bytes(b"old regular file")
-        fs.dump(out)
+        fs.export(out)
         assert (out / "link.txt").is_symlink()
         assert os.readlink(out / "link.txt") == "target.txt"
 
@@ -174,8 +174,8 @@ class TestPathLikeSupport:
 class TestProperties:
     def test_hash(self, repo_with_files):
         _, fs = repo_with_files
-        assert isinstance(fs.hash, str)
-        assert len(fs.hash) == 40
+        assert isinstance(fs.commit_hash, str)
+        assert len(fs.commit_hash) == 40
 
     def test_branch(self, repo_with_files):
         _, fs = repo_with_files

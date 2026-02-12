@@ -69,7 +69,7 @@ class TestWritableFile:
             f.write(b"x")
         new_fs = f.fs
         assert new_fs.exists("x.txt")
-        assert new_fs.hash != fs.hash
+        assert new_fs.commit_hash != fs.commit_hash
 
     def test_exception_no_commit(self, repo_fs):
         _, fs = repo_fs
@@ -115,9 +115,9 @@ class TestWritableFile:
         f = fs.open("closed.txt", "wb")
         f.write(b"data")
         f.close()
-        first_hash = f.fs.hash
+        first_hash = f.fs.commit_hash
         f.close()  # should not commit again
-        assert f.fs.hash == first_hash
+        assert f.fs.commit_hash == first_hash
 
     def test_writable_properties(self, repo_fs):
         _, fs = repo_fs

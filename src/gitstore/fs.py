@@ -31,6 +31,7 @@ from .tree import (
 )
 
 if TYPE_CHECKING:
+    from .copy._types import ChangeReport
     from .repo import GitStore
 
 __all__ = ["FS", "retry_write"]
@@ -49,7 +50,7 @@ class FS:
         self._branch = branch
         commit = gitstore._repo[commit_oid]
         self._tree_oid = commit.tree_id
-        self._report = None
+        self._changes = None
 
     @property
     def _writable(self) -> bool:
@@ -62,7 +63,7 @@ class FS:
         return f"FS(commit={short})"
 
     @property
-    def hash(self) -> str:
+    def commit_hash(self) -> str:
         return str(self._commit_oid)
 
     @property
@@ -88,9 +89,9 @@ class FS:
         return self._store._repo[self._commit_oid].author.email
 
     @property
-    def report(self):
+    def changes(self) -> ChangeReport | None:
         """Report of the operation that created this snapshot."""
-        return self._report
+        return self._changes
 
     # --- Read operations ---
 
@@ -269,13 +270,13 @@ class FS:
 
     # --- Write operations ---
 
-    def _build_report_from_changes(
+    def _build_changes(
         self,
         writes: dict[str, bytes | tuple[bytes, int] | pygit2.Oid | tuple[pygit2.Oid, int]],
         removes: set[str],
     ):
-        """Build CopyReport from writes and removes with type detection."""
-        from .copy._types import CopyReport, FileEntry
+        """Build ChangeReport from writes and removes with type detection."""
+        from .copy._types import ChangeReport, FileEntry, FileType
 
         repo = self._store._repo
         add_entries = []
@@ -311,9 +312,9 @@ class FS:
                 delete_entries.append(file_entry)
             else:
                 # Shouldn't happen, but handle gracefully
-                delete_entries.append(FileEntry(path, "B"))
+                delete_entries.append(FileEntry(path, FileType.BLOB))
 
-        return CopyReport(add=add_entries, update=update_entries, delete=delete_entries)
+        return ChangeReport(add=add_entries, update=update_entries, delete=delete_entries)
 
     def _commit_changes(
         self,
@@ -330,11 +331,11 @@ class FS:
         repo = self._store._repo
         sig = self._store._signature
 
-        # Build report from changes
-        report = self._build_report_from_changes(writes, removes)
+        # Build changes
+        changes = self._build_changes(writes, removes)
 
         # Generate message if not provided
-        final_message = format_commit_message(report, message, operation)
+        final_message = format_commit_message(changes, message, operation)
 
         new_tree_oid = rebuild_tree(repo, self._tree_oid, writes, removes)
 
@@ -363,7 +364,7 @@ class FS:
             ref.set_target(new_commit_oid, message=f"commit: {final_message}".encode(), committer=sig._identity)
 
         new_fs = FS(self._store, new_commit_oid, branch=self._branch)
-        new_fs._report = report
+        new_fs._changes = changes
         return new_fs
 
     def write(
@@ -426,9 +427,9 @@ class FS:
         from .batch import Batch
         return Batch(self, message=message, operation=operation)
 
-    # --- Dump ---
+    # --- Export ---
 
-    def dump(self, path: str | Path) -> None:
+    def export(self, path: str | Path) -> None:
         """Write the tree contents to a directory on the filesystem.
 
         The destination directory should be empty or non-existent.

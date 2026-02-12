@@ -13,7 +13,7 @@ from gitstore.cli._watch import (
     _run_sync_cycle,
     watch_and_sync,
 )
-from gitstore.copy._types import CopyReport, FileEntry
+from gitstore.copy._types import ChangeReport, FileEntry
 from gitstore.exceptions import StaleSnapshotError
 
 
@@ -42,40 +42,40 @@ class TestImportWatchfiles:
 
 class TestFormatSummary:
     def test_empty_report(self):
-        report = CopyReport()
-        assert _format_summary(report) == "no changes"
+        changes = ChangeReport()
+        assert _format_summary(changes) == "no changes"
 
     def test_adds_only(self):
-        report = CopyReport(add=[FileEntry("a.txt", "B"), FileEntry("b.txt", "B")])
-        assert _format_summary(report) == "+2"
+        changes = ChangeReport(add=[FileEntry("a.txt", "B"), FileEntry("b.txt", "B")])
+        assert _format_summary(changes) == "+2"
 
     def test_updates_only(self):
-        report = CopyReport(update=[FileEntry("a.txt", "B")])
-        assert _format_summary(report) == "~1"
+        changes = ChangeReport(update=[FileEntry("a.txt", "B")])
+        assert _format_summary(changes) == "~1"
 
     def test_deletes_only(self):
-        report = CopyReport(delete=[FileEntry("a.txt", "B"), FileEntry("b.txt", "B"), FileEntry("c.txt", "B")])
-        assert _format_summary(report) == "-3"
+        changes = ChangeReport(delete=[FileEntry("a.txt", "B"), FileEntry("b.txt", "B"), FileEntry("c.txt", "B")])
+        assert _format_summary(changes) == "-3"
 
     def test_mixed(self):
-        report = CopyReport(
+        changes = ChangeReport(
             add=[FileEntry("a.txt", "B")],
             update=[FileEntry("b.txt", "B"), FileEntry("c.txt", "B")],
             delete=[FileEntry("d.txt", "B")],
         )
-        assert _format_summary(report) == "+1 ~2 -1"
+        assert _format_summary(changes) == "+1 ~2 -1"
 
 
 # ---------------------------------------------------------------------------
 # watch_and_sync
 # ---------------------------------------------------------------------------
 
-def _make_store_and_fs(report=None):
+def _make_store_and_fs(changes=None):
     """Create mock store + branches dict returning a mock FS."""
     fs = MagicMock()
     new_fs = MagicMock()
-    new_fs.report = report
-    new_fs.hash = "abc1234def"
+    new_fs.changes = changes
+    new_fs.commit_hash = "abc1234def"
 
     store = MagicMock()
     store.branches = {"main": fs}
@@ -85,7 +85,7 @@ def _make_store_and_fs(report=None):
 class TestInitialSync:
     def test_initial_sync_runs(self):
         """Initial sync runs before the watch loop starts."""
-        store, fs, new_fs = _make_store_and_fs(report=None)
+        store, fs, new_fs = _make_store_and_fs(changes=None)
 
         def fake_watch(path, debounce):
             raise KeyboardInterrupt
@@ -107,7 +107,7 @@ class TestInitialSync:
 class TestWatchOneCycle:
     def test_watch_one_cycle(self):
         """Watch yields one changeset, then KeyboardInterrupt -> 2 sync calls."""
-        store, fs, new_fs = _make_store_and_fs(report=None)
+        store, fs, new_fs = _make_store_and_fs(changes=None)
 
         call_count = 0
 
@@ -135,7 +135,7 @@ class TestWatchOneCycle:
 class TestCycleErrorHandling:
     def test_stale_snapshot_continues(self):
         """StaleSnapshotError in a cycle doesn't stop the loop."""
-        store, fs, new_fs = _make_store_and_fs(report=None)
+        store, fs, new_fs = _make_store_and_fs(changes=None)
 
         cycle_calls = []
 
@@ -165,7 +165,7 @@ class TestCycleErrorHandling:
 
     def test_generic_exception_continues(self):
         """A generic exception in a cycle doesn't stop the loop."""
-        store, fs, new_fs = _make_store_and_fs(report=None)
+        store, fs, new_fs = _make_store_and_fs(changes=None)
 
         cycle_calls = []
 
@@ -200,13 +200,13 @@ class TestCycleErrorHandling:
 class TestRunSyncCycle:
     def test_prints_summary(self, capsys):
         """_run_sync_cycle prints a summary line on changes."""
-        report = CopyReport(
+        changes = ChangeReport(
             add=[FileEntry("a.txt", "B")],
             update=[FileEntry("b.txt", "B")],
         )
         new_fs = MagicMock()
-        new_fs.report = report
-        new_fs.hash = "abc1234"
+        new_fs.changes = changes
+        new_fs.commit_hash = "abc1234"
 
         store = MagicMock()
         store.branches = {"main": MagicMock()}
@@ -220,10 +220,10 @@ class TestRunSyncCycle:
         assert "abc1234" in captured.out
 
     def test_no_changes(self, capsys):
-        """_run_sync_cycle prints 'no changes' when report is None."""
+        """_run_sync_cycle prints 'no changes' when changes is None."""
         new_fs = MagicMock()
-        new_fs.report = None
-        new_fs.hash = "abc1234"
+        new_fs.changes = None
+        new_fs.commit_hash = "abc1234"
 
         store = MagicMock()
         store.branches = {"main": MagicMock()}

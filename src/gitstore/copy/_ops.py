@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ..tree import _entry_at_path, _normalize_path, _mode_from_disk, GIT_FILEMODE_LINK
-from ._types import CopyError, CopyReport, FileEntry, _finalize_report
+from ._types import ChangeError, ChangeReport, FileEntry, FileType, _finalize_changes
 from ._resolve import (
     _walk_local_paths,
     _walk_repo,
@@ -48,14 +48,14 @@ def _make_entries_from_disk(rel_paths: list[str], rel_to_abs: dict[str, str], fo
     for rel in rel_paths:
         full_path = rel_to_abs.get(rel, rel)  # fallback to rel if not in map
         if os.path.islink(full_path) and not follow_symlinks:
-            entries.append(FileEntry(rel, "L", src=full_path))
+            entries.append(FileEntry(rel, FileType.LINK, src=full_path))
         else:
             try:
                 mode = _mode_from_disk(full_path)
                 entries.append(FileEntry.from_mode(rel, mode, src=full_path))
             except OSError:
                 # If we can't read it, assume blob
-                entries.append(FileEntry(rel, "B", src=full_path))
+                entries.append(FileEntry(rel, FileType.BLOB, src=full_path))
     return entries
 
 
@@ -69,7 +69,7 @@ def _make_entries_from_repo(fs: FS, rel_paths: list[str], base_path: str) -> lis
             entries.append(FileEntry.from_mode(rel, entry[1], src=full_path))
         else:
             # Shouldn't happen, but handle gracefully
-            entries.append(FileEntry(rel, "B", src=full_path))
+            entries.append(FileEntry(rel, FileType.BLOB, src=full_path))
     return entries
 
 
@@ -88,7 +88,7 @@ def _make_entries_from_repo_dict(fs: FS, rel_paths: list[str], rel_to_repo: dict
             entries.append(FileEntry.from_mode(rel, entry[1], src=repo_path))
         else:
             # Shouldn't happen, but handle gracefully
-            entries.append(FileEntry(rel, "B", src=repo_path))
+            entries.append(FileEntry(rel, FileType.BLOB, src=repo_path))
     return entries
 
 
@@ -100,7 +100,7 @@ def _apply_plan(
     fs: FS,
     write_pairs: list[tuple[str, str]],
     delete_paths: list[str],
-    report: CopyReport,
+    changes: ChangeReport,
     *,
     message: str | None = None,
     operation: str | None = None,
@@ -108,34 +108,34 @@ def _apply_plan(
     mode: int | None = None,
     ignore_errors: bool = False,
 ) -> FS:
-    """Execute a batch of writes and deletes, attach *report* to the result.
+    """Execute a batch of writes and deletes, attach *changes* to the result.
 
     Shared by ``copy_to_repo`` and ``remove_from_repo``.
     """
     if not write_pairs and not delete_paths:
-        if ignore_errors and report.errors:
-            raise RuntimeError(f"All files failed to copy: {report.errors}")
-        fs._report = _finalize_report(report)
+        if ignore_errors and changes.errors:
+            raise RuntimeError(f"All files failed to copy: {changes.errors}")
+        fs._changes = _finalize_changes(changes)
         return fs
 
     with fs.batch(message=message, operation=operation) as b:
         if write_pairs:
             _write_files_to_repo(b, write_pairs, follow_symlinks=follow_symlinks,
                                  mode=mode, ignore_errors=ignore_errors,
-                                 errors=report.errors)
+                                 errors=changes.errors)
         for path in delete_paths:
             try:
                 b.remove(path)
             except OSError as exc:
                 if not ignore_errors:
                     raise
-                report.errors.append(CopyError(path=path, error=str(exc)))
+                changes.errors.append(ChangeError(path=path, error=str(exc)))
     result_fs = b.fs
 
-    if ignore_errors and report.errors and result_fs.hash == fs.hash:
-        raise RuntimeError(f"All files failed to copy: {report.errors}")
+    if ignore_errors and changes.errors and result_fs.commit_hash == fs.commit_hash:
+        raise RuntimeError(f"All files failed to copy: {changes.errors}")
 
-    result_fs._report = _finalize_report(report)
+    result_fs._changes = _finalize_changes(changes)
     return result_fs
 
 
@@ -166,9 +166,9 @@ def copy_to_repo(
     When *ignore_errors* is ``True``, per-file errors are collected instead
     of aborting. If **all** files fail, a ``RuntimeError`` is raised.
 
-    The operation report is available via ``fs.report``.
+    The changes are available via ``fs.changes``.
     """
-    report = CopyReport()
+    changes = ChangeReport()
 
     if ignore_errors:
         resolved: list[tuple[str, str, str]] = []
@@ -176,11 +176,11 @@ def copy_to_repo(
             try:
                 resolved.extend(_resolve_disk_sources([src]))
             except (FileNotFoundError, NotADirectoryError) as exc:
-                report.errors.append(CopyError(path=src, error=str(exc)))
+                changes.errors.append(ChangeError(path=src, error=str(exc)))
         if not resolved:
-            if report.errors:
-                raise RuntimeError(f"All files failed to copy: {report.errors}")
-            fs._report = _finalize_report(report)
+            if changes.errors:
+                raise RuntimeError(f"All files failed to copy: {changes.errors}")
+            fs._changes = _finalize_changes(changes)
             return fs
     else:
         resolved = _resolve_disk_sources(sources)
@@ -199,7 +199,7 @@ def copy_to_repo(
             else:
                 rel = repo_path
             if rel in pair_map:
-                report.warnings.append(CopyError(
+                changes.warnings.append(ChangeError(
                     path=local_path,
                     error=f"Overlapping destination '{rel}': skipping (kept earlier source)",
                 ))
@@ -239,7 +239,7 @@ def copy_to_repo(
             except OSError as exc:
                 if not ignore_errors:
                     raise
-                report.errors.append(CopyError(path=pair_map[rel], error=str(exc)))
+                changes.errors.append(ChangeError(path=pair_map[rel], error=str(exc)))
                 update_rels.append(rel)  # treat as needing update
 
         if ignore_existing:
@@ -247,11 +247,11 @@ def copy_to_repo(
 
         write_rels = add_rels + update_rels
         if not write_rels and not delete_rels:
-            if ignore_errors and report.errors:
+            if ignore_errors and changes.errors:
                 raise RuntimeError(
-                    f"All files failed to copy: {report.errors}"
+                    f"All files failed to copy: {changes.errors}"
                 )
-            fs._report = _finalize_report(report)
+            fs._changes = _finalize_changes(changes)
             return fs
 
         write_pairs = []
@@ -263,11 +263,11 @@ def copy_to_repo(
         safe_deletes = _filter_tree_conflicts(write_path_set, delete_rels)
         delete_full = [f"{dest}/{rel}" if dest else rel for rel in safe_deletes]
 
-        report.add = _make_entries_from_disk(add_rels, pair_map, follow_symlinks)
-        report.update = _make_entries_from_disk(update_rels, pair_map, follow_symlinks)
-        report.delete = _make_entries_from_repo(fs, safe_deletes, dest)
+        changes.add = _make_entries_from_disk(add_rels, pair_map, follow_symlinks)
+        changes.update = _make_entries_from_disk(update_rels, pair_map, follow_symlinks)
+        changes.delete = _make_entries_from_repo(fs, safe_deletes, dest)
 
-        return _apply_plan(fs, write_pairs, delete_full, report,
+        return _apply_plan(fs, write_pairs, delete_full, changes,
                            message=message, operation=operation,
                            follow_symlinks=follow_symlinks, mode=mode,
                            ignore_errors=ignore_errors)
@@ -277,11 +277,11 @@ def copy_to_repo(
             pairs = [(l, r) for l, r in pairs if not fs.exists(r)]
 
         if not pairs:
-            if ignore_errors and report.errors:
+            if ignore_errors and changes.errors:
                 raise RuntimeError(
-                    f"All files failed to copy: {report.errors}"
+                    f"All files failed to copy: {changes.errors}"
                 )
-            fs._report = _finalize_report(report)
+            fs._changes = _finalize_changes(changes)
             return fs
 
         # Classify before writing and build rel -> local_path mapping
@@ -299,10 +299,10 @@ def copy_to_repo(
             else:
                 add_rels.append(rel)
 
-        report.add = _make_entries_from_disk(add_rels, pair_map, follow_symlinks)
-        report.update = _make_entries_from_disk(update_rels, pair_map, follow_symlinks)
+        changes.add = _make_entries_from_disk(add_rels, pair_map, follow_symlinks)
+        changes.update = _make_entries_from_disk(update_rels, pair_map, follow_symlinks)
 
-        return _apply_plan(fs, pairs, [], report,
+        return _apply_plan(fs, pairs, [], changes,
                            message=message, operation=operation,
                            follow_symlinks=follow_symlinks, mode=mode,
                            ignore_errors=ignore_errors)
@@ -317,8 +317,8 @@ def copy_from_repo(
     delete: bool = False,
     ignore_errors: bool = False,
     checksum: bool = True,
-) -> CopyReport | None:
-    """Copy repo files/dirs/globs to local disk. Returns a ``CopyReport`` or ``None``.
+) -> ChangeReport | None:
+    """Copy repo files/dirs/globs to local disk. Returns a ``ChangeReport`` or ``None``.
 
     With ``delete=True``, local files under *dest* that are not covered
     by *sources* are removed (rsync ``--delete`` semantics).
@@ -330,7 +330,7 @@ def copy_from_repo(
     """
     import shutil
 
-    report = CopyReport()
+    changes = ChangeReport()
 
     if ignore_errors:
         resolved: list[tuple[str, str, str]] = []
@@ -338,11 +338,11 @@ def copy_from_repo(
             try:
                 resolved.extend(_resolve_repo_sources(fs, [src]))
             except (FileNotFoundError, NotADirectoryError) as exc:
-                report.errors.append(CopyError(path=src, error=str(exc)))
+                changes.errors.append(ChangeError(path=src, error=str(exc)))
         if not resolved:
-            if report.errors:
-                raise RuntimeError(f"All files failed to copy: {report.errors}")
-            return _finalize_report(report)
+            if changes.errors:
+                raise RuntimeError(f"All files failed to copy: {changes.errors}")
+            return _finalize_changes(changes)
     else:
         resolved = _resolve_repo_sources(fs, sources)
 
@@ -357,7 +357,7 @@ def copy_from_repo(
         for repo_path, local_path in pairs:
             rel = os.path.relpath(local_path, dest).replace(os.sep, "/")
             if rel in pair_map:
-                report.warnings.append(CopyError(
+                changes.warnings.append(ChangeError(
                     path=repo_path,
                     error=f"Overlapping destination '{rel}': skipping (kept earlier source)",
                 ))
@@ -404,7 +404,7 @@ def copy_from_repo(
             except OSError as exc:
                 if not ignore_errors:
                     raise
-                report.errors.append(CopyError(path=str(base / rel), error=str(exc)))
+                changes.errors.append(ChangeError(path=str(base / rel), error=str(exc)))
                 update_rels.append(rel)  # treat as needing update
 
         if ignore_existing:
@@ -419,7 +419,7 @@ def copy_from_repo(
             except OSError as exc:
                 if not ignore_errors:
                     raise
-                report.errors.append(CopyError(path=str(out), error=str(exc)))
+                changes.errors.append(ChangeError(path=str(out), error=str(exc)))
 
         # Clear blocking paths
         for rel in add_rels + update_rels:
@@ -440,27 +440,27 @@ def copy_from_repo(
         cts = fs._store._repo[fs._commit_oid].commit_time
         _write_files_to_disk(fs, write_pairs, base=base,
                              ignore_errors=ignore_errors,
-                             errors=report.errors, commit_ts=cts)
+                             errors=changes.errors, commit_ts=cts)
         _prune_empty_dirs(base)
 
         # Convert to FileEntry lists
         # For add/update from repo, get modes from repo
         repo_rel_to_path = {rel: pair_map[rel] for rel in add_rels + update_rels}
-        report.add = _make_entries_from_repo_dict(fs, add_rels, repo_rel_to_path)
-        report.update = _make_entries_from_repo_dict(fs, update_rels, repo_rel_to_path)
+        changes.add = _make_entries_from_repo_dict(fs, add_rels, repo_rel_to_path)
+        changes.update = _make_entries_from_repo_dict(fs, update_rels, repo_rel_to_path)
         # For deletes from disk, we don't have type info anymore (already deleted)
         # Just mark as blobs
-        report.delete = [FileEntry(rel, "B") for rel in delete_rels]
+        changes.delete = [FileEntry(rel, FileType.BLOB) for rel in delete_rels]
     else:
         if ignore_existing:
             pairs = [(r, l) for r, l in pairs if not Path(l).exists()]
 
         if not pairs:
-            if ignore_errors and report.errors:
+            if ignore_errors and changes.errors:
                 raise RuntimeError(
-                    f"All files failed to copy: {report.errors}"
+                    f"All files failed to copy: {changes.errors}"
                 )
-            return _finalize_report(report)
+            return _finalize_changes(changes)
 
         # Classify as add vs update and build mapping
         repo_rel_to_path: dict[str, str] = {}
@@ -481,19 +481,19 @@ def copy_from_repo(
         cts = fs._store._repo[fs._commit_oid].commit_time
         _write_files_to_disk(fs, pairs, base=Path(dest),
                              ignore_errors=ignore_errors,
-                             errors=report.errors, commit_ts=cts)
+                             errors=changes.errors, commit_ts=cts)
 
         # Convert to FileEntry lists (get modes from repo)
-        report.add = _make_entries_from_repo_dict(fs, add_rels, repo_rel_to_path)
-        report.update = _make_entries_from_repo_dict(fs, update_rels, repo_rel_to_path)
+        changes.add = _make_entries_from_repo_dict(fs, add_rels, repo_rel_to_path)
+        changes.update = _make_entries_from_repo_dict(fs, update_rels, repo_rel_to_path)
 
     # Safety check: if all files failed
-    if ignore_errors and report.errors and not pairs:
+    if ignore_errors and changes.errors and not pairs:
         raise RuntimeError(
-            f"All files failed to copy: {report.errors}"
+            f"All files failed to copy: {changes.errors}"
         )
 
-    return _finalize_report(report)
+    return _finalize_changes(changes)
 
 
 def copy_to_repo_dry_run(
@@ -506,14 +506,14 @@ def copy_to_repo_dry_run(
     delete: bool = False,
     checksum: bool = True,
     exclude: ExcludeFilter | None = None,
-) -> CopyReport | None:
-    """Compute what copy_to_repo would do. Returns a ``CopyReport`` or ``None``."""
+) -> ChangeReport | None:
+    """Compute what copy_to_repo would do. Returns a ``ChangeReport`` or ``None``."""
     resolved = _resolve_disk_sources(sources)
     pairs = _enum_disk_to_repo(resolved, dest, follow_symlinks=follow_symlinks,
                                exclude=exclude)
 
     if delete:
-        report = CopyReport()
+        changes = ChangeReport()
         pair_map: dict[str, str] = {}
         for local_path, repo_path in pairs:
             if dest and repo_path.startswith(dest + "/"):
@@ -521,7 +521,7 @@ def copy_to_repo_dry_run(
             else:
                 rel = repo_path
             if rel in pair_map:
-                report.warnings.append(CopyError(
+                changes.warnings.append(ChangeError(
                     path=local_path,
                     error=f"Overlapping destination '{rel}': skipping (kept earlier source)",
                 ))
@@ -562,10 +562,10 @@ def copy_to_repo_dry_run(
             update = []
 
         # Convert to FileEntry lists
-        report.add = _make_entries_from_disk(add, pair_map, follow_symlinks)
-        report.update = _make_entries_from_disk(update, pair_map, follow_symlinks)
-        report.delete = _make_entries_from_repo(fs, delete_list, dest)
-        return _finalize_report(report)
+        changes.add = _make_entries_from_disk(add, pair_map, follow_symlinks)
+        changes.update = _make_entries_from_disk(update, pair_map, follow_symlinks)
+        changes.delete = _make_entries_from_repo(fs, delete_list, dest)
+        return _finalize_changes(changes)
     else:
         # Non-delete mode: classify by existence only
         add: list[str] = []
@@ -588,7 +588,7 @@ def copy_to_repo_dry_run(
         # Convert to FileEntry lists
         add_entries = _make_entries_from_disk(sorted(add), pair_map, follow_symlinks)
         update_entries = _make_entries_from_disk(sorted(update), pair_map, follow_symlinks)
-        return _finalize_report(CopyReport(add=add_entries, update=update_entries))
+        return _finalize_changes(ChangeReport(add=add_entries, update=update_entries))
 
 
 def copy_from_repo_dry_run(
@@ -599,20 +599,20 @@ def copy_from_repo_dry_run(
     ignore_existing: bool = False,
     delete: bool = False,
     checksum: bool = True,
-) -> CopyReport | None:
-    """Compute what copy_from_repo would do. Returns a ``CopyReport`` or ``None``."""
+) -> ChangeReport | None:
+    """Compute what copy_from_repo would do. Returns a ``ChangeReport`` or ``None``."""
     resolved = _resolve_repo_sources(fs, sources)
     pairs = _enum_repo_to_disk(fs, resolved, dest)
 
     if delete:
         base = Path(dest)
-        report = CopyReport()
+        changes = ChangeReport()
 
         pair_map: dict[str, str] = {}
         for repo_path, local_path in pairs:
             rel = os.path.relpath(local_path, dest).replace(os.sep, "/")
             if rel in pair_map:
-                report.warnings.append(CopyError(
+                changes.warnings.append(ChangeError(
                     path=repo_path,
                     error=f"Overlapping destination '{rel}': skipping (kept earlier source)",
                 ))
@@ -659,11 +659,11 @@ def copy_from_repo_dry_run(
             update = []
 
         # Convert to FileEntry lists
-        report.add = _make_entries_from_repo_dict(fs, add, pair_map)
-        report.update = _make_entries_from_repo_dict(fs, update, pair_map)
+        changes.add = _make_entries_from_repo_dict(fs, add, pair_map)
+        changes.update = _make_entries_from_repo_dict(fs, update, pair_map)
         # For deletes, we don't have type info (files on disk), just mark as blobs
-        report.delete = [FileEntry(rel, "B") for rel in delete_list]
-        return _finalize_report(report)
+        changes.delete = [FileEntry(rel, FileType.BLOB) for rel in delete_list]
+        return _finalize_changes(changes)
     else:
         # Non-delete mode: classify by existence only
         add: list[str] = []
@@ -683,7 +683,7 @@ def copy_from_repo_dry_run(
         # Convert to FileEntry lists
         add_entries = _make_entries_from_repo_dict(fs, sorted(add), repo_rel_to_path)
         update_entries = _make_entries_from_repo_dict(fs, sorted(update), repo_rel_to_path)
-        return _finalize_report(CopyReport(add=add_entries, update=update_entries))
+        return _finalize_changes(ChangeReport(add=add_entries, update=update_entries))
 
 
 # ---------------------------------------------------------------------------
@@ -692,16 +692,16 @@ def copy_from_repo_dry_run(
 
 def _collect_remove_paths(
     fs: FS,
-    patterns: list[str],
+    sources: list[str],
     *,
     recursive: bool = False,
 ) -> list[str]:
-    """Resolve *patterns* against the repo and return full paths to delete.
+    """Resolve *sources* against the repo and return full paths to delete.
 
-    Raises ``FileNotFoundError`` when a pattern matches nothing and
+    Raises ``FileNotFoundError`` when a source matches nothing and
     ``IsADirectoryError`` when a directory is matched without *recursive*.
     """
-    resolved = _resolve_repo_sources(fs, patterns)
+    resolved = _resolve_repo_sources(fs, sources)
     delete_paths: list[str] = []
     for repo_path, mode, _prefix in resolved:
         if mode == "file":
@@ -719,50 +719,50 @@ def _collect_remove_paths(
     return sorted(set(delete_paths))
 
 
-def remove_from_repo(
+def remove_in_repo(
     fs: FS,
-    patterns: list[str],
+    sources: list[str],
     *,
     recursive: bool = False,
     message: str | None = None,
 ) -> FS:
-    """Remove files matching *patterns* from the repo. Returns new ``FS``.
+    """Remove files matching *sources* from the repo. Returns new ``FS``.
 
-    Patterns support globs, directories, and ``/./`` pivots — the same
+    Sources support globs, directories, and ``/./`` pivots — the same
     syntax accepted by ``copy_from_repo`` sources.
 
     With ``recursive=True``, directories are removed recursively. Without
     it, matching a directory raises ``IsADirectoryError``.
 
-    The operation report is available via ``fs.report``.
+    The changes are available via ``fs.changes``.
     """
-    delete_paths = _collect_remove_paths(fs, patterns, recursive=recursive)
+    delete_paths = _collect_remove_paths(fs, sources, recursive=recursive)
     if not delete_paths:
-        raise FileNotFoundError(f"No matches for patterns: {patterns}")
+        raise FileNotFoundError(f"No matches for sources: {sources}")
 
-    report = CopyReport()
+    changes = ChangeReport()
     rel_to_repo = {p: p for p in delete_paths}
-    report.delete = _make_entries_from_repo_dict(fs, delete_paths, rel_to_repo)
+    changes.delete = _make_entries_from_repo_dict(fs, delete_paths, rel_to_repo)
 
-    return _apply_plan(fs, [], delete_paths, report,
+    return _apply_plan(fs, [], delete_paths, changes,
                        message=message, operation="rm")
 
 
-def remove_from_repo_dry_run(
+def remove_in_repo_dry_run(
     fs: FS,
-    patterns: list[str],
+    sources: list[str],
     *,
     recursive: bool = False,
-) -> CopyReport | None:
-    """Compute what ``remove_from_repo`` would do. Returns a ``CopyReport`` or ``None``."""
-    delete_paths = _collect_remove_paths(fs, patterns, recursive=recursive)
+) -> ChangeReport | None:
+    """Compute what ``remove_in_repo`` would do. Returns a ``ChangeReport`` or ``None``."""
+    delete_paths = _collect_remove_paths(fs, sources, recursive=recursive)
     if not delete_paths:
-        raise FileNotFoundError(f"No matches for patterns: {patterns}")
+        raise FileNotFoundError(f"No matches for sources: {sources}")
 
-    report = CopyReport()
+    changes = ChangeReport()
     rel_to_repo = {p: p for p in delete_paths}
-    report.delete = _make_entries_from_repo_dict(fs, delete_paths, rel_to_repo)
-    return _finalize_report(report)
+    changes.delete = _make_entries_from_repo_dict(fs, delete_paths, rel_to_repo)
+    return _finalize_changes(changes)
 
 
 # ---------------------------------------------------------------------------
@@ -783,7 +783,7 @@ def sync_to_repo(
 ) -> FS:
     """Make *repo_path* identical to *local_path*. Returns new ``FS``.
 
-    The operation report is available via ``fs.report``.
+    The changes are available via ``fs.changes``.
     """
     try:
         return copy_to_repo(
@@ -795,13 +795,13 @@ def sync_to_repo(
         # Nonexistent local path → treat as empty source (delete everything)
         new_fs, delete_rels, is_file = _sync_delete_all_in_repo(fs, repo_path, message=message)
         if not delete_rels:
-            new_fs._report = None
+            new_fs._changes = None
             return new_fs
         # Convert string list to FileEntry list
         # For file deletes, rels are full paths (base=""); for dirs, relative to repo_path
         base = "" if is_file else repo_path
-        report = CopyReport(delete=_make_entries_from_repo(fs, delete_rels, base))
-        new_fs._report = report
+        changes = ChangeReport(delete=_make_entries_from_repo(fs, delete_rels, base))
+        new_fs._changes = changes
         return new_fs
 
 
@@ -834,8 +834,8 @@ def sync_from_repo(
     fs: FS, repo_path: str, local_path: str, *,
     ignore_errors: bool = False,
     checksum: bool = True,
-) -> CopyReport | None:
-    """Make *local_path* identical to *repo_path*. Returns a ``CopyReport`` or ``None``."""
+) -> ChangeReport | None:
+    """Make *local_path* identical to *repo_path*. Returns a ``ChangeReport`` or ``None``."""
     try:
         sources = [_ensure_trailing_slash(repo_path)] if repo_path else [""]
         return copy_from_repo(fs, sources, local_path, delete=True,
@@ -846,7 +846,7 @@ def sync_from_repo(
         if not delete_rels:
             return None
         # For local file deletes, we don't have type info - just mark as blobs
-        return CopyReport(delete=[FileEntry(rel, "B") for rel in delete_rels])
+        return ChangeReport(delete=[FileEntry(rel, FileType.BLOB) for rel in delete_rels])
 
 
 def _sync_delete_all_local(local_path: str) -> list[str]:
@@ -869,7 +869,7 @@ def sync_to_repo_dry_run(
     fs: FS, local_path: str, repo_path: str, *,
     checksum: bool = True,
     exclude: ExcludeFilter | None = None,
-) -> CopyReport | None:
+) -> ChangeReport | None:
     """Compute what ``sync_to_repo`` would do without writing."""
     try:
         return copy_to_repo_dry_run(
@@ -882,17 +882,17 @@ def sync_to_repo_dry_run(
         repo_files = _walk_repo(fs, dest)
         if not repo_files and dest and fs.exists(dest) and not fs.is_dir(dest):
             entry = _entry_at_path(fs._store._repo, fs._tree_oid, dest)
-            file_entry = FileEntry.from_mode(dest, entry[1]) if entry else FileEntry(dest, "B")
-            return CopyReport(delete=[file_entry])
+            file_entry = FileEntry.from_mode(dest, entry[1]) if entry else FileEntry(dest, FileType.BLOB)
+            return ChangeReport(delete=[file_entry])
         delete_list = sorted(repo_files.keys())
         delete_entries = _make_entries_from_repo(fs, delete_list, dest)
-        return _finalize_report(CopyReport(delete=delete_entries))
+        return _finalize_changes(ChangeReport(delete=delete_entries))
 
 
 def sync_from_repo_dry_run(
     fs: FS, repo_path: str, local_path: str, *,
     checksum: bool = True,
-) -> CopyReport | None:
+) -> ChangeReport | None:
     """Compute what ``sync_from_repo`` would do without writing."""
     try:
         sources = [_ensure_trailing_slash(repo_path)] if repo_path else [""]
@@ -902,8 +902,8 @@ def sync_from_repo_dry_run(
         # Nonexistent repo path → everything local is a delete
         local_paths = sorted(_walk_local_paths(local_path))
         # For local files being deleted, we don't have type info, mark as blobs
-        delete_entries = [FileEntry(p, "B") for p in local_paths]
-        return _finalize_report(CopyReport(delete=delete_entries))
+        delete_entries = [FileEntry(p, FileType.BLOB) for p in local_paths]
+        return _finalize_changes(ChangeReport(delete=delete_entries))
 
 
 # ---------------------------------------------------------------------------
@@ -983,16 +983,16 @@ def move_in_repo(
     ``recursive=True``. The operation is atomic — writes and deletes
     happen in a single commit.
 
-    The operation report is available via ``fs.report``.
+    The changes are available via ``fs.changes``.
     """
     pairs, delete_paths = _resolve_move(fs, sources, dest, recursive=recursive)
 
-    # Build report
-    report = CopyReport()
+    # Build changes
+    changes = ChangeReport()
     dest_rel_to_repo = {dp: dp for _, dp in pairs}
-    report.add = _make_entries_from_repo_dict(fs, [dp for _, dp in pairs], dest_rel_to_repo)
+    changes.add = _make_entries_from_repo_dict(fs, [dp for _, dp in pairs], dest_rel_to_repo)
     src_rel_to_repo = {p: p for p in delete_paths}
-    report.delete = _make_entries_from_repo_dict(fs, delete_paths, src_rel_to_repo)
+    changes.delete = _make_entries_from_repo_dict(fs, delete_paths, src_rel_to_repo)
 
     # Execute: write dest files from source blob data, then remove sources
     with fs.batch(message=message, operation="mv") as b:
@@ -1002,7 +1002,7 @@ def move_in_repo(
             b.remove(path)
 
     result_fs = b.fs
-    result_fs._report = _finalize_report(report)
+    result_fs._changes = _finalize_changes(changes)
     return result_fs
 
 
@@ -1012,14 +1012,14 @@ def move_in_repo_dry_run(
     dest: str,
     *,
     recursive: bool = False,
-) -> CopyReport | None:
-    """Compute what ``move_in_repo`` would do. Returns a ``CopyReport`` or ``None``."""
+) -> ChangeReport | None:
+    """Compute what ``move_in_repo`` would do. Returns a ``ChangeReport`` or ``None``."""
     pairs, delete_paths = _resolve_move(fs, sources, dest, recursive=recursive)
 
-    # Build report
-    report = CopyReport()
+    # Build changes
+    changes = ChangeReport()
     dest_rel_to_repo = {dp: dp for _, dp in pairs}
-    report.add = _make_entries_from_repo_dict(fs, [dp for _, dp in pairs], dest_rel_to_repo)
+    changes.add = _make_entries_from_repo_dict(fs, [dp for _, dp in pairs], dest_rel_to_repo)
     src_rel_to_repo = {p: p for p in delete_paths}
-    report.delete = _make_entries_from_repo_dict(fs, delete_paths, src_rel_to_repo)
-    return _finalize_report(report)
+    changes.delete = _make_entries_from_repo_dict(fs, delete_paths, src_rel_to_repo)
+    return _finalize_changes(changes)

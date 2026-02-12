@@ -314,7 +314,7 @@ def rm(ctx, paths, recursive, dry_run, branch, message, tag, force_tag):
         gitstore rm -n :file.txt         # dry run
         gitstore rm :a.txt :b.txt        # multiple
     """
-    from ..copy import remove_from_repo, remove_from_repo_dry_run
+    from ..copy import remove_in_repo, remove_in_repo_dry_run
 
     store = _open_store(_require_repo(ctx))
     branch = branch or _default_branch(store)
@@ -328,17 +328,17 @@ def rm(ctx, paths, recursive, dry_run, branch, message, tag, force_tag):
 
     try:
         if dry_run:
-            report = remove_from_repo_dry_run(fs, patterns, recursive=recursive)
-            if report:
-                for action in report.actions():
+            changes = remove_in_repo_dry_run(fs, patterns, recursive=recursive)
+            if changes:
+                for action in changes.actions():
                     click.echo(f"- :{action.path}")
         else:
-            new_fs = remove_from_repo(fs, patterns, recursive=recursive,
+            new_fs = remove_in_repo(fs, patterns, recursive=recursive,
                                       message=message)
             if tag:
                 _apply_tag(store, new_fs, tag, force_tag)
-            report = new_fs.report
-            n = len(report.delete) if report else 0
+            changes = new_fs.changes
+            n = len(changes.delete) if changes else 0
             _status(ctx, f"Removed {n} file(s)")
     except FileNotFoundError as exc:
         raise click.ClickException(str(exc))
@@ -418,11 +418,11 @@ def mv(ctx, args, recursive, dry_run, branch, message, tag, force_tag):
 
     try:
         if dry_run:
-            report = move_in_repo_dry_run(
+            changes = move_in_repo_dry_run(
                 fs, source_patterns, dest_path, recursive=recursive,
             )
-            if report:
-                for action in report.actions():
+            if changes:
+                for action in changes.actions():
                     prefix = {"add": "+", "delete": "-"}[action.action]
                     click.echo(f"{prefix} :{action.path}")
         else:
@@ -432,9 +432,9 @@ def mv(ctx, args, recursive, dry_run, branch, message, tag, force_tag):
             )
             if tag:
                 _apply_tag(store, new_fs, tag, force_tag)
-            report = new_fs.report
-            n_add = len(report.add) if report else 0
-            n_del = len(report.delete) if report else 0
+            changes = new_fs.changes
+            n_add = len(changes.add) if changes else 0
+            n_del = len(changes.delete) if changes else 0
             _status(ctx, f"Moved {n_del} -> {n_add} file(s)")
     except FileNotFoundError as exc:
         raise click.ClickException(str(exc))
@@ -582,7 +582,7 @@ def log(ctx, target, at_path, deprecated_at, match_pattern, before, branch, ref,
             click.echo(json.dumps(_log_entry_dict(entry)))
     else:
         for entry in entries:
-            click.echo(f"{entry.hash[:7]}  {entry.time.isoformat()}  {entry.message}")
+            click.echo(f"{entry.commit_hash[:7]}  {entry.time.isoformat()}  {entry.message}")
 
 
 # ---------------------------------------------------------------------------
@@ -628,7 +628,7 @@ def diff(ctx, baseline, branch, ref, at_path, match_pattern, before, back, rever
     head_fs = _get_fs(store, branch, None)
     other_fs = _resolve_fs(store, branch, ref, at_path=at_path,
                            match_pattern=match_pattern, before=before, back=back)
-    if head_fs.hash == other_fs.hash:
+    if head_fs.commit_hash == other_fs.commit_hash:
         return
     new_files = _walk_repo(head_fs, "")
     old_files = _walk_repo(other_fs, "")
@@ -678,7 +678,7 @@ def undo(ctx, branch, steps):
             click.echo(f"Undid 1 commit on '{branch}'")
         else:
             click.echo(f"Undid {steps} commits on '{branch}'")
-        click.echo(f"Branch now at: {new_fs.hash[:7]} - {new_fs.message}")
+        click.echo(f"Branch now at: {new_fs.commit_hash[:7]} - {new_fs.message}")
 
     except KeyError:
         raise click.ClickException(f"Branch {branch!r} not found")
@@ -723,7 +723,7 @@ def redo(ctx, branch, steps):
             click.echo(f"Redid 1 step on '{branch}'")
         else:
             click.echo(f"Redid {steps} steps on '{branch}'")
-        click.echo(f"Branch now at: {new_fs.hash[:7]} - {new_fs.message}")
+        click.echo(f"Branch now at: {new_fs.commit_hash[:7]} - {new_fs.message}")
 
     except KeyError:
         raise click.ClickException(f"Branch {branch!r} not found")
@@ -782,21 +782,23 @@ def reflog(ctx, branch, limit, fmt):
 
         # Output in requested format
         if fmt == "json":
-            click.echo(json.dumps(entries, indent=2))
+            from dataclasses import asdict
+            click.echo(json.dumps([asdict(e) for e in entries], indent=2))
         elif fmt == "jsonl":
+            from dataclasses import asdict
             for entry in entries:
-                click.echo(json.dumps(entry))
+                click.echo(json.dumps(asdict(entry)))
         else:
             # Text format (default)
             import datetime
             click.echo(f"Reflog for branch '{branch}' ({len(entries)} entries):\n")
 
             for i, entry in enumerate(entries):
-                new = entry['new_sha'][:7]
-                msg = entry['message']
+                new = entry.new_sha[:7]
+                msg = entry.message
 
                 # Format timestamp
-                ts = datetime.datetime.fromtimestamp(entry['timestamp'])
+                ts = datetime.datetime.fromtimestamp(entry.timestamp)
                 time_str = ts.strftime("%Y-%m-%d %H:%M:%S")
 
                 click.echo(f"  [{i}] {new} ({time_str})")

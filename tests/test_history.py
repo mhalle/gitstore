@@ -39,15 +39,15 @@ class TestParent:
 class TestBack:
     def test_back_zero(self, repo_with_history):
         _, fs = repo_with_history
-        assert fs.back(0).hash == fs.hash
+        assert fs.back(0).commit_hash == fs.commit_hash
 
     def test_back_one(self, repo_with_history):
         _, fs = repo_with_history
-        assert fs.back(1).hash == fs.parent.hash
+        assert fs.back(1).commit_hash == fs.parent.commit_hash
 
     def test_back_n(self, repo_with_history):
         _, fs = repo_with_history
-        assert fs.back(2).hash == fs.parent.parent.hash
+        assert fs.back(2).commit_hash == fs.parent.parent.commit_hash
 
     def test_back_too_far(self, repo_with_history):
         _, fs = repo_with_history
@@ -77,7 +77,7 @@ class TestLog:
     def test_log_each_is_fs(self, repo_with_history):
         _, fs = repo_with_history
         for entry in fs.log():
-            assert hasattr(entry, "hash")
+            assert hasattr(entry, "commit_hash")
             assert hasattr(entry, "read")
 
     def test_log_no_args_unchanged(self, repo_with_history):

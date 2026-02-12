@@ -72,7 +72,7 @@ class TestRefDictBranches:
         fs = repo.branches["main"]
         repo.branches["exp"] = fs
         assert "exp" in repo.branches
-        assert repo.branches["exp"].hash == fs.hash
+        assert repo.branches["exp"].commit_hash == fs.commit_hash
 
     def test_del(self, tmp_path):
         repo = GitStore.open(tmp_path / "test.git")
@@ -92,7 +92,7 @@ class TestRefDictTags:
         fs = repo.branches["main"]
         repo.tags["v1"] = fs
         tag_fs = repo.tags["v1"]
-        assert tag_fs.hash == fs.hash
+        assert tag_fs.commit_hash == fs.commit_hash
         assert tag_fs.branch is None  # read-only
 
     def test_tag_missing(self, tmp_path):
@@ -178,7 +178,7 @@ class TestRefDictTags:
             "release tag",
         )
         tag_fs = repo.tags["v-annotated"]
-        assert tag_fs.hash == fs.hash
+        assert tag_fs.commit_hash == fs.commit_hash
         assert tag_fs.branch is None
 
 

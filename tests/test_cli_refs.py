@@ -50,7 +50,7 @@ class TestBranch:
     def test_hash(self, runner, repo_with_files):
         from gitstore import GitStore
         store = GitStore.open(repo_with_files, create=False)
-        expected = store.branches["main"].hash
+        expected = store.branches["main"].commit_hash
         result = runner.invoke(main, ["branch", "--repo", repo_with_files, "hash", "main"])
         assert result.exit_code == 0
         out = result.output.strip()
@@ -60,7 +60,7 @@ class TestBranch:
     def test_hash_back(self, runner, repo_with_files):
         from gitstore import GitStore
         store = GitStore.open(repo_with_files, create=False)
-        expected = store.branches["main"].parent.hash
+        expected = store.branches["main"].parent.commit_hash
         result = runner.invoke(main, [
             "branch", "--repo", repo_with_files, "hash", "main", "--back", "1"
         ])
@@ -78,7 +78,7 @@ class TestBranch:
         from gitstore import GitStore
         store = GitStore.open(repo_with_files, create=False)
         fs = store.branches["main"]
-        expected = next(fs.log(path="hello.txt")).hash
+        expected = next(fs.log(path="hello.txt")).commit_hash
         result = runner.invoke(main, [
             "branch", "--repo", repo_with_files, "hash", "main", "--path", "hello.txt"
         ])
@@ -258,7 +258,7 @@ class TestTag:
         from gitstore import GitStore
         store = GitStore.open(repo_with_files, create=False)
         fs = store.branches["main"]
-        full_hash = fs.hash
+        full_hash = fs.commit_hash
 
         result = runner.invoke(main, [
             "tag", "--repo", repo_with_files, "fork", "from-hash", "--ref", full_hash
@@ -274,7 +274,7 @@ class TestTag:
         runner.invoke(main, ["tag", "--repo", initialized_repo, "fork", "v1"])
         from gitstore import GitStore
         store = GitStore.open(initialized_repo, create=False)
-        expected = store.tags["v1"].hash
+        expected = store.tags["v1"].commit_hash
         result = runner.invoke(main, ["tag", "--repo", initialized_repo, "hash", "v1"])
         assert result.exit_code == 0
         out = result.output.strip()
@@ -443,7 +443,7 @@ class TestHash:
         from gitstore import GitStore
         store = GitStore.open(repo_path, create=False)
         fs = store.branches["main"]
-        return fs.hash
+        return fs.commit_hash
 
     @staticmethod
     def _get_parent_hash(repo_path):
@@ -451,7 +451,7 @@ class TestHash:
         from gitstore import GitStore
         store = GitStore.open(repo_path, create=False)
         fs = store.branches["main"]
-        return fs.parent.hash
+        return fs.parent.commit_hash
 
     def test_cat_by_hash(self, runner, repo_with_files):
         commit_hash = self._get_commit_hash(repo_with_files)
