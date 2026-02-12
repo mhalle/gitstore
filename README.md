@@ -574,6 +574,14 @@ gitstore tag -r /path/to/repo.git list   # v1
 ```
 
 ```bash
+# Serve files over HTTP
+gitstore serve                                # http://127.0.0.1:8000/
+gitstore serve --all --cors                   # all branches/tags with CORS
+gitstore serve --base-path /data -p 9000      # mount under /data prefix
+gitstore serve --open --no-cache -q           # open browser, no caching, quiet
+```
+
+```bash
 # Browse at a specific commit
 gitstore log --path file.txt                # find the commit hash
 gitstore cat file.txt --ref abc1234...   # read file at that commit
@@ -601,6 +609,8 @@ Write commands (`cp`, `rm`, `write`, `unarchive`, `unzip`, `untar`) accept `-m` 
 `log`, `archive`, `zip`, and `tar` accept `--before` with an ISO 8601 date or datetime to filter to commits on or before that point in time. `archive`, `zip`, and `tar` accept `-` as FILENAME to write to stdout; `unarchive` and `untar` read from stdin when no filename is given (or with `-`). `archive` and `unarchive` auto-detect the format from the filename extension; use `--format zip` or `--format tar` to override or when piping to/from stdout/stdin. The `zip`/`unzip`/`tar`/`untar` commands remain as aliases.
 
 `backup` and `restore` operate on the entire repository (all branches and tags) and accept `-n`/`--dry-run` to preview changes without transferring data. `restore` also accepts `--no-create` to require an existing repo.
+
+`serve` starts an HTTP file server for browsing repo contents. By default it serves the current branch; use `--all` to expose all branches and tags via `/<ref>/<path>`. Supports `--cors`, `--no-cache`, `--base-path` for mounting under a URL prefix, `--open` to launch a browser, and `-q`/`--quiet` to suppress request logs.
 
 ## Documentation
 

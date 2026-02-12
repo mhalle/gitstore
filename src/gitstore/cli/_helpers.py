@@ -330,6 +330,7 @@ def _log_entry_dict(entry) -> dict:
 # ---------------------------------------------------------------------------
 
 @click.group()
+@click.version_option(package_name="gitstore")
 @click.option("--repo", "-r", type=click.Path(), envvar="GITSTORE_REPO",
               help="Path to bare git repository (or set GITSTORE_REPO).",
               expose_value=False, callback=_store_repo, is_eager=True)

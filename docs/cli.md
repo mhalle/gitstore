@@ -487,6 +487,50 @@ gitstore restore -n https://github.com/user/repo.git  # dry run
 
 ## Server
 
+### serve
+
+Serve repository files over HTTP with content negotiation. Browsers see HTML directory listings and raw file contents; API clients requesting `Accept: application/json` get JSON metadata.
+
+```bash
+gitstore serve                                   # serve HEAD branch at http://127.0.0.1:8000/
+gitstore serve -b dev                            # serve a different branch
+gitstore serve --ref v1.0                        # serve a tag snapshot
+gitstore serve --back 3                          # serve 3 commits before tip
+gitstore serve --all                             # multi-ref: /<branch-or-tag>/<path>
+gitstore serve --all --cors                      # multi-ref with CORS headers
+gitstore serve --base-path /data -p 9000         # mount under /data on port 9000
+gitstore serve --open --no-cache                 # open browser, disable caching
+gitstore serve -q                                # suppress per-request log output
+```
+
+| Option | Description |
+|--------|-------------|
+| `--host` | Bind address (default: `127.0.0.1`). |
+| `-p`, `--port` | Port to listen on (default: `8000`, use `0` for OS-assigned). |
+| `-b`, `--branch` | Branch (default: `main`). |
+| `--ref`, `--path`, `--match`, `--before`, `--back` | Snapshot filters. |
+| `--all` | Multi-ref mode: expose all branches and tags via `/<ref>/<path>`. |
+| `--cors` | Add `Access-Control-Allow-Origin: *` and related CORS headers. |
+| `--no-cache` | Send `Cache-Control: no-store` on every response. |
+| `--base-path PREFIX` | URL prefix to mount under (e.g. `/data`). |
+| `--open` | Open the URL in the default browser on start. |
+| `-q`, `--quiet` | Suppress per-request log output. |
+
+**Modes:**
+
+- **Single-ref** (default): serves one branch or snapshot. URLs are plain repo paths (`/file.txt`, `/dir/`).
+- **Multi-ref** (`--all`): first URL segment selects the branch or tag (`/main/file.txt`, `/v1/dir/`). The root (`/`) lists all branches and tags.
+
+**Content negotiation:**
+
+- `Accept: application/json` returns JSON metadata (path, ref, size, type, entries).
+- Otherwise: raw file bytes with MIME types, or HTML directory listings.
+
+**Response headers:**
+
+- `ETag` is set to the commit hash on all 200 responses.
+- JSON, XML, GeoJSON, and YAML files are served as `text/plain` so browsers display them inline.
+
 ### gitserve
 
 Serve the repository read-only over HTTP. Standard git clients can clone and fetch from the URL. Pushes are rejected.
