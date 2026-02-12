@@ -4,6 +4,22 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.47.6 (2026-02-11)
+
+**Security:**
+
+- Fix XSS in `serve` HTML output — escape display text and percent-encode/attribute-escape href values
+
+**Bug fixes:**
+
+- Reject scp-style SSH URLs (`git@host:path`, `host:path`) in mirror operations with a clear error suggesting `ssh://` format
+- Guard `redo()` against zero-SHA reflog entries at branch creation point
+- `glob()` now returns sorted results (was unordered); docstring updated to match
+
+**New features:**
+
+- Add `gc` subcommand — runs `git gc` to prune unreachable objects (orphaned blobs, etc.); requires git on PATH
+
 ## v0.47.5 (2026-02-11)
 
 **Improvements:**
