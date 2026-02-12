@@ -1,16 +1,17 @@
 # gitstore
 
-A versioned key-value filesystem backed by bare Git repositories. Store, retrieve, and version binary data using an immutable-snapshot API — every write produces a new commit, and old snapshots remain accessible forever.
+A versioned key-value filesystem backed by bare Git repositories. Store, retrieve, and version binary data using an immutable-snapshot API -- every write produces a new commit, and old snapshots remain accessible forever.
 
 Built on [dulwich](https://www.dulwich.io/), gitstore gives you Git's content-addressable storage, branching, tagging, and history without touching the working directory or the `git` CLI.
 
 ## Installation
 
 ```
-pip install gitstore
+pip install gitstore          # core library (dulwich only)
+pip install gitstore[cli]     # adds the gitstore command-line tool
 ```
 
-Requires Python 3.10+ and dulwich.
+Requires Python 3.10+.
 
 ## Quick start
 
@@ -23,24 +24,24 @@ repo = GitStore.open("data.git")
 # Get a snapshot of the branch
 fs = repo.branches["main"]
 
-# Write a file — returns a new immutable snapshot
+# Write a file -- returns a new immutable snapshot
 fs = fs.write("hello.txt", b"Hello, world!")
 
 # Read it back
-print(fs.read("hello.txt"))  # b'Hello, world!'
+print(fs.read("hello.txt"))     # b'Hello, world!'
 
 # Every write is a commit
-print(fs.hash)     # full 40-char SHA
-print(fs.message)  # '+ hello.txt'
+print(fs.commit_hash)           # full 40-char SHA
+print(fs.message)               # '+ hello.txt'
 ```
 
 ## Core concepts
 
-**Bare repository.** gitstore uses a *bare* Git repository — one that contains only Git's internal object database, with no working directory or checked-out files. You won't see your stored files by browsing the repo directory; all data lives inside Git's content-addressable object store and is accessed exclusively through the gitstore API. This is by design: it avoids filesystem conflicts, keeps the storage compact, and lets Git handle deduplication and integrity.
+**Bare repository.** gitstore uses a *bare* Git repository -- one that contains only Git's internal object database, with no working directory or checked-out files. You won't see your stored files by browsing the repo directory; all data lives inside Git's content-addressable object store and is accessed exclusively through the gitstore API. This is by design: it avoids filesystem conflicts, keeps the storage compact, and lets Git handle deduplication and integrity.
 
 **`GitStore`** opens or creates a bare repository. It exposes `branches` and `tags` as [`MutableMapping`](https://docs.python.org/3/library/collections.abc.html#collections.abc.MutableMapping) objects (supporting `.get`, `.keys`, `.values`, `.items`, etc.).
 
-**`FS`** is an immutable snapshot of a committed tree. Reading methods (`read`, `ls`, `walk`, `exists`, `open`) never mutate state. Writing methods (`write`, `write_from`, `remove`, `batch`) return a *new* `FS` pointing at the new commit — the original `FS` is unchanged.
+**`FS`** is an immutable snapshot of a committed tree. Reading methods (`read`, `ls`, `walk`, `exists`, `open`) never mutate state. Writing methods (`write`, `write_from_file`, `remove`, `batch`) return a *new* `FS` pointing at the new commit -- the original `FS` is unchanged.
 
 Snapshots obtained from **branches** are writable. Snapshots obtained from **tags** are read-only.
 
@@ -49,75 +50,49 @@ Snapshots obtained from **branches** are writable. Snapshots obtained from **tag
 ### Opening a repository
 
 ```python
-# Create or open a repo with a "main" branch (default)
-repo = GitStore.open("data.git")
-
-# Create with a custom branch name
-repo = GitStore.open("data.git", branch="dev")
-
-# Create empty repo (no branches)
-repo = GitStore.open("data.git", branch=None)
-
-# Open existing repo only (fail if missing)
-repo = GitStore.open("data.git", create=False)
-
-# Custom author for commits
-repo = GitStore.open("data.git", author="alice", email="alice@example.com")
+repo = GitStore.open("data.git")                         # create or open
+repo = GitStore.open("data.git", create=False)            # open only
+repo = GitStore.open("data.git", branch="dev")            # custom initial branch
+repo = GitStore.open("data.git", branch=None)             # branchless
+repo = GitStore.open("data.git", author="alice",          # custom author
+                     email="alice@example.com")
 ```
 
 ### Branches and tags
 
 ```python
-# Access branches and tags like dicts
 fs = repo.branches["main"]
 repo.branches["experiment"] = fs   # fork a branch
 del repo.branches["experiment"]    # delete a branch
 
-# Tags are immutable — overwriting raises KeyError
-repo.tags["v1.0"] = fs
-snapshot = repo.tags["v1.0"]       # read-only FS (branch=None)
+repo.tags["v1.0"] = fs            # create a tag
+snapshot = repo.tags["v1.0"]       # read-only FS
 
-# Iteration
 for name in repo.branches:
     print(name)
-
-print(len(repo.tags))
-print("main" in repo.branches)    # True
-
-# Full MutableMapping interface — .get, .keys, .values, .items, etc.
-fs = repo.branches.get("main")              # returns None if missing
-for name, snapshot in repo.branches.items():
-    print(name, snapshot.hash)
+"main" in repo.branches           # True
 ```
-
-### Paths
-
-All path arguments throughout the API (`read`, `write`, `write_from`, `remove`, `ls`, `walk`, `exists`, `open`, `batch.write`, `batch.write_from`, `batch.remove`, `batch.open`) accept `str` or any `os.PathLike` (e.g. `pathlib.PurePosixPath`). Paths use forward slashes as separators.
 
 ### Reading
 
 ```python
-from pathlib import PurePosixPath
-
 data = fs.read("path/to/file.bin")           # bytes
-data = fs.read(PurePosixPath("path/to/file.bin"))  # PathLike works too
+text = fs.read_text("config.json")           # str (UTF-8)
 entries = fs.ls()                             # root listing
 entries = fs.ls("src")                        # subdirectory listing
 exists = fs.exists("path/to/file.bin")        # bool
 
 # Walk the tree (like os.walk)
-for dirpath, dirnames, filenames in fs.walk():
-    print(dirpath, dirnames, filenames)
+for dirpath, dirnames, file_entries in fs.walk():
+    for entry in file_entries:
+        print(entry.name, entry.file_type)    # WalkEntry with name, oid, filemode
 
-# Walk a subtree
-for dirpath, dirnames, filenames in fs.walk("src"):
-    ...
+# Glob
+matches = fs.glob("**/*.py")                 # sorted list of matching paths
 
 # File-like object
 with fs.open("data.bin", "rb") as f:
     header = f.read(4)
-    f.seek(0)
-    all_data = f.read()
 ```
 
 ### Writing
@@ -126,20 +101,12 @@ Every write auto-commits and returns a new snapshot:
 
 ```python
 fs = fs.write("config.json", b'{"key": "value"}')
-fs = fs.write("data/nested/file.bin", b"\x00\x01\x02")  # directories created automatically
-fs = fs.write("script.sh", b"#!/bin/sh\n", mode=0o100755)  # executable
-fs = fs.write("config.json", b"{}", message="Reset config")  # custom commit message
-
-# Write from a file on disk
-fs = fs.write_from("big-dataset.bin", "/data/dataset.bin")
-
-# Preserves executable bit from disk permissions
-fs = fs.write_from("script.sh", "/usr/local/bin/script.sh")
-
-# Override mode explicitly
-fs = fs.write_from("script.sh", "./script.sh", mode=0o100755)
-
-fs = fs.remove("old-file.txt")  # raises FileNotFoundError if missing
+fs = fs.write_text("notes.txt", "Hello")                  # str convenience
+fs = fs.write("script.sh", b"#!/bin/sh\n", mode=0o100755) # executable
+fs = fs.write("config.json", b"{}", message="Reset")      # custom message
+fs = fs.write_from_file("big.bin", "/data/big.bin")        # from disk
+fs = fs.write_symlink("link", "target")                    # symlink
+fs = fs.remove("old-file.txt")
 ```
 
 The original `FS` is never mutated:
@@ -151,172 +118,90 @@ assert not fs1.exists("new.txt")  # fs1 is unchanged
 assert fs2.exists("new.txt")
 ```
 
-### Commit messages
-
-Write operations automatically generate descriptive commit messages:
-
-```python
-fs = fs.write("config.json", b"{}")
-print(fs.message)  # "+ config.json"
-
-fs = fs.write("deploy.sh", b"#!/bin/sh", mode=0o100755)
-print(fs.message)  # "+ deploy.sh (E)"  -- executable
-
-fs = fs.write_symlink("link", "target")
-print(fs.message)  # "+ link (L)"  -- symlink
-
-fs = fs.write("config.json", b'{"updated": true}')
-print(fs.message)  # "~ config.json"  -- update
-
-fs = fs.remove("old.txt")
-print(fs.message)  # "- old.txt"
-```
-
-Batch operations show a summary with operation context:
-```python
-# Manual batch
-with fs.batch() as b:
-    b.write("a.txt", b"a")
-    b.write("b.txt", b"b")
-    b.remove("c.txt")
-print(b.fs.message)  # "Batch: +2 -1"
-
-# Copy operations show "Batch cp:", sync shows "Batch sync:"
-from gitstore import copy_to_repo
-fs = copy_to_repo(fs, ["./data/"], "backup")
-print(fs.message)  # "Batch cp: +10 ~2 -1"
-print(fs.report.add)  # [FileEntry(...), ...]
-
-# Archive extraction shows "Batch ar:"
-# (when using gitstore unzip/untar/unarchive)
-```
-
-**Symbols:**
-- `+` = additions
-- `~` = updates
-- `-` = deletions
-
-**Operation prefixes:**
-- `Batch:` = manual batch
-- `Batch cp:` = copy
-- `Batch sync:` = sync
-- `Batch ar:` = archive extraction
-
-**Type annotations:**
-- `(E)` = executable
-- `(L)` = symlink
-
-Override with a custom message:
-```python
-fs = fs.write("config.json", b"{}", message="Reset config to defaults")
-```
-
 ### Batch writes
 
 Multiple writes/removes in a single commit:
 
 ```python
-with fs.batch() as b:
-    b.write("a.txt", b"alpha")
-    b.write("b.txt", b"bravo")
-    b.write("script.sh", b"#!/bin/sh", mode=0o100755)  # executable mode
-    b.write_from("big.bin", "/data/big.bin")            # from disk
-    b.remove("old.txt")
-
-    # File-like interface
-    with b.open("c.txt", "wb") as f:
-        f.write(b"charlie")
-
-fs = b.fs  # new snapshot after the batch commits
-
-# Custom commit message
 with fs.batch(message="Import dataset v2") as b:
-    b.write("data.csv", csv_bytes)
-    b.write("meta.json", meta_bytes)
+    b.write("a.txt", b"alpha")
+    b.write_from_file("big.bin", "/data/big.bin")
+    b.write_symlink("link.txt", "a.txt")
+    b.remove("old.txt")
+fs = b.fs  # new snapshot after the batch commits
 ```
 
-If an exception occurs inside the batch, nothing is committed:
-
-```python
-try:
-    with fs.batch() as b:
-        b.write("x.txt", b"data")
-        raise RuntimeError("abort")
-except RuntimeError:
-    pass
-assert b.fs is None  # no commit was made
-```
-
-### File-like objects
-
-File objects support `closed`, `readable()`, `writable()`, and `seekable()` for compatibility with code that checks standard file properties.
-
-```python
-# Reading — supports read, seek, tell, close
-with fs.open("data.bin", "rb") as f:
-    chunk = f.read(1024)
-    f.seek(0)
-    pos = f.tell()
-    assert f.readable() and f.seekable()
-
-# Writing (commits on context manager exit) — or call close() explicitly
-with fs.open("output.bin", "wb") as f:
-    f.write(b"some data")
-    assert f.writable()
-new_fs = f.fs
-```
+If an exception occurs inside the batch, nothing is committed.
 
 ### History
 
 ```python
-# Parent snapshot
-parent = fs.parent       # FS or None (for the initial commit)
+parent = fs.parent                               # FS or None
+ancestor = fs.back(3)                            # 3 commits back
 
-# Walk the full commit log
-for snapshot in fs.log():
-    print(snapshot.hash, snapshot.message)
+for snapshot in fs.log():                        # full commit log
+    print(snapshot.commit_hash, snapshot.message)
 
-# Only commits that changed a specific file
-for snapshot in fs.log("path/to/file.txt"):
-    print(snapshot.hash, snapshot.message)
+for snapshot in fs.log("config.json"):           # file history
+    print(snapshot.commit_hash, snapshot.message)
 
-# Same thing using the keyword form
-for snapshot in fs.log(path="path/to/file.txt"):
-    print(snapshot.hash, snapshot.message)
+for snapshot in fs.log(match="deploy*"):         # message filter
+    ...
 
-# Filter by commit message (supports * and ? wildcards)
-for snapshot in fs.log(match="deploy*"):
-    print(snapshot.hash, snapshot.message)
+for snapshot in fs.log(before=cutoff):           # date filter
+    ...
 
-# Only commits on or before a date
-from datetime import datetime, timezone
-cutoff = datetime(2024, 6, 1, tzinfo=timezone.utc)
-for snapshot in fs.log(before=cutoff):
-    print(snapshot.hash, snapshot.message)
-
-# Combine filters (AND)
-for snapshot in fs.log(path="config.json", match="fix*"):
-    print(snapshot.hash, snapshot.message)
+fs = fs.undo()                                   # move branch back 1 commit
+fs = fs.redo()                                   # move branch forward 1 reflog step
 ```
 
-### Dump to filesystem
-
-Export the entire tree to a directory on disk:
+### Export
 
 ```python
-fs.dump("/tmp/export")
+fs.export_tree("/tmp/export")
 # Creates /tmp/export/hello.txt, /tmp/export/src/main.py, etc.
+```
+
+### Copy and sync
+
+```python
+from gitstore import copy_to_repo, copy_from_repo, sync_to_repo, sync_from_repo
+
+# Disk to repo
+fs = copy_to_repo(fs, ["./data/"], "backup")
+print(fs.changes.add)                            # [FileEntry(...), ...]
+
+# Repo to disk
+copy_from_repo(fs, ["docs"], "./local-docs")
+
+# Sync (make identical, including deletes)
+fs = sync_to_repo(fs, "./local", "data")
+sync_from_repo(fs, "data", "./local")
+
+# Remove and move within repo
+from gitstore import remove_in_repo, move_in_repo
+fs = remove_in_repo(fs, ["old-dir"], recursive=True)
+fs = move_in_repo(fs, ["old.txt"], "new.txt")
 ```
 
 ### Snapshot properties
 
 ```python
-fs.hash          # str — full 40-character commit SHA
-fs.branch        # str | None — branch name, or None for tags
-fs.message       # str — commit message
-fs.time          # datetime — commit timestamp (timezone-aware)
-fs.author_name   # str — commit author name
-fs.author_email  # str — commit author email
+fs.commit_hash           # str -- full 40-character commit SHA
+fs.branch                # str | None -- branch name, or None for tags
+fs.message               # str -- commit message
+fs.time                  # datetime -- commit timestamp (timezone-aware)
+fs.author_name           # str -- commit author name
+fs.author_email          # str -- commit author email
+fs.changes               # ChangeReport | None -- changes from last operation
+```
+
+### Backup and restore
+
+```python
+diff = repo.backup("https://github.com/user/repo.git")    # MirrorDiff
+diff = repo.restore("https://github.com/user/repo.git")   # MirrorDiff
+diff = repo.backup(url, dry_run=True)                      # preview only
 ```
 
 ## Concurrency safety
@@ -327,10 +212,10 @@ gitstore uses an advisory file lock (`gitstore.lock` in the repo directory) to m
 from gitstore import StaleSnapshotError
 
 fs = repo.branches["main"]
-_ = fs.write("a.txt", b"a")     # advances the branch (returns new FS)
+_ = fs.write("a.txt", b"a")     # advances the branch
 
 try:
-    fs.write("b.txt", b"b")     # fs is now stale — branch moved past it
+    fs.write("b.txt", b"b")     # fs is now stale
 except StaleSnapshotError:
     fs = repo.branches["main"]  # re-fetch and retry
 ```
@@ -339,8 +224,6 @@ For single-file writes, `retry_write` handles the re-fetch-and-retry loop automa
 
 ```python
 from gitstore import retry_write
-
-# Fetches a fresh branch FS, writes, and retries on concurrent modification
 fs = retry_write(repo, "main", "file.txt", data)
 ```
 
@@ -348,16 +231,16 @@ fs = retry_write(repo, "main", "file.txt", data)
 
 - Single-machine, multi-process writes to the same branch are serialized by the file lock and will never silently lose commits.
 - When a stale write is rejected, the commit object is created but unreferenced. These dangling objects are harmless and will be cleaned up by `git gc`.
-- Cross-machine coordination (e.g. NFS-mounted repos) is not supported — file locks are not reliable over network filesystems.
+- Cross-machine coordination (e.g. NFS-mounted repos) is not supported -- file locks are not reliable over network filesystems.
 
-**Maintenance:** gitstore repos are standard bare Git repositories. Run `gitstore gc` (or `git gc` directly) to repack loose objects and prune unreferenced data. This is optional — Git objects are cheap and the repo will work fine without it — but it can reduce disk usage for long-lived repos with many writes.
+**Maintenance:** gitstore repos are standard bare Git repositories. Run `gitstore gc` (or `git gc` directly) to repack loose objects and prune unreferenced data. This is optional but can reduce disk usage for long-lived repos.
 
 ## Error handling
 
 | Exception | When |
 |-----------|------|
-| `FileNotFoundError` | `read`/`remove` on a missing path; `write_from` with a missing local file; opening a missing repo with `create=False` |
-| `IsADirectoryError` | `read` on a directory path; `write_from` with a directory as local path; `remove` on a directory |
+| `FileNotFoundError` | `read`/`remove` on a missing path; `write_from_file` with a missing local file; opening a missing repo with `create=False` |
+| `IsADirectoryError` | `read` on a directory path; `write_from_file` with a directory; `remove` on a directory |
 | `NotADirectoryError` | `ls`/`walk` on a file path |
 | `PermissionError` | Writing to a tag snapshot |
 | `KeyError` | Accessing a missing branch/tag; overwriting an existing tag |
@@ -368,270 +251,87 @@ fs = retry_write(repo, "main", "file.txt", data)
 
 ## CLI
 
-gitstore includes a command-line interface for working with bare repos without writing Python. Install the package to get the `gitstore` command.
-
-Specify the repository with `--repo`/`-r` or the `GITSTORE_REPO` environment variable. Use `--branch`/`-b` to select a branch (defaults to `main`). Use `--ref` to read from any branch, tag, or commit hash. For `cp`, prefix repo-side paths with `:` to distinguish them from local paths. For other commands (`ls`, `cat`, `rm`) the `:` prefix is optional.
+gitstore includes a command-line interface. Install with `pip install gitstore[cli]`.
 
 ```bash
-# Set once per session
-export GITSTORE_REPO=/path/to/repo.git
-gitstore init
-gitstore cp local-file.txt :remote-file.txt
-gitstore ls
-
-# Or per-command
-gitstore ls --repo /path/to/repo.git
-gitstore -r /path/to/repo.git ls
+export GITSTORE_REPO=/path/to/repo.git    # or pass --repo/-r per command
 ```
 
 ```bash
-# Create a repo
-gitstore init --repo /path/to/repo.git
-
-# Destroy a repo
-gitstore destroy                          # fails if repo has data
-gitstore destroy -f                       # force-remove non-empty repo
-
-# Garbage collection (requires git)
+# Repository management
+gitstore init
+gitstore destroy -f
 gitstore gc
 
-# Copy files, directories, and globs
-gitstore cp local-file.txt :remote-file.txt
-gitstore cp :remote-file.txt local-copy.txt
-gitstore cp local-file.txt :              # keep original name at root
+# Copy files (disk <-> repo, repo <-> repo)
+gitstore cp local-file.txt :                        # disk to repo root
+gitstore cp ./mydir/ :dest                           # contents mode
+gitstore cp './src/*.py' :backup                     # glob
+gitstore cp :file.txt ./local.txt                    # repo to disk
+gitstore cp -n ./mydir :dest                         # dry run
 
-# Multiple sources (last arg is destination)
-gitstore cp file1.txt file2.txt :dir
-gitstore cp :a.txt :b.txt ./local-dir
+# Sync (make identical, including deletes)
+gitstore sync ./local :repo_path
+gitstore sync :repo_path ./local
+gitstore sync --watch ./dir :data                    # continuous watch mode
 
-# Directories are copied recursively with name preserved
-gitstore cp ./mydir :dest                 # creates :dest/mydir/...
-
-# Trailing slash = "contents of" (like rsync)
-gitstore cp ./mydir/ :dest                # creates :dest/... (no mydir prefix)
-
-# Glob patterns (* and ?) — do not match leading dots
-gitstore cp './src/*.py' :backup          # only .py files, no dotfiles
-gitstore cp ':docs/*.md' ./local-docs     # repo-side glob
-
-# Dry run — show what would be copied without writing
-gitstore cp -n ./mydir :dest
-gitstore cp --dry-run :data ./out
-
-# Set file mode
-gitstore cp script.sh :script.sh --mode 755
-
-# Follow symlinks instead of preserving them (disk→repo)
-gitstore cp --follow-symlinks ./dir :dest
-
-# Do not overwrite existing files at the destination
-gitstore cp --ignore-existing ./mydir :dest
-gitstore cp --ignore-existing :data ./out
-
-# Sync mode — delete destination files not in source (like rsync --delete)
-gitstore cp --delete ./mydir/ :dest
-gitstore cp --delete :data/ ./out
-
-# Skip failed files and continue (report errors at end)
-gitstore cp --ignore-errors ./mydir/ :dest
-
-# Sync (make destination identical to source, including deletes)
-gitstore sync ./dir                          # sync local dir to repo root
-gitstore sync ./local :repo_path             # disk → repo
-gitstore sync :repo_path ./local             # repo → disk
-gitstore sync -n ./local :repo_path          # dry run
-
-# Browse contents
+# Browse
 gitstore ls
-gitstore ls subdir
+gitstore ls -R :src
 gitstore cat file.txt
 
-# Write stdin to repo
+# Write stdin
 echo "hello" | gitstore write file.txt
-cmd | gitstore write log.txt -p | grep error   # passthrough (tee mode)
+cmd | gitstore write log.txt -p | grep error         # passthrough (tee)
 
-# Remove files
+# Remove and move within repo
 gitstore rm old-file.txt
+gitstore rm -R :dir
+gitstore mv :old.txt :new.txt
+gitstore mv ':*.txt' :archive/
 
-# View commit history
+# History
 gitstore log
-gitstore log --path file.txt                # commits that changed this file
-gitstore log --match "deploy*"            # commits matching message pattern
-gitstore log --path file.txt --match "fix*" # both filters (AND)
-gitstore log --before 2024-06-01          # commits on or before this date
-gitstore log --before 2024-06-01T14:30:00 # date-time (ISO 8601)
-gitstore log --format json                # JSON array
-gitstore log --format jsonl               # one JSON object per line
+gitstore log --path file.txt --format jsonl
+gitstore diff --back 3
+gitstore undo
+gitstore redo
 
-# Compare HEAD against another snapshot
-gitstore diff --back 3                    # what changed in last 3 commits
-gitstore diff --ref other-branch          # what's different vs another branch
-gitstore diff --before 2025-01-01         # what changed since Jan 1
-gitstore diff --ref feature --back 2      # vs feature~2
-gitstore diff --back 3 --reverse          # swap direction (new → old)
-
-# Manage branches
-gitstore branch                           # list
-gitstore branch set dev                   # fork from default branch
-gitstore branch set dev --ref main --path config.json  # fork from commit that last changed a file
-gitstore branch set dev --ref main --match "deploy*"   # fork from commit matching message
-gitstore branch set dev --ref main --before 2024-06-01 # fork from commit as of a date
-gitstore branch set dev --empty           # empty orphan branch
-gitstore branch set dev -f                # overwrite existing branch
-gitstore branch exists dev                # exit 0 if exists, 1 if not
-gitstore branch default                   # show default branch
-gitstore branch default -b dev            # set default branch
-gitstore branch delete dev
-
-# Manage tags
-gitstore tag set v1.0                     # tag from default branch
-gitstore tag set v1.0-fix --path bugfix.py           # tag the commit that last changed bugfix.py
-gitstore tag set v1.0 --match "deploy*"              # tag the latest deploy commit
-gitstore tag set v1.0 --before 2024-06-01            # tag the state as of a date
-gitstore tag set v1.0 -f                  # overwrite existing tag
-gitstore tag exists v1.0                  # exit 0 if exists, 1 if not
-gitstore tag hash v1.0                    # print commit SHA
+# Branches and tags
+gitstore branch set dev --ref main
+gitstore branch exists dev
+gitstore tag set v1.0
 gitstore tag delete v1.0
 
-# Export to an archive (format auto-detected from extension)
-gitstore archive archive.zip
-gitstore archive archive.tar.gz
-gitstore archive archive.tar --path file.txt  # snapshot where file.txt last changed
-gitstore archive archive.zip --match "v1*"    # snapshot matching message pattern
-gitstore archive out.dat --format zip         # override format detection
-gitstore archive - --format tar | gzip > a.tar.gz  # stdout (requires --format)
+# Archives
+gitstore archive out.zip
+gitstore unarchive data.tar.gz
 
-# Import an archive (format auto-detected from extension)
-gitstore unarchive archive.zip
-gitstore unarchive archive.tar.gz
-gitstore unarchive data.bin --format tar      # override format detection
-gitstore unarchive --format tar < archive.tar # stdin (requires --format)
-gitstore unarchive archive.zip -m "Import data" -b dev
-
-# zip/unzip/tar/untar still work as aliases
-gitstore zip archive.zip
-gitstore unzip archive.zip
-gitstore tar archive.tar.gz
-gitstore untar archive.tar.gz
-
-# Backup to a remote (exact mirror — all branches and tags)
+# Mirror (backup/restore all refs)
 gitstore backup https://github.com/user/repo.git
-gitstore backup git@github.com:user/repo.git
-gitstore backup /path/to/other-bare-repo.git
-
-# Preview what backup would do
-gitstore backup -n https://github.com/user/repo.git
-
-# Restore from a remote (overwrite local to match remote)
 gitstore restore https://github.com/user/repo.git
+gitstore backup -n https://github.com/user/repo.git  # dry run
 
-# Preview what restore would do
-gitstore restore -n https://github.com/user/repo.git
-```
-
-### Copy behavior
-
-`cp` handles files, directories, trailing-slash, and glob patterns following rsync conventions:
-
-| Command | Result |
-|---------|--------|
-| `cp file.txt :dest` | `:dest` is the file (or `:dest/file.txt` if `:dest` is an existing directory) |
-| `cp dir :dest` | `:dest/dir/...` (directory name preserved) |
-| `cp dir/ :dest` | `:dest/...` (contents poured into dest, including dotfiles) |
-| `cp 'dir/*' :dest` | `:dest/a.txt` etc. (glob-matched children, no dotfiles) |
-| `cp 'dir/*.txt' :dest` | only matching files |
-| `cp f1 dir1 :dest` | `:dest/f1`, `:dest/dir1/...` (mixed sources) |
-| `cp ':dir/*' /out` | repo-side glob to local disk |
-
-Glob patterns (`*`, `?`) do not match files or directories whose names start with `.` (Unix convention). Use `.*` to match dotfiles explicitly. Trailing `/` on a source means "contents of" and includes dotfiles (it is not a glob).
-
-### Backup and restore
-
-`backup` and `restore` replicate an entire gitstore repository to and from a remote URL. They are whole-repo mirror operations: every branch and tag is included, and the destination becomes an exact copy of the source.
-
-- **`gitstore backup URL`** pushes all local refs (branches and tags) to the remote. Remote refs that don't exist locally are deleted. Diverged histories are force-overwritten. After backup, the remote is an exact mirror of the local repo.
-
-- **`gitstore restore URL`** fetches all objects from the remote, then overwrites local refs to match. Local refs that don't exist on the remote are deleted. After restore, the local repo is an exact mirror of the remote.
-
-- **`-n` / `--dry-run`** connects to the remote and compares refs, showing what would be created, updated, or deleted, without transferring any data.
-
-The URL can be any git remote: HTTPS (`https://github.com/...`), SSH (`git@github.com:...`), or a local path (`/path/to/bare-repo.git`).
-
-**Authentication.** For HTTPS URLs, gitstore automatically obtains credentials by running `git credential fill`, which delegates to whatever credential helper is configured on your system (macOS Keychain, Windows Credential Manager, GNOME Keyring, `gh auth setup-git`, etc.). If that fails and the host is GitHub, it falls back to `gh auth token`. SSH URLs use your SSH agent as usual. No additional configuration is needed if `git push` already works for you.
-
-**Typical workflow.** gitstore repos are local bare repositories with no configured remotes. Use `backup` after making changes to push a safety copy, and `restore` to recreate a repo from that copy:
-
-```bash
-# Initial setup: create a repo and add data
-gitstore init -r /path/to/repo.git
-gitstore cp -r /path/to/repo.git data.csv :data.csv
-gitstore tag -r /path/to/repo.git set v1
-
-# Push everything to GitHub
-gitstore backup -r /path/to/repo.git https://github.com/user/repo.git
-
-# Later, on another machine: recreate from backup
-gitstore init -r /path/to/repo.git
-gitstore restore -r /path/to/repo.git https://github.com/user/repo.git
-
-# Verify
-gitstore ls -r /path/to/repo.git        # data.csv
-gitstore tag -r /path/to/repo.git list   # v1
-```
-
-```bash
 # Serve files over HTTP
-gitstore serve                                # http://127.0.0.1:8000/
-gitstore serve --all --cors                   # all branches/tags with CORS
-gitstore serve --base-path /data -p 9000      # mount under /data prefix
-gitstore serve --open --no-cache -q           # open browser, no caching, quiet
+gitstore serve                                        # single branch
+gitstore serve --all --cors                           # all refs with CORS
+
+# Serve repo over git protocol (read-only)
+gitstore gitserve
 ```
 
-```bash
-# Browse at a specific commit
-gitstore log --path file.txt                # find the commit hash
-gitstore cat file.txt --ref abc1234...   # read file at that commit
-gitstore ls --ref abc1234...             # list files at that commit
-
-# Works with tags too
-gitstore cat file.txt --ref v1.0
-
-# Export a snapshot at a specific commit
-gitstore zip archive.zip --ref abc1234...
-gitstore tar archive.tar --ref abc1234...
-
-# Copy from a specific commit
-gitstore cp :file.txt local.txt --ref abc1234...
-```
-
-Write commands (`cp`, `rm`, `write`, `unarchive`, `unzip`, `untar`) accept `-m` for custom commit messages. Read commands (`cat`, `ls`, `cp`, `archive`, `zip`, `tar`, `log`, `diff`) accept `--ref` to read from any branch, tag, or full commit hash. Pass `-v` before any command for status messages on stderr.
-
-`diff` compares the current branch HEAD against another snapshot using git-style `A`/`M`/`D` output (added, modified, deleted). It accepts all snapshot filters (`--ref`, `--back`, `--before`, `--path`, `--match`) to select the baseline. Pass `--reverse` to swap the comparison direction.
-
-`write` reads stdin and commits it to a file in the repo. Pass `-p`/`--passthrough` for tee mode where data flows through to stdout, useful in pipelines (e.g. `cmd | gitstore write log.txt -p | grep error`).
-
-`cp` handles files, directories, trailing-slash "contents" mode, and glob patterns; pass `-n`/`--dry-run` to preview what would be copied without writing. It accepts `--mode 644` or `--mode 755` to set file permissions, `--follow-symlinks` to dereference symlinks, `--ignore-existing` to skip files that already exist at the destination, `--delete` to remove destination files not present in the source (like rsync `--delete`), and `--ignore-errors` to skip failed files and continue copying. When copying directories, `cp` auto-detects executable permissions from disk and preserves symlinks by default; pass `--follow-symlinks` to dereference them instead. When copying repo→disk, `cp` recreates symlink entries as symlinks on disk.
-
-`log`, `archive`, `zip`, and `tar` accept `--before` with an ISO 8601 date or datetime to filter to commits on or before that point in time. `archive`, `zip`, and `tar` accept `-` as FILENAME to write to stdout; `unarchive` and `untar` read from stdin when no filename is given (or with `-`). `archive` and `unarchive` auto-detect the format from the filename extension; use `--format zip` or `--format tar` to override or when piping to/from stdout/stdin. The `zip`/`unzip`/`tar`/`untar` commands remain as aliases.
-
-`backup` and `restore` operate on the entire repository (all branches and tags) and accept `-n`/`--dry-run` to preview changes without transferring data. `restore` also accepts `--no-create` to require an existing repo.
-
-`serve` starts an HTTP file server for browsing repo contents. Content is resolved live on each request, so new commits are visible immediately. Use `--all` to expose all branches and tags via `/<ref>/<path>`. Responses include `ETag` headers (commit hash) and `Cache-Control: no-cache`, so browsers revalidate on every request and get a lightweight 304 when nothing has changed. Supports `--cors`, `--no-cache` (disables caching entirely), `--base-path` for mounting under a URL prefix, `--open` to launch a browser, and `-q`/`--quiet` to suppress request logs.
+For full CLI documentation, see [docs/cli.md](docs/cli.md).
 
 ## Documentation
-
-Structured reference documentation is available in the [`docs/`](docs/) directory:
 
 - [Documentation hub](docs/index.md) -- quick start and navigation
 - [Python API Reference](docs/api.md) -- classes, methods, and data types
 - [CLI Reference](docs/cli.md) -- the `gitstore` command-line tool
+- [Path Syntax](docs/paths.md) -- how `ref:path` works across commands
 
 ## Development
 
 ```bash
-# Install with dev dependencies
-uv sync --dev
-
-# Run tests
+uv sync --dev       # install with dev dependencies (includes CLI)
 uv run python -m pytest -v
 ```

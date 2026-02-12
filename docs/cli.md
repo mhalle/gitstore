@@ -166,7 +166,7 @@ gitstore sync --watch --debounce 5000 ./dir
 gitstore sync --watch -c ./src :code       # checksum mode
 ```
 
-Requires: `pip install gitstore[watch]`
+Requires: `pip install gitstore[cli]`
 
 ### ls
 

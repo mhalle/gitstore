@@ -3,7 +3,12 @@
 ```python
 from gitstore import GitStore, FS, StaleSnapshotError, retry_write
 from gitstore import copy_to_repo, copy_from_repo, sync_to_repo, sync_from_repo
-from gitstore import CopyReport, CopyAction, CopyError, FileEntry, SyncDiff, RefChange
+from gitstore import copy_to_repo_dry_run, copy_from_repo_dry_run
+from gitstore import sync_to_repo_dry_run, sync_from_repo_dry_run
+from gitstore import remove_in_repo, remove_in_repo_dry_run
+from gitstore import move_in_repo, move_in_repo_dry_run
+from gitstore import ChangeReport, ChangeAction, ChangeError, FileEntry, FileType
+from gitstore import MirrorDiff, RefChange, ReflogEntry, WalkEntry
 ```
 
 ---
@@ -63,9 +68,9 @@ fs_dev = repo.branches.set("dev", fs)   # correct
 # fs_dev = repo.branches["dev"] = fs    # WRONG: fs_dev not bound to "dev"
 ```
 
-### branches.reflog(name) -> list[dict]
+### branches.reflog(name) -> list[ReflogEntry]
 
-Reflog entries (chronological). Each dict: `old_sha`, `new_sha`, `committer`, `timestamp`, `message`.
+Reflog entries (chronological). Each `ReflogEntry` has fields: `old_sha`, `new_sha`, `committer`, `timestamp`, `message`.
 
 Raises `KeyError` (missing branch), `FileNotFoundError` (no reflog).
 
@@ -83,7 +88,7 @@ del repo.tags["v1.0"]
 
 ---
 
-## FS — Reading
+## FS -- Reading
 
 An immutable committed snapshot. Read operations never mutate state.
 
@@ -91,17 +96,21 @@ An immutable committed snapshot. Read operations never mutate state.
 
 | Property | Type | Description |
 |----------|------|-------------|
-| `hash` | `str` | 40-char commit SHA. |
+| `commit_hash` | `str` | 40-char commit SHA. |
 | `branch` | `str \| None` | Branch name (`None` for tags). |
 | `message` | `str` | Commit message. |
 | `time` | `datetime` | Timezone-aware commit timestamp. |
 | `author_name` | `str` | Author name. |
 | `author_email` | `str` | Author email. |
-| `report` | `CopyReport \| None` | Report from the last copy/sync that produced this snapshot. |
+| `changes` | `ChangeReport \| None` | Report from the last operation that produced this snapshot. |
 
 ### fs.read(path) -> bytes
 
 Read file contents. Raises `FileNotFoundError`, `IsADirectoryError`.
+
+### fs.read_text(path, encoding="utf-8") -> str
+
+Read file contents as a string. Shorthand for `fs.read(path).decode(encoding)`.
 
 ### fs.ls(path=None) -> list[str]
 
@@ -115,13 +124,19 @@ List entries at *path* (or root). Raises `NotADirectoryError` if *path* is a fil
 
 `True` if *path* is a directory. `False` if missing.
 
-### fs.walk(path=None) -> Iterator[tuple[str, list[str], list[str]]]
+### fs.walk(path=None) -> Iterator[tuple[str, list[str], list[WalkEntry]]]
 
-Walk the tree like `os.walk`. Yields `(dirpath, dirnames, filenames)`.
+Walk the tree like `os.walk`. Yields `(dirpath, dirnames, file_entries)`.
+
+Each file entry is a `WalkEntry` named tuple with fields `name`, `oid`, and `filemode`. Access `entry.file_type` to get a `FileType` enum value.
 
 ### fs.glob(pattern) -> list[str]
 
-Expand a glob pattern (`*`, `?`). Wildcards do not match a leading `.`. Returns sorted list.
+Expand a glob pattern (`*`, `?`, `**`). Wildcards do not match a leading `.`. Returns sorted list.
+
+### fs.iglob(pattern) -> Iterator[str]
+
+Like `glob` but returns an unordered iterator instead of a sorted list. Useful when you only need to iterate once.
 
 ### fs.open(path, mode="rb")
 
@@ -142,15 +157,19 @@ Read symlink target. Raises `FileNotFoundError`, `ValueError` (not a symlink).
 
 ---
 
-## FS — Writing
+## FS -- Writing
 
 Write methods require a writable snapshot (from a branch). They return a **new** FS; the original is unchanged.
 
 ### fs.write(path, data, *, message=None, mode=None) -> FS
 
-Write *data* (bytes). Set `mode=0o100755` for executables. Directories auto-created.
+Write *data* (bytes). Set `mode=FileType.EXECUTABLE` or `mode=0o100755` for executables. Directories auto-created.
 
-### fs.write_from(path, local_path, *, message=None, mode=None) -> FS
+### fs.write_text(path, text, *, encoding="utf-8", message=None, mode=None) -> FS
+
+Write *text* (str). Shorthand for `fs.write(path, text.encode(encoding), ...)`.
+
+### fs.write_from_file(path, local_path, *, message=None, mode=None) -> FS
 
 Write from a file on disk. Auto-detects executable permission unless *mode* is set.
 
@@ -173,7 +192,7 @@ Multiple writes/removes in one commit. Nothing is committed if an exception occu
 ```python
 with fs.batch(message="Import v2") as b:
     b.write("a.txt", b"alpha")
-    b.write_from("big.bin", "/data/big.bin")
+    b.write_from_file("big.bin", "/data/big.bin")
     b.write_symlink("link.txt", "a.txt")
     b.remove("old.txt")
     with b.open("c.txt", "wb") as f:
@@ -186,7 +205,7 @@ new_fs = b.fs
 | Method | Description |
 |--------|-------------|
 | `b.write(path, data, *, mode=None)` | Stage a file write. |
-| `b.write_from(path, local_path, *, mode=None)` | Stage a write from disk. |
+| `b.write_from_file(path, local_path, *, mode=None)` | Stage a write from disk. |
 | `b.write_symlink(path, target)` | Stage a symlink. |
 | `b.remove(path)` | Stage a removal. |
 | `b.open(path, mode="wb")` | Writable file-like, stages on close. |
@@ -204,6 +223,10 @@ new_fs = b.fs
 ### fs.parent -> FS | None
 
 Parent snapshot, or `None` for the initial commit.
+
+### fs.back(n) -> FS
+
+Return the FS at the *n*-th ancestor commit. Raises `ValueError` if history is too short.
 
 ### fs.log(path=None, *, match=None, before=None) -> Iterator[FS]
 
@@ -229,9 +252,9 @@ Undo creates one reflog entry. To redo `undo(N)`, use `redo(1)`.
 
 ## Export
 
-### fs.dump(path) -> None
+### fs.export_tree(path) -> None
 
-Write the entire tree to a directory on disk. Symlinks are recreated.
+Write the entire tree to a directory on disk. Symlinks are recreated, executables get `0o755` permissions.
 
 ---
 
@@ -244,10 +267,11 @@ Copy files between local disk and a gitstore repo. Supports files, directories, 
 ```python
 copy_to_repo(fs, sources, dest, *, follow_symlinks=False, message=None,
              mode=None, ignore_existing=False, delete=False,
-             ignore_errors=False) -> FS
+             ignore_errors=False, checksum=True,
+             exclude=None) -> FS
 ```
 
-Copy local files/dirs/globs into the repo. Returns new FS with report on `fs.report`.
+Copy local files/dirs/globs into the repo. Returns new FS with changes on `fs.changes`.
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
@@ -259,19 +283,23 @@ Copy local files/dirs/globs into the repo. Returns new FS with report on `fs.rep
 | `ignore_existing` | `bool` | Skip existing files. |
 | `delete` | `bool` | Remove repo files not in source. |
 | `ignore_errors` | `bool` | Collect errors instead of aborting. |
+| `checksum` | `bool` | Compare files by content hash (default `True`). |
+| `exclude` | `ExcludeFilter \| None` | Exclude filter (gitignore-style patterns). |
 
 ### copy_to_repo_dry_run
 
 ```python
 copy_to_repo_dry_run(fs, sources, dest, *, follow_symlinks=False,
-                     ignore_existing=False, delete=False) -> CopyReport | None
+                     ignore_existing=False, delete=False,
+                     checksum=True, exclude=None) -> ChangeReport | None
 ```
 
 ### copy_from_repo
 
 ```python
 copy_from_repo(fs, sources, dest, *, ignore_existing=False,
-               delete=False, ignore_errors=False) -> CopyReport | None
+               delete=False, ignore_errors=False,
+               checksum=True) -> ChangeReport | None
 ```
 
 Copy repo files/dirs/globs to local disk.
@@ -280,14 +308,43 @@ Copy repo files/dirs/globs to local disk.
 
 ```python
 copy_from_repo_dry_run(fs, sources, dest, *, ignore_existing=False,
-                       delete=False) -> CopyReport | None
+                       delete=False, checksum=True) -> ChangeReport | None
+```
+
+### remove_in_repo
+
+```python
+remove_in_repo(fs, sources, *, recursive=False, message=None) -> FS
+```
+
+Remove files matching *sources* from the repo. Sources support globs, directories, and `/./` pivots. With `recursive=True`, directories are removed recursively; without it, matching a directory raises `IsADirectoryError`. The changes are available via `fs.changes`.
+
+### remove_in_repo_dry_run
+
+```python
+remove_in_repo_dry_run(fs, sources, *, recursive=False) -> ChangeReport | None
+```
+
+### move_in_repo
+
+```python
+move_in_repo(fs, sources, dest, *, recursive=False, message=None) -> FS
+```
+
+Move/rename files within the repo. All *sources* and *dest* are repo paths. Directories require `recursive=True`. The operation is atomic -- writes and deletes happen in a single commit. The changes are available via `fs.changes`.
+
+### move_in_repo_dry_run
+
+```python
+move_in_repo_dry_run(fs, sources, dest, *, recursive=False) -> ChangeReport | None
 ```
 
 ### sync_to_repo
 
 ```python
 sync_to_repo(fs, local_path, repo_path, *, message=None,
-             ignore_errors=False) -> FS
+             ignore_errors=False, checksum=True,
+             exclude=None) -> FS
 ```
 
 Make *repo_path* identical to *local_path* (includes deletes).
@@ -295,14 +352,15 @@ Make *repo_path* identical to *local_path* (includes deletes).
 ### sync_to_repo_dry_run
 
 ```python
-sync_to_repo_dry_run(fs, local_path, repo_path) -> CopyReport | None
+sync_to_repo_dry_run(fs, local_path, repo_path, *, checksum=True,
+                     exclude=None) -> ChangeReport | None
 ```
 
 ### sync_from_repo
 
 ```python
 sync_from_repo(fs, repo_path, local_path, *,
-               ignore_errors=False) -> CopyReport | None
+               ignore_errors=False, checksum=True) -> ChangeReport | None
 ```
 
 Make *local_path* identical to *repo_path* (includes deletes).
@@ -310,7 +368,8 @@ Make *local_path* identical to *repo_path* (includes deletes).
 ### sync_from_repo_dry_run
 
 ```python
-sync_from_repo_dry_run(fs, repo_path, local_path) -> CopyReport | None
+sync_from_repo_dry_run(fs, repo_path, local_path, *,
+                       checksum=True) -> ChangeReport | None
 ```
 
 ### Source path modes
@@ -328,10 +387,10 @@ sync_from_repo_dry_run(fs, repo_path, local_path) -> CopyReport | None
 An embedded `/./` in a source path (rsync `-R` style) controls which part of the path is preserved at the destination. Everything before `/./` locates files on disk; everything after becomes the destination-relative path.
 
 ```python
-# /home/user/./projects/app → dest/projects/app/...
+# /home/user/./projects/app -> dest/projects/app/...
 copy_to_repo(fs, ["/home/user/./projects/app"], "dest")
 
-# /home/user/./projects/app/ → dest/projects/...  (contents mode)
+# /home/user/./projects/app/ -> dest/projects/...  (contents mode)
 copy_to_repo(fs, ["/home/user/./projects/app/"], "dest")
 ```
 
@@ -341,11 +400,11 @@ A leading `./` (e.g. `./mydir`) is a normal relative path and does **not** trigg
 
 ## Backup and Restore
 
-### repo.backup(url, *, dry_run=False) -> SyncDiff
+### repo.backup(url, *, dry_run=False) -> MirrorDiff
 
 Push all refs to *url*, creating an exact mirror. Remote-only refs are deleted.
 
-### repo.restore(url, *, dry_run=False) -> SyncDiff
+### repo.restore(url, *, dry_run=False) -> MirrorDiff
 
 Fetch all refs from *url*, overwriting local state. Local-only refs are deleted.
 
@@ -359,14 +418,16 @@ Write operations auto-generate commit messages. Override with `message=` on any 
 
 ```
 + filename.txt              # add
-+ script.sh (E)             # add executable
-+ config.json (L)           # add symlink
++ script.sh (executable)    # add executable
++ config.json (link)        # add symlink
 ~ filename.txt              # update
 - filename.txt              # remove
 Batch: +3 ~1                # manual batch
 Batch cp: +3 ~1 -2          # copy
 Batch sync: +3 ~1 -2        # sync
 Batch ar: +10               # archive extraction
+Batch mv: +2 -2             # move
+Batch rm: -3                # remove
 ```
 
 ### Placeholders
@@ -380,7 +441,7 @@ Custom messages support placeholders that expand at commit time:
 | `{update_count}` | Number of updates. |
 | `{delete_count}` | Number of deletions. |
 | `{total_count}` | Total changed files. |
-| `{op}` | Operation name (`cp`, `ar`, or empty). |
+| `{op}` | Operation name (`cp`, `ar`, `mv`, `rm`, etc.). |
 
 A message without `{` is used as-is. Unknown placeholders raise `KeyError`.
 
@@ -388,25 +449,23 @@ A message without `{` is used as-is. Unknown placeholders raise `KeyError`.
 
 ## Data Classes
 
-### CopyReport
+### ChangeReport
 
-Result of a copy/sync operation.
+Result of a copy/sync/move/remove operation.
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `add` | `list[FileEntry]` | Files added. |
 | `update` | `list[FileEntry]` | Files updated. |
 | `delete` | `list[FileEntry]` | Files deleted. |
-| `errors` | `list[CopyError]` | Per-file errors (with `ignore_errors`). |
-| `warnings` | `list[CopyError]` | Non-fatal warnings. |
+| `errors` | `list[ChangeError]` | Per-file errors (with `ignore_errors`). |
+| `warnings` | `list[ChangeError]` | Non-fatal warnings. |
 
 | Property/Method | Returns | Description |
 |-----------------|---------|-------------|
 | `in_sync` | `bool` | No add/update/delete actions. |
 | `total` | `int` | Total action count. |
-| `actions()` | `list[CopyAction]` | All actions sorted by path. |
-
-`CopyPlan` and `SyncPlan` are backward-compatible aliases.
+| `actions()` | `list[ChangeAction]` | All actions sorted by path. |
 
 ### FileEntry
 
@@ -414,31 +473,54 @@ Result of a copy/sync operation.
 @dataclass
 class FileEntry:
     path: str
-    type: str       # "B" (blob), "E" (executable), "L" (symlink)
-    src: str | None  # source path or None
+    type: FileType    # FileType.BLOB, .EXECUTABLE, .LINK
+    src: str | None   # source path or None
 ```
 
-### CopyAction
+### FileType
+
+```python
+class FileType(str, Enum):
+    BLOB = "blob"
+    EXECUTABLE = "executable"
+    LINK = "link"
+    TREE = "tree"
+```
+
+`FileType.from_filemode(mode)` converts a git filemode integer. `entry.filemode` converts back.
+
+### WalkEntry
+
+Named tuple yielded by `fs.walk()` in the file-entries list.
+
+```python
+class WalkEntry(NamedTuple):
+    name: str
+    oid: Oid
+    filemode: int
+```
+
+`entry.file_type` returns the corresponding `FileType`.
+
+### ChangeAction
 
 ```python
 @dataclass
-class CopyAction:
+class ChangeAction:
     path: str       # relative path
     action: str     # "add", "update", "delete"
 ```
 
-`SyncAction` is a backward-compatible alias.
-
-### CopyError
+### ChangeError
 
 ```python
 @dataclass
-class CopyError:
+class ChangeError:
     path: str
     error: str
 ```
 
-### SyncDiff
+### MirrorDiff
 
 Result of backup/restore operations.
 
@@ -463,6 +545,18 @@ class RefChange:
     dest_sha: str | None
 ```
 
+### ReflogEntry
+
+```python
+@dataclass
+class ReflogEntry:
+    old_sha: str
+    new_sha: str
+    committer: str
+    timestamp: float
+    message: str
+```
+
 ---
 
 ## Exceptions
@@ -473,10 +567,10 @@ Raised when writing from a snapshot whose branch has moved.
 
 ```python
 fs1 = fs.write("a.txt", b"a")     # branch advances
-fs.write("b.txt", b"b")           # StaleSnapshotError — fs is stale
+fs.write("b.txt", b"b")           # StaleSnapshotError -- fs is stale
 ```
 
-Fix: re-fetch `repo.branches["main"]` and retry — or use `retry_write` (below).
+Fix: re-fetch `repo.branches["main"]` and retry -- or use `retry_write` (below).
 
 ---
 
@@ -499,10 +593,10 @@ retry_write(store, branch, path, data, *, message=None, mode=None, retries=5) ->
 | `path` | `str \| PathLike` | | Destination path in the repo. |
 | `data` | `bytes` | | File contents. |
 | `message` | `str \| None` | `None` | Commit message. |
-| `mode` | `int \| None` | `None` | File mode (e.g. `0o100755`). |
+| `mode` | `FileType \| int \| None` | `None` | File mode (e.g. `FileType.EXECUTABLE` or `0o100755`). |
 | `retries` | `int` | `5` | Maximum attempts before raising. |
 
-**Returns:** `FS` — new snapshot after successful write.
+**Returns:** `FS` -- new snapshot after successful write.
 
 **Raises:** `StaleSnapshotError` if all attempts are exhausted. `KeyError` if the branch does not exist.
 
@@ -517,13 +611,13 @@ fs = retry_write(repo, "main", "log.txt", b"new data")
 
 ### Backoff strategy
 
-Base delay 10 ms, factor 2x, cap 200 ms, with uniform jitter. Delays per attempt: 0–10 ms, 0–20 ms, 0–40 ms, 0–80 ms, then raise.
+Base delay 10 ms, factor 2x, cap 200 ms, with uniform jitter. Delays per attempt: 0--10 ms, 0--20 ms, 0--40 ms, 0--80 ms, then raise.
 
 ---
 
 ## Stale Snapshot Semantics
 
-Old snapshots remain **readable** — you can call `read`, `ls`, `exists`, `walk`, `glob`, `log` on them. They raise `StaleSnapshotError` on any write because the branch has moved past them.
+Old snapshots remain **readable** -- you can call `read`, `ls`, `exists`, `walk`, `glob`, `log` on them. They raise `StaleSnapshotError` on any write because the branch has moved past them.
 
 To write from an old state, reset the branch or create a new one:
 
