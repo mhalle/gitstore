@@ -525,7 +525,7 @@ transaction system.  A typical pattern:
 
 ```bash
 # 1. Create a temporary working branch
-gitstore branch fork session
+gitstore branch set session
 
 # 2. Make changes on the temporary branch
 echo "data" | gitstore write session:file.txt

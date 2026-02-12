@@ -451,7 +451,7 @@ class TestSync:
     def test_sync_repo_to_repo(self, runner, repo_with_files):
         """sync :src :dest now works (repo→repo sync)."""
         # First create a second branch
-        runner.invoke(main, ["branch", "--repo", repo_with_files, "fork", "dev"])
+        runner.invoke(main, ["branch", "--repo", repo_with_files, "set", "dev"])
         # Sync from main to dev (repo→repo)
         result = runner.invoke(main, [
             "sync", "--repo", repo_with_files, ":", "dev:", "-n",
@@ -822,7 +822,7 @@ class TestUndo:
 
     def test_undo_custom_branch(self, runner, initialized_repo, tmp_path):
         """Undo on a specific branch via -b."""
-        runner.invoke(main, ["branch", "--repo", initialized_repo, "fork", "dev"])
+        runner.invoke(main, ["branch", "--repo", initialized_repo, "set", "dev"])
         f = tmp_path / "a.txt"
         f.write_text("dev-data")
         runner.invoke(main, ["cp", "--repo", initialized_repo, "-b", "dev", str(f), ":a.txt"])

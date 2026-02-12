@@ -147,25 +147,25 @@ class TestCLIUsesHeadDefault:
         fs = store2.branches["data"]
         assert fs.read("newfile.txt") == b"new content"
 
-    def test_branch_fork_uses_head(self, runner, tmp_path):
-        """branch fork without --ref uses the default branch."""
+    def test_branch_set_uses_head(self, runner, tmp_path):
+        """branch set without --ref uses the default branch."""
         p = str(tmp_path / "test.git")
         store = GitStore.open(p, branch="data")
         fs = store.branches["data"]
         fs.write("hello.txt", b"hi")
-        result = runner.invoke(main, ["branch", "fork", "copy", "-r", p])
+        result = runner.invoke(main, ["branch", "set", "copy", "-r", p])
         assert result.exit_code == 0
         store2 = GitStore.open(p, create=False)
         assert "copy" in store2.branches
         assert store2.branches["copy"].read("hello.txt") == b"hi"
 
-    def test_tag_fork_uses_head(self, runner, tmp_path):
-        """tag fork without --ref uses the default branch."""
+    def test_tag_set_uses_head(self, runner, tmp_path):
+        """tag set without --ref uses the default branch."""
         p = str(tmp_path / "test.git")
         store = GitStore.open(p, branch="data")
         fs = store.branches["data"]
         fs.write("hello.txt", b"hi")
-        result = runner.invoke(main, ["tag", "fork", "v1", "-r", p])
+        result = runner.invoke(main, ["tag", "set", "v1", "-r", p])
         assert result.exit_code == 0
         store2 = GitStore.open(p, create=False)
         assert "v1" in store2.tags

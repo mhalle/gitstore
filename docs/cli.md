@@ -376,12 +376,12 @@ gitstore reflog --format json
 ```bash
 gitstore branch                               # list
 gitstore branch list                          # same
-gitstore branch create dev                    # empty orphan
-gitstore branch fork dev                      # fork from default branch
-gitstore branch fork dev --ref main           # fork from specific ref
-gitstore branch fork dev --ref main --path config.json
-gitstore branch fork dev -f                   # overwrite existing
-gitstore branch set dev --ref main            # point at a ref (create or update)
+gitstore branch set dev                       # fork from default branch
+gitstore branch set dev --ref main            # fork from specific ref
+gitstore branch set dev --ref main --path config.json
+gitstore branch set dev -f                    # overwrite existing
+gitstore branch set dev --empty               # empty orphan branch
+gitstore branch exists dev                    # exit 0 if exists, 1 if not
 gitstore branch default                       # show default branch
 gitstore branch default -b dev                # set default branch
 gitstore branch delete dev
@@ -390,23 +390,18 @@ gitstore branch hash main --back 3            # 3 commits before tip
 gitstore branch hash main --path config.json  # last commit that changed file
 ```
 
-#### branch create options
-
-Creates an empty orphan branch. No additional options.
-
-#### branch fork options
+#### branch set options
 
 | Option | Description |
 |--------|-------------|
 | `-b`, `--branch` | Source branch (default: repo default). |
 | `-f`, `--force` | Overwrite if branch already exists. |
+| `--empty` | Create an empty root branch (no parent commit). Cannot combine with other options. |
 | `--ref`, `--path`, `--match`, `--before`, `--back` | Snapshot filters. |
 
-#### branch set options
+#### branch exists
 
-| Option | Description |
-|--------|-------------|
-| `--ref`, `--path`, `--match`, `--before`, `--back` | Snapshot filters. |
+Exits with code 0 if the branch exists, 1 if it does not. No output.
 
 #### branch hash options
 
@@ -419,26 +414,26 @@ Creates an empty orphan branch. No additional options.
 ```bash
 gitstore tag                                  # list
 gitstore tag list                             # same
-gitstore tag fork v1.0                        # tag from default branch
-gitstore tag fork v1.0 --ref main             # tag from specific ref
-gitstore tag fork v1.0 --before 2024-06-01    # tag a historical commit
-gitstore tag set v1.0 --ref main              # create or update tag
+gitstore tag set v1.0                         # tag from default branch
+gitstore tag set v1.0 --ref main              # tag from specific ref
+gitstore tag set v1.0 --before 2024-06-01     # tag a historical commit
+gitstore tag set v1.0 -f                      # overwrite existing tag
+gitstore tag exists v1.0                      # exit 0 if exists, 1 if not
 gitstore tag hash v1.0                        # commit SHA
 gitstore tag delete v1.0
 ```
-
-#### tag fork options
-
-| Option | Description |
-|--------|-------------|
-| `-b`, `--branch` | Source branch (default: repo default). |
-| `--ref`, `--path`, `--match`, `--before`, `--back` | Snapshot filters. |
 
 #### tag set options
 
 | Option | Description |
 |--------|-------------|
+| `-b`, `--branch` | Source branch (default: repo default). |
+| `-f`, `--force` | Overwrite if tag already exists. |
 | `--ref`, `--path`, `--match`, `--before`, `--back` | Snapshot filters. |
+
+#### tag exists
+
+Exits with code 0 if the tag exists, 1 if it does not. No output.
 
 ---
 
@@ -604,7 +599,7 @@ Several commands accept filters to select a specific commit:
 | `--before DATE` | Latest commit on or before this date (ISO 8601). |
 | `--back N` | Walk back N commits from tip. |
 
-Filters combine with AND. Available on `cp`, `sync`, `ls`, `cat`, `log`, `diff`, `branch fork`, `branch set`, `branch hash`, `tag fork`, `tag set`, `archive`, `zip`, `tar`.
+Filters combine with AND. Available on `cp`, `sync`, `ls`, `cat`, `log`, `diff`, `branch set`, `branch hash`, `tag set`, `archive`, `zip`, `tar`.
 
 ### Dry-run output format
 

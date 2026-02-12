@@ -35,72 +35,61 @@ def branch_list(ctx):
         click.echo(name)
 
 
-@branch.command("create")
-@_repo_option
-@click.argument("name")
-@click.pass_context
-def branch_create(ctx, name):
-    """Create a new empty branch NAME."""
-    store = _open_store(_require_repo(ctx))
-
-    if name in store.branches:
-        raise click.ClickException(f"Branch already exists: {name}")
-
-    repo = store._repo
-    sig = store._signature
-    tree_oid = repo.TreeBuilder().write()
-    repo.create_commit(
-        f"refs/heads/{name}", sig, sig,
-        f"Initialize {name}", tree_oid, [],
-    )
-    _status(ctx, f"Created branch {name}")
-
-
-@branch.command("fork")
+@branch.command("set")
 @_repo_option
 @click.argument("name")
 @_branch_option
 @click.option("-f", "--force", is_flag=True, default=False,
               help="Overwrite if branch already exists.")
+@click.option("--empty", is_flag=True, default=False,
+              help="Create an empty root branch (no parent commit).")
 @_snapshot_options
 @click.pass_context
-def branch_fork(ctx, name, branch, force, ref, at_path, match_pattern, before, back):
-    """Create a new branch NAME forked from an existing ref."""
+def branch_set(ctx, name, branch, force, empty, ref, at_path, match_pattern, before, back):
+    """Create or update branch NAME.
+
+    By default forks from the current branch. Use --empty for a new root branch.
+    Use --force to overwrite an existing branch.
+    """
     store = _open_store(_require_repo(ctx))
-    branch = branch or _default_branch(store)
 
     if name in store.branches and not force:
         raise click.ClickException(f"Branch already exists: {name}")
 
-    source_fs = _resolve_fs(store, branch, ref=ref, at_path=at_path,
-                            match_pattern=match_pattern, before=before, back=back)
-    from ..fs import FS
-    new_fs = FS(store, source_fs._commit_oid, branch=name)
-    try:
-        store.branches[name] = new_fs
-    except ValueError as e:
-        raise click.ClickException(str(e))
-    _status(ctx, f"Created branch {name}")
+    if empty:
+        if ref or at_path or match_pattern or before or back:
+            raise click.ClickException(
+                "--empty cannot be combined with --ref/--path/--match/--before/--back")
+        repo = store._repo
+        sig = store._signature
+        tree_oid = repo.TreeBuilder().write()
+        repo.create_commit(
+            f"refs/heads/{name}", sig, sig,
+            f"Initialize {name}", tree_oid, [],
+        )
+    else:
+        branch = branch or _default_branch(store)
+        source_fs = _resolve_fs(store, branch, ref=ref, at_path=at_path,
+                                match_pattern=match_pattern, before=before, back=back)
+        from ..fs import FS
+        new_fs = FS(store, source_fs._commit_oid, branch=name)
+        try:
+            store.branches[name] = new_fs
+        except ValueError as e:
+            raise click.ClickException(str(e))
+
+    _status(ctx, f"Set branch {name}")
 
 
-@branch.command("set")
+@branch.command("exists")
 @_repo_option
 @click.argument("name")
-@_snapshot_options
 @click.pass_context
-def branch_set(ctx, name, ref, at_path, match_pattern, before, back):
-    """Point branch NAME at an existing ref (creates if new)."""
-    if not ref:
-        raise click.ClickException("--ref is required for this command")
+def branch_exists(ctx, name):
+    """Check if branch NAME exists (exit 0 if yes, exit 1 if no)."""
     store = _open_store(_require_repo(ctx))
-
-    source_fs = _apply_snapshot_filters(
-        _resolve_ref(store, ref), at_path=at_path,
-        match_pattern=match_pattern, before=before, back=back)
-    from ..fs import FS
-    new_fs = FS(store, source_fs._commit_oid, branch=name)
-    store.branches[name] = new_fs
-    _status(ctx, f"Set branch {name}")
+    if name not in store.branches:
+        raise SystemExit(1)
 
 
 @branch.command("delete")
@@ -148,52 +137,44 @@ def tag_list(ctx):
         click.echo(name)
 
 
-@tag.command("fork")
-@_repo_option
-@click.argument("name")
-@_branch_option
-@_snapshot_options
-@click.pass_context
-def tag_fork(ctx, name, branch, ref, at_path, match_pattern, before, back):
-    """Create a new tag NAME from an existing ref."""
-    store = _open_store(_require_repo(ctx))
-    branch = branch or _default_branch(store)
-
-    if name in store.tags:
-        raise click.ClickException(f"Tag already exists: {name}")
-
-    source_fs = _resolve_fs(store, branch, ref=ref, at_path=at_path,
-                            match_pattern=match_pattern, before=before, back=back)
-
-    from ..fs import FS
-    new_fs = FS(store, source_fs._commit_oid, branch=None)
-    try:
-        store.tags[name] = new_fs
-    except ValueError as e:
-        raise click.ClickException(str(e))
-    _status(ctx, f"Created tag {name}")
-
-
 @tag.command("set")
 @_repo_option
 @click.argument("name")
+@_branch_option
+@click.option("-f", "--force", is_flag=True, default=False,
+              help="Overwrite if tag already exists.")
 @_snapshot_options
 @click.pass_context
-def tag_set(ctx, name, ref, at_path, match_pattern, before, back):
-    """Point tag NAME at an existing ref (creates or updates)."""
-    if not ref:
-        raise click.ClickException("--ref is required for this command")
+def tag_set(ctx, name, branch, force, ref, at_path, match_pattern, before, back):
+    """Create or update tag NAME from an existing ref.
+
+    Use --force to overwrite an existing tag.
+    """
     store = _open_store(_require_repo(ctx))
 
-    source_fs = _apply_snapshot_filters(
-        _resolve_ref(store, ref), at_path=at_path,
-        match_pattern=match_pattern, before=before, back=back)
+    if name in store.tags and not force:
+        raise click.ClickException(f"Tag already exists: {name}")
+
+    branch = branch or _default_branch(store)
+    source_fs = _resolve_fs(store, branch, ref=ref, at_path=at_path,
+                            match_pattern=match_pattern, before=before, back=back)
     from ..fs import FS
     new_fs = FS(store, source_fs._commit_oid, branch=None)
     if name in store.tags:
         del store.tags[name]
     store.tags[name] = new_fs
     _status(ctx, f"Set tag {name}")
+
+
+@tag.command("exists")
+@_repo_option
+@click.argument("name")
+@click.pass_context
+def tag_exists(ctx, name):
+    """Check if tag NAME exists (exit 0 if yes, exit 1 if no)."""
+    store = _open_store(_require_repo(ctx))
+    if name not in store.tags:
+        raise SystemExit(1)
 
 
 @tag.command("delete")

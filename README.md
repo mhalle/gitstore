@@ -472,22 +472,24 @@ gitstore diff --back 3 --reverse          # swap direction (new → old)
 
 # Manage branches
 gitstore branch                           # list
-gitstore branch create dev                # empty orphan branch
-gitstore branch fork dev                  # fork from default branch
-gitstore branch fork dev --ref main --path config.json  # fork from commit that last changed a file
-gitstore branch fork dev --ref main --match "deploy*"   # fork from commit matching message
-gitstore branch fork dev --ref main --before 2024-06-01 # fork from commit as of a date
-gitstore branch set dev --ref main        # point at an existing ref
+gitstore branch set dev                   # fork from default branch
+gitstore branch set dev --ref main --path config.json  # fork from commit that last changed a file
+gitstore branch set dev --ref main --match "deploy*"   # fork from commit matching message
+gitstore branch set dev --ref main --before 2024-06-01 # fork from commit as of a date
+gitstore branch set dev --empty           # empty orphan branch
+gitstore branch set dev -f                # overwrite existing branch
+gitstore branch exists dev                # exit 0 if exists, 1 if not
 gitstore branch default                   # show default branch
 gitstore branch default -b dev            # set default branch
 gitstore branch delete dev
 
 # Manage tags
-gitstore tag fork v1.0                    # tag from default branch
-gitstore tag fork v1.0-fix --path bugfix.py         # tag the commit that last changed bugfix.py
-gitstore tag fork v1.0 --match "deploy*"            # tag the latest deploy commit
-gitstore tag fork v1.0 --before 2024-06-01          # tag the state as of a date
-gitstore tag set v1.0 --ref main          # point tag at a ref (creates or updates)
+gitstore tag set v1.0                     # tag from default branch
+gitstore tag set v1.0-fix --path bugfix.py           # tag the commit that last changed bugfix.py
+gitstore tag set v1.0 --match "deploy*"              # tag the latest deploy commit
+gitstore tag set v1.0 --before 2024-06-01            # tag the state as of a date
+gitstore tag set v1.0 -f                  # overwrite existing tag
+gitstore tag exists v1.0                  # exit 0 if exists, 1 if not
 gitstore tag hash v1.0                    # print commit SHA
 gitstore tag delete v1.0
 
@@ -563,7 +565,7 @@ The URL can be any git remote: HTTPS (`https://github.com/...`), SSH (`git@githu
 # Initial setup: create a repo and add data
 gitstore init -r /path/to/repo.git
 gitstore cp -r /path/to/repo.git data.csv :data.csv
-gitstore tag -r /path/to/repo.git create v1 main
+gitstore tag -r /path/to/repo.git set v1
 
 # Push everything to GitHub
 gitstore backup -r /path/to/repo.git https://github.com/user/repo.git

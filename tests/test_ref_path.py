@@ -151,7 +151,7 @@ class TestRefPath:
     def test_ls_multiple_refs(self, runner, repo_with_files):
         """ls from multiple refs in one call."""
         # Create dev branch with a unique file
-        runner.invoke(main, ["branch", "--repo", repo_with_files, "fork", "dev"])
+        runner.invoke(main, ["branch", "--repo", repo_with_files, "set", "dev"])
         runner.invoke(main, [
             "write", "--repo", repo_with_files, "-b", "dev", ":dev.txt"
         ], input="dev")
@@ -171,7 +171,7 @@ class TestRefPath:
 
     def test_cat_from_tag(self, runner, repo_with_files):
         """cat v1:file reads from tag."""
-        runner.invoke(main, ["tag", "--repo", repo_with_files, "fork", "v1"])
+        runner.invoke(main, ["tag", "--repo", repo_with_files, "set", "v1"])
         r = runner.invoke(main, ["cat", "--repo", repo_with_files, "v1:hello.txt"])
         assert r.exit_code == 0
         assert r.output == "hello world\n"
@@ -192,7 +192,7 @@ class TestRefPath:
 
     def test_rm_explicit_ref(self, runner, repo_with_files):
         """rm dev:file removes from specific branch."""
-        runner.invoke(main, ["branch", "--repo", repo_with_files, "fork", "dev"])
+        runner.invoke(main, ["branch", "--repo", repo_with_files, "set", "dev"])
         runner.invoke(main, [
             "write", "--repo", repo_with_files, "-b", "dev", ":dev.txt"
         ], input="dev")
@@ -204,7 +204,7 @@ class TestRefPath:
 
     def test_write_explicit_ref(self, runner, repo_with_files):
         """write dev:file writes to specific branch."""
-        runner.invoke(main, ["branch", "--repo", repo_with_files, "fork", "dev"])
+        runner.invoke(main, ["branch", "--repo", repo_with_files, "set", "dev"])
         r = runner.invoke(main, [
             "write", "--repo", repo_with_files, "dev:new.txt"
         ], input="new content")
@@ -266,7 +266,7 @@ class TestRefPath:
 
     def test_diff_positional_ref(self, runner, repo_with_files):
         """diff dev: compares HEAD vs dev branch."""
-        runner.invoke(main, ["branch", "--repo", repo_with_files, "fork", "dev"])
+        runner.invoke(main, ["branch", "--repo", repo_with_files, "set", "dev"])
         # Modify main
         runner.invoke(main, [
             "write", "--repo", repo_with_files, ":unique.txt"
@@ -277,7 +277,7 @@ class TestRefPath:
 
     def test_sync_repo_to_repo_cross_branch(self, runner, repo_with_files):
         """sync main: dev: syncs content from main to dev."""
-        runner.invoke(main, ["branch", "--repo", repo_with_files, "fork", "dev"])
+        runner.invoke(main, ["branch", "--repo", repo_with_files, "set", "dev"])
         # Add file to main
         runner.invoke(main, [
             "write", "--repo", repo_with_files, ":sync-test.txt"
@@ -294,7 +294,7 @@ class TestRefPath:
 
     def test_sync_repo_to_repo_deletes(self, runner, repo_with_files):
         """sync repo->repo deletes files in dest not in source."""
-        runner.invoke(main, ["branch", "--repo", repo_with_files, "fork", "dev"])
+        runner.invoke(main, ["branch", "--repo", repo_with_files, "set", "dev"])
         # Add unique file to dev
         runner.invoke(main, [
             "write", "--repo", repo_with_files, "-b", "dev", ":dev-only.txt"
@@ -311,7 +311,7 @@ class TestRefPath:
     def test_validate_ref_name_colon(self, runner, repo_with_files):
         """Creating a branch with ':' in the name should fail."""
         r = runner.invoke(main, [
-            "branch", "--repo", repo_with_files, "fork", "bad:name"
+            "branch", "--repo", repo_with_files, "set", "bad:name"
         ])
         assert r.exit_code != 0
         assert "colon" in r.output.lower() or "Invalid ref" in r.output
@@ -319,7 +319,7 @@ class TestRefPath:
     def test_validate_ref_name_space(self, runner, repo_with_files):
         """Creating a branch with space in the name should fail."""
         r = runner.invoke(main, [
-            "branch", "--repo", repo_with_files, "fork", "bad name"
+            "branch", "--repo", repo_with_files, "set", "bad name"
         ])
         assert r.exit_code != 0
         assert "space" in r.output.lower() or "Invalid ref" in r.output
@@ -357,7 +357,7 @@ class TestRefPath:
 
     def test_ls_multiple_different_refs_with_filter_error(self, runner, repo_with_files):
         """ls main:x dev:y --back 1 is an error (different refs + filter)."""
-        runner.invoke(main, ["branch", "--repo", repo_with_files, "fork", "dev"])
+        runner.invoke(main, ["branch", "--repo", repo_with_files, "set", "dev"])
         r = runner.invoke(main, [
             "ls", "--repo", repo_with_files, "main:", "dev:", "--back", "1"
         ])
@@ -404,7 +404,7 @@ class TestRefPath:
 
     def test_diff_explicit_ref_with_branch_error(self, runner, repo_with_files):
         """diff dev: -b main is an error."""
-        runner.invoke(main, ["branch", "--repo", repo_with_files, "fork", "dev"])
+        runner.invoke(main, ["branch", "--repo", repo_with_files, "set", "dev"])
         r = runner.invoke(main, [
             "diff", "--repo", repo_with_files, "dev:", "-b", "main"
         ])
@@ -442,7 +442,7 @@ class TestCpRefPath:
     def test_repo_to_repo_cross_branch(self, runner, repo_with_files):
         """cp main:file dev: copies from main to dev."""
         # Create dev branch
-        runner.invoke(main, ["branch", "--repo", repo_with_files, "fork", "dev"])
+        runner.invoke(main, ["branch", "--repo", repo_with_files, "set", "dev"])
         # Write something unique to dev
         result = runner.invoke(main, [
             "write", "--repo", repo_with_files, "-b", "dev", ":dev-only.txt"
@@ -529,7 +529,7 @@ class TestCpRefPath:
     def test_cp_from_tag(self, runner, repo_with_files, tmp_path):
         """cp v1:file.txt ./out reads from tag."""
         # Create a tag
-        result = runner.invoke(main, ["tag", "--repo", repo_with_files, "fork", "v1"])
+        result = runner.invoke(main, ["tag", "--repo", repo_with_files, "set", "v1"])
         assert result.exit_code == 0, result.output
         # Copy from tag to disk
         out = tmp_path / "out.txt"
@@ -542,7 +542,7 @@ class TestCpRefPath:
     def test_cp_dest_to_explicit_branch(self, runner, repo_with_files, tmp_path):
         """cp file.txt dev: writes to explicit branch."""
         # Create dev branch
-        runner.invoke(main, ["branch", "--repo", repo_with_files, "fork", "dev"])
+        runner.invoke(main, ["branch", "--repo", repo_with_files, "set", "dev"])
         f = tmp_path / "new.txt"
         f.write_text("new content")
         result = runner.invoke(main, [
@@ -563,7 +563,7 @@ class TestCpRefPath:
 
     def test_cp_write_to_tag_error(self, runner, repo_with_files, tmp_path):
         """Writing to a tag should error."""
-        runner.invoke(main, ["tag", "--repo", repo_with_files, "fork", "v1"])
+        runner.invoke(main, ["tag", "--repo", repo_with_files, "set", "v1"])
         f = tmp_path / "x.txt"
         f.write_text("x")
         result = runner.invoke(main, [
@@ -748,7 +748,7 @@ class TestMv:
 
     def test_explicit_ref(self, runner, repo_with_files):
         """mv dev:old.txt dev:new.txt works on explicit branch."""
-        runner.invoke(main, ["branch", "--repo", repo_with_files, "fork", "dev"])
+        runner.invoke(main, ["branch", "--repo", repo_with_files, "set", "dev"])
         runner.invoke(main, [
             "write", "--repo", repo_with_files, "-b", "dev", ":devfile.txt"
         ], input="dev content")
@@ -762,7 +762,7 @@ class TestMv:
 
     def test_cross_branch_error(self, runner, repo_with_files):
         """mv main:file dev:file is an error."""
-        runner.invoke(main, ["branch", "--repo", repo_with_files, "fork", "dev"])
+        runner.invoke(main, ["branch", "--repo", repo_with_files, "set", "dev"])
         result = runner.invoke(main, [
             "mv", "--repo", repo_with_files, "main:hello.txt", "dev:hello.txt"
         ])

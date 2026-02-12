@@ -182,7 +182,7 @@ class TestCp:
 
     def test_custom_branch(self, runner, initialized_repo, tmp_path):
         # Create a dev branch
-        runner.invoke(main, ["branch", "--repo", initialized_repo, "fork", "dev"])
+        runner.invoke(main, ["branch", "--repo", initialized_repo, "set", "dev"])
         f = tmp_path / "dev.txt"
         f.write_text("dev content")
         result = runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":dev.txt", "-b", "dev"])
