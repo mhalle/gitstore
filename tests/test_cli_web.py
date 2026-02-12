@@ -199,6 +199,54 @@ class TestSingleRefDir:
 
 
 # ---------------------------------------------------------------------------
+# Single-ref link correctness
+# ---------------------------------------------------------------------------
+
+class TestSingleRefLinks:
+    """In single-ref mode, HTML links must NOT include the ref prefix."""
+
+    def test_root_links_no_ref_prefix(self, store_with_files):
+        fs = store_with_files.branches["main"]
+        app = _make_app(store_with_files, fs=fs, ref_label="main")
+        _, _, body = _wsgi_get(app, "/")
+        html = body.decode()
+        # Links should be /hello.txt, not /main/hello.txt
+        assert 'href="/hello.txt"' in html
+        assert 'href="/data"' in html
+        assert 'href="/main/' not in html
+
+    def test_subdir_links_no_ref_prefix(self, store_with_files):
+        fs = store_with_files.branches["main"]
+        app = _make_app(store_with_files, fs=fs, ref_label="main")
+        _, _, body = _wsgi_get(app, "/data")
+        html = body.decode()
+        # Links should be /data/info.json, not /main/data/info.json
+        assert 'href="/data/info.json"' in html
+        assert 'href="/main/' not in html
+
+
+# ---------------------------------------------------------------------------
+# Multi-ref link correctness
+# ---------------------------------------------------------------------------
+
+class TestMultiRefLinks:
+    """In multi-ref mode, HTML links MUST include the ref prefix."""
+
+    def test_root_dir_links_include_ref(self, store_with_files):
+        app = _make_app(store_with_files)
+        _, _, body = _wsgi_get(app, "/main/")
+        html = body.decode()
+        assert 'href="/main/hello.txt"' in html
+        assert 'href="/main/data"' in html
+
+    def test_subdir_links_include_ref(self, store_with_files):
+        app = _make_app(store_with_files)
+        _, _, body = _wsgi_get(app, "/main/data")
+        html = body.decode()
+        assert 'href="/main/data/info.json"' in html
+
+
+# ---------------------------------------------------------------------------
 # Multi-ref mode tests (--all)
 # ---------------------------------------------------------------------------
 
@@ -291,6 +339,61 @@ class TestMultiRefBranches:
         status, _, body = _wsgi_get(app, "/dev/dev-file.txt")
         assert status == "200 OK"
         assert body == b"on dev"
+
+
+# ---------------------------------------------------------------------------
+# ETag tests
+# ---------------------------------------------------------------------------
+
+class TestETag:
+    def test_file_has_etag(self, store_with_files):
+        fs = store_with_files.branches["main"]
+        app = _make_app(store_with_files, fs=fs, ref_label="main")
+        _, headers, _ = _wsgi_get(app, "/hello.txt")
+        assert "ETag" in headers
+        assert headers["ETag"] == f'"{fs.hash}"'
+
+    def test_dir_has_etag(self, store_with_files):
+        fs = store_with_files.branches["main"]
+        app = _make_app(store_with_files, fs=fs, ref_label="main")
+        _, headers, _ = _wsgi_get(app, "/data")
+        assert "ETag" in headers
+        assert headers["ETag"] == f'"{fs.hash}"'
+
+    def test_json_has_etag(self, store_with_files):
+        fs = store_with_files.branches["main"]
+        app = _make_app(store_with_files, fs=fs, ref_label="main")
+        _, headers, _ = _wsgi_get(app, "/hello.txt", accept="application/json")
+        assert "ETag" in headers
+        assert headers["ETag"] == f'"{fs.hash}"'
+
+    def test_root_has_etag(self, store_with_files):
+        fs = store_with_files.branches["main"]
+        app = _make_app(store_with_files, fs=fs, ref_label="main")
+        _, headers, _ = _wsgi_get(app, "/")
+        assert "ETag" in headers
+
+    def test_multi_ref_file_has_etag(self, store_with_files):
+        app = _make_app(store_with_files)
+        _, headers, _ = _wsgi_get(app, "/main/hello.txt")
+        assert "ETag" in headers
+        fs = store_with_files.branches["main"]
+        assert headers["ETag"] == f'"{fs.hash}"'
+
+    def test_different_snapshots_different_etags(self, store_with_files):
+        fs = store_with_files.branches["main"]
+        old_fs = fs.back(1)
+        app_new = _make_app(store_with_files, fs=fs, ref_label="main")
+        app_old = _make_app(store_with_files, fs=old_fs, ref_label="main")
+        _, h_new, _ = _wsgi_get(app_new, "/hello.txt")
+        _, h_old, _ = _wsgi_get(app_old, "/hello.txt")
+        assert h_new["ETag"] != h_old["ETag"]
+
+    def test_404_has_no_etag(self, store_with_files):
+        fs = store_with_files.branches["main"]
+        app = _make_app(store_with_files, fs=fs, ref_label="main")
+        _, headers, _ = _wsgi_get(app, "/nonexistent.txt")
+        assert "ETag" not in headers
 
 
 # ---------------------------------------------------------------------------

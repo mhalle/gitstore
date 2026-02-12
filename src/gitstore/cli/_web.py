@@ -38,7 +38,7 @@ def _make_app(store, *, fs=None, ref_label=None):
 
         if fs is not None:
             # --- Single-ref mode ---
-            return _serve_path(start_response, fs, ref_label or "", path, want_json)
+            return _serve_path(start_response, fs, ref_label or "", "", path, want_json)
         else:
             # --- Multi-ref mode ---
             if not path:
@@ -54,7 +54,7 @@ def _make_app(store, *, fs=None, ref_label=None):
                 return _send_404(start_response, f"Unknown ref: {ref_name}")
 
             resolved = _resolve_fs_for_ref(store, ref_name)
-            return _serve_path(start_response, resolved, ref_name, rest, want_json)
+            return _serve_path(start_response, resolved, ref_name, f"/{ref_name}", rest, want_json)
 
     return app
 
@@ -98,21 +98,23 @@ def _serve_ref_listing(start_response, store, want_json):
     return [body]
 
 
-def _serve_path(start_response, fs, ref_label, path, want_json):
+def _serve_path(start_response, fs, ref_label, link_prefix, path, want_json):
     """Serve a file or directory listing within a resolved FS."""
+    etag = f'"{fs.hash}"'
+
     if not path:
-        return _serve_dir(start_response, fs, ref_label, "", want_json)
+        return _serve_dir(start_response, fs, ref_label, link_prefix, "", want_json, etag)
 
     if not fs.exists(path):
         return _send_404(start_response, f"Not found: {path}")
 
     if fs.is_dir(path):
-        return _serve_dir(start_response, fs, ref_label, path, want_json)
+        return _serve_dir(start_response, fs, ref_label, link_prefix, path, want_json, etag)
 
-    return _serve_file(start_response, fs, ref_label, path, want_json)
+    return _serve_file(start_response, fs, ref_label, path, want_json, etag)
 
 
-def _serve_file(start_response, fs, ref_label, path, want_json):
+def _serve_file(start_response, fs, ref_label, path, want_json, etag):
     """Serve file contents or JSON metadata."""
     data = fs.read(path)
 
@@ -126,6 +128,7 @@ def _serve_file(start_response, fs, ref_label, path, want_json):
         start_response("200 OK", [
             ("Content-Type", "application/json"),
             ("Content-Length", str(len(body))),
+            ("ETag", etag),
         ])
         return [body]
 
@@ -136,11 +139,12 @@ def _serve_file(start_response, fs, ref_label, path, want_json):
     start_response("200 OK", [
         ("Content-Type", mime),
         ("Content-Length", str(len(data))),
+        ("ETag", etag),
     ])
     return [data]
 
 
-def _serve_dir(start_response, fs, ref_label, path, want_json):
+def _serve_dir(start_response, fs, ref_label, link_prefix, path, want_json, etag):
     """Serve directory listing as JSON or HTML."""
     entries = fs.ls(path if path else None)
 
@@ -154,18 +158,15 @@ def _serve_dir(start_response, fs, ref_label, path, want_json):
         start_response("200 OK", [
             ("Content-Type", "application/json"),
             ("Content-Length", str(len(body))),
+            ("ETag", etag),
         ])
         return [body]
 
-    # HTML listing — in single-ref mode links are just /<path>,
-    # in multi-ref mode they include /<ref>/<path>.
+    # HTML listing
     display_path = path or "/"
     lines = ["<html><body>", f"<h1>{display_path}</h1>", "<ul>"]
     for entry in sorted(entries):
-        if ref_label:
-            href = f"/{ref_label}/{path}/{entry}" if path else f"/{ref_label}/{entry}"
-        else:
-            href = f"/{path}/{entry}" if path else f"/{entry}"
+        href = f"{link_prefix}/{path}/{entry}" if path else f"{link_prefix}/{entry}"
         lines.append(f'<li><a href="{href}">{entry}</a></li>')
     lines.append("</ul>")
     lines.append("</body></html>")
@@ -173,6 +174,7 @@ def _serve_dir(start_response, fs, ref_label, path, want_json):
     start_response("200 OK", [
         ("Content-Type", "text/html; charset=utf-8"),
         ("Content-Length", str(len(body))),
+        ("ETag", etag),
     ])
     return [body]
 
