@@ -19,6 +19,27 @@ from ._helpers import (
 )
 
 
+# Register extensions that Python's mimetypes module doesn't know.
+mimetypes.add_type("application/geo+json", ".geojson")
+
+# MIME overrides for types that browsers download instead of displaying.
+_MIME_OVERRIDES = {
+    "application/json": "text/plain; charset=utf-8",
+    "application/geo+json": "text/plain; charset=utf-8",
+    "application/xml": "text/xml; charset=utf-8",
+    "application/yaml": "text/plain; charset=utf-8",
+    "application/x-yaml": "text/plain; charset=utf-8",
+}
+
+
+def _guess_mime(path):
+    """Return a browser-friendly MIME type for *path*."""
+    mime, _ = mimetypes.guess_type(path)
+    if mime is None:
+        return "application/octet-stream"
+    return _MIME_OVERRIDES.get(mime, mime)
+
+
 def _make_app(store, *, fs=None, ref_label=None):
     """Return a WSGI application serving *store* contents over HTTP.
 
@@ -132,9 +153,7 @@ def _serve_file(start_response, fs, ref_label, path, want_json, etag):
         ])
         return [body]
 
-    mime, _ = mimetypes.guess_type(path)
-    if mime is None:
-        mime = "application/octet-stream"
+    mime = _guess_mime(path)
 
     start_response("200 OK", [
         ("Content-Type", mime),

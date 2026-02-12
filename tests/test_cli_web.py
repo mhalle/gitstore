@@ -455,6 +455,33 @@ class TestMimeTypes:
         # Markdown may be text/markdown or text/x-markdown depending on platform
         assert "text/" in headers["Content-Type"]
 
+    def test_json_served_as_text(self, store_with_files):
+        """JSON files should display inline, not trigger download."""
+        fs = store_with_files.branches["main"]
+        app = _make_app(store_with_files, fs=fs, ref_label="main")
+        status, headers, body = _wsgi_get(app, "/data/info.json")
+        assert status == "200 OK"
+        assert headers["Content-Type"] == "text/plain; charset=utf-8"
+        assert body == b'{"key": "value"}'
+
+    def test_xml_served_as_text(self, tmp_path):
+        store = GitStore.open(str(tmp_path / "test.git"), branch="main")
+        fs = store.branches["main"]
+        fs.write("data.xml", b"<root/>")
+        fs = store.branches["main"]
+        app = _make_app(store, fs=fs, ref_label="main")
+        _, headers, _ = _wsgi_get(app, "/data.xml")
+        assert headers["Content-Type"] == "text/xml; charset=utf-8"
+
+    def test_geojson_served_as_text(self, tmp_path):
+        store = GitStore.open(str(tmp_path / "test.git"), branch="main")
+        fs = store.branches["main"]
+        fs.write("map.geojson", b'{"type":"Feature"}')
+        fs = store.branches["main"]
+        app = _make_app(store, fs=fs, ref_label="main")
+        _, headers, _ = _wsgi_get(app, "/map.geojson")
+        assert headers["Content-Type"] == "text/plain; charset=utf-8"
+
 
 # ---------------------------------------------------------------------------
 # CLI command registration
