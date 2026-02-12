@@ -4,6 +4,23 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.48.0 (2026-02-12)
+
+**Features:**
+
+- `ref:path` syntax for cross-branch CLI operations — `main:file.txt`, `dev:data/`, `v1.0:config.json`
+- Ancestor syntax `ref~N:path` to read from historical commits (e.g., `main~3:file.txt`)
+- Repo-to-repo `cp` and `sync` — copy files between branches without touching disk
+- Per-path ref resolution in `ls` and `cat` — list/read from multiple branches in one command
+- `write` and `rm` accept explicit `ref:path` to target a specific branch
+- `log` and `diff` accept positional `ref:path` target (e.g., `gitstore log main~3:config.json`)
+- Snapshot filters (`--back`, `--before`, `--path`, `--match`) work with explicit `ref:path`
+- Ref name validation — branch/tag names containing `:`, space, tab, or newline are rejected
+
+**Documentation:**
+
+- New `docs/paths.md` — comprehensive path syntax reference covering parsing rules, per-command behavior, flag interaction, writability, and cross-branch workflows
+
 ## v0.47.8 (2026-02-11)
 
 **Improvements:**
