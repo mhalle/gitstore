@@ -379,7 +379,7 @@ class FS:
         value: bytes | tuple[bytes, int] = (data, mode) if mode is not None else data
         return self._commit_changes({path: value}, set(), message)
 
-    def write_from(
+    def write_from_file(
         self,
         path: str | os.PathLike[str],
         local_path: str | os.PathLike[str],

@@ -142,7 +142,7 @@ class TestWriteFrom:
         _, fs = repo_fs
         local = tmp_path / "data.bin"
         local.write_bytes(b"\x00\x01\x02\x03")
-        fs2 = fs.write_from("data.bin", local)
+        fs2 = fs.write_from_file("data.bin", local)
         assert fs2.read("data.bin") == b"\x00\x01\x02\x03"
 
     def test_write_from_preserves_executable(self, repo_fs, tmp_path):
@@ -150,7 +150,7 @@ class TestWriteFrom:
         local = tmp_path / "run.sh"
         local.write_bytes(b"#!/bin/sh\necho hi")
         local.chmod(local.stat().st_mode | stat.S_IXUSR)
-        fs2 = fs.write_from("run.sh", local)
+        fs2 = fs.write_from_file("run.sh", local)
         tree = fs2._store._repo[fs2._tree_oid]
         assert tree["run.sh"].filemode == GIT_FILEMODE_BLOB_EXECUTABLE
 
@@ -159,7 +159,7 @@ class TestWriteFrom:
         local = tmp_path / "script.sh"
         local.write_bytes(b"#!/bin/sh")
         # File is NOT executable on disk, but we override
-        fs2 = fs.write_from("script.sh", local, mode=GIT_FILEMODE_BLOB_EXECUTABLE)
+        fs2 = fs.write_from_file("script.sh", local, mode=GIT_FILEMODE_BLOB_EXECUTABLE)
         tree = fs2._store._repo[fs2._tree_oid]
         assert tree["script.sh"].filemode == GIT_FILEMODE_BLOB_EXECUTABLE
 
@@ -167,7 +167,7 @@ class TestWriteFrom:
         _, fs = repo_fs
         local = tmp_path / "file.txt"
         local.write_bytes(b"content")
-        fs2 = fs.write_from("file.txt", local, message="Import file")
+        fs2 = fs.write_from_file("file.txt", local, message="Import file")
         assert fs2.message == "Import file"
 
     def test_write_from_on_tag_raises(self, tmp_path):
@@ -178,17 +178,17 @@ class TestWriteFrom:
         local = tmp_path / "file.txt"
         local.write_bytes(b"data")
         with pytest.raises(PermissionError):
-            tag_fs.write_from("file.txt", local)
+            tag_fs.write_from_file("file.txt", local)
 
     def test_write_from_missing_file(self, repo_fs):
         _, fs = repo_fs
         with pytest.raises(FileNotFoundError):
-            fs.write_from("x.txt", "/nonexistent/path/file.txt")
+            fs.write_from_file("x.txt", "/nonexistent/path/file.txt")
 
     def test_write_from_directory_raises(self, repo_fs, tmp_path):
         _, fs = repo_fs
         with pytest.raises(IsADirectoryError):
-            fs.write_from("x.txt", str(tmp_path))
+            fs.write_from_file("x.txt", str(tmp_path))
 
 
 class TestSymlink:

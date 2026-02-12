@@ -172,7 +172,7 @@ class TestBatch:
         local = tmp_path / "hello.txt"
         local.write_bytes(b"hello from disk")
         with fs.batch() as b:
-            b.write_from("hello.txt", local)
+            b.write_from_file("hello.txt", local)
         assert b.fs.read("hello.txt") == b"hello from disk"
 
     def test_write_from_preserves_executable(self, repo_fs, tmp_path):
@@ -181,7 +181,7 @@ class TestBatch:
         local.write_bytes(b"#!/bin/sh\necho hi")
         local.chmod(local.stat().st_mode | stat.S_IXUSR)
         with fs.batch() as b:
-            b.write_from("run.sh", local)
+            b.write_from_file("run.sh", local)
         tree = b.fs._store._repo[b.fs._tree_oid]
         assert tree["run.sh"].filemode == GIT_FILEMODE_BLOB_EXECUTABLE
 
@@ -191,7 +191,7 @@ class TestBatch:
         local.write_bytes(b"#!/bin/sh")
         # File is NOT executable on disk, but we override
         with fs.batch() as b:
-            b.write_from("script.sh", local, mode=GIT_FILEMODE_BLOB_EXECUTABLE)
+            b.write_from_file("script.sh", local, mode=GIT_FILEMODE_BLOB_EXECUTABLE)
         tree = b.fs._store._repo[b.fs._tree_oid]
         assert tree["script.sh"].filemode == GIT_FILEMODE_BLOB_EXECUTABLE
 
@@ -199,13 +199,13 @@ class TestBatch:
         _, fs = repo_fs
         with pytest.raises(FileNotFoundError):
             with fs.batch() as b:
-                b.write_from("x.txt", "/nonexistent/path/file.txt")
+                b.write_from_file("x.txt", "/nonexistent/path/file.txt")
 
     def test_write_from_directory_raises(self, repo_fs, tmp_path):
         _, fs = repo_fs
         with pytest.raises(IsADirectoryError):
             with fs.batch() as b:
-                b.write_from("x.txt", str(tmp_path))
+                b.write_from_file("x.txt", str(tmp_path))
 
     def test_batch_mode_parameter(self, repo_fs):
         _, fs = repo_fs

@@ -217,7 +217,7 @@ def cp(ctx, args, branch, ref, at_path, match_pattern, before, back, message, mo
                     click.echo(f"{local} -> :{repo_file}")
                 else:
                     with fs.batch(message=message, operation="cp") as b:
-                        b.write_from(repo_file, local, mode=filemode)
+                        b.write_from_file(repo_file, local, mode=filemode)
                     if tag:
                         _apply_tag(store, b.fs, tag, force_tag)
                     _status(ctx, f"Copied -> :{repo_file}")

@@ -39,7 +39,7 @@ class Batch:
         blob_oid = self._repo.create_blob(data)
         self._writes[path] = (blob_oid, mode) if mode is not None else blob_oid
 
-    def write_from(self, path: str | os.PathLike[str], local_path: str | os.PathLike[str], *, mode: int | None = None) -> None:
+    def write_from_file(self, path: str | os.PathLike[str], local_path: str | os.PathLike[str], *, mode: int | None = None) -> None:
         self._check_open()
         path = _normalize_path(path)
         local_path = os.fspath(local_path)

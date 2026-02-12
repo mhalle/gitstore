@@ -71,7 +71,7 @@ def _write_files_to_repo(batch, pairs, *, follow_symlinks=False, mode=None,
             if not follow_symlinks and p.is_symlink():
                 batch.write_symlink(repo_path, os.readlink(local_path))
             else:
-                batch.write_from(repo_path, p, mode=mode)
+                batch.write_from_file(repo_path, p, mode=mode)
         except OSError as exc:
             if not ignore_errors:
                 raise
