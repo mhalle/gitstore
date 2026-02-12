@@ -521,6 +521,8 @@ class FS:
             >>> fs = fs.undo()  # Go back 1 commit
             >>> fs = fs.undo(3)  # Go back 3 commits
         """
+        if steps < 1:
+            raise ValueError(f"steps must be >= 1, got {steps}")
         if not self._writable:
             raise PermissionError("Cannot undo on a read-only snapshot")
 
@@ -570,6 +572,8 @@ class FS:
             >>> fs = fs.undo(2)  # Creates 1 reflog entry moving back 2 commits
             >>> fs = fs.redo()   # Go back 1 reflog entry (to before the undo)
         """
+        if steps < 1:
+            raise ValueError(f"steps must be >= 1, got {steps}")
         if not self._writable:
             raise PermissionError("Cannot redo on a read-only snapshot")
 

@@ -410,6 +410,7 @@ def copy_from_repo(
         if ignore_existing:
             update_rels = []
 
+        n_errs_pre = len(changes.errors)
         # Process deletes first
         for rel in delete_rels:
             out = base / rel
@@ -451,6 +452,14 @@ def copy_from_repo(
         # For deletes from disk, we don't have type info anymore (already deleted)
         # Just mark as blobs
         changes.delete = [FileEntry(rel, FileType.BLOB) for rel in delete_rels]
+
+        n_op_errors = len(changes.errors) - n_errs_pre
+        n_total_ops = len(write_pairs) + len(delete_rels)
+        if ignore_errors and changes.errors and n_total_ops > 0 and n_op_errors >= n_total_ops:
+            raise RuntimeError(
+                f"All files failed to copy: {changes.errors}"
+            )
+        return _finalize_changes(changes)
     else:
         if ignore_existing:
             pairs = [(r, l) for r, l in pairs if not Path(l).exists()]
@@ -478,6 +487,7 @@ def copy_from_repo(
             else:
                 add_rels.append(rel)
 
+        n_errs_pre = len(changes.errors)
         cts = fs._store._repo[fs._commit_oid].commit_time
         _write_files_to_disk(fs, pairs, base=Path(dest),
                              ignore_errors=ignore_errors,
@@ -487,11 +497,10 @@ def copy_from_repo(
         changes.add = _make_entries_from_repo_dict(fs, add_rels, repo_rel_to_path)
         changes.update = _make_entries_from_repo_dict(fs, update_rels, repo_rel_to_path)
 
-    # Safety check: if all files failed
-    if ignore_errors and changes.errors and not pairs:
-        raise RuntimeError(
-            f"All files failed to copy: {changes.errors}"
-        )
+        if ignore_errors and changes.errors and len(changes.errors) - n_errs_pre >= len(pairs):
+            raise RuntimeError(
+                f"All files failed to copy: {changes.errors}"
+            )
 
     return _finalize_changes(changes)
 

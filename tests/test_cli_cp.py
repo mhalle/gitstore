@@ -1096,3 +1096,80 @@ class TestExcludeCLI:
         assert ".gitignore" not in r.output
 
 
+class TestSingleFileCpBugfixes:
+    """Regression tests for single-file cp edge cases."""
+
+    def test_single_file_disk_to_repo_preserves_symlink(self, runner, initialized_repo, tmp_path):
+        """Single-file cp from disk to repo should preserve symlinks (not dereference)."""
+        from gitstore import GitStore
+        from gitstore.tree import GIT_FILEMODE_LINK, _entry_at_path
+
+        target = tmp_path / "target.txt"
+        target.write_text("content")
+        link = tmp_path / "link.txt"
+        os.symlink("target.txt", link)
+
+        result = runner.invoke(main, ["cp", "--repo", initialized_repo, str(link), ":link.txt"])
+        assert result.exit_code == 0, result.output
+
+        store = GitStore.open(initialized_repo, create=False)
+        fs = store.branches["main"]
+        entry = _entry_at_path(store._repo, fs._tree_oid, "link.txt")
+        assert entry is not None
+        assert entry[1] == GIT_FILEMODE_LINK
+        assert fs.readlink("link.txt") == "target.txt"
+
+    def test_single_file_disk_to_repo_follow_symlinks_dereferences(self, runner, initialized_repo, tmp_path):
+        """Single-file cp with --follow-symlinks should dereference."""
+        from gitstore import GitStore
+        from gitstore.tree import GIT_FILEMODE_LINK, _entry_at_path
+
+        target = tmp_path / "target.txt"
+        target.write_text("content")
+        link = tmp_path / "link.txt"
+        os.symlink("target.txt", link)
+
+        result = runner.invoke(main, [
+            "cp", "--repo", initialized_repo, str(link), ":link.txt", "--follow-symlinks"
+        ])
+        assert result.exit_code == 0, result.output
+
+        store = GitStore.open(initialized_repo, create=False)
+        fs = store.branches["main"]
+        entry = _entry_at_path(store._repo, fs._tree_oid, "link.txt")
+        assert entry is not None
+        assert entry[1] != GIT_FILEMODE_LINK
+        assert fs.read("link.txt") == b"content"
+
+    def test_single_file_repo_to_disk_overwrites_existing(self, runner, initialized_repo, tmp_path):
+        """Single-file cp from repo to disk should overwrite existing files."""
+        from gitstore import GitStore
+
+        store = GitStore.open(initialized_repo, create=False)
+        fs = store.branches["main"]
+        fs.write("data.txt", b"repo content")
+
+        out = tmp_path / "data.txt"
+        out.write_text("old content")
+
+        result = runner.invoke(main, ["cp", "--repo", initialized_repo, ":data.txt", str(out)])
+        assert result.exit_code == 0, result.output
+        assert out.read_text() == "repo content"
+
+    def test_single_file_repo_to_disk_overwrites_existing_symlink(self, runner, initialized_repo, tmp_path):
+        """Single-file cp from repo to disk should overwrite existing symlinks."""
+        from gitstore import GitStore
+
+        store = GitStore.open(initialized_repo, create=False)
+        fs = store.branches["main"]
+        fs.write_symlink("link.txt", "target.txt")
+
+        out = tmp_path / "link.txt"
+        out.write_text("blocking file")
+
+        result = runner.invoke(main, ["cp", "--repo", initialized_repo, ":link.txt", str(out)])
+        assert result.exit_code == 0, result.output
+        assert out.is_symlink()
+        assert os.readlink(out) == "target.txt"
+
+

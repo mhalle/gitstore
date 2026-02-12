@@ -320,6 +320,20 @@ class TestUndo:
         latest = repo.branches["main"]
         assert latest.commit_hash == fs_back.commit_hash
 
+    def test_undo_zero_raises(self, repo_fs):
+        """Undo with steps=0 should raise ValueError."""
+        _, fs = repo_fs
+        fs1 = fs.write("a.txt", b"a")
+        with pytest.raises(ValueError, match="steps must be >= 1"):
+            fs1.undo(0)
+
+    def test_undo_negative_raises(self, repo_fs):
+        """Undo with negative steps should raise ValueError."""
+        _, fs = repo_fs
+        fs1 = fs.write("a.txt", b"a")
+        with pytest.raises(ValueError, match="steps must be >= 1"):
+            fs1.undo(-3)
+
     def test_undo_too_many_raises(self, repo_fs):
         """Undo beyond history should raise ValueError."""
         _, fs = repo_fs
@@ -378,6 +392,24 @@ class TestRedo:
         fs_forward = fs_back.redo()
         latest = repo.branches["main"]
         assert latest.commit_hash == fs_forward.commit_hash
+
+    def test_redo_zero_raises(self, repo_fs):
+        """Redo with steps=0 should raise ValueError."""
+        repo, fs = repo_fs
+        fs1 = fs.write("a.txt", b"a")
+        fs2 = fs1.write("b.txt", b"b")
+        fs_back = fs2.undo()
+        with pytest.raises(ValueError, match="steps must be >= 1"):
+            fs_back.redo(0)
+
+    def test_redo_negative_raises(self, repo_fs):
+        """Redo with negative steps should raise ValueError."""
+        repo, fs = repo_fs
+        fs1 = fs.write("a.txt", b"a")
+        fs2 = fs1.write("b.txt", b"b")
+        fs_back = fs2.undo()
+        with pytest.raises(ValueError, match="steps must be >= 1"):
+            fs_back.redo(-1)
 
     def test_redo_too_many_raises(self, repo_fs):
         """Redo beyond available history should raise ValueError."""

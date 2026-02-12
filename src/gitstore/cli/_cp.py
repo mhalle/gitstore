@@ -221,7 +221,10 @@ def cp(ctx, args, branch, ref, at_path, match_pattern, before, back, message, fi
                     click.echo(f"{local} -> :{repo_file}")
                 else:
                     with fs.batch(message=message, operation="cp") as b:
-                        b.write_from_file(repo_file, local, mode=filemode)
+                        if not follow_symlinks and local.is_symlink():
+                            b.write_symlink(repo_file, os.readlink(local))
+                        else:
+                            b.write_from_file(repo_file, local, mode=filemode)
                     if tag:
                         _apply_tag(store, b.fs, tag, force_tag)
                     _status(ctx, f"Copied -> :{repo_file}")
@@ -439,6 +442,8 @@ def _cp_single_repo_to_disk(ctx, fs, src_raw, dest_path, dry_run,
     else:
         try:
             out.parent.mkdir(parents=True, exist_ok=True)
+            if out.exists() or out.is_symlink():
+                out.unlink()
             entry = _entry_at_path(fs._store._repo, fs._tree_oid, src_path)
             if entry and FileType.from_filemode(entry[1]) == FileType.LINK:
                 target = fs.readlink(src_path)

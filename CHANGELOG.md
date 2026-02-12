@@ -4,6 +4,15 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.50.1 (2026-02-12)
+
+**Bug fixes:**
+
+- Fix single-file `cp` disk→repo silently dereferencing symlinks — now preserves symlinks unless `--follow-symlinks` is set
+- Fix single-file `cp` repo→disk failing with `FileExistsError` when destination already exists (symlink or regular file)
+- Fix `copy_from_repo(..., ignore_errors=True)` not raising `RuntimeError` when all write-phase operations fail, despite the documented contract
+- Fix `undo()` / `redo()` accepting 0 and negative steps, which produced no-op reflog mutations
+
 ## v0.50.0 (2026-02-12)
 
 **Breaking changes:**

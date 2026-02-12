@@ -663,17 +663,16 @@ class TestIgnoreErrors:
         assert new_fs.read("dest/ok.txt") == b"ok"
 
     def test_ignore_errors_from_repo_write_fail(self, store_and_fs):
-        """Read-only dest dir; error returned for from_repo."""
+        """Read-only dest dir; all writes fail -> RuntimeError."""
         _, fs, tmp_path = store_and_fs
         out = tmp_path / "readonly_out"
         out.mkdir()
         out.chmod(0o444)
         try:
-            changes = copy_from_repo(
-                fs, ["existing.txt"], str(out), ignore_errors=True,
-            )
-            assert changes is not None
-            assert len(changes.errors) >= 1
+            with pytest.raises(RuntimeError, match="All files failed"):
+                copy_from_repo(
+                    fs, ["existing.txt"], str(out), ignore_errors=True,
+                )
         finally:
             out.chmod(0o755)
 
