@@ -9,31 +9,11 @@ import pytest
 
 from gitstore.cli._watch import (
     _format_summary,
-    _import_watchfiles,
     _run_sync_cycle,
     watch_and_sync,
 )
 from gitstore.copy._types import ChangeReport, FileEntry
 from gitstore.exceptions import StaleSnapshotError
-
-
-# ---------------------------------------------------------------------------
-# _import_watchfiles
-# ---------------------------------------------------------------------------
-
-class TestImportWatchfiles:
-    def test_import_error(self):
-        """Missing watchfiles raises ClickException with install instructions."""
-        with patch.dict("sys.modules", {"watchfiles": None}):
-            with pytest.raises(click.ClickException, match="pip install gitstore\\[watch\\]"):
-                _import_watchfiles()
-
-    def test_import_success(self):
-        """When watchfiles is available, returns the module."""
-        fake_mod = MagicMock()
-        with patch.dict("sys.modules", {"watchfiles": fake_mod}):
-            result = _import_watchfiles()
-            assert result is fake_mod
 
 
 # ---------------------------------------------------------------------------
@@ -90,11 +70,10 @@ class TestInitialSync:
         def fake_watch(path, debounce):
             raise KeyboardInterrupt
 
-        with patch("gitstore.cli._watch._import_watchfiles") as mock_import:
-            mock_wf = MagicMock()
-            mock_wf.watch = fake_watch
-            mock_import.return_value = mock_wf
+        mock_wf = MagicMock()
+        mock_wf.watch = fake_watch
 
+        with patch("gitstore.cli._watch.watchfiles", mock_wf):
             with patch("gitstore.cli._watch._run_sync_cycle") as mock_cycle:
                 watch_and_sync(store, "main", "/tmp/test", "",
                                debounce=2000, message=None,
@@ -118,11 +97,10 @@ class TestWatchOneCycle:
                 yield {("changed", "/tmp/test/a.txt")}
             raise KeyboardInterrupt
 
-        with patch("gitstore.cli._watch._import_watchfiles") as mock_import:
-            mock_wf = MagicMock()
-            mock_wf.watch = fake_watch
-            mock_import.return_value = mock_wf
+        mock_wf = MagicMock()
+        mock_wf.watch = fake_watch
 
+        with patch("gitstore.cli._watch.watchfiles", mock_wf):
             with patch("gitstore.cli._watch._run_sync_cycle") as mock_cycle:
                 watch_and_sync(store, "main", "/tmp/test", "",
                                debounce=2000, message=None,
@@ -150,11 +128,10 @@ class TestCycleErrorHandling:
                 # First two calls (initial + first change) raise StaleSnapshotError
                 raise StaleSnapshotError("stale")
 
-        with patch("gitstore.cli._watch._import_watchfiles") as mock_import:
-            mock_wf = MagicMock()
-            mock_wf.watch = fake_watch
-            mock_import.return_value = mock_wf
+        mock_wf = MagicMock()
+        mock_wf.watch = fake_watch
 
+        with patch("gitstore.cli._watch.watchfiles", mock_wf):
             with patch("gitstore.cli._watch._run_sync_cycle", side_effect=fake_cycle):
                 watch_and_sync(store, "main", "/tmp/test", "",
                                debounce=2000, message=None,
@@ -179,11 +156,10 @@ class TestCycleErrorHandling:
             if len(cycle_calls) == 2:
                 raise FileNotFoundError("no such file")
 
-        with patch("gitstore.cli._watch._import_watchfiles") as mock_import:
-            mock_wf = MagicMock()
-            mock_wf.watch = fake_watch
-            mock_import.return_value = mock_wf
+        mock_wf = MagicMock()
+        mock_wf.watch = fake_watch
 
+        with patch("gitstore.cli._watch.watchfiles", mock_wf):
             with patch("gitstore.cli._watch._run_sync_cycle", side_effect=fake_cycle):
                 watch_and_sync(store, "main", "/tmp/test", "",
                                debounce=2000, message=None,

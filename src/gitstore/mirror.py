@@ -90,7 +90,7 @@ def restore(store: GitStore, url: str, *, dry_run: bool = False, progress=None) 
 
 
 # ---------------------------------------------------------------------------
-# CLI helpers (extracted from cli.py)
+# Credentials
 # ---------------------------------------------------------------------------
 
 def resolve_credentials(url: str) -> str:
@@ -153,33 +153,3 @@ def resolve_credentials(url: str) -> str:
         pass
 
     return url
-
-
-def print_diff(diff: MirrorDiff, direction: str) -> None:
-    """Pretty-print a MirrorDiff to stdout."""
-    import click
-
-    verb = "push" if direction == "push" else "pull"
-    if diff.in_sync:
-        click.echo(f"Nothing to {verb} — already in sync.")
-        return
-    for c in sorted(diff.create, key=lambda c: c.ref):
-        click.echo(f"  create  {c.ref}  {c.src_sha[:7]}")
-    for c in sorted(diff.update, key=lambda c: c.ref):
-        click.echo(f"  update  {c.ref}  {c.dest_sha[:7]} -> {c.src_sha[:7]}")
-    for c in sorted(diff.delete, key=lambda c: c.ref):
-        click.echo(f"  delete  {c.ref}  {c.dest_sha[:7]}")
-    click.echo(f"{diff.total} ref(s) would be changed.")
-
-
-def progress_cb(ctx) -> None:
-    """Return a progress callback if verbose mode is on, else None."""
-    import click
-
-    if not ctx.obj.get("verbose"):
-        return None
-    def _on_progress(msg):
-        text = msg.decode()
-        text = text.replace("\r", "\r\033[K")
-        click.echo(text, nl=False, err=True)
-    return _on_progress

@@ -6,23 +6,12 @@ import datetime
 from typing import TYPE_CHECKING
 
 import click
+import watchfiles
 
 from ..exceptions import StaleSnapshotError
 
 if TYPE_CHECKING:
     from .._exclude import ExcludeFilter
-
-
-def _import_watchfiles():
-    """Lazy-import watchfiles, raising a friendly error if missing."""
-    try:
-        import watchfiles
-        return watchfiles
-    except ImportError:
-        raise click.ClickException(
-            "watchfiles is required for --watch mode.\n"
-            "Install it with: pip install gitstore[watch]"
-        )
 
 
 def _format_summary(changes) -> str:
@@ -67,8 +56,6 @@ def watch_and_sync(store, branch, local_path, repo_dest, *,
                    debounce, message, ignore_errors, checksum,
                    exclude: ExcludeFilter | None = None):
     """Watch *local_path* and sync to repo on every change batch."""
-    watchfiles = _import_watchfiles()
-
     # Initial sync to catch up with any pending changes
     click.echo(f"Watching {local_path} -> :{repo_dest or '/'} (debounce {debounce}ms)")
     try:
