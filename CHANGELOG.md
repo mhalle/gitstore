@@ -4,6 +4,14 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.49.1 (2026-02-12)
+
+**Internal:**
+
+- Extract `_resolve_same_branch()` helper — shared by `rm` and `mv` for cross-branch validation
+- Extract `_copy_blob_to_batch()` helper — shared by `mv` and repo-to-repo `cp`
+- Fix bug in `rm` cross-branch detection that compared against the default branch instead of tracking the first explicit ref
+
 ## v0.49.0 (2026-02-12)
 
 **Features:**
