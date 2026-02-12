@@ -442,7 +442,7 @@ class FS:
 
     # --- Export ---
 
-    def export(self, path: str | Path) -> None:
+    def export_tree(self, path: str | Path) -> None:
         """Write the tree contents to a directory on the filesystem.
 
         The destination directory should be empty or non-existent.
