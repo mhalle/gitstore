@@ -51,35 +51,24 @@ def tx():
     then squash everything into a single commit:
 
     \b
-        eval $(gitstore tx begin --export)
+        export GITSTORE_TX=$(gitstore tx begin)
         echo data1 | gitstore write :stage1.txt &
         echo data2 | gitstore write :stage2.txt &
         wait
         gitstore tx commit -m "pipeline run"
-
-    \b
-    Or pass the ID explicitly:
-
-    \b
-        TX=$(gitstore tx begin)
-        echo data | gitstore write --tx $TX :file.txt
-        gitstore tx commit $TX -m "done"
     """
 
 
 @tx.command("begin")
 @_repo_option
 @_branch_option
-@click.option("--export", "export_mode", is_flag=True, default=False,
-              help="Print export statement for eval (sets GITSTORE_TX).")
 @click.pass_context
-def begin(ctx, branch, export_mode):
+def begin(ctx, branch):
     """Start a transaction. Prints the transaction ID to stdout.
 
     \b
-    With --export, prints a shell export statement:
-        eval $(gitstore tx begin --export)
-    This sets GITSTORE_TX so subsequent commands pick it up automatically.
+    Capture and export as GITSTORE_TX so child processes inherit it:
+        export GITSTORE_TX=$(gitstore tx begin)
     """
     store = _open_store(_require_repo(ctx))
     branch = branch or _default_branch(store)
@@ -87,10 +76,7 @@ def begin(ctx, branch, export_mode):
         tx_id = _tx_begin(store, branch)
     except KeyError as exc:
         raise click.ClickException(str(exc))
-    if export_mode:
-        click.echo(f"export {GITSTORE_TX_ENV}={tx_id}")
-    else:
-        click.echo(tx_id)
+    click.echo(tx_id)
 
 
 @tx.command("commit")
