@@ -364,7 +364,8 @@ Write operations auto-generate commit messages. Override with `message=` on any 
 ~ filename.txt              # update
 - filename.txt              # remove
 Batch: +3 ~1                # manual batch
-Batch cp: +3 ~1 -2          # copy/sync
+Batch cp: +3 ~1 -2          # copy
+Batch sync: +3 ~1 -2        # sync
 Batch ar: +10               # archive extraction
 ```
 

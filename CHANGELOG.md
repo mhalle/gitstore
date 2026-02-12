@@ -4,6 +4,12 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.47.8 (2026-02-11)
+
+**Improvements:**
+
+- Sync operations now use `Batch sync:` commit message prefix instead of `Batch cp:`
+
 ## v0.47.7 (2026-02-11)
 
 **Documentation:**

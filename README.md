@@ -181,7 +181,7 @@ with fs.batch() as b:
     b.remove("c.txt")
 print(b.fs.message)  # "Batch: +2 -1"
 
-# Copy/sync operations show "Batch cp:"
+# Copy operations show "Batch cp:", sync shows "Batch sync:"
 from gitstore import copy_to_repo
 fs = copy_to_repo(fs, ["./data/"], "backup")
 print(fs.message)  # "Batch cp: +10 ~2 -1"
@@ -198,7 +198,8 @@ print(fs.report.add)  # [FileEntry(...), ...]
 
 **Operation prefixes:**
 - `Batch:` = manual batch
-- `Batch cp:` = copy/sync
+- `Batch cp:` = copy
+- `Batch sync:` = sync
 - `Batch ar:` = archive extraction
 
 **Type annotations:**

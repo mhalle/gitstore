@@ -154,6 +154,7 @@ def copy_to_repo(
     ignore_errors: bool = False,
     checksum: bool = True,
     exclude: ExcludeFilter | None = None,
+    operation: str = "cp",
 ) -> FS:
     """Copy local files/dirs/globs into the repo. Returns new ``FS``.
 
@@ -265,7 +266,7 @@ def copy_to_repo(
         report.delete = _make_entries_from_repo(fs, safe_deletes, dest)
 
         return _apply_plan(fs, write_pairs, delete_full, report,
-                           message=message, operation="cp",
+                           message=message, operation=operation,
                            follow_symlinks=follow_symlinks, mode=mode,
                            ignore_errors=ignore_errors)
     else:
@@ -300,7 +301,7 @@ def copy_to_repo(
         report.update = _make_entries_from_disk(update_rels, pair_map, follow_symlinks)
 
         return _apply_plan(fs, pairs, [], report,
-                           message=message, operation="cp",
+                           message=message, operation=operation,
                            follow_symlinks=follow_symlinks, mode=mode,
                            ignore_errors=ignore_errors)
 
@@ -786,7 +787,7 @@ def sync_to_repo(
         return copy_to_repo(
             fs, [_ensure_trailing_slash(local_path)], repo_path,
             message=message, delete=True, ignore_errors=ignore_errors,
-            checksum=checksum, exclude=exclude,
+            checksum=checksum, exclude=exclude, operation="sync",
         )
     except (FileNotFoundError, NotADirectoryError):
         # Nonexistent local path → treat as empty source (delete everything)
@@ -816,7 +817,7 @@ def _sync_delete_all_in_repo(
     if not repo_files:
         # _walk_repo returns {} for files (not dirs) — check if dest is a file
         if dest and fs.exists(dest) and not fs.is_dir(dest):
-            with fs.batch(message=message, operation="cp") as b:
+            with fs.batch(message=message, operation="sync") as b:
                 b.remove(dest)
             return b.fs, [dest], True
         return fs, [], False
