@@ -14,7 +14,7 @@ from gitstore.repo import GitStore
 # WSGI test helper
 # ---------------------------------------------------------------------------
 
-def _wsgi_get(app, path="/", accept=None, method="GET"):
+def _wsgi_get(app, path="/", accept=None, method="GET", if_none_match=None):
     """Call the WSGI app with a request, return (status, headers, body)."""
     environ = {
         "REQUEST_METHOD": method,
@@ -27,6 +27,8 @@ def _wsgi_get(app, path="/", accept=None, method="GET"):
     }
     if accept:
         environ["HTTP_ACCEPT"] = accept
+    if if_none_match:
+        environ["HTTP_IF_NONE_MATCH"] = if_none_match
 
     captured = {}
 
@@ -397,6 +399,69 @@ class TestETag:
 
 
 # ---------------------------------------------------------------------------
+# Cache-Control and 304 tests
+# ---------------------------------------------------------------------------
+
+class TestCacheControl:
+    def test_file_has_cache_control(self, store_with_files):
+        fs = store_with_files.branches["main"]
+        app = _make_app(store_with_files, fs=fs, ref_label="main")
+        _, headers, _ = _wsgi_get(app, "/hello.txt")
+        assert headers["Cache-Control"] == "no-cache"
+
+    def test_dir_has_cache_control(self, store_with_files):
+        fs = store_with_files.branches["main"]
+        app = _make_app(store_with_files, fs=fs, ref_label="main")
+        _, headers, _ = _wsgi_get(app, "/data")
+        assert headers["Cache-Control"] == "no-cache"
+
+    def test_json_has_cache_control(self, store_with_files):
+        fs = store_with_files.branches["main"]
+        app = _make_app(store_with_files, fs=fs, ref_label="main")
+        _, headers, _ = _wsgi_get(app, "/hello.txt", accept="application/json")
+        assert headers["Cache-Control"] == "no-cache"
+
+    def test_304_on_matching_etag(self, store_with_files):
+        fs = store_with_files.branches["main"]
+        app = _make_app(store_with_files, fs=fs, ref_label="main")
+        etag = f'"{fs.hash}"'
+        status, headers, body = _wsgi_get(app, "/hello.txt", if_none_match=etag)
+        assert status == "304 Not Modified"
+        assert body == b""
+        assert headers["ETag"] == etag
+
+    def test_304_on_dir(self, store_with_files):
+        fs = store_with_files.branches["main"]
+        app = _make_app(store_with_files, fs=fs, ref_label="main")
+        etag = f'"{fs.hash}"'
+        status, _, body = _wsgi_get(app, "/data", if_none_match=etag)
+        assert status == "304 Not Modified"
+        assert body == b""
+
+    def test_200_on_stale_etag(self, store_with_files):
+        fs = store_with_files.branches["main"]
+        app = _make_app(store_with_files, fs=fs, ref_label="main")
+        status, _, body = _wsgi_get(app, "/hello.txt", if_none_match='"stale"')
+        assert status == "200 OK"
+        assert body == b"hello world\n"
+
+    def test_304_multi_ref(self, store_with_files):
+        app = _make_app(store_with_files)
+        fs = store_with_files.branches["main"]
+        etag = f'"{fs.hash}"'
+        status, _, body = _wsgi_get(app, "/main/hello.txt", if_none_match=etag)
+        assert status == "304 Not Modified"
+        assert body == b""
+
+    def test_no_store_overrides_no_cache(self, store_with_files):
+        """--no-cache flag sends no-store which overrides the default no-cache."""
+        fs = store_with_files.branches["main"]
+        app = _make_app(store_with_files, fs=fs, ref_label="main", no_cache=True)
+        _, headers, _ = _wsgi_get(app, "/hello.txt")
+        assert headers["Cache-Control"] == "no-store"
+
+
+# ---------------------------------------------------------------------------
 # 404 tests
 # ---------------------------------------------------------------------------
 
@@ -534,11 +599,12 @@ class TestCORS:
 # ---------------------------------------------------------------------------
 
 class TestNoCache:
-    def test_no_cache_disabled_by_default(self, store_with_files):
+    def test_no_store_disabled_by_default(self, store_with_files):
+        """Without --no-cache flag, Cache-Control is no-cache (not no-store)."""
         fs = store_with_files.branches["main"]
         app = _make_app(store_with_files, fs=fs, ref_label="main")
         _, headers, _ = _wsgi_get(app, "/hello.txt")
-        assert "Cache-Control" not in headers
+        assert headers["Cache-Control"] == "no-cache"
 
     def test_no_cache_adds_header(self, store_with_files):
         fs = store_with_files.branches["main"]

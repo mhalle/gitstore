@@ -130,8 +130,8 @@ def _make_app(store, *, fs=None, resolver=None, ref_label=None,
         if single_ref:
             # --- Single-ref mode ---
             current_fs = _get_fs()
-            return _serve_path(start_response, current_fs, ref_label or "",
-                               base_path, path, want_json)
+            return _serve_path(environ, start_response, current_fs,
+                               ref_label or "", base_path, path, want_json)
         else:
             # --- Multi-ref mode ---
             if not path:
@@ -148,7 +148,7 @@ def _make_app(store, *, fs=None, resolver=None, ref_label=None,
                 return _send_404(start_response, f"Unknown ref: {ref_name}")
 
             resolved = _resolve_fs_for_ref(store, ref_name)
-            return _serve_path(start_response, resolved, ref_name,
+            return _serve_path(environ, start_response, resolved, ref_name,
                                f"{base_path}/{ref_name}", rest, want_json)
 
     result = app
@@ -200,9 +200,15 @@ def _serve_ref_listing(start_response, store, base_path, want_json):
     return [body]
 
 
-def _serve_path(start_response, fs, ref_label, link_prefix, path, want_json):
+def _serve_path(environ, start_response, fs, ref_label, link_prefix, path, want_json):
     """Serve a file or directory listing within a resolved FS."""
     etag = f'"{fs.hash}"'
+
+    # 304 Not Modified if client ETag matches
+    if_none_match = environ.get("HTTP_IF_NONE_MATCH")
+    if if_none_match and if_none_match == etag:
+        start_response("304 Not Modified", [("ETag", etag)])
+        return [b""]
 
     if not path:
         return _serve_dir(start_response, fs, ref_label, link_prefix, "", want_json, etag)
@@ -231,6 +237,7 @@ def _serve_file(start_response, fs, ref_label, path, want_json, etag):
             ("Content-Type", "application/json"),
             ("Content-Length", str(len(body))),
             ("ETag", etag),
+            ("Cache-Control", "no-cache"),
         ])
         return [body]
 
@@ -240,6 +247,7 @@ def _serve_file(start_response, fs, ref_label, path, want_json, etag):
         ("Content-Type", mime),
         ("Content-Length", str(len(data))),
         ("ETag", etag),
+        ("Cache-Control", "no-cache"),
     ])
     return [data]
 
@@ -259,6 +267,7 @@ def _serve_dir(start_response, fs, ref_label, link_prefix, path, want_json, etag
             ("Content-Type", "application/json"),
             ("Content-Length", str(len(body))),
             ("ETag", etag),
+            ("Cache-Control", "no-cache"),
         ])
         return [body]
 
@@ -275,6 +284,7 @@ def _serve_dir(start_response, fs, ref_label, link_prefix, path, want_json, etag
         ("Content-Type", "text/html; charset=utf-8"),
         ("Content-Length", str(len(body))),
         ("ETag", etag),
+        ("Cache-Control", "no-cache"),
     ])
     return [body]
 
