@@ -4,6 +4,12 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.47.7 (2026-02-11)
+
+**Documentation:**
+
+- Document `gc` subcommand in README and CLI reference
+
 ## v0.47.6 (2026-02-11)
 
 **Security:**

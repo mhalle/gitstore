@@ -36,6 +36,14 @@ gitstore destroy                 # fails if repo has data
 gitstore destroy -f              # force
 ```
 
+### gc
+
+Run garbage collection on the repository. Removes unreachable objects (orphaned blobs, etc.) and repacks the object store. Requires `git` to be installed.
+
+```bash
+gitstore gc
+```
+
 ---
 
 ## Everyday Commands

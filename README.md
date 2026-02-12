@@ -349,7 +349,7 @@ fs = retry_write(repo, "main", "file.txt", data)
 - When a stale write is rejected, the commit object is created but unreferenced. These dangling objects are harmless and will be cleaned up by `git gc`.
 - Cross-machine coordination (e.g. NFS-mounted repos) is not supported — file locks are not reliable over network filesystems.
 
-**Maintenance:** gitstore repos are standard bare Git repositories. You can run `git gc /path/to/repo.git` to repack loose objects and prune unreferenced data. This is optional — Git objects are cheap and the repo will work fine without it — but it can reduce disk usage for long-lived repos with many writes.
+**Maintenance:** gitstore repos are standard bare Git repositories. Run `gitstore gc` (or `git gc` directly) to repack loose objects and prune unreferenced data. This is optional — Git objects are cheap and the repo will work fine without it — but it can reduce disk usage for long-lived repos with many writes.
 
 ## Error handling
 
@@ -390,6 +390,9 @@ gitstore init --repo /path/to/repo.git
 # Destroy a repo
 gitstore destroy                          # fails if repo has data
 gitstore destroy -f                       # force-remove non-empty repo
+
+# Garbage collection (requires git)
+gitstore gc
 
 # Copy files, directories, and globs
 gitstore cp local-file.txt :remote-file.txt
