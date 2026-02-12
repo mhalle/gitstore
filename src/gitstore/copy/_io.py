@@ -124,6 +124,21 @@ def _write_files_to_disk(fs: FS, pairs, *, base: Path | None = None,
                 errors.append(CopyError(path=local_path, error=str(exc)))
 
 
+def _copy_blob_to_batch(batch, fs: FS, src: str, dst: str, *, filemode: int | None = None) -> None:
+    """Copy a single blob from *src* to *dst* inside a :class:`Batch`.
+
+    Reads the blob data and filemode from the repo and writes it to
+    *dst*.  When *filemode* is given it overrides the source filemode.
+    Silently skips when *src* does not exist in the tree.
+    """
+    entry = _entry_at_path(fs._store._repo, fs._tree_oid, src)
+    if entry is None:
+        return
+    blob_oid, fmode = entry[0], entry[1]
+    data = fs._store._repo[blob_oid].data
+    batch.write(dst, data, mode=filemode if filemode is not None else fmode)
+
+
 # ---------------------------------------------------------------------------
 # Tree conflict filtering & cleanup
 # ---------------------------------------------------------------------------

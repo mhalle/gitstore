@@ -20,6 +20,7 @@ from ._resolve import (
 from ._io import (
     _local_file_oid,
     _local_file_oid_abs,
+    _copy_blob_to_batch,
     _write_files_to_repo,
     _write_files_to_disk,
     _filter_tree_conflicts,
@@ -996,12 +997,7 @@ def move_in_repo(
     # Execute: write dest files from source blob data, then remove sources
     with fs.batch(message=message, operation="mv") as b:
         for src, dst in pairs:
-            entry = _entry_at_path(fs._store._repo, fs._tree_oid, src)
-            if entry is None:
-                continue
-            blob_oid, fmode = entry[0], entry[1]
-            data = fs._store._repo[blob_oid].data
-            b.write(dst, data, mode=fmode)
+            _copy_blob_to_batch(b, fs, src, dst)
         for path in delete_paths:
             b.remove(path)
 

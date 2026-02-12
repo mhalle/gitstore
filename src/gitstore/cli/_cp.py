@@ -9,6 +9,7 @@ import click
 
 from ..exceptions import StaleSnapshotError
 from ..tree import GIT_FILEMODE_BLOB, GIT_FILEMODE_BLOB_EXECUTABLE, GIT_FILEMODE_LINK, _entry_at_path
+from ..copy._io import _copy_blob_to_batch
 from ._helpers import (
     main,
     _parse_ref_path,
@@ -402,15 +403,9 @@ def cp(ctx, args, branch, ref, at_path, match_pattern, before, back, message, mo
                                 pass
 
                     for src_fs, sp, dp in all_pairs:
-                        entry = _entry_at_path(src_fs._store._repo, src_fs._tree_oid, sp)
-                        if entry is None:
-                            continue
                         if ignore_existing and dest_fs.exists(dp):
                             continue
-                        blob_oid, fmode = entry[0], entry[1]
-                        data = src_fs._store._repo[blob_oid].data
-                        effective_mode = filemode if filemode is not None else fmode
-                        b.write(dp, data, mode=effective_mode)
+                        _copy_blob_to_batch(b, src_fs, sp, dp, filemode=filemode)
                 _status(ctx, f"Copied -> :{dest_path or '/'}")
         except (FileNotFoundError, NotADirectoryError) as exc:
             raise click.ClickException(str(exc))

@@ -433,6 +433,35 @@ def _check_ref_conflicts(parsed_paths, *, ref=None, branch=None, back=0,
         )
 
 
+def _resolve_same_branch(
+    store: GitStore,
+    parsed: list[RefPath],
+    default_branch: str,
+    *,
+    operation: str = "modify",
+) -> str:
+    """Ensure all explicit refs in *parsed* target the same branch.
+
+    Returns the resolved branch name.  Raises :class:`click.ClickException`
+    when a ref is a tag, not found, or when multiple different refs are used.
+    """
+    explicit_ref: str | None = None
+    for rp in parsed:
+        if rp.ref:
+            if rp.ref not in store.branches:
+                if rp.ref in store.tags:
+                    raise click.ClickException(
+                        f"Cannot {operation} in tag '{rp.ref}' — use a branch"
+                    )
+                raise click.ClickException(f"Branch not found: {rp.ref}")
+            if explicit_ref is not None and explicit_ref != rp.ref:
+                raise click.ClickException(
+                    "All paths must target the same branch"
+                )
+            explicit_ref = rp.ref
+    return explicit_ref if explicit_ref is not None else default_branch
+
+
 def _require_writable_ref(store: GitStore, rp: RefPath, default_branch: str) -> tuple:
     """Resolve a repo dest :class:`RefPath` to ``(FS, branch_name)``.
 

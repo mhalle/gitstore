@@ -19,6 +19,7 @@ from ._helpers import (
     _parse_ref_path,
     _resolve_ref_path,
     _require_writable_ref,
+    _resolve_same_branch,
     _check_ref_conflicts,
     _repo_option,
     _branch_option,
@@ -318,24 +319,12 @@ def rm(ctx, paths, recursive, dry_run, branch, message, tag, force_tag):
     store = _open_store(_require_repo(ctx))
     branch = branch or _default_branch(store)
 
-    # Parse all paths — all explicit refs must resolve to the same branch
-    resolved_branch = branch
-    for p in paths:
-        rp = _parse_ref_path(p)
-        if rp.is_repo and rp.ref:
-            if rp.ref not in store.branches:
-                if rp.ref in store.tags:
-                    raise click.ClickException(f"Cannot remove from tag '{rp.ref}' — use a branch")
-                raise click.ClickException(f"Branch not found: {rp.ref}")
-            if resolved_branch != branch and resolved_branch != rp.ref:
-                raise click.ClickException("All paths must target the same branch")
-            resolved_branch = rp.ref
-
-    branch = resolved_branch
+    parsed = [_parse_ref_path(p) for p in paths]
+    branch = _resolve_same_branch(store, parsed, branch, operation="remove")
     fs = _get_branch_fs(store, branch)
 
-    patterns = [_normalize_repo_path(_parse_ref_path(p).path if _parse_ref_path(p).is_repo else p)
-                for p in paths]
+    patterns = [_normalize_repo_path(rp.path if rp.is_repo else p)
+                for p, rp in zip(paths, parsed)]
 
     try:
         if dry_run:
@@ -406,23 +395,9 @@ def mv(ctx, args, recursive, dry_run, branch, message, tag, force_tag):
                 "Cannot move to/from a historical commit (remove ~N)"
             )
 
-    # All explicit refs must resolve to the same branch
     store = _open_store(_require_repo(ctx))
     branch = branch or _default_branch(store)
-
-    explicit_ref = None  # first explicit ref seen
-    for i, rp in enumerate(parsed):
-        if rp.ref:
-            if rp.ref not in store.branches:
-                if rp.ref in store.tags:
-                    raise click.ClickException(f"Cannot move in tag '{rp.ref}' — use a branch")
-                raise click.ClickException(f"Branch not found: {rp.ref}")
-            if explicit_ref is not None and explicit_ref != rp.ref:
-                raise click.ClickException("All paths must target the same branch")
-            explicit_ref = rp.ref
-
-    if explicit_ref is not None:
-        branch = explicit_ref
+    branch = _resolve_same_branch(store, parsed, branch, operation="move")
     fs = _get_branch_fs(store, branch)
 
     source_patterns = [
