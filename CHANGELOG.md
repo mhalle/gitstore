@@ -4,6 +4,13 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.47.3 (2026-02-11)
+
+**Improvements:**
+
+- Add `--version` flag to CLI
+- Document `serve` command in `docs/cli.md` and `README.md`
+
 ## v0.47.2 (2026-02-11)
 
 **New features:**
