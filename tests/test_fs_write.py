@@ -15,6 +15,24 @@ def repo_fs(tmp_path):
     return repo, fs
 
 
+class TestWriteText:
+    def test_write_text_roundtrip(self, repo_fs):
+        _, fs = repo_fs
+        fs2 = fs.write_text("hello.txt", "Hello!")
+        assert fs2.read_text("hello.txt") == "Hello!"
+        assert fs2.read("hello.txt") == b"Hello!"
+
+    def test_write_text_encoding(self, repo_fs):
+        _, fs = repo_fs
+        fs2 = fs.write_text("latin.txt", "café", encoding="latin-1")
+        assert fs2.read("latin.txt") == "café".encode("latin-1")
+
+    def test_write_text_message(self, repo_fs):
+        _, fs = repo_fs
+        fs2 = fs.write_text("a.txt", "data", message="custom msg")
+        assert fs2.message == "custom msg"
+
+
 class TestWrite:
     def test_write_returns_new_fs(self, repo_fs):
         _, fs = repo_fs

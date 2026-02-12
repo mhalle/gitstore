@@ -37,6 +37,18 @@ class TestRead:
             fs.read("src")
 
 
+class TestReadText:
+    def test_read_text(self, repo_with_files):
+        _, fs = repo_with_files
+        assert fs.read_text("hello.txt") == "Hello!"
+
+    def test_read_text_encoding(self, tmp_path):
+        repo = GitStore.open(tmp_path / "test.git")
+        fs = repo.branches["main"]
+        fs = fs.write("latin.txt", "café".encode("latin-1"))
+        assert fs.read_text("latin.txt", encoding="latin-1") == "café"
+
+
 class TestLs:
     def test_ls_root(self, repo_with_files):
         _, fs = repo_with_files

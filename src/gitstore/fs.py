@@ -98,6 +98,9 @@ class FS:
     def read(self, path: str | os.PathLike[str]) -> bytes:
         return read_blob_at_path(self._store._repo, self._tree_oid, path)
 
+    def read_text(self, path: str | os.PathLike[str], encoding: str = "utf-8") -> str:
+        return self.read(path).decode(encoding)
+
     def ls(self, path: str | os.PathLike[str] | None = None) -> list[str]:
         return list_tree_at_path(self._store._repo, self._tree_oid, path)
 
@@ -378,6 +381,16 @@ class FS:
         path = _normalize_path(path)
         value: bytes | tuple[bytes, int] = (data, mode) if mode is not None else data
         return self._commit_changes({path: value}, set(), message)
+
+    def write_text(
+        self,
+        path: str | os.PathLike[str],
+        text: str,
+        *,
+        encoding: str = "utf-8",
+        message: str | None = None,
+    ) -> FS:
+        return self.write(path, text.encode(encoding), message=message)
 
     def write_from_file(
         self,
