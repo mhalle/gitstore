@@ -4,6 +4,22 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.47.1 (2026-02-11)
+
+**Bug fixes:**
+
+- Fix HTML directory links in single-ref mode — no longer prefixed with the ref name
+- Serve JSON, XML, GeoJSON, YAML as text so browsers display inline instead of downloading
+- Register `.geojson` extension with Python's `mimetypes` module
+
+**Improvements:**
+
+- Add `ETag` header (commit hash) to all 200 responses
+
+**Tests:**
+
+- Add 14 tests: link correctness (single-ref and multi-ref), ETag presence/correctness, MIME overrides for JSON/XML/GeoJSON
+
 ## v0.47.0 (2026-02-11)
 
 **New features:**
