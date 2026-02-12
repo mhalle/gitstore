@@ -10,6 +10,13 @@ from . import _compat as pygit2
 from .mirror import RefChange, SyncDiff
 
 
+def _validate_ref_name(name: str) -> None:
+    """Reject ref names containing ':', space, tab, or newline."""
+    for ch, label in ((":", "colon"), (" ", "space"), ("\t", "tab"), ("\n", "newline")):
+        if ch in name:
+            raise ValueError(f"Invalid ref name {name!r}: contains {label}")
+
+
 class GitStore:
     """A versioned filesystem backed by a bare git repository."""
 
@@ -129,6 +136,7 @@ class RefDict(MutableMapping):
         from ._lock import repo_lock
         from .fs import FS
 
+        _validate_ref_name(name)
         if not isinstance(fs, FS):
             raise TypeError(f"Expected FS, got {type(fs).__name__}")
         try:

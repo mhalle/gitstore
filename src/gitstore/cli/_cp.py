@@ -11,6 +11,10 @@ from ..exceptions import StaleSnapshotError
 from ..tree import GIT_FILEMODE_BLOB, GIT_FILEMODE_BLOB_EXECUTABLE, GIT_FILEMODE_LINK, _entry_at_path
 from ._helpers import (
     main,
+    _parse_ref_path,
+    _resolve_ref_path,
+    _require_writable_ref,
+    _check_ref_conflicts,
     _repo_option,
     _branch_option,
     _message_option,
@@ -59,31 +63,30 @@ from ._helpers import (
 @_tag_option
 @click.pass_context
 def cp(ctx, args, branch, ref, at_path, match_pattern, before, back, message, mode, follow_symlinks, dry_run, ignore_existing, delete, ignore_errors, checksum, no_create, tag, force_tag, exclude, exclude_from):
-    """Copy files and directories between disk and repo.
+    """Copy files and directories between disk and repo, or between repo refs.
 
     Requires --repo or GITSTORE_REPO environment variable.
 
     The last argument is the destination; all preceding arguments are sources.
-    Sources must all be the same type (all repo or all local), and the
-    destination must be the opposite type.
-
     Directories are copied recursively with their name preserved.
     A trailing '/' on a source means "contents of" (like rsync).
     Glob patterns (* and ?) are expanded; they do not match leading dots.
 
-    Prefix repo-side paths with ':'.
-
+    \b
+    Prefix repo-side paths with ':' (current branch) or 'ref:' (explicit ref).
     Examples:
-
-        gitstore --repo path/to/repo.git cp file.txt :
-        gitstore --repo path/to/repo.git cp :file.txt ./
-        gitstore --repo path/to/repo.git cp '*.jpg' :images/
+        gitstore cp file.txt :               # disk → repo
+        gitstore cp :file.txt ./             # repo → disk
+        gitstore cp '*.jpg' :images/         # disk → repo with glob
+        gitstore cp session:/ :              # repo → repo (cross-branch)
+        gitstore cp main~1:a.txt :backup/    # from 1 commit back on main
     """
     from ..copy import (
         copy_to_repo, copy_from_repo,
         copy_to_repo_dry_run, copy_from_repo_dry_run,
         ExcludeFilter,
     )
+    from ..copy._resolve import _resolve_repo_sources, _enum_repo_to_repo
 
     if len(args) < 2:
         raise click.ClickException("cp requires at least two arguments (SRC... DEST)")
@@ -91,32 +94,54 @@ def cp(ctx, args, branch, ref, at_path, match_pattern, before, back, message, mo
     raw_sources = args[:-1]
     raw_dest = args[-1]
 
+    # Parse all args through _parse_ref_path
+    parsed_sources = [_parse_ref_path(s) for s in raw_sources]
+    parsed_dest = _parse_ref_path(raw_dest)
+
+    any_src_repo = any(rp.is_repo for rp in parsed_sources)
+    all_src_repo = all(rp.is_repo for rp in parsed_sources)
+    all_src_local = all(not rp.is_repo for rp in parsed_sources)
+    dest_is_repo = parsed_dest.is_repo
+
     # Determine direction
-    dest_is_repo = raw_dest.startswith(":")
-    src_is_repo = raw_sources[0].startswith(":")
-    if any((s.startswith(":")) != src_is_repo for s in raw_sources):
+    if all_src_local and not dest_is_repo:
+        raise click.ClickException(
+            "Neither sources nor DEST is a repo path — prefix repo paths with ':'"
+        )
+    if all_src_local and dest_is_repo:
+        direction = "disk_to_repo"
+    elif all_src_repo and not dest_is_repo:
+        direction = "repo_to_disk"
+    elif any_src_repo and not all_src_repo and not dest_is_repo:
         raise click.ClickException(
             "All source paths must be the same type (all repo or all local)"
         )
-    if src_is_repo == dest_is_repo:
-        if src_is_repo:
-            raise click.ClickException(
-                "Both sources and DEST are repo paths — one side must be local"
-            )
+    elif all_src_repo and dest_is_repo:
+        direction = "repo_to_repo"
+    elif any_src_repo and not all_src_repo and dest_is_repo:
+        raise click.ClickException(
+            "Mixed local and repo sources are not supported — use separate cp commands"
+        )
+    else:
         raise click.ClickException(
             "Neither sources nor DEST is a repo path — prefix repo paths with ':'"
         )
 
+    # Check for conflicts between explicit ref:path and flags
+    _check_ref_conflicts(parsed_sources + [parsed_dest],
+                         ref=ref, branch=branch, back=back,
+                         before=before, at_path=at_path, match_pattern=match_pattern)
+
     has_snapshot_filters = ref or at_path or match_pattern or before or back
-    if has_snapshot_filters and not src_is_repo:
+    if has_snapshot_filters and direction == "disk_to_repo":
         raise click.ClickException(
             "--ref/--path/--match/--before only apply when reading from repo"
         )
-    if tag and src_is_repo:
+    if tag and direction != "disk_to_repo":
         raise click.ClickException(
             "--tag only applies when writing to repo (disk → repo)"
         )
-    if (exclude or exclude_from) and src_is_repo:
+    if (exclude or exclude_from) and direction != "disk_to_repo":
         raise click.ClickException(
             "--exclude/--exclude-from only apply when copying from disk to repo"
         )
@@ -127,14 +152,6 @@ def cp(ctx, args, branch, ref, at_path, match_pattern, before, back, message, mo
         excl = ExcludeFilter(patterns=exclude, exclude_from=exclude_from)
 
     repo_path = _require_repo(ctx)
-    if not src_is_repo and not dry_run and not no_create:
-        store = _open_or_create_store(repo_path, branch or "main")
-        branch = branch or _default_branch(store)
-    else:
-        store = _open_store(repo_path)
-        branch = branch or _default_branch(store)
-    fs = _resolve_fs(store, branch, ref, at_path=at_path,
-                     match_pattern=match_pattern, before=before, back=back)
 
     filemode = (GIT_FILEMODE_BLOB_EXECUTABLE if mode == "755"
                 else GIT_FILEMODE_BLOB) if mode else None
@@ -149,9 +166,24 @@ def cp(ctx, args, branch, ref, at_path, match_pattern, before, back, message, mo
         and "/./" not in raw_sources[0]
     )
 
-    if not src_is_repo:
-        # Disk → repo
-        dest_path = raw_dest[1:]  # strip leading ':'
+    if direction == "disk_to_repo":
+        # ---- Disk → repo ----
+        if not dry_run and not no_create:
+            store = _open_or_create_store(repo_path, branch or "main")
+            branch = branch or _default_branch(store)
+        else:
+            store = _open_store(repo_path)
+            branch = branch or _default_branch(store)
+
+        # Resolve dest ref
+        if parsed_dest.ref:
+            dest_fs, branch = _require_writable_ref(store, parsed_dest, branch)
+        else:
+            dest_fs = _resolve_fs(store, branch, ref, at_path=at_path,
+                                  match_pattern=match_pattern, before=before, back=back)
+        fs = dest_fs
+
+        dest_path = parsed_dest.path
         if dest_path:
             dest_path = dest_path.rstrip("/")
             if dest_path:
@@ -243,86 +275,224 @@ def cp(ctx, args, branch, ref, at_path, match_pattern, before, back, message, mo
                 raise click.ClickException(str(exc))
             except StaleSnapshotError:
                 raise click.ClickException("Branch modified concurrently — retry")
-    else:
-        # Repo → disk
-        source_paths = [s[1:] for s in raw_sources]  # strip ':'
+
+    elif direction == "repo_to_disk":
+        # ---- Repo → disk ----
+        store = _open_store(repo_path)
+        branch = branch or _default_branch(store)
+        default_fs = _resolve_fs(store, branch, ref, at_path=at_path,
+                                 match_pattern=match_pattern, before=before, back=back)
+
         dest_path = raw_dest
 
-        src_raw = source_paths[0]
-        is_single_repo_file = (
-            single_file_src and src_raw
-            and not fs.is_dir(_normalize_repo_path(src_raw))
-        )
+        # For per-source ref grouping: resolve each source's FS
+        # For backward compat, when all sources use the default ref, use single FS
+        all_default_ref = all(not rp.ref for rp in parsed_sources)
 
-        if is_single_repo_file:
-            if delete:
-                raise click.ClickException(
-                    "Cannot use --delete with a single file source."
-                )
-            # Single file: dest is the exact local path (or into dir if dir exists)
-            src_path = _normalize_repo_path(src_raw)
-            if not fs.exists(src_path):
-                raise click.ClickException(f"File not found in repo: {src_path}")
-            local_dest = Path(dest_path)
-            if local_dest.is_dir():
-                out = local_dest / Path(src_path).name
+        if all_default_ref:
+            fs = default_fs
+            source_paths = [rp.path for rp in parsed_sources]
+
+            src_raw = source_paths[0]
+            is_single_repo_file = (
+                single_file_src and src_raw
+                and not fs.is_dir(_normalize_repo_path(src_raw))
+            )
+
+            if is_single_repo_file:
+                _cp_single_repo_to_disk(ctx, fs, src_raw, dest_path, dry_run,
+                                         delete, ignore_existing, ignore_errors)
             else:
-                out = local_dest
-            if ignore_existing and out.exists():
-                return
-            if dry_run:
-                click.echo(f":{src_path} -> {out}")
-            else:
-                try:
-                    out.parent.mkdir(parents=True, exist_ok=True)
-                    entry = _entry_at_path(fs._store._repo, fs._tree_oid, src_path)
-                    if entry and entry[1] == GIT_FILEMODE_LINK:
-                        target = fs.readlink(src_path)
-                        out.symlink_to(target)
-                    else:
-                        out.write_bytes(fs.read(src_path))
-                    cts = fs._store._repo[fs._commit_oid].commit_time
-                    os.utime(out, (cts, cts), follow_symlinks=False)
-                except OSError as exc:
-                    if ignore_errors:
-                        click.echo(f"ERROR: {out}: {exc}", err=True)
-                        ctx.exit(1)
-                    else:
-                        raise click.ClickException(f"Cannot write {out}: {exc}")
-                else:
-                    _status(ctx, f"Copied :{src_path} -> {out}")
+                _cp_multi_repo_to_disk(ctx, fs, source_paths, dest_path, dry_run,
+                                        delete, ignore_existing, ignore_errors, checksum,
+                                        copy_from_repo, copy_from_repo_dry_run)
         else:
-            try:
-                if dry_run:
-                    report = copy_from_repo_dry_run(
-                        fs, source_paths, dest_path,
-                        ignore_existing=ignore_existing,
-                        delete=delete,
-                        checksum=checksum,
-                    )
-                    if report:
-                        for w in report.warnings:
-                            click.echo(f"WARNING: {w.path}: {w.error}", err=True)
-                        for action in report.actions():
-                            prefix = {"add": "+", "update": "~", "delete": "-"}[action.action]
-                            click.echo(f"{prefix} {os.path.join(dest_path, action.path)}")
+            # Per-source ref grouping
+            for rp in parsed_sources:
+                if rp.is_repo and (rp.ref or rp.back):
+                    src_fs = _resolve_ref_path(store, rp, ref, branch,
+                                               at_path=at_path, match_pattern=match_pattern,
+                                               before=before, back=back)
                 else:
-                    report = copy_from_repo(
-                        fs, source_paths, dest_path,
-                        ignore_existing=ignore_existing,
-                        delete=delete,
-                        ignore_errors=ignore_errors,
-                        checksum=checksum,
-                    )
-                    if report:
-                        for w in report.warnings:
-                            click.echo(f"WARNING: {w.path}: {w.error}", err=True)
-                        for e in report.errors:
-                            click.echo(f"ERROR: {e.path}: {e.error}", err=True)
-                    _status(ctx, f"Copied -> {dest_path}")
-                    if report and report.errors:
-                        ctx.exit(1)
-            except (FileNotFoundError, NotADirectoryError) as exc:
-                raise click.ClickException(str(exc))
-            except OSError as exc:
-                raise click.ClickException(str(exc))
+                    src_fs = default_fs
+                source_paths = [rp.path]
+
+                src_raw = rp.path
+                is_single = (
+                    single_file_src and src_raw
+                    and not src_fs.is_dir(_normalize_repo_path(src_raw))
+                )
+                if is_single:
+                    _cp_single_repo_to_disk(ctx, src_fs, src_raw, dest_path, dry_run,
+                                             delete, ignore_existing, ignore_errors)
+                else:
+                    _cp_multi_repo_to_disk(ctx, src_fs, source_paths, dest_path, dry_run,
+                                            delete, ignore_existing, ignore_errors, checksum,
+                                            copy_from_repo, copy_from_repo_dry_run)
+
+    elif direction == "repo_to_repo":
+        # ---- Repo → repo ----
+        store = _open_store(repo_path)
+        branch = branch or _default_branch(store)
+
+        # Resolve dest
+        dest_fs, dest_branch = _require_writable_ref(store, parsed_dest, branch)
+
+        dest_path = parsed_dest.path
+        if dest_path:
+            dest_path = dest_path.rstrip("/")
+            if dest_path:
+                dest_path = _normalize_repo_path(dest_path)
+
+        # Resolve source FS(es) and enumerate files
+        default_fs = _resolve_fs(store, dest_branch, ref, at_path=at_path,
+                                 match_pattern=match_pattern, before=before, back=back)
+
+        # Collect all (src_repo_path, dest_repo_path) pairs across source groups
+        all_pairs: list[tuple] = []  # (src_fs, src_path, dest_path)
+        for rp in parsed_sources:
+            if rp.is_repo and (rp.ref or rp.back):
+                src_fs = _resolve_ref_path(store, rp, ref, branch,
+                                           at_path=at_path, match_pattern=match_pattern,
+                                           before=before, back=back)
+            else:
+                src_fs = default_fs
+            src_path = rp.path if rp.is_repo else rp.path
+            resolved = _resolve_repo_sources(src_fs, [src_path])
+            pairs = _enum_repo_to_repo(src_fs, resolved, dest_path or "")
+            for sp, dp in pairs:
+                all_pairs.append((src_fs, sp, dp))
+
+        if not all_pairs and not delete:
+            return
+
+        try:
+            if dry_run:
+                # Build dest file set for --delete
+                if delete:
+                    from ..copy._resolve import _walk_repo
+                    dest_files = set(_walk_repo(dest_fs, dest_path or "").keys())
+                    src_dest_paths = {dp for _, _, dp in all_pairs}
+                    for dp in sorted(dest_files - src_dest_paths):
+                        full = f"{dest_path}/{dp}" if dest_path else dp
+                        click.echo(f"- :{full}")
+                for src_fs, sp, dp in all_pairs:
+                    entry = _entry_at_path(src_fs._store._repo, src_fs._tree_oid, sp)
+                    if entry is None:
+                        continue
+                    if ignore_existing and dest_fs.exists(dp):
+                        continue
+                    # Check if it's add or update
+                    if dest_fs.exists(dp):
+                        click.echo(f"~ :{dp}")
+                    else:
+                        click.echo(f"+ :{dp}")
+            else:
+                with dest_fs.batch(message=message, operation="cp") as b:
+                    # Handle --delete
+                    if delete:
+                        from ..copy._resolve import _walk_repo
+                        dest_files = set(_walk_repo(dest_fs, dest_path or "").keys())
+                        src_dest_paths = {dp for _, _, dp in all_pairs}
+                        for dp in sorted(dest_files - src_dest_paths):
+                            full = f"{dest_path}/{dp}" if dest_path else dp
+                            try:
+                                b.remove(full)
+                            except (FileNotFoundError, IsADirectoryError):
+                                pass
+
+                    for src_fs, sp, dp in all_pairs:
+                        entry = _entry_at_path(src_fs._store._repo, src_fs._tree_oid, sp)
+                        if entry is None:
+                            continue
+                        if ignore_existing and dest_fs.exists(dp):
+                            continue
+                        blob_oid, fmode = entry[0], entry[1]
+                        data = src_fs._store._repo[blob_oid].data
+                        effective_mode = filemode if filemode is not None else fmode
+                        b.write(dp, data, mode=effective_mode)
+                _status(ctx, f"Copied -> :{dest_path or '/'}")
+        except (FileNotFoundError, NotADirectoryError) as exc:
+            raise click.ClickException(str(exc))
+        except StaleSnapshotError:
+            raise click.ClickException("Branch modified concurrently — retry")
+
+
+def _cp_single_repo_to_disk(ctx, fs, src_raw, dest_path, dry_run,
+                              delete, ignore_existing, ignore_errors):
+    """Handle single repo file → disk copy."""
+    if delete:
+        raise click.ClickException(
+            "Cannot use --delete with a single file source."
+        )
+    src_path = _normalize_repo_path(src_raw)
+    if not fs.exists(src_path):
+        raise click.ClickException(f"File not found in repo: {src_path}")
+    local_dest = Path(dest_path)
+    if local_dest.is_dir():
+        out = local_dest / Path(src_path).name
+    else:
+        out = local_dest
+    if ignore_existing and out.exists():
+        return
+    if dry_run:
+        click.echo(f":{src_path} -> {out}")
+    else:
+        try:
+            out.parent.mkdir(parents=True, exist_ok=True)
+            entry = _entry_at_path(fs._store._repo, fs._tree_oid, src_path)
+            if entry and entry[1] == GIT_FILEMODE_LINK:
+                target = fs.readlink(src_path)
+                out.symlink_to(target)
+            else:
+                out.write_bytes(fs.read(src_path))
+            cts = fs._store._repo[fs._commit_oid].commit_time
+            os.utime(out, (cts, cts), follow_symlinks=False)
+        except OSError as exc:
+            if ignore_errors:
+                click.echo(f"ERROR: {out}: {exc}", err=True)
+                ctx.exit(1)
+            else:
+                raise click.ClickException(f"Cannot write {out}: {exc}")
+        else:
+            _status(ctx, f"Copied :{src_path} -> {out}")
+
+
+def _cp_multi_repo_to_disk(ctx, fs, source_paths, dest_path, dry_run,
+                             delete, ignore_existing, ignore_errors, checksum,
+                             copy_from_repo, copy_from_repo_dry_run):
+    """Handle multi-file repo → disk copy."""
+    try:
+        if dry_run:
+            report = copy_from_repo_dry_run(
+                fs, source_paths, dest_path,
+                ignore_existing=ignore_existing,
+                delete=delete,
+                checksum=checksum,
+            )
+            if report:
+                for w in report.warnings:
+                    click.echo(f"WARNING: {w.path}: {w.error}", err=True)
+                for action in report.actions():
+                    prefix = {"add": "+", "update": "~", "delete": "-"}[action.action]
+                    click.echo(f"{prefix} {os.path.join(dest_path, action.path)}")
+        else:
+            report = copy_from_repo(
+                fs, source_paths, dest_path,
+                ignore_existing=ignore_existing,
+                delete=delete,
+                ignore_errors=ignore_errors,
+                checksum=checksum,
+            )
+            if report:
+                for w in report.warnings:
+                    click.echo(f"WARNING: {w.path}: {w.error}", err=True)
+                for e in report.errors:
+                    click.echo(f"ERROR: {e.path}: {e.error}", err=True)
+            _status(ctx, f"Copied -> {dest_path}")
+            if report and report.errors:
+                ctx.exit(1)
+    except (FileNotFoundError, NotADirectoryError) as exc:
+        raise click.ClickException(str(exc))
+    except OSError as exc:
+        raise click.ClickException(str(exc))

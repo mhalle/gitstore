@@ -76,7 +76,10 @@ def branch_fork(ctx, name, branch, force, ref, at_path, match_pattern, before, b
                             match_pattern=match_pattern, before=before, back=back)
     from ..fs import FS
     new_fs = FS(store, source_fs._commit_oid, branch=name)
-    store.branches[name] = new_fs
+    try:
+        store.branches[name] = new_fs
+    except ValueError as e:
+        raise click.ClickException(str(e))
     _status(ctx, f"Created branch {name}")
 
 
@@ -164,7 +167,10 @@ def tag_fork(ctx, name, branch, ref, at_path, match_pattern, before, back):
 
     from ..fs import FS
     new_fs = FS(store, source_fs._commit_oid, branch=None)
-    store.tags[name] = new_fs
+    try:
+        store.tags[name] = new_fs
+    except ValueError as e:
+        raise click.ClickException(str(e))
     _status(ctx, f"Created tag {name}")
 
 

@@ -483,3 +483,41 @@ def _enum_repo_to_disk(
                     local = os.path.join(_dest, rel)
                     pairs.append((store_path, local))
     return pairs
+
+
+def _enum_repo_to_repo(
+    fs: FS, resolved: list[tuple[str, str, str]], dest: str,
+) -> list[tuple[str, str]]:
+    """Build ``(src_repo_path, dest_repo_path)`` pairs for repo → repo copy."""
+    pairs: list[tuple[str, str]] = []
+    for repo_path, mode, prefix in resolved:
+        _dest = "/".join(p for p in (dest, prefix) if p)
+
+        if mode == "file":
+            name = repo_path.rsplit("/", 1)[-1]
+            dest_file = f"{_dest}/{name}" if _dest else name
+            pairs.append((repo_path, _normalize_path(dest_file)))
+        elif mode == "dir":
+            dirname = repo_path.rsplit("/", 1)[-1]
+            target = f"{_dest}/{dirname}" if _dest else dirname
+            for dirpath, _dirs, files in fs.walk(repo_path):
+                for fname in files:
+                    store_path = f"{dirpath}/{fname}" if dirpath else fname
+                    if repo_path and store_path.startswith(repo_path + "/"):
+                        rel = store_path[len(repo_path) + 1:]
+                    else:
+                        rel = store_path
+                    dest_file = f"{target}/{rel}"
+                    pairs.append((store_path, _normalize_path(dest_file)))
+        elif mode == "contents":
+            walk_path = repo_path or None
+            for dirpath, _dirs, files in fs.walk(walk_path):
+                for fname in files:
+                    store_path = f"{dirpath}/{fname}" if dirpath else fname
+                    if repo_path and store_path.startswith(repo_path + "/"):
+                        rel = store_path[len(repo_path) + 1:]
+                    else:
+                        rel = store_path
+                    dest_file = f"{_dest}/{rel}" if _dest else rel
+                    pairs.append((store_path, _normalize_path(dest_file)))
+    return pairs

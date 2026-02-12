@@ -7,8 +7,13 @@ import os
 import click
 
 from ..exceptions import StaleSnapshotError
+from ..tree import _entry_at_path
 from ._helpers import (
     main,
+    _parse_ref_path,
+    _resolve_ref_path,
+    _require_writable_ref,
+    _check_ref_conflicts,
     _repo_option,
     _branch_option,
     _message_option,
@@ -18,6 +23,7 @@ from ._helpers import (
     _no_create_option,
     _require_repo,
     _status,
+    _normalize_repo_path,
     _open_store,
     _open_or_create_store,
     _default_branch,
@@ -62,10 +68,11 @@ def sync(ctx, args, branch, ref, at_path, match_pattern, before, back, message, 
 
         gitstore --repo path/to/repo.git sync ./dir
 
+    \b
     With two arguments, direction is determined by the ':' prefix:
-
-        gitstore --repo path/to/repo.git sync ./local :repo_path   (disk → repo)
-        gitstore --repo path/to/repo.git sync :repo_path ./local    (repo → disk)
+        gitstore sync ./local :repo_path   (disk → repo)
+        gitstore sync :repo_path ./local   (repo → disk)
+        gitstore sync session:/ :          (repo → repo, cross-branch)
     """
     from ..copy import (
         sync_to_repo, sync_from_repo,
@@ -75,7 +82,8 @@ def sync(ctx, args, branch, ref, at_path, match_pattern, before, back, message, 
 
     if len(args) == 1:
         # 1-arg form: sync local dir to repo root
-        if args[0].startswith(":"):
+        rp = _parse_ref_path(args[0])
+        if rp.is_repo:
             raise click.ClickException(
                 "Single-argument sync must be a local path, not a repo path"
             )
@@ -83,26 +91,25 @@ def sync(ctx, args, branch, ref, at_path, match_pattern, before, back, message, 
         repo_dest = ""
         direction = "to_repo"
     elif len(args) == 2:
-        src, dest = args
-        src_is_repo = src.startswith(":")
-        dest_is_repo = dest.startswith(":")
-        if src_is_repo and dest_is_repo:
-            raise click.ClickException(
-                "Both arguments are repo paths — one side must be local"
-            )
-        if not src_is_repo and not dest_is_repo:
+        src_raw, dest_raw = args
+        src_rp = _parse_ref_path(src_raw)
+        dest_rp = _parse_ref_path(dest_raw)
+
+        if src_rp.is_repo and dest_rp.is_repo:
+            direction = "repo_to_repo"
+        elif not src_rp.is_repo and not dest_rp.is_repo:
             raise click.ClickException(
                 "Neither argument is a repo path — prefix repo paths with ':'"
             )
-        if not src_is_repo:
+        elif not src_rp.is_repo:
             # disk → repo
-            local_path = src
-            repo_dest = dest[1:].rstrip("/")
+            local_path = src_raw
+            repo_dest = dest_rp.path.rstrip("/")
             direction = "to_repo"
         else:
             # repo → disk
-            repo_dest = src[1:].rstrip("/")
-            local_path = dest
+            repo_dest = src_rp.path.rstrip("/")
+            local_path = dest_raw
             direction = "from_repo"
     else:
         raise click.ClickException("sync requires 1 or 2 arguments")
@@ -112,18 +119,26 @@ def sync(ctx, args, branch, ref, at_path, match_pattern, before, back, message, 
         raise click.ClickException(
             "--ref/--path/--match/--before only apply when reading from repo"
         )
-    if tag and direction == "from_repo":
+    if tag and direction in ("from_repo", "repo_to_repo"):
         raise click.ClickException(
             "--tag only applies when writing to repo (disk → repo)"
         )
-    if (exclude or exclude_from) and direction == "from_repo":
+    if (exclude or exclude_from) and direction != "to_repo":
         raise click.ClickException(
             "--exclude/--exclude-from only apply when syncing from disk to repo"
         )
-    if use_gitignore and direction == "from_repo":
+    if use_gitignore and direction != "to_repo":
         raise click.ClickException(
             "--gitignore only applies when syncing from disk to repo"
         )
+
+    # Check for conflicts between explicit ref:path and flags
+    if direction == "from_repo":
+        _check_ref_conflicts([src_rp], ref=ref, branch=branch, back=back,
+                             before=before, at_path=at_path, match_pattern=match_pattern)
+    elif direction == "repo_to_repo":
+        _check_ref_conflicts([src_rp, dest_rp], ref=ref, branch=branch, back=back,
+                             before=before, at_path=at_path, match_pattern=match_pattern)
 
     # Build exclude filter (disk→repo only)
     excl = None
@@ -135,12 +150,37 @@ def sync(ctx, args, branch, ref, at_path, match_pattern, before, back, message, 
     if watch:
         if dry_run:
             raise click.ClickException("--watch and --dry-run are incompatible")
-        if direction == "from_repo":
+        if direction != "to_repo":
             raise click.ClickException("--watch only supports disk → repo")
         if debounce < 100:
             raise click.ClickException("--debounce must be at least 100 ms")
 
     repo_path = _require_repo(ctx)
+
+    if direction == "repo_to_repo":
+        # ---- Repo → repo sync ----
+        store = _open_store(repo_path)
+        branch = branch or _default_branch(store)
+
+        # Resolve source
+        if src_rp.ref or src_rp.back:
+            src_fs = _resolve_ref_path(store, src_rp, ref, branch,
+                                       at_path=at_path, match_pattern=match_pattern,
+                                       before=before, back=back)
+        else:
+            src_fs = _resolve_fs(store, branch, ref, at_path=at_path,
+                                 match_pattern=match_pattern, before=before, back=back)
+
+        # Resolve dest (must be writable branch)
+        dest_fs, dest_branch = _require_writable_ref(store, dest_rp, branch)
+
+        src_repo_path = src_rp.path.rstrip("/")
+        dest_repo_path = dest_rp.path.rstrip("/")
+
+        _sync_repo_to_repo(ctx, store, src_fs, dest_fs, src_repo_path,
+                           dest_repo_path, dry_run, message, ignore_errors)
+        return
+
     if direction == "to_repo" and not dry_run and not no_create:
         store = _open_or_create_store(repo_path, branch or "main")
         branch = branch or _default_branch(store)
@@ -156,8 +196,13 @@ def sync(ctx, args, branch, ref, at_path, match_pattern, before, back, message, 
                        exclude=excl)
         return
 
-    fs = _resolve_fs(store, branch, ref, at_path=at_path,
-                     match_pattern=match_pattern, before=before, back=back)
+    if direction == "from_repo" and (src_rp.ref or src_rp.back):
+        fs = _resolve_ref_path(store, src_rp, ref, branch,
+                               at_path=at_path, match_pattern=match_pattern,
+                               before=before, back=back)
+    else:
+        fs = _resolve_fs(store, branch, ref, at_path=at_path,
+                         match_pattern=match_pattern, before=before, back=back)
 
     try:
         if direction == "to_repo":
@@ -215,6 +260,65 @@ def sync(ctx, args, branch, ref, at_path, match_pattern, before, back, message, 
                 _status(ctx, f"Synced -> {local_path}")
                 if report and report.errors:
                     ctx.exit(1)
+    except (FileNotFoundError, NotADirectoryError) as exc:
+        raise click.ClickException(str(exc))
+    except StaleSnapshotError:
+        raise click.ClickException("Branch modified concurrently — retry")
+
+
+def _sync_repo_to_repo(ctx, store, src_fs, dest_fs, src_repo_path, dest_repo_path,
+                         dry_run, message, ignore_errors):
+    """Sync one repo path to another (like rsync --delete between refs)."""
+    from ..copy._resolve import _walk_repo
+
+    # Walk source and dest trees
+    src_files = _walk_repo(src_fs, src_repo_path)
+    dest_files = _walk_repo(dest_fs, dest_repo_path)
+
+    src_keys = set(src_files.keys())
+    dest_keys = set(dest_files.keys())
+
+    to_add = src_keys - dest_keys
+    to_delete = dest_keys - src_keys
+    to_check = src_keys & dest_keys
+    to_update = {k for k in to_check if src_files[k] != dest_files[k]}
+
+    if not to_add and not to_delete and not to_update:
+        return
+
+    try:
+        if dry_run:
+            for p in sorted(to_delete):
+                full = f"{dest_repo_path}/{p}" if dest_repo_path else p
+                click.echo(f"- :{full}")
+            for p in sorted(to_add):
+                full = f"{dest_repo_path}/{p}" if dest_repo_path else p
+                click.echo(f"+ :{full}")
+            for p in sorted(to_update):
+                full = f"{dest_repo_path}/{p}" if dest_repo_path else p
+                click.echo(f"~ :{full}")
+        else:
+            with dest_fs.batch(message=message, operation="sync") as b:
+                # Delete files not in source
+                for p in sorted(to_delete):
+                    full = f"{dest_repo_path}/{p}" if dest_repo_path else p
+                    try:
+                        b.remove(full)
+                    except (FileNotFoundError, IsADirectoryError):
+                        pass
+
+                # Add/update files from source
+                for p in sorted(to_add | to_update):
+                    src_full = f"{src_repo_path}/{p}" if src_repo_path else p
+                    dest_full = f"{dest_repo_path}/{p}" if dest_repo_path else p
+                    entry = _entry_at_path(src_fs._store._repo, src_fs._tree_oid, src_full)
+                    if entry is None:
+                        continue
+                    blob_oid, fmode = entry[0], entry[1]
+                    data = src_fs._store._repo[blob_oid].data
+                    b.write(dest_full, data, mode=fmode)
+
+            _status(ctx, f"Synced -> :{dest_repo_path or '/'}")
     except (FileNotFoundError, NotADirectoryError) as exc:
         raise click.ClickException(str(exc))
     except StaleSnapshotError:

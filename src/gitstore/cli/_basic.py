@@ -15,6 +15,11 @@ from ..repo import GitStore
 from ..tree import _normalize_path
 from ._helpers import (
     main,
+    RefPath,
+    _parse_ref_path,
+    _resolve_ref_path,
+    _require_writable_ref,
+    _check_ref_conflicts,
     _repo_option,
     _branch_option,
     _message_option,
@@ -161,9 +166,18 @@ def ls(ctx, paths, branch, recursive, ref, at_path, match_pattern, before, back)
         gitstore ls -R :src :docs           # recursive under multiple dirs
     """
     store = _open_store(_require_repo(ctx))
+
+    # Parse paths and check for conflicts with flags
+    if paths:
+        parsed = [_parse_ref_path(p) for p in paths]
+        _check_ref_conflicts(parsed, ref=ref, branch=branch, back=back,
+                             before=before, at_path=at_path, match_pattern=match_pattern)
+    else:
+        parsed = []
+
     branch = branch or _default_branch(store)
-    fs = _resolve_fs(store, branch, ref, at_path=at_path,
-                     match_pattern=match_pattern, before=before, back=back)
+    default_fs = _resolve_fs(store, branch, ref, at_path=at_path,
+                             match_pattern=match_pattern, before=before, back=back)
 
     # No args → list root (single implicit path)
     if not paths:
@@ -171,11 +185,25 @@ def ls(ctx, paths, branch, recursive, ref, at_path, match_pattern, before, back)
 
     results: set[str] = set()
 
-    for path in paths:
-        has_glob = path is not None and ("*" in path or "?" in path)
+    for i, path in enumerate(paths):
+        # Resolve per-path ref
+        if path is not None:
+            rp = parsed[i]
+            if rp.is_repo and (rp.ref or rp.back):
+                fs = _resolve_ref_path(store, rp, ref, branch,
+                                       at_path=at_path, match_pattern=match_pattern,
+                                       before=before, back=back)
+            else:
+                fs = default_fs
+            repo_path = rp.path if rp.is_repo else path
+        else:
+            fs = default_fs
+            repo_path = None
+
+        has_glob = repo_path is not None and ("*" in repo_path or "?" in repo_path)
 
         if has_glob:
-            pattern = _strip_colon(path)
+            pattern = repo_path
             matches = fs.iglob(pattern)
             if recursive:
                 for m in matches:
@@ -189,32 +217,28 @@ def ls(ctx, paths, branch, recursive, ref, at_path, match_pattern, before, back)
                 results.update(matches)
 
         elif recursive:
-            repo_path = None
-            if path is not None:
-                repo_path = _strip_colon(path)
-                if repo_path:
-                    repo_path = _normalize_repo_path(repo_path)
+            rp_norm = None
+            if repo_path:
+                rp_norm = _normalize_repo_path(repo_path)
             try:
-                for dp, _, fnames in fs.walk(repo_path if repo_path else None):
+                for dp, _, fnames in fs.walk(rp_norm if rp_norm else None):
                     for f in fnames:
                         results.add(f"{dp}/{f}" if dp else f)
             except FileNotFoundError:
-                raise click.ClickException(f"Path not found: {repo_path}")
+                raise click.ClickException(f"Path not found: {rp_norm}")
             except NotADirectoryError:
-                results.add(repo_path)
+                results.add(rp_norm)
 
         else:
-            repo_path = None
-            if path is not None:
-                repo_path = _strip_colon(path)
-                if repo_path:
-                    repo_path = _normalize_repo_path(repo_path)
+            rp_norm = None
+            if repo_path:
+                rp_norm = _normalize_repo_path(repo_path)
             try:
-                results.update(fs.ls(repo_path if repo_path else None))
+                results.update(fs.ls(rp_norm if rp_norm else None))
             except FileNotFoundError:
-                raise click.ClickException(f"Path not found: {repo_path}")
+                raise click.ClickException(f"Path not found: {rp_norm}")
             except NotADirectoryError:
-                results.add(repo_path)
+                results.add(rp_norm)
 
     for entry in results:
         click.echo(entry)
@@ -233,12 +257,25 @@ def ls(ctx, paths, branch, recursive, ref, at_path, match_pattern, before, back)
 def cat(ctx, paths, branch, ref, at_path, match_pattern, before, back):
     """Concatenate file contents to stdout."""
     store = _open_store(_require_repo(ctx))
-    branch = branch or _default_branch(store)
-    fs = _resolve_fs(store, branch, ref, at_path=at_path,
-                     match_pattern=match_pattern, before=before, back=back)
 
-    for path in paths:
-        repo_path = _normalize_repo_path(_strip_colon(path))
+    # Parse paths and check for conflicts with flags
+    parsed = [_parse_ref_path(p) for p in paths]
+    _check_ref_conflicts(parsed, ref=ref, branch=branch, back=back,
+                         before=before, at_path=at_path, match_pattern=match_pattern)
+
+    branch = branch or _default_branch(store)
+    default_fs = _resolve_fs(store, branch, ref, at_path=at_path,
+                             match_pattern=match_pattern, before=before, back=back)
+
+    for i, path in enumerate(paths):
+        rp = parsed[i]
+        if rp.is_repo and (rp.ref or rp.back):
+            fs = _resolve_ref_path(store, rp, ref, branch,
+                                   at_path=at_path, match_pattern=match_pattern,
+                                   before=before, back=back)
+        else:
+            fs = default_fs
+        repo_path = _normalize_repo_path(rp.path if rp.is_repo else path)
         try:
             data = fs.read(repo_path)
         except FileNotFoundError:
@@ -280,9 +317,25 @@ def rm(ctx, paths, recursive, dry_run, branch, message, tag, force_tag):
 
     store = _open_store(_require_repo(ctx))
     branch = branch or _default_branch(store)
+
+    # Parse all paths — all explicit refs must resolve to the same branch
+    resolved_branch = branch
+    for p in paths:
+        rp = _parse_ref_path(p)
+        if rp.is_repo and rp.ref:
+            if rp.ref not in store.branches:
+                if rp.ref in store.tags:
+                    raise click.ClickException(f"Cannot remove from tag '{rp.ref}' — use a branch")
+                raise click.ClickException(f"Branch not found: {rp.ref}")
+            if resolved_branch != branch and resolved_branch != rp.ref:
+                raise click.ClickException("All paths must target the same branch")
+            resolved_branch = rp.ref
+
+    branch = resolved_branch
     fs = _get_branch_fs(store, branch)
 
-    patterns = [_normalize_repo_path(_strip_colon(p)) for p in paths]
+    patterns = [_normalize_repo_path(_parse_ref_path(p).path if _parse_ref_path(p).is_repo else p)
+                for p in paths]
 
     try:
         if dry_run:
@@ -326,6 +379,13 @@ def write(ctx, path, branch, message, no_create, tag, force_tag, passthrough):
     """Write stdin to a file in the repo."""
     from ..fs import retry_write
 
+    # Parse ref:path — explicit ref overrides -b
+    rp = _parse_ref_path(path)
+    if rp.is_repo and rp.ref:
+        branch = rp.ref
+    if rp.is_repo and rp.back:
+        raise click.ClickException("Cannot write to a historical commit (remove ~N)")
+
     # Stage 1: open store, resolve branch name (no FS fetch yet)
     repo_path = _require_repo(ctx)
     if no_create:
@@ -335,7 +395,7 @@ def write(ctx, path, branch, message, no_create, tag, force_tag, passthrough):
         store = _open_or_create_store(repo_path, branch=branch or "main")
         branch = branch or _default_branch(store)
 
-    repo_path_norm = _normalize_repo_path(_strip_colon(path))
+    repo_path_norm = _normalize_repo_path(rp.path if rp.is_repo else _strip_colon(path))
 
     # Stage 2: read stdin (may take arbitrarily long — no stale FS held)
     if passthrough:
@@ -374,14 +434,47 @@ def write(ctx, path, branch, message, no_create, tag, force_tag, passthrough):
 
 @main.command()
 @_repo_option
+@click.argument("target", required=False, default=None)
 @click.option("--at", "deprecated_at", default=None, hidden=True)
 @_branch_option
 @_snapshot_options
 @_format_option
 @click.pass_context
-def log(ctx, at_path, deprecated_at, match_pattern, before, branch, ref, back, fmt):
-    """Show commit log, optionally filtered by path and/or message pattern."""
+def log(ctx, target, at_path, deprecated_at, match_pattern, before, branch, ref, back, fmt):
+    """Show commit log, optionally filtered by path and/or message pattern.
+
+    \b
+    An optional TARGET argument supports ref:path syntax:
+        gitstore log main:config.json   →  --ref main --path config.json
+        gitstore log main~3:            →  --ref main --back 3
+        gitstore log ~3:config.json     →  --back 3 --path config.json
+    """
     at_path = at_path or deprecated_at
+
+    # Parse optional positional target
+    if target is not None:
+        rp = _parse_ref_path(target)
+        if rp.is_repo:
+            if rp.ref and ref:
+                raise click.ClickException("Cannot specify both positional ref and --ref")
+            if rp.ref and branch is not None:
+                raise click.ClickException("Cannot use -b/--branch with explicit ref: in target")
+            if rp.back and back:
+                raise click.ClickException("Cannot specify both positional ~N and --back")
+            if rp.path and at_path:
+                raise click.ClickException("Cannot specify both positional path and --path")
+            if rp.ref:
+                ref = rp.ref
+            if rp.back:
+                back = rp.back
+            if rp.path:
+                at_path = rp.path
+        else:
+            # Not a repo path — treat the whole thing as a --path filter
+            if at_path:
+                raise click.ClickException("Cannot specify both positional path and --path")
+            at_path = target
+
     store = _open_store(_require_repo(ctx))
     branch = branch or _default_branch(store)
     fs = _get_fs(store, branch, ref)
@@ -411,12 +504,38 @@ def log(ctx, at_path, deprecated_at, match_pattern, before, branch, ref, back, f
 
 @main.command()
 @_repo_option
+@click.argument("baseline", required=False, default=None)
 @_branch_option
 @_snapshot_options
 @click.option("--reverse", is_flag=True, help="Swap comparison direction.")
 @click.pass_context
-def diff(ctx, branch, ref, at_path, match_pattern, before, back, reverse):
-    """Show files that differ between HEAD and another snapshot."""
+def diff(ctx, baseline, branch, ref, at_path, match_pattern, before, back, reverse):
+    """Show files that differ between HEAD and another snapshot.
+
+    \b
+    An optional BASELINE argument supports ref:path syntax:
+        gitstore diff ~3:     →  --back 3
+        gitstore diff dev:    →  --ref dev
+    """
+    # Parse optional positional baseline
+    if baseline is not None:
+        rp = _parse_ref_path(baseline)
+        if rp.is_repo:
+            if rp.ref and ref:
+                raise click.ClickException("Cannot specify both positional ref and --ref")
+            if rp.ref and branch is not None:
+                raise click.ClickException("Cannot use -b/--branch with explicit ref: in baseline")
+            if rp.back and back:
+                raise click.ClickException("Cannot specify both positional ~N and --back")
+            if rp.path and at_path:
+                raise click.ClickException("Cannot specify both positional path and --path")
+            if rp.ref:
+                ref = rp.ref
+            if rp.back:
+                back = rp.back
+            if rp.path:
+                at_path = rp.path
+
     store = _open_store(_require_repo(ctx))
     branch = branch or _default_branch(store)
     head_fs = _get_fs(store, branch, None)

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from dataclasses import dataclass
 
 import click
 from gitstore import _compat as pygit2
@@ -22,12 +23,84 @@ from ..tree import (
 
 
 # ---------------------------------------------------------------------------
+# RefPath parsing
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class RefPath:
+    """Parsed ``ref:path`` specification.
+
+    * ``ref is None`` → local filesystem path
+    * ``ref == ""``   → current/default branch
+    * ``ref == "xyz"`` → explicit branch/tag/commit
+    """
+    ref: str | None
+    back: int
+    path: str
+
+    @property
+    def is_repo(self) -> bool:
+        return self.ref is not None
+
+
+def _parse_ref_path(raw: str) -> RefPath:
+    """Parse a ``ref:path`` string into a :class:`RefPath`.
+
+    Rules (in order):
+    1. No ``:`` → local path.
+    2. Starts with ``:`` → current branch, ``path = raw[1:]``.
+    3. ``:`` at position > 0:
+       - Single letter before ``:`` AND next char is ``\\`` or ``/`` → local (Windows drive).
+       - ``/`` or ``\\`` anywhere before the ``:`` → local (filesystem path containing ``:``).
+       - Otherwise → parse ref portion for ``~N`` ancestor suffix.
+    """
+    colon = raw.find(":")
+    if colon < 0:
+        # No colon → local
+        return RefPath(ref=None, back=0, path=raw)
+    if colon == 0:
+        # Starts with : → current branch
+        return RefPath(ref="", back=0, path=raw[1:])
+
+    before = raw[:colon]
+    after = raw[colon + 1:]
+
+    # Windows drive letter: single char + next is / or backslash
+    if len(before) == 1 and before.isalpha() and after and after[0] in ("/", "\\"):
+        return RefPath(ref=None, back=0, path=raw)
+
+    # Slash or backslash before colon → local filesystem path
+    if "/" in before or "\\" in before:
+        return RefPath(ref=None, back=0, path=raw)
+
+    # It's a ref:path — parse ~N ancestor suffix
+    ref_part = before
+    back = 0
+    tilde = ref_part.rfind("~")
+    if tilde >= 0:
+        suffix = ref_part[tilde + 1:]
+        if not suffix.isdigit():
+            raise click.ClickException(
+                f"Invalid ancestor suffix '~{suffix}' — must be a positive integer"
+            )
+        n = int(suffix)
+        if n == 0:
+            raise click.ClickException(
+                f"Invalid ancestor '~0' — use '{ref_part[:tilde]}:{after}' instead"
+            )
+        ref_part = ref_part[:tilde]
+        back = n
+
+    return RefPath(ref=ref_part, back=back, path=after)
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 def _strip_colon(raw: str) -> str:
     """Strip an optional leading ':' from a repo-side path."""
-    return raw[1:] if raw.startswith(":") else raw
+    return _parse_ref_path(raw).path
 
 
 def _normalize_repo_path(path: str) -> str:
@@ -312,6 +385,71 @@ def _resolve_ref(store: GitStore, ref_str: str):
     except (ValueError, KeyError):
         pass
     raise click.ClickException(f"Unknown ref: {ref_str}")
+
+
+def _resolve_ref_path(store: GitStore, rp: RefPath, default_ref: str | None, default_branch: str, *,
+                      at_path=None, match_pattern=None, before=None, back=0):
+    """Resolve a :class:`RefPath` to an FS.
+
+    * ``rp.ref == ""`` → use *default_ref* if set, else *default_branch*
+    * ``rp.ref`` non-empty → call :func:`_resolve_ref`
+    * Then walk back ``rp.back`` parents.
+    * Then apply remaining snapshot filters (*at_path*, *match_pattern*, *before*, *back*).
+    """
+    if rp.ref == "":
+        fs = _get_fs(store, default_branch, default_ref)
+    else:
+        fs = _resolve_ref(store, rp.ref)
+    if rp.back:
+        try:
+            fs = fs.back(rp.back)
+        except ValueError as e:
+            raise click.ClickException(str(e))
+    return _apply_snapshot_filters(fs, at_path=at_path, match_pattern=match_pattern,
+                                   before=before, back=back)
+
+
+def _check_ref_conflicts(parsed_paths, *, ref=None, branch=None, back=0,
+                         before=None, at_path=None, match_pattern=None):
+    """Raise if explicit ``ref:path`` conflicts with ``--ref``, ``-b``, or ``--back``."""
+    repo_paths = [rp for rp in parsed_paths if rp and rp.is_repo]
+    explicit_ref_paths = [rp for rp in repo_paths if rp.ref]
+    tilde_paths = [rp for rp in repo_paths if rp.back]
+
+    if explicit_ref_paths:
+        if ref:
+            raise click.ClickException("Cannot use --ref with explicit ref: in path")
+        if branch is not None:
+            raise click.ClickException("Cannot use -b/--branch with explicit ref: in path")
+
+    if tilde_paths and back:
+        raise click.ClickException("Cannot use --back with ~N in path")
+
+    explicit_refs = {rp.ref for rp in explicit_ref_paths}
+    has_filters = back or before or at_path or match_pattern
+    if len(explicit_refs) > 1 and has_filters:
+        raise click.ClickException(
+            "Cannot use snapshot filters with paths targeting different refs"
+        )
+
+
+def _require_writable_ref(store: GitStore, rp: RefPath, default_branch: str) -> tuple:
+    """Resolve a repo dest :class:`RefPath` to ``(FS, branch_name)``.
+
+    Ensures the ref is a branch (not tag/hash) and ``back == 0``.
+    """
+    if rp.back:
+        raise click.ClickException("Cannot write to a historical commit (remove ~N from destination)")
+    if rp.ref == "":
+        branch = default_branch
+    elif rp.ref in store.branches:
+        branch = rp.ref
+    else:
+        if rp.ref in store.tags:
+            raise click.ClickException(f"Cannot write to tag '{rp.ref}' — use a branch")
+        raise click.ClickException(f"Branch not found: {rp.ref}")
+    fs = _get_branch_fs(store, branch)
+    return fs, branch
 
 
 def _log_entry_dict(entry) -> dict:

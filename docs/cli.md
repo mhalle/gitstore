@@ -640,4 +640,4 @@ The `--gitignore` flag (sync only) automatically reads `.gitignore` files from t
 
 ---
 
-See also: [Python API Reference](api.md) | [README](../README.md)
+See also: [Path Syntax](paths.md) | [Python API Reference](api.md) | [README](../README.md)
