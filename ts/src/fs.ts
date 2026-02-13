@@ -515,9 +515,7 @@ export class FS {
   ): Promise<FS> {
     const normalized = normalizePath(path);
     const mode = opts?.mode
-      ? typeof opts.mode === 'string' && opts.mode.length < 6
-        ? fileModeFromType(opts.mode as FileType)
-        : (opts.mode as string)
+      ? resolveMode(opts.mode)
       : MODE_BLOB;
     const writes = new Map<string, TreeWrite>([[normalized, { data, mode }]]);
     return this._commitChanges(writes, new Set(), opts?.message);
@@ -540,9 +538,7 @@ export class FS {
     const normalized = normalizePath(path);
     const detectedMode = await modeFromDisk(this._fsModule, localPath);
     const mode = opts?.mode
-      ? typeof opts.mode === 'string' && opts.mode.length < 6
-        ? fileModeFromType(opts.mode as FileType)
-        : (opts.mode as string)
+      ? resolveMode(opts.mode)
       : detectedMode;
     const data = (await this._fsModule.promises.readFile(localPath)) as Uint8Array;
     const blobOid = await git.writeBlob({ fs: this._fsModule, gitdir: this._gitdir, blob: data });
@@ -596,9 +592,7 @@ export class FS {
             ? new TextEncoder().encode(entry.data)
             : entry.data;
         const mode = entry.mode
-          ? typeof entry.mode === 'string' && entry.mode.length < 6
-            ? fileModeFromType(entry.mode as FileType)
-            : (entry.mode as string)
+          ? resolveMode(entry.mode)
           : MODE_BLOB;
         internalWrites.set(normalized, { data, mode });
       }
@@ -945,6 +939,16 @@ export class FS {
 // ---------------------------------------------------------------------------
 
 import { modeFromDisk } from './tree.js';
+
+/**
+ * Resolve a mode that may be a FileType name ('blob', 'executable', 'link')
+ * or a git mode string ('100644', '100755', '120000').
+ */
+function resolveMode(mode: FileType | string): string {
+  // Git mode strings are 6-digit octal like '100644'
+  if (typeof mode === 'string' && /^\d{6}$/.test(mode)) return mode;
+  return fileModeFromType(mode as FileType);
+}
 
 /**
  * Write data to a branch with automatic retry on concurrent modification.

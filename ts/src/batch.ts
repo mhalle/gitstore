@@ -9,6 +9,7 @@ import {
   MODE_TREE,
   FileNotFoundError,
   IsADirectoryError,
+  PermissionError,
   type FsModule,
 } from './types.js';
 import { normalizePath } from './paths.js';
@@ -37,7 +38,7 @@ export class Batch {
 
   constructor(fs: FS, message?: string | null, operation?: string | null) {
     if (!fs._writable) {
-      throw new Error('Cannot batch on a read-only snapshot');
+      throw new PermissionError('Cannot batch on a read-only snapshot');
     }
     this._fs = fs;
     this._store = fs._store;

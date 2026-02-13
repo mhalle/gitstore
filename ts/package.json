@@ -13,14 +13,17 @@
   },
   "scripts": {
     "build": "tsc",
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "isomorphic-git": "^1.27.0"
   },
   "devDependencies": {
     "typescript": "^5.5.0",
-    "@types/node": "^22.0.0"
+    "@types/node": "^22.0.0",
+    "vitest": "^3.0.0"
   },
   "engines": {
     "node": ">=18.0.0"
