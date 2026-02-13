@@ -149,6 +149,112 @@ class TestExport:
         assert os.readlink(out / "link.txt") == "target.txt"
 
 
+class TestType:
+    def test_type_blob(self, repo_with_files):
+        _, fs = repo_with_files
+        from gitstore import FileType
+        assert fs.type("hello.txt") == FileType.BLOB
+
+    def test_type_tree(self, repo_with_files):
+        _, fs = repo_with_files
+        from gitstore import FileType
+        assert fs.type("src") == FileType.TREE
+
+    def test_type_nested(self, repo_with_files):
+        _, fs = repo_with_files
+        from gitstore import FileType
+        assert fs.type("src/main.py") == FileType.BLOB
+
+    def test_type_executable(self, tmp_path):
+        from gitstore import FileType
+        repo = GitStore.open(tmp_path / "test.git")
+        fs = repo.branches["main"]
+        fs = fs.write("run.sh", b"#!/bin/sh\n", mode=FileType.EXECUTABLE)
+        assert fs.type("run.sh") == FileType.EXECUTABLE
+
+    def test_type_symlink(self, tmp_path):
+        from gitstore import FileType
+        repo = GitStore.open(tmp_path / "test.git")
+        fs = repo.branches["main"]
+        fs = fs.write("target.txt", b"content")
+        fs = fs.write_symlink("link.txt", "target.txt")
+        assert fs.type("link.txt") == FileType.LINK
+
+    def test_type_missing(self, repo_with_files):
+        _, fs = repo_with_files
+        with pytest.raises(FileNotFoundError):
+            fs.type("nope.txt")
+
+    def test_type_pathlike(self, repo_with_files):
+        _, fs = repo_with_files
+        from gitstore import FileType
+        assert fs.type(PurePosixPath("src/main.py")) == FileType.BLOB
+
+
+class TestSize:
+    def test_size_file(self, repo_with_files):
+        _, fs = repo_with_files
+        assert fs.size("hello.txt") == len(b"Hello!")
+
+    def test_size_nested(self, repo_with_files):
+        _, fs = repo_with_files
+        assert fs.size("src/main.py") == len(b"print('hi')")
+
+    def test_size_missing(self, repo_with_files):
+        _, fs = repo_with_files
+        with pytest.raises(FileNotFoundError):
+            fs.size("nope.txt")
+
+    def test_size_matches_read(self, repo_with_files):
+        _, fs = repo_with_files
+        assert fs.size("hello.txt") == len(fs.read("hello.txt"))
+
+    def test_size_pathlike(self, repo_with_files):
+        _, fs = repo_with_files
+        assert fs.size(PurePosixPath("hello.txt")) == len(b"Hello!")
+
+
+class TestHash:
+    def test_hash_is_hex(self, repo_with_files):
+        _, fs = repo_with_files
+        h = fs.hash("hello.txt")
+        assert isinstance(h, str)
+        assert len(h) == 40
+        int(h, 16)  # valid hex
+
+    def test_hash_same_content(self, tmp_path):
+        """Same content in different paths produces the same blob hash."""
+        repo = GitStore.open(tmp_path / "test.git")
+        fs = repo.branches["main"]
+        fs = fs.write("a.txt", b"same")
+        fs = fs.write("b.txt", b"same")
+        assert fs.hash("a.txt") == fs.hash("b.txt")
+
+    def test_hash_different_content(self, repo_with_files):
+        _, fs = repo_with_files
+        assert fs.hash("hello.txt") != fs.hash("src/main.py")
+
+    def test_hash_tree(self, repo_with_files):
+        _, fs = repo_with_files
+        h = fs.hash("src")
+        assert isinstance(h, str)
+        assert len(h) == 40
+
+    def test_hash_missing(self, repo_with_files):
+        _, fs = repo_with_files
+        with pytest.raises(FileNotFoundError):
+            fs.hash("nope.txt")
+
+    def test_hash_stable(self, repo_with_files):
+        """Hash doesn't change across reads."""
+        _, fs = repo_with_files
+        assert fs.hash("hello.txt") == fs.hash("hello.txt")
+
+    def test_hash_pathlike(self, repo_with_files):
+        _, fs = repo_with_files
+        assert fs.hash(PurePosixPath("hello.txt")) == fs.hash("hello.txt")
+
+
 class TestPathLikeSupport:
     def test_read_with_path(self, repo_with_files):
         _, fs = repo_with_files

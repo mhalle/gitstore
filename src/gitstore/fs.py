@@ -128,6 +128,50 @@ class FS:
             return False
         return entry[1] == GIT_FILEMODE_TREE
 
+    def type(self, path: str | os.PathLike[str]) -> FileType:
+        """Return the :class:`FileType` of *path*.
+
+        Returns ``FileType.BLOB``, ``FileType.EXECUTABLE``,
+        ``FileType.LINK``, or ``FileType.TREE``.
+
+        Raises :exc:`FileNotFoundError` if the path does not exist.
+        """
+        from .copy._types import FileType
+        path = _normalize_path(path)
+        entry = _entry_at_path(self._store._repo, self._tree_oid, path)
+        if entry is None:
+            raise FileNotFoundError(path)
+        return FileType.from_filemode(entry[1])
+
+    def size(self, path: str | os.PathLike[str]) -> int:
+        """Return the size in bytes of the object at *path*.
+
+        Works without reading the full blob into memory.
+
+        Raises :exc:`FileNotFoundError` if the path does not exist.
+        """
+        path = _normalize_path(path)
+        entry = _entry_at_path(self._store._repo, self._tree_oid, path)
+        if entry is None:
+            raise FileNotFoundError(path)
+        oid, _filemode = entry
+        from ._objsize import ObjectSizer
+        with ObjectSizer(self._store._repo.object_store) as sizer:
+            return sizer.size(oid.raw)
+
+    def hash(self, path: str | os.PathLike[str]) -> str:
+        """Return the 40-character hex SHA of the object at *path*.
+
+        For files this is the blob SHA; for directories the tree SHA.
+
+        Raises :exc:`FileNotFoundError` if the path does not exist.
+        """
+        path = _normalize_path(path)
+        entry = _entry_at_path(self._store._repo, self._tree_oid, path)
+        if entry is None:
+            raise FileNotFoundError(path)
+        return str(entry[0])
+
     def iglob(self, pattern: str) -> Iterator[str]:
         """Expand a glob pattern against the repo tree, yielding unique matches.
 
