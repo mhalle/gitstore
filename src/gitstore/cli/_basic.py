@@ -1,4 +1,4 @@
-"""Basic commands: init, destroy, gc, ls, cat, rm, mv, write, log, diff, undo, redo, reflog."""
+"""Basic commands: init, destroy, gc, ls, cat, rm, mv, write, log, diff, cmp, undo, redo, reflog."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import io
 import json
 import os
 import sys
+from pathlib import Path as _Path
 
 import click
 
@@ -791,6 +792,97 @@ def diff(ctx, baseline, branch, ref, at_path, match_pattern, before, back, rever
             click.echo(f"M  {p}")
     for p in sorted(set(old_files) - set(new_files)):
         click.echo(f"D  {p}")
+
+
+# ---------------------------------------------------------------------------
+# cmp
+# ---------------------------------------------------------------------------
+
+def _get_blob_hash(store, rp, fs):
+    """Return 40-char hex blob hash for a RefPath target."""
+    if rp.is_repo:
+        path = _normalize_repo_path(rp.path)
+        try:
+            return fs.object_hash(path)
+        except FileNotFoundError:
+            raise click.ClickException(f"File not found: {path}")
+        except IsADirectoryError:
+            raise click.ClickException(f"Is a directory: {path}")
+    else:
+        local = _Path(rp.path)
+        if not local.exists():
+            raise click.ClickException(f"File not found: {rp.path}")
+        if local.is_dir():
+            raise click.ClickException(f"Is a directory: {rp.path}")
+        from ..copy._io import _local_file_oid_abs
+        return _local_file_oid_abs(local).decode("ascii")
+
+
+@main.command()
+@_repo_option
+@click.argument("file1", required=True)
+@click.argument("file2", required=True)
+@_branch_option
+@_snapshot_options
+@click.pass_context
+def cmp(ctx, file1, file2, branch, ref, at_path, match_pattern, before, back):
+    """Compare two files by content hash.
+
+    Compares the git blob SHA of two files. Files can be repo paths
+    (with : prefix or ref:path syntax), local disk paths, or a mix.
+
+    \b
+    Exit codes:
+        0  files are identical
+        1  files differ
+
+    \b
+    Examples:
+        gitstore cmp :file1.txt :file2.txt           # two repo files
+        gitstore cmp main:f.txt dev:f.txt             # cross-branch
+        gitstore cmp main~3:f.txt main:f.txt          # ancestor
+        gitstore cmp :data.bin /tmp/data.bin           # repo vs disk
+        gitstore cmp /tmp/a.txt /tmp/b.txt             # two disk files
+    """
+    rp1 = _parse_ref_path(file1)
+    rp2 = _parse_ref_path(file2)
+
+    # Collect repo-typed args and check for conflicts with flags
+    repo_rps = [rp for rp in (rp1, rp2) if rp.is_repo]
+    if repo_rps:
+        _check_ref_conflicts(repo_rps, ref=ref, branch=branch, back=back,
+                             before=before, at_path=at_path, match_pattern=match_pattern)
+
+    # Only open store if at least one arg is a repo path
+    store = None
+    default_fs = None
+    if repo_rps:
+        store = _open_store(_require_repo(ctx))
+        branch = branch or _default_branch(store)
+        default_fs = _resolve_fs(store, branch, ref, at_path=at_path,
+                                 match_pattern=match_pattern, before=before, back=back)
+
+    # Resolve FS for each arg
+    def _resolve_arg_fs(rp):
+        if not rp.is_repo:
+            return None  # local file, no FS needed
+        if rp.ref or rp.back:
+            return _resolve_ref_path(store, rp, ref, branch,
+                                     at_path=at_path, match_pattern=match_pattern,
+                                     before=before, back=back)
+        return default_fs
+
+    fs1 = _resolve_arg_fs(rp1)
+    fs2 = _resolve_arg_fs(rp2)
+
+    hash1 = _get_blob_hash(store, rp1, fs1)
+    hash2 = _get_blob_hash(store, rp2, fs2)
+
+    if ctx.obj.get("verbose"):
+        click.echo(f"{hash1}  {file1}", err=True)
+        click.echo(f"{hash2}  {file2}", err=True)
+
+    ctx.exit(0 if hash1 == hash2 else 1)
 
 
 # ---------------------------------------------------------------------------
