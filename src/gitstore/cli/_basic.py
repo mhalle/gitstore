@@ -237,9 +237,10 @@ def _format_ls_output(results, long, fmt, object_store):
 @click.option("-R", "--recursive", is_flag=True, help="List all files recursively with full paths.")
 @click.option("-l", "--long", "long_", is_flag=True, help="Show file sizes, types, and modes.")
 @_format_option
+@_no_glob_option
 @_snapshot_options
 @click.pass_context
-def ls(ctx, paths, branch, recursive, long_, fmt, ref, at_path, match_pattern, before, back):
+def ls(ctx, paths, branch, recursive, long_, fmt, no_glob, ref, at_path, match_pattern, before, back):
     """List files/directories at PATH(s) (or root).
 
     Accepts multiple paths and glob patterns.  Results are coalesced and
@@ -292,7 +293,7 @@ def ls(ctx, paths, branch, recursive, long_, fmt, ref, at_path, match_pattern, b
             fs = default_fs
             repo_path = None
 
-        has_glob = repo_path is not None and ("*" in repo_path or "?" in repo_path)
+        has_glob = not no_glob and repo_path is not None and ("*" in repo_path or "?" in repo_path)
 
         if has_glob:
             pattern = repo_path

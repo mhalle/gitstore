@@ -4,6 +4,12 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.51.2 (2026-02-12)
+
+**New features:**
+
+- Add `--no-glob` flag to `ls` CLI command
+
 ## v0.51.1 (2026-02-12)
 
 **New features:**
