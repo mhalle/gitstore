@@ -30,11 +30,9 @@ def _run_sync_cycle(store, branch, local_path, repo_dest, *,
                     message, ignore_errors, checksum,
                     exclude: ExcludeFilter | None = None):
     """Run one sync-to-repo cycle with a fresh FS."""
-    from ..copy import sync_to_repo
-
     fs = store.branches[branch]
-    new_fs = sync_to_repo(
-        fs, local_path, repo_dest,
+    new_fs = fs.sync_in(
+        local_path, repo_dest,
         message=message, ignore_errors=ignore_errors,
         checksum=checksum, exclude=exclude,
     )

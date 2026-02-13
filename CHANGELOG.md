@@ -4,6 +4,27 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.51.0 (2026-02-12)
+
+**Breaking changes:**
+
+- Replace 12 standalone copy/sync/remove/move functions with 6 FS methods:
+  - `copy_to_repo()` / `copy_to_repo_dry_run()` → `fs.copy_in(..., dry_run=False)`
+  - `copy_from_repo()` / `copy_from_repo_dry_run()` → `fs.copy_out(..., dry_run=False)`
+  - `sync_to_repo()` / `sync_to_repo_dry_run()` → `fs.sync_in(..., dry_run=False)`
+  - `sync_from_repo()` / `sync_from_repo_dry_run()` → `fs.sync_out(..., dry_run=False)`
+  - `remove_in_repo()` / `remove_in_repo_dry_run()` → `fs.remove(..., dry_run=False)`
+  - `move_in_repo()` / `move_in_repo_dry_run()` → `fs.move(..., dry_run=False)`
+- All methods return `FS` with `.changes` set (dry-run variants previously returned `ChangeReport | None`)
+- `fs.remove()` now accepts glob patterns, `recursive`, and `dry_run` (replaces the old single-file-only `fs.remove(path)`)
+- `fs.export_tree()` renamed to `fs.export()`
+- Standalone functions removed from `gitstore` and `gitstore.copy` public exports
+
+**New features:**
+
+- Add `glob` parameter (`bool`, default `True`) to `copy_in`, `copy_out`, `remove`, and `move` — when `False`, source paths are treated as literal (no `*`/`?` expansion)
+- `copy_in`, `copy_out`, `remove`, and `move` now accept `str | list[str]` for sources (bare string auto-wrapped)
+
 ## v0.50.1 (2026-02-12)
 
 **Bug fixes:**

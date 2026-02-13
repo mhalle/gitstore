@@ -3,8 +3,14 @@
 Supports files, directories, trailing-slash "contents" mode, and glob
 patterns (``*``, ``?``) with dotfile-aware matching.
 
-Sync operations (``sync_to_repo``, ``sync_from_repo``) make a repo path
-identical to a local directory or vice versa, including deletes.
+Operations are available as methods on ``FS``:
+
+- ``fs.copy_in()``  — disk → repo
+- ``fs.copy_out()`` — repo → disk
+- ``fs.sync_in()``  — disk → repo (with delete)
+- ``fs.sync_out()`` — repo → disk (with delete)
+- ``fs.remove()``   — remove from repo
+- ``fs.move()``     — move within repo
 """
 
 from .._exclude import ExcludeFilter
@@ -37,33 +43,9 @@ from ._io import (
     _filter_tree_conflicts,
     _prune_empty_dirs,
 )
-from ._ops import (
-    copy_to_repo,
-    copy_from_repo,
-    copy_to_repo_dry_run,
-    copy_from_repo_dry_run,
-    remove_in_repo,
-    remove_in_repo_dry_run,
-    move_in_repo,
-    move_in_repo_dry_run,
-    sync_to_repo,
-    sync_from_repo,
-    sync_to_repo_dry_run,
-    sync_from_repo_dry_run,
-    _ensure_trailing_slash,
-    _sync_delete_all_in_repo,
-    _sync_delete_all_local,
-)
 
 __all__ = [
     # Public types
     "ChangeAction", "ChangeError", "ChangeReport", "ExcludeFilter",
     "FileEntry", "FileType",
-    # Public functions
-    "copy_to_repo", "copy_from_repo",
-    "copy_to_repo_dry_run", "copy_from_repo_dry_run",
-    "remove_in_repo", "remove_in_repo_dry_run",
-    "move_in_repo", "move_in_repo_dry_run",
-    "sync_to_repo", "sync_from_repo",
-    "sync_to_repo_dry_run", "sync_from_repo_dry_run",
 ]

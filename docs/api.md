@@ -2,11 +2,6 @@
 
 ```python
 from gitstore import GitStore, FS, StaleSnapshotError, retry_write
-from gitstore import copy_to_repo, copy_from_repo, sync_to_repo, sync_from_repo
-from gitstore import copy_to_repo_dry_run, copy_from_repo_dry_run
-from gitstore import sync_to_repo_dry_run, sync_from_repo_dry_run
-from gitstore import remove_in_repo, remove_in_repo_dry_run
-from gitstore import move_in_repo, move_in_repo_dry_run
 from gitstore import ChangeReport, ChangeAction, ChangeError, FileEntry, FileType
 from gitstore import MirrorDiff, RefChange, ReflogEntry, WalkEntry
 ```
@@ -177,9 +172,9 @@ Write from a file on disk. Auto-detects executable permission unless *mode* is s
 
 Create a symbolic link.
 
-### fs.remove(path, *, message=None) -> FS
+### fs.remove(sources, *, recursive=False, dry_run=False, glob=True, message=None) -> FS
 
-Remove a file. Raises `FileNotFoundError`, `IsADirectoryError`.
+Remove files matching *sources* (string or list of strings) from the repo. With `recursive=True`, directories are removed recursively. With `dry_run=True`, no changes are written; the result FS has `.changes` set. Raises `FileNotFoundError` if no matches.
 
 ---
 
@@ -252,31 +247,33 @@ Undo creates one reflog entry. To redo `undo(N)`, use `redo(1)`.
 
 ## Export
 
-### fs.export_tree(path) -> None
+### fs.export(path) -> None
 
 Write the entire tree to a directory on disk. Symlinks are recreated, executables get `0o755` permissions.
 
 ---
 
-## Copy and Sync
+## Copy, Sync, and Move
 
-Copy files between local disk and a gitstore repo. Supports files, directories, trailing-slash contents mode, glob patterns, and `/./` pivot markers.
+Copy files between local disk and a gitstore repo, sync directories, and move/rename within the repo. Supports files, directories, trailing-slash contents mode, glob patterns, and `/./` pivot markers.
 
-### copy_to_repo
+### fs.copy_in (disk -> repo)
 
 ```python
-copy_to_repo(fs, sources, dest, *, follow_symlinks=False, message=None,
-             mode=None, ignore_existing=False, delete=False,
-             ignore_errors=False, checksum=True,
-             exclude=None) -> FS
+fs.copy_in(sources, dest, *, dry_run=False, glob=True,
+           follow_symlinks=False, message=None, mode=None,
+           ignore_existing=False, delete=False, ignore_errors=False,
+           checksum=True, exclude=None) -> FS
 ```
 
-Copy local files/dirs/globs into the repo. Returns new FS with changes on `fs.changes`.
+Copy local files/dirs/globs into the repo. Returns new FS with `.changes` set.
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `sources` | `list[str]` | Local paths. Trailing `/` = contents. `/./` = pivot. |
+| `sources` | `str \| list[str]` | Local paths. Trailing `/` = contents. `/./` = pivot. |
 | `dest` | `str` | Repo destination (empty string for root). |
+| `dry_run` | `bool` | Preview only; no changes written. Result FS has `.changes` set. |
+| `glob` | `bool` | Expand glob patterns in sources (default `True`). |
 | `follow_symlinks` | `bool` | Dereference symlinks. |
 | `message` | `str \| None` | Commit message (supports [placeholders](#commit-messages)). |
 | `mode` | `int \| None` | Override file mode for all files. |
@@ -286,91 +283,80 @@ Copy local files/dirs/globs into the repo. Returns new FS with changes on `fs.ch
 | `checksum` | `bool` | Compare files by content hash (default `True`). |
 | `exclude` | `ExcludeFilter \| None` | Exclude filter (gitignore-style patterns). |
 
-### copy_to_repo_dry_run
+### fs.copy_out (repo -> disk)
 
 ```python
-copy_to_repo_dry_run(fs, sources, dest, *, follow_symlinks=False,
-                     ignore_existing=False, delete=False,
-                     checksum=True, exclude=None) -> ChangeReport | None
+fs.copy_out(sources, dest, *, dry_run=False, glob=True,
+            ignore_existing=False, delete=False, ignore_errors=False,
+            checksum=True) -> FS
 ```
 
-### copy_from_repo
+Copy repo files/dirs/globs to local disk. Returns FS with `.changes` set.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `sources` | `str \| list[str]` | Repo paths. Trailing `/` = contents. `/./` = pivot. |
+| `dest` | `str` | Local destination directory. |
+| `dry_run` | `bool` | Preview only; no changes written. Result FS has `.changes` set. |
+| `glob` | `bool` | Expand glob patterns in sources (default `True`). |
+| `ignore_existing` | `bool` | Skip existing files. |
+| `delete` | `bool` | Remove local files not in source. |
+| `ignore_errors` | `bool` | Collect errors instead of aborting. |
+| `checksum` | `bool` | Compare files by content hash (default `True`). |
+
+### fs.sync_in (disk -> repo)
 
 ```python
-copy_from_repo(fs, sources, dest, *, ignore_existing=False,
-               delete=False, ignore_errors=False,
-               checksum=True) -> ChangeReport | None
+fs.sync_in(local_path, repo_path, *, dry_run=False, message=None,
+           ignore_errors=False, checksum=True, exclude=None) -> FS
 ```
 
-Copy repo files/dirs/globs to local disk.
+Make *repo_path* identical to *local_path* (includes deletes). Returns new FS with `.changes` set.
 
-### copy_from_repo_dry_run
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `local_path` | `str` | Local directory to sync from. |
+| `repo_path` | `str` | Repo directory to sync to. |
+| `dry_run` | `bool` | Preview only; no changes written. Result FS has `.changes` set. |
+| `message` | `str \| None` | Commit message (supports [placeholders](#commit-messages)). |
+| `ignore_errors` | `bool` | Collect errors instead of aborting. |
+| `checksum` | `bool` | Compare files by content hash (default `True`). |
+| `exclude` | `ExcludeFilter \| None` | Exclude filter (gitignore-style patterns). |
+
+### fs.sync_out (repo -> disk)
 
 ```python
-copy_from_repo_dry_run(fs, sources, dest, *, ignore_existing=False,
-                       delete=False, checksum=True) -> ChangeReport | None
+fs.sync_out(repo_path, local_path, *, dry_run=False,
+            ignore_errors=False, checksum=True) -> FS
 ```
 
-### remove_in_repo
+Make *local_path* identical to *repo_path* (includes deletes). Returns FS with `.changes` set.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `repo_path` | `str` | Repo directory to sync from. |
+| `local_path` | `str` | Local directory to sync to. |
+| `dry_run` | `bool` | Preview only; no changes written. Result FS has `.changes` set. |
+| `ignore_errors` | `bool` | Collect errors instead of aborting. |
+| `checksum` | `bool` | Compare files by content hash (default `True`). |
+
+### fs.move (within repo)
 
 ```python
-remove_in_repo(fs, sources, *, recursive=False, message=None) -> FS
+fs.move(sources, dest, *, recursive=False, dry_run=False, glob=True,
+        message=None) -> FS
 ```
 
-Remove files matching *sources* from the repo. Sources support globs, directories, and `/./` pivots. With `recursive=True`, directories are removed recursively; without it, matching a directory raises `IsADirectoryError`. The changes are available via `fs.changes`.
+Move/rename files within the repo. All *sources* and *dest* are repo paths. Directories require `recursive=True`. The operation is atomic -- writes and deletes happen in a single commit. Returns new FS with `.changes` set.
 
-### remove_in_repo_dry_run
-
-```python
-remove_in_repo_dry_run(fs, sources, *, recursive=False) -> ChangeReport | None
-```
-
-### move_in_repo
-
-```python
-move_in_repo(fs, sources, dest, *, recursive=False, message=None) -> FS
-```
-
-Move/rename files within the repo. All *sources* and *dest* are repo paths. Directories require `recursive=True`. The operation is atomic -- writes and deletes happen in a single commit. The changes are available via `fs.changes`.
-
-### move_in_repo_dry_run
-
-```python
-move_in_repo_dry_run(fs, sources, dest, *, recursive=False) -> ChangeReport | None
-```
-
-### sync_to_repo
-
-```python
-sync_to_repo(fs, local_path, repo_path, *, message=None,
-             ignore_errors=False, checksum=True,
-             exclude=None) -> FS
-```
-
-Make *repo_path* identical to *local_path* (includes deletes).
-
-### sync_to_repo_dry_run
-
-```python
-sync_to_repo_dry_run(fs, local_path, repo_path, *, checksum=True,
-                     exclude=None) -> ChangeReport | None
-```
-
-### sync_from_repo
-
-```python
-sync_from_repo(fs, repo_path, local_path, *,
-               ignore_errors=False, checksum=True) -> ChangeReport | None
-```
-
-Make *local_path* identical to *repo_path* (includes deletes).
-
-### sync_from_repo_dry_run
-
-```python
-sync_from_repo_dry_run(fs, repo_path, local_path, *,
-                       checksum=True) -> ChangeReport | None
-```
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `sources` | `str \| list[str]` | Repo paths to move. |
+| `dest` | `str` | Repo destination path. |
+| `recursive` | `bool` | Allow moving directories. |
+| `dry_run` | `bool` | Preview only; no changes written. Result FS has `.changes` set. |
+| `glob` | `bool` | Expand glob patterns in sources (default `True`). |
+| `message` | `str \| None` | Commit message (supports [placeholders](#commit-messages)). |
 
 ### Source path modes
 
@@ -388,10 +374,10 @@ An embedded `/./` in a source path (rsync `-R` style) controls which part of the
 
 ```python
 # /home/user/./projects/app -> dest/projects/app/...
-copy_to_repo(fs, ["/home/user/./projects/app"], "dest")
+fs.copy_in(["/home/user/./projects/app"], "dest")
 
 # /home/user/./projects/app/ -> dest/projects/...  (contents mode)
-copy_to_repo(fs, ["/home/user/./projects/app/"], "dest")
+fs.copy_in(["/home/user/./projects/app/"], "dest")
 ```
 
 A leading `./` (e.g. `./mydir`) is a normal relative path and does **not** trigger pivot mode.

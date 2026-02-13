@@ -1,4 +1,4 @@
-"""Public copy/sync operations."""
+"""Copy/sync/remove/move operations (internal implementations)."""
 
 from __future__ import annotations
 
@@ -110,7 +110,7 @@ def _apply_plan(
 ) -> FS:
     """Execute a batch of writes and deletes, attach *changes* to the result.
 
-    Shared by ``copy_to_repo`` and ``remove_in_repo``.
+    Shared by ``_copy_in`` and ``_remove``.
     """
     if not write_pairs and not delete_paths:
         if ignore_errors and changes.errors:
@@ -140,14 +140,16 @@ def _apply_plan(
 
 
 # ---------------------------------------------------------------------------
-# Public API: Copy
+# Copy: disk → repo
 # ---------------------------------------------------------------------------
 
-def copy_to_repo(
+def _copy_in(
     fs: FS,
-    sources: list[str],
+    sources: str | list[str],
     dest: str,
     *,
+    dry_run: bool = False,
+    glob: bool = True,
     follow_symlinks: bool = False,
     message: str | None = None,
     mode: int | None = None,
@@ -158,23 +160,31 @@ def copy_to_repo(
     exclude: ExcludeFilter | None = None,
     operation: str = "cp",
 ) -> FS:
-    """Copy local files/dirs/globs into the repo. Returns new ``FS``.
+    """Copy local files/dirs/globs into the repo. Returns ``FS``.
+
+    With ``dry_run=True``, no changes are written; the input *fs* is
+    returned with ``.changes`` set.
 
     With ``delete=True``, files under *dest* that are not covered by
     *sources* are removed (rsync ``--delete`` semantics).
 
-    When *ignore_errors* is ``True``, per-file errors are collected instead
-    of aborting. If **all** files fail, a ``RuntimeError`` is raised.
-
     The changes are available via ``fs.changes``.
     """
+    if isinstance(sources, str):
+        sources = [sources]
+    if dry_run:
+        return _copy_in_dry(fs, sources, dest, glob=glob,
+                            follow_symlinks=follow_symlinks,
+                            ignore_existing=ignore_existing, delete=delete,
+                            checksum=checksum, exclude=exclude)
+
     changes = ChangeReport()
 
     if ignore_errors:
         resolved: list[tuple[str, str, str]] = []
         for src in sources:
             try:
-                resolved.extend(_resolve_disk_sources([src]))
+                resolved.extend(_resolve_disk_sources([src], glob=glob))
             except (FileNotFoundError, NotADirectoryError) as exc:
                 changes.errors.append(ChangeError(path=src, error=str(exc)))
         if not resolved:
@@ -183,7 +193,7 @@ def copy_to_repo(
             fs._changes = _finalize_changes(changes)
             return fs
     else:
-        resolved = _resolve_disk_sources(sources)
+        resolved = _resolve_disk_sources(sources, glob=glob)
 
     pairs = _enum_disk_to_repo(resolved, dest, follow_symlinks=follow_symlinks,
                                exclude=exclude)
@@ -308,26 +318,135 @@ def copy_to_repo(
                            ignore_errors=ignore_errors)
 
 
-def copy_from_repo(
+def _copy_in_dry(
     fs: FS,
     sources: list[str],
     dest: str,
     *,
+    glob: bool = True,
+    follow_symlinks: bool = False,
+    ignore_existing: bool = False,
+    delete: bool = False,
+    checksum: bool = True,
+    exclude: ExcludeFilter | None = None,
+) -> FS:
+    """Dry-run for _copy_in. Returns input *fs* with ``.changes`` set."""
+    resolved = _resolve_disk_sources(sources, glob=glob)
+    pairs = _enum_disk_to_repo(resolved, dest, follow_symlinks=follow_symlinks,
+                               exclude=exclude)
+
+    if delete:
+        changes = ChangeReport()
+        pair_map: dict[str, str] = {}
+        for local_path, repo_path in pairs:
+            if dest and repo_path.startswith(dest + "/"):
+                rel = repo_path[len(dest) + 1:]
+            else:
+                rel = repo_path
+            if rel in pair_map:
+                changes.warnings.append(ChangeError(
+                    path=local_path,
+                    error=f"Overlapping destination '{rel}': skipping (kept earlier source)",
+                ))
+            else:
+                pair_map[rel] = local_path
+
+        repo_files = _walk_repo(fs, dest)
+        local_rels = set(pair_map.keys())
+        repo_rels = set(repo_files.keys())
+
+        add = sorted(local_rels - repo_rels)
+        delete_list = sorted(repo_rels - local_rels)
+        both = sorted(local_rels & repo_rels)
+
+        if not checksum:
+            commit_ts = fs._store._repo[fs._commit_oid].commit_time
+
+        update: list[str] = []
+        for rel in both:
+            repo_oid, repo_mode = repo_files[rel]
+            local_path = Path(pair_map[rel])
+
+            if not checksum:
+                try:
+                    if not follow_symlinks and local_path.is_symlink():
+                        pass  # fall through to hash
+                    elif int(local_path.stat().st_mtime) <= commit_ts:
+                        continue  # assume unchanged
+                except OSError:
+                    pass  # fall through to hash on stat failure
+
+            if _local_file_oid_abs(local_path, follow_symlinks=follow_symlinks) != repo_oid:
+                update.append(rel)
+            elif repo_mode != GIT_FILEMODE_LINK and _mode_from_disk(pair_map[rel]) != repo_mode:
+                update.append(rel)
+
+        if ignore_existing:
+            update = []
+
+        # Convert to FileEntry lists
+        changes.add = _make_entries_from_disk(add, pair_map, follow_symlinks)
+        changes.update = _make_entries_from_disk(update, pair_map, follow_symlinks)
+        changes.delete = _make_entries_from_repo(fs, delete_list, dest)
+        fs._changes = _finalize_changes(changes)
+        return fs
+    else:
+        # Non-delete mode: classify by existence only
+        add: list[str] = []
+        update: list[str] = []
+        pair_map: dict[str, str] = {}
+        for local_path, repo_path in pairs:
+            if dest and repo_path.startswith(dest + "/"):
+                rel = repo_path[len(dest) + 1:]
+            else:
+                rel = repo_path
+            pair_map[rel] = local_path
+            if fs.exists(repo_path):
+                update.append(rel)
+            else:
+                add.append(rel)
+
+        if ignore_existing:
+            update = []
+
+        # Convert to FileEntry lists
+        add_entries = _make_entries_from_disk(sorted(add), pair_map, follow_symlinks)
+        update_entries = _make_entries_from_disk(sorted(update), pair_map, follow_symlinks)
+        fs._changes = _finalize_changes(ChangeReport(add=add_entries, update=update_entries))
+        return fs
+
+
+# ---------------------------------------------------------------------------
+# Copy: repo → disk
+# ---------------------------------------------------------------------------
+
+def _copy_out(
+    fs: FS,
+    sources: str | list[str],
+    dest: str,
+    *,
+    dry_run: bool = False,
+    glob: bool = True,
     ignore_existing: bool = False,
     delete: bool = False,
     ignore_errors: bool = False,
     checksum: bool = True,
-) -> ChangeReport | None:
-    """Copy repo files/dirs/globs to local disk. Returns a ``ChangeReport`` or ``None``.
+) -> FS:
+    """Copy repo files/dirs/globs to local disk. Returns ``FS`` with ``.changes`` set.
+
+    With ``dry_run=True``, no changes are written; the input *fs* is
+    returned with ``.changes`` set.
 
     With ``delete=True``, local files under *dest* that are not covered
     by *sources* are removed (rsync ``--delete`` semantics).
-
-    When *ignore_errors* is ``True``, per-file errors are collected instead
-    of aborting. If **all** files fail, a ``RuntimeError`` is raised.
-
-    Returns ``None`` when there are no actions, errors, or warnings.
     """
+    if isinstance(sources, str):
+        sources = [sources]
+    if dry_run:
+        return _copy_out_dry(fs, sources, dest, glob=glob,
+                             ignore_existing=ignore_existing, delete=delete,
+                             checksum=checksum)
+
     import shutil
 
     changes = ChangeReport()
@@ -336,15 +455,16 @@ def copy_from_repo(
         resolved: list[tuple[str, str, str]] = []
         for src in sources:
             try:
-                resolved.extend(_resolve_repo_sources(fs, [src]))
+                resolved.extend(_resolve_repo_sources(fs, [src], glob=glob))
             except (FileNotFoundError, NotADirectoryError) as exc:
                 changes.errors.append(ChangeError(path=src, error=str(exc)))
         if not resolved:
             if changes.errors:
                 raise RuntimeError(f"All files failed to copy: {changes.errors}")
-            return _finalize_changes(changes)
+            fs._changes = _finalize_changes(changes)
+            return fs
     else:
-        resolved = _resolve_repo_sources(fs, sources)
+        resolved = _resolve_repo_sources(fs, sources, glob=glob)
 
     pairs = _enum_repo_to_disk(fs, resolved, dest)
 
@@ -459,7 +579,8 @@ def copy_from_repo(
             raise RuntimeError(
                 f"All files failed to copy: {changes.errors}"
             )
-        return _finalize_changes(changes)
+        fs._changes = _finalize_changes(changes)
+        return fs
     else:
         if ignore_existing:
             pairs = [(r, l) for r, l in pairs if not Path(l).exists()]
@@ -469,7 +590,8 @@ def copy_from_repo(
                 raise RuntimeError(
                     f"All files failed to copy: {changes.errors}"
                 )
-            return _finalize_changes(changes)
+            fs._changes = _finalize_changes(changes)
+            return fs
 
         # Classify as add vs update and build mapping
         repo_rel_to_path: dict[str, str] = {}
@@ -502,115 +624,22 @@ def copy_from_repo(
                 f"All files failed to copy: {changes.errors}"
             )
 
-    return _finalize_changes(changes)
+    fs._changes = _finalize_changes(changes)
+    return fs
 
 
-def copy_to_repo_dry_run(
+def _copy_out_dry(
     fs: FS,
     sources: list[str],
     dest: str,
     *,
-    follow_symlinks: bool = False,
+    glob: bool = True,
     ignore_existing: bool = False,
     delete: bool = False,
     checksum: bool = True,
-    exclude: ExcludeFilter | None = None,
-) -> ChangeReport | None:
-    """Compute what copy_to_repo would do. Returns a ``ChangeReport`` or ``None``."""
-    resolved = _resolve_disk_sources(sources)
-    pairs = _enum_disk_to_repo(resolved, dest, follow_symlinks=follow_symlinks,
-                               exclude=exclude)
-
-    if delete:
-        changes = ChangeReport()
-        pair_map: dict[str, str] = {}
-        for local_path, repo_path in pairs:
-            if dest and repo_path.startswith(dest + "/"):
-                rel = repo_path[len(dest) + 1:]
-            else:
-                rel = repo_path
-            if rel in pair_map:
-                changes.warnings.append(ChangeError(
-                    path=local_path,
-                    error=f"Overlapping destination '{rel}': skipping (kept earlier source)",
-                ))
-            else:
-                pair_map[rel] = local_path
-
-        repo_files = _walk_repo(fs, dest)
-        local_rels = set(pair_map.keys())
-        repo_rels = set(repo_files.keys())
-
-        add = sorted(local_rels - repo_rels)
-        delete_list = sorted(repo_rels - local_rels)
-        both = sorted(local_rels & repo_rels)
-
-        if not checksum:
-            commit_ts = fs._store._repo[fs._commit_oid].commit_time
-
-        update: list[str] = []
-        for rel in both:
-            repo_oid, repo_mode = repo_files[rel]
-            local_path = Path(pair_map[rel])
-
-            if not checksum:
-                try:
-                    if not follow_symlinks and local_path.is_symlink():
-                        pass  # fall through to hash
-                    elif int(local_path.stat().st_mtime) <= commit_ts:
-                        continue  # assume unchanged
-                except OSError:
-                    pass  # fall through to hash on stat failure
-
-            if _local_file_oid_abs(local_path, follow_symlinks=follow_symlinks) != repo_oid:
-                update.append(rel)
-            elif repo_mode != GIT_FILEMODE_LINK and _mode_from_disk(pair_map[rel]) != repo_mode:
-                update.append(rel)
-
-        if ignore_existing:
-            update = []
-
-        # Convert to FileEntry lists
-        changes.add = _make_entries_from_disk(add, pair_map, follow_symlinks)
-        changes.update = _make_entries_from_disk(update, pair_map, follow_symlinks)
-        changes.delete = _make_entries_from_repo(fs, delete_list, dest)
-        return _finalize_changes(changes)
-    else:
-        # Non-delete mode: classify by existence only
-        add: list[str] = []
-        update: list[str] = []
-        pair_map: dict[str, str] = {}
-        for local_path, repo_path in pairs:
-            if dest and repo_path.startswith(dest + "/"):
-                rel = repo_path[len(dest) + 1:]
-            else:
-                rel = repo_path
-            pair_map[rel] = local_path
-            if fs.exists(repo_path):
-                update.append(rel)
-            else:
-                add.append(rel)
-
-        if ignore_existing:
-            update = []
-
-        # Convert to FileEntry lists
-        add_entries = _make_entries_from_disk(sorted(add), pair_map, follow_symlinks)
-        update_entries = _make_entries_from_disk(sorted(update), pair_map, follow_symlinks)
-        return _finalize_changes(ChangeReport(add=add_entries, update=update_entries))
-
-
-def copy_from_repo_dry_run(
-    fs: FS,
-    sources: list[str],
-    dest: str,
-    *,
-    ignore_existing: bool = False,
-    delete: bool = False,
-    checksum: bool = True,
-) -> ChangeReport | None:
-    """Compute what copy_from_repo would do. Returns a ``ChangeReport`` or ``None``."""
-    resolved = _resolve_repo_sources(fs, sources)
+) -> FS:
+    """Dry-run for _copy_out. Returns input *fs* with ``.changes`` set."""
+    resolved = _resolve_repo_sources(fs, sources, glob=glob)
     pairs = _enum_repo_to_disk(fs, resolved, dest)
 
     if delete:
@@ -672,7 +701,8 @@ def copy_from_repo_dry_run(
         changes.update = _make_entries_from_repo_dict(fs, update, pair_map)
         # For deletes, we don't have type info (files on disk), just mark as blobs
         changes.delete = [FileEntry(rel, FileType.BLOB) for rel in delete_list]
-        return _finalize_changes(changes)
+        fs._changes = _finalize_changes(changes)
+        return fs
     else:
         # Non-delete mode: classify by existence only
         add: list[str] = []
@@ -692,11 +722,12 @@ def copy_from_repo_dry_run(
         # Convert to FileEntry lists
         add_entries = _make_entries_from_repo_dict(fs, sorted(add), repo_rel_to_path)
         update_entries = _make_entries_from_repo_dict(fs, sorted(update), repo_rel_to_path)
-        return _finalize_changes(ChangeReport(add=add_entries, update=update_entries))
+        fs._changes = _finalize_changes(ChangeReport(add=add_entries, update=update_entries))
+        return fs
 
 
 # ---------------------------------------------------------------------------
-# Public API: Remove
+# Remove
 # ---------------------------------------------------------------------------
 
 def _collect_remove_paths(
@@ -704,13 +735,14 @@ def _collect_remove_paths(
     sources: list[str],
     *,
     recursive: bool = False,
+    glob: bool = True,
 ) -> list[str]:
     """Resolve *sources* against the repo and return full paths to delete.
 
     Raises ``FileNotFoundError`` when a source matches nothing and
     ``IsADirectoryError`` when a directory is matched without *recursive*.
     """
-    resolved = _resolve_repo_sources(fs, sources)
+    resolved = _resolve_repo_sources(fs, sources, glob=glob)
     delete_paths: list[str] = []
     for repo_path, mode, _prefix in resolved:
         if mode == "file":
@@ -728,54 +760,44 @@ def _collect_remove_paths(
     return sorted(set(delete_paths))
 
 
-def remove_in_repo(
+def _remove(
     fs: FS,
-    sources: list[str],
+    sources: str | list[str],
     *,
+    dry_run: bool = False,
+    glob: bool = True,
     recursive: bool = False,
     message: str | None = None,
 ) -> FS:
-    """Remove files matching *sources* from the repo. Returns new ``FS``.
+    """Remove files matching *sources* from the repo. Returns ``FS``.
 
-    Sources support globs, directories, and ``/./`` pivots — the same
-    syntax accepted by ``copy_from_repo`` sources.
+    *sources* may be a single string or a list of strings.
 
-    With ``recursive=True``, directories are removed recursively. Without
-    it, matching a directory raises ``IsADirectoryError``.
-
-    The changes are available via ``fs.changes``.
+    With ``dry_run=True``, no changes are written; the input *fs* is
+    returned with ``.changes`` set.
     """
-    delete_paths = _collect_remove_paths(fs, sources, recursive=recursive)
+    if isinstance(sources, (str, os.PathLike)):
+        sources = [str(sources)]
+
+    delete_paths = _collect_remove_paths(fs, sources, recursive=recursive,
+                                         glob=glob)
     if not delete_paths:
         raise FileNotFoundError(f"No matches for sources: {sources}")
 
     changes = ChangeReport()
     rel_to_repo = {p: p for p in delete_paths}
     changes.delete = _make_entries_from_repo_dict(fs, delete_paths, rel_to_repo)
+
+    if dry_run:
+        fs._changes = _finalize_changes(changes)
+        return fs
 
     return _apply_plan(fs, [], delete_paths, changes,
                        message=message, operation="rm")
 
 
-def remove_in_repo_dry_run(
-    fs: FS,
-    sources: list[str],
-    *,
-    recursive: bool = False,
-) -> ChangeReport | None:
-    """Compute what ``remove_in_repo`` would do. Returns a ``ChangeReport`` or ``None``."""
-    delete_paths = _collect_remove_paths(fs, sources, recursive=recursive)
-    if not delete_paths:
-        raise FileNotFoundError(f"No matches for sources: {sources}")
-
-    changes = ChangeReport()
-    rel_to_repo = {p: p for p in delete_paths}
-    changes.delete = _make_entries_from_repo_dict(fs, delete_paths, rel_to_repo)
-    return _finalize_changes(changes)
-
-
 # ---------------------------------------------------------------------------
-# Public API: Sync (convenience wrappers with delete=True)
+# Sync (convenience wrappers with delete=True)
 # ---------------------------------------------------------------------------
 
 def _ensure_trailing_slash(path: str) -> str:
@@ -783,19 +805,42 @@ def _ensure_trailing_slash(path: str) -> str:
     return path if path.endswith("/") else path + "/"
 
 
-def sync_to_repo(
+def _sync_in(
     fs: FS, local_path: str, repo_path: str, *,
+    dry_run: bool = False,
     message: str | None = None,
     ignore_errors: bool = False,
     checksum: bool = True,
     exclude: ExcludeFilter | None = None,
 ) -> FS:
-    """Make *repo_path* identical to *local_path*. Returns new ``FS``.
+    """Make *repo_path* identical to *local_path*. Returns ``FS``.
 
-    The changes are available via ``fs.changes``.
+    With ``dry_run=True``, no changes are written; the input *fs* is
+    returned with ``.changes`` set.
     """
+    if dry_run:
+        try:
+            return _copy_in(
+                fs, [_ensure_trailing_slash(local_path)], repo_path,
+                dry_run=True, delete=True,
+                checksum=checksum, exclude=exclude,
+            )
+        except (FileNotFoundError, NotADirectoryError):
+            # Nonexistent local path → everything in repo is a delete
+            dest = _normalize_path(repo_path) if repo_path else ""
+            repo_files = _walk_repo(fs, dest)
+            if not repo_files and dest and fs.exists(dest) and not fs.is_dir(dest):
+                entry = _entry_at_path(fs._store._repo, fs._tree_oid, dest)
+                file_entry = FileEntry.from_mode(dest, entry[1]) if entry else FileEntry(dest, FileType.BLOB)
+                fs._changes = ChangeReport(delete=[file_entry])
+                return fs
+            delete_list = sorted(repo_files.keys())
+            delete_entries = _make_entries_from_repo(fs, delete_list, dest)
+            fs._changes = _finalize_changes(ChangeReport(delete=delete_entries))
+            return fs
+
     try:
-        return copy_to_repo(
+        return _copy_in(
             fs, [_ensure_trailing_slash(local_path)], repo_path,
             message=message, delete=True, ignore_errors=ignore_errors,
             checksum=checksum, exclude=exclude, operation="sync",
@@ -839,23 +884,43 @@ def _sync_delete_all_in_repo(
     return b.fs, sorted(repo_files.keys()), False
 
 
-def sync_from_repo(
+def _sync_out(
     fs: FS, repo_path: str, local_path: str, *,
+    dry_run: bool = False,
     ignore_errors: bool = False,
     checksum: bool = True,
-) -> ChangeReport | None:
-    """Make *local_path* identical to *repo_path*. Returns a ``ChangeReport`` or ``None``."""
+) -> FS:
+    """Make *local_path* identical to *repo_path*. Returns ``FS`` with ``.changes`` set.
+
+    With ``dry_run=True``, no changes are written; the input *fs* is
+    returned with ``.changes`` set.
+    """
+    if dry_run:
+        try:
+            sources = [_ensure_trailing_slash(repo_path)] if repo_path else [""]
+            return _copy_out(fs, sources, local_path, dry_run=True,
+                             delete=True, checksum=checksum)
+        except (FileNotFoundError, NotADirectoryError):
+            # Nonexistent repo path → everything local is a delete
+            local_paths = sorted(_walk_local_paths(local_path))
+            # For local files being deleted, we don't have type info, mark as blobs
+            delete_entries = [FileEntry(p, FileType.BLOB) for p in local_paths]
+            fs._changes = _finalize_changes(ChangeReport(delete=delete_entries))
+            return fs
+
     try:
         sources = [_ensure_trailing_slash(repo_path)] if repo_path else [""]
-        return copy_from_repo(fs, sources, local_path, delete=True,
-                              ignore_errors=ignore_errors, checksum=checksum)
+        return _copy_out(fs, sources, local_path, delete=True,
+                         ignore_errors=ignore_errors, checksum=checksum)
     except (FileNotFoundError, NotADirectoryError):
         # Nonexistent repo path → treat as empty source (delete everything local)
         delete_rels = _sync_delete_all_local(local_path)
         if not delete_rels:
-            return None
+            fs._changes = None
+            return fs
         # For local file deletes, we don't have type info - just mark as blobs
-        return ChangeReport(delete=[FileEntry(rel, FileType.BLOB) for rel in delete_rels])
+        fs._changes = ChangeReport(delete=[FileEntry(rel, FileType.BLOB) for rel in delete_rels])
+        return fs
 
 
 def _sync_delete_all_local(local_path: str) -> list[str]:
@@ -874,49 +939,8 @@ def _sync_delete_all_local(local_path: str) -> list[str]:
     return deleted
 
 
-def sync_to_repo_dry_run(
-    fs: FS, local_path: str, repo_path: str, *,
-    checksum: bool = True,
-    exclude: ExcludeFilter | None = None,
-) -> ChangeReport | None:
-    """Compute what ``sync_to_repo`` would do without writing."""
-    try:
-        return copy_to_repo_dry_run(
-            fs, [_ensure_trailing_slash(local_path)], repo_path, delete=True,
-            checksum=checksum, exclude=exclude,
-        )
-    except (FileNotFoundError, NotADirectoryError):
-        # Nonexistent local path → everything in repo is a delete
-        dest = _normalize_path(repo_path) if repo_path else ""
-        repo_files = _walk_repo(fs, dest)
-        if not repo_files and dest and fs.exists(dest) and not fs.is_dir(dest):
-            entry = _entry_at_path(fs._store._repo, fs._tree_oid, dest)
-            file_entry = FileEntry.from_mode(dest, entry[1]) if entry else FileEntry(dest, FileType.BLOB)
-            return ChangeReport(delete=[file_entry])
-        delete_list = sorted(repo_files.keys())
-        delete_entries = _make_entries_from_repo(fs, delete_list, dest)
-        return _finalize_changes(ChangeReport(delete=delete_entries))
-
-
-def sync_from_repo_dry_run(
-    fs: FS, repo_path: str, local_path: str, *,
-    checksum: bool = True,
-) -> ChangeReport | None:
-    """Compute what ``sync_from_repo`` would do without writing."""
-    try:
-        sources = [_ensure_trailing_slash(repo_path)] if repo_path else [""]
-        return copy_from_repo_dry_run(fs, sources, local_path, delete=True,
-                                      checksum=checksum)
-    except (FileNotFoundError, NotADirectoryError):
-        # Nonexistent repo path → everything local is a delete
-        local_paths = sorted(_walk_local_paths(local_path))
-        # For local files being deleted, we don't have type info, mark as blobs
-        delete_entries = [FileEntry(p, FileType.BLOB) for p in local_paths]
-        return _finalize_changes(ChangeReport(delete=delete_entries))
-
-
 # ---------------------------------------------------------------------------
-# Public API: Move (repo-internal)
+# Move (repo-internal)
 # ---------------------------------------------------------------------------
 
 def _resolve_move(
@@ -925,6 +949,7 @@ def _resolve_move(
     dest: str,
     *,
     recursive: bool = False,
+    glob: bool = True,
 ) -> tuple[list[tuple[str, str]], list[str]]:
     """Common resolution for move operations.
 
@@ -937,7 +962,7 @@ def _resolve_move(
     the dest is the exact target path (rename).  Otherwise files are
     placed inside *dest*.
     """
-    resolved = _resolve_repo_sources(fs, sources)
+    resolved = _resolve_repo_sources(fs, sources, glob=glob)
 
     dest_norm = _normalize_path(dest.rstrip("/")) if dest.rstrip("/") else ""
     dest_exists_as_dir = dest_norm and fs.is_dir(dest_norm)
@@ -973,28 +998,31 @@ def _resolve_move(
             raise ValueError(f"Source and destination are the same: {src}")
 
     # Collect all source paths for deletion
-    delete_paths = _collect_remove_paths(fs, sources, recursive=recursive)
+    delete_paths = _collect_remove_paths(fs, sources, recursive=recursive,
+                                         glob=glob)
 
     return pairs, delete_paths
 
 
-def move_in_repo(
+def _move(
     fs: FS,
-    sources: list[str],
+    sources: str | list[str],
     dest: str,
     *,
+    dry_run: bool = False,
+    glob: bool = True,
     recursive: bool = False,
     message: str | None = None,
 ) -> FS:
-    """Move/rename files within the repo. Returns new ``FS``.
+    """Move/rename files within the repo. Returns ``FS``.
 
-    All *sources* and *dest* are repo paths. Directories require
-    ``recursive=True``. The operation is atomic — writes and deletes
-    happen in a single commit.
-
-    The changes are available via ``fs.changes``.
+    With ``dry_run=True``, no changes are written; the input *fs* is
+    returned with ``.changes`` set.
     """
-    pairs, delete_paths = _resolve_move(fs, sources, dest, recursive=recursive)
+    if isinstance(sources, str):
+        sources = [sources]
+    pairs, delete_paths = _resolve_move(fs, sources, dest, recursive=recursive,
+                                        glob=glob)
 
     # Build changes
     changes = ChangeReport()
@@ -1002,6 +1030,10 @@ def move_in_repo(
     changes.add = _make_entries_from_repo_dict(fs, [dp for _, dp in pairs], dest_rel_to_repo)
     src_rel_to_repo = {p: p for p in delete_paths}
     changes.delete = _make_entries_from_repo_dict(fs, delete_paths, src_rel_to_repo)
+
+    if dry_run:
+        fs._changes = _finalize_changes(changes)
+        return fs
 
     # Execute: write dest files from source blob data, then remove sources
     with fs.batch(message=message, operation="mv") as b:
@@ -1013,22 +1045,3 @@ def move_in_repo(
     result_fs = b.fs
     result_fs._changes = _finalize_changes(changes)
     return result_fs
-
-
-def move_in_repo_dry_run(
-    fs: FS,
-    sources: list[str],
-    dest: str,
-    *,
-    recursive: bool = False,
-) -> ChangeReport | None:
-    """Compute what ``move_in_repo`` would do. Returns a ``ChangeReport`` or ``None``."""
-    pairs, delete_paths = _resolve_move(fs, sources, dest, recursive=recursive)
-
-    # Build changes
-    changes = ChangeReport()
-    dest_rel_to_repo = {dp: dp for _, dp in pairs}
-    changes.add = _make_entries_from_repo_dict(fs, [dp for _, dp in pairs], dest_rel_to_repo)
-    src_rel_to_repo = {p: p for p in delete_paths}
-    changes.delete = _make_entries_from_repo_dict(fs, delete_paths, src_rel_to_repo)
-    return _finalize_changes(changes)

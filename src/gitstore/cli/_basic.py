@@ -447,8 +447,6 @@ def rm(ctx, paths, recursive, dry_run, branch, message, tag, force_tag):
         gitstore rm -n :file.txt         # dry run
         gitstore rm :a.txt :b.txt        # multiple
     """
-    from ..copy import remove_in_repo, remove_in_repo_dry_run
-
     store = _open_store(_require_repo(ctx))
     branch = branch or _default_branch(store)
 
@@ -461,13 +459,14 @@ def rm(ctx, paths, recursive, dry_run, branch, message, tag, force_tag):
 
     try:
         if dry_run:
-            changes = remove_in_repo_dry_run(fs, patterns, recursive=recursive)
+            result_fs = fs.remove(patterns, recursive=recursive, dry_run=True)
+            changes = result_fs.changes
             if changes:
                 for action in changes.actions():
                     click.echo(f"- :{action.path}")
         else:
-            new_fs = remove_in_repo(fs, patterns, recursive=recursive,
-                                      message=message)
+            new_fs = fs.remove(patterns, recursive=recursive,
+                               message=message)
             if tag:
                 _apply_tag(store, new_fs, tag, force_tag)
             changes = new_fs.changes
@@ -511,8 +510,6 @@ def mv(ctx, args, recursive, dry_run, branch, message, tag, force_tag):
         gitstore mv :a.txt :b.txt :dest/             # multiple -> dir
         gitstore mv -n :old.txt :new.txt             # dry run
     """
-    from ..copy import move_in_repo, move_in_repo_dry_run
-
     if len(args) < 2:
         raise click.ClickException("mv requires at least two arguments (SRC... DEST)")
 
@@ -551,16 +548,17 @@ def mv(ctx, args, recursive, dry_run, branch, message, tag, force_tag):
 
     try:
         if dry_run:
-            changes = move_in_repo_dry_run(
-                fs, source_patterns, dest_path, recursive=recursive,
+            result_fs = fs.move(
+                source_patterns, dest_path, recursive=recursive, dry_run=True,
             )
+            changes = result_fs.changes
             if changes:
                 for action in changes.actions():
                     prefix = {"add": "+", "delete": "-"}[action.action]
                     click.echo(f"{prefix} :{action.path}")
         else:
-            new_fs = move_in_repo(
-                fs, source_patterns, dest_path,
+            new_fs = fs.move(
+                source_patterns, dest_path,
                 recursive=recursive, message=message,
             )
             if tag:

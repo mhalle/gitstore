@@ -71,11 +71,7 @@ def sync(ctx, args, branch, ref, at_path, match_pattern, before, back, message, 
         gitstore sync :repo_path ./local   (repo → disk)
         gitstore sync session:/ :          (repo → repo, cross-branch)
     """
-    from ..copy import (
-        sync_to_repo, sync_from_repo,
-        sync_to_repo_dry_run, sync_from_repo_dry_run,
-        ExcludeFilter,
-    )
+    from ..copy import ExcludeFilter
 
     if len(args) == 1:
         # 1-arg form: sync local dir to repo root
@@ -204,9 +200,11 @@ def sync(ctx, args, branch, ref, at_path, match_pattern, before, back, message, 
     try:
         if direction == "to_repo":
             if dry_run:
-                changes = sync_to_repo_dry_run(fs, local_path, repo_dest,
-                                                     checksum=checksum,
-                                                     exclude=excl)
+                _dry_fs = fs.sync_in(local_path, repo_dest,
+                                     dry_run=True,
+                                     checksum=checksum,
+                                     exclude=excl)
+                changes = _dry_fs.changes
                 if changes:
                     for w in changes.warnings:
                         click.echo(f"WARNING: {w.path}: {w.error}", err=True)
@@ -217,8 +215,8 @@ def sync(ctx, args, branch, ref, at_path, match_pattern, before, back, message, 
                         else:
                             click.echo(f"{prefix} :{repo_dest or ''}{action.path}")
             else:
-                _new_fs = sync_to_repo(
-                    fs, local_path, repo_dest,
+                _new_fs = fs.sync_in(
+                    local_path, repo_dest,
                     message=message, ignore_errors=ignore_errors,
                     checksum=checksum, exclude=excl,
                 )
@@ -235,8 +233,10 @@ def sync(ctx, args, branch, ref, at_path, match_pattern, before, back, message, 
                     ctx.exit(1)
         else:
             if dry_run:
-                changes = sync_from_repo_dry_run(fs, repo_dest, local_path,
-                                                       checksum=checksum)
+                _dry_fs = fs.sync_out(repo_dest, local_path,
+                                      dry_run=True,
+                                      checksum=checksum)
+                changes = _dry_fs.changes
                 if changes:
                     for w in changes.warnings:
                         click.echo(f"WARNING: {w.path}: {w.error}", err=True)
@@ -244,11 +244,12 @@ def sync(ctx, args, branch, ref, at_path, match_pattern, before, back, message, 
                         prefix = {"add": "+", "update": "~", "delete": "-"}[action.action]
                         click.echo(f"{prefix} {os.path.join(local_path, action.path)}")
             else:
-                changes = sync_from_repo(
-                    fs, repo_dest, local_path,
+                _result_fs = fs.sync_out(
+                    repo_dest, local_path,
                     ignore_errors=ignore_errors,
                     checksum=checksum,
                 )
+                changes = _result_fs.changes
                 if changes:
                     for w in changes.warnings:
                         click.echo(f"WARNING: {w.path}: {w.error}", err=True)

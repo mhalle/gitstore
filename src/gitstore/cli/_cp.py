@@ -82,11 +82,7 @@ def cp(ctx, args, branch, ref, at_path, match_pattern, before, back, message, fi
         gitstore cp session:/ :              # repo → repo (cross-branch)
         gitstore cp main~1:a.txt :backup/    # from 1 commit back on main
     """
-    from ..copy import (
-        copy_to_repo, copy_from_repo,
-        copy_to_repo_dry_run, copy_from_repo_dry_run,
-        ExcludeFilter,
-    )
+    from ..copy import ExcludeFilter
     from ..copy._resolve import _resolve_repo_sources, _enum_repo_to_repo
 
     if len(args) < 2:
@@ -240,14 +236,16 @@ def cp(ctx, args, branch, ref, at_path, match_pattern, before, back, message, fi
             source_paths = list(raw_sources)
             try:
                 if dry_run:
-                    changes = copy_to_repo_dry_run(
-                        fs, source_paths, dest_path,
+                    _dry_fs = fs.copy_in(
+                        source_paths, dest_path,
+                        dry_run=True,
                         follow_symlinks=follow_symlinks,
                         ignore_existing=ignore_existing,
                         delete=delete,
                         checksum=checksum,
                         exclude=excl,
                     )
+                    changes = _dry_fs.changes
                     if changes:
                         for w in changes.warnings:
                             click.echo(f"WARNING: {w.path}: {w.error}", err=True)
@@ -258,8 +256,8 @@ def cp(ctx, args, branch, ref, at_path, match_pattern, before, back, message, fi
                             else:
                                 click.echo(f"{prefix} :{dest_path or ''}{action.path}")
                 else:
-                    _new_fs = copy_to_repo(
-                        fs, source_paths, dest_path,
+                    _new_fs = fs.copy_in(
+                        source_paths, dest_path,
                         follow_symlinks=follow_symlinks,
                         message=message, mode=filemode,
                         ignore_existing=ignore_existing,
@@ -312,8 +310,7 @@ def cp(ctx, args, branch, ref, at_path, match_pattern, before, back, message, fi
                                          delete, ignore_existing, ignore_errors)
             else:
                 _cp_multi_repo_to_disk(ctx, fs, source_paths, dest_path, dry_run,
-                                        delete, ignore_existing, ignore_errors, checksum,
-                                        copy_from_repo, copy_from_repo_dry_run)
+                                        delete, ignore_existing, ignore_errors, checksum)
         else:
             # Per-source ref grouping
             for rp in parsed_sources:
@@ -335,8 +332,7 @@ def cp(ctx, args, branch, ref, at_path, match_pattern, before, back, message, fi
                                              delete, ignore_existing, ignore_errors)
                 else:
                     _cp_multi_repo_to_disk(ctx, src_fs, source_paths, dest_path, dry_run,
-                                            delete, ignore_existing, ignore_errors, checksum,
-                                            copy_from_repo, copy_from_repo_dry_run)
+                                            delete, ignore_existing, ignore_errors, checksum)
 
     elif direction == "repo_to_repo":
         # ---- Repo → repo ----
@@ -463,17 +459,18 @@ def _cp_single_repo_to_disk(ctx, fs, src_raw, dest_path, dry_run,
 
 
 def _cp_multi_repo_to_disk(ctx, fs, source_paths, dest_path, dry_run,
-                             delete, ignore_existing, ignore_errors, checksum,
-                             copy_from_repo, copy_from_repo_dry_run):
+                             delete, ignore_existing, ignore_errors, checksum):
     """Handle multi-file repo → disk copy."""
     try:
         if dry_run:
-            changes = copy_from_repo_dry_run(
-                fs, source_paths, dest_path,
+            result_fs = fs.copy_out(
+                source_paths, dest_path,
+                dry_run=True,
                 ignore_existing=ignore_existing,
                 delete=delete,
                 checksum=checksum,
             )
+            changes = result_fs.changes
             if changes:
                 for w in changes.warnings:
                     click.echo(f"WARNING: {w.path}: {w.error}", err=True)
@@ -481,13 +478,14 @@ def _cp_multi_repo_to_disk(ctx, fs, source_paths, dest_path, dry_run,
                     prefix = {"add": "+", "update": "~", "delete": "-"}[action.action]
                     click.echo(f"{prefix} {os.path.join(dest_path, action.path)}")
         else:
-            changes = copy_from_repo(
-                fs, source_paths, dest_path,
+            result_fs = fs.copy_out(
+                source_paths, dest_path,
                 ignore_existing=ignore_existing,
                 delete=delete,
                 ignore_errors=ignore_errors,
                 checksum=checksum,
             )
+            changes = result_fs.changes
             if changes:
                 for w in changes.warnings:
                     click.echo(f"WARNING: {w.path}: {w.error}", err=True)

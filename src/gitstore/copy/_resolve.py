@@ -227,7 +227,7 @@ def _disk_glob_walk(segments: list[str], prefix: str) -> list[str]:
 # Source resolution
 # ---------------------------------------------------------------------------
 
-def _resolve_disk_sources(sources: list[str]) -> list[tuple[str, str, str]]:
+def _resolve_disk_sources(sources: list[str], *, glob: bool = True) -> list[tuple[str, str, str]]:
     """Resolve local source specs into ``(local_path, mode, prefix)`` tuples.
 
     ``mode`` is one of:
@@ -252,7 +252,7 @@ def _resolve_disk_sources(sources: list[str]) -> list[tuple[str, str, str]]:
             rest = rest_os.replace(os.sep, "/")            # normalised for contents_mode / prefix
             contents_mode = rest.endswith("/")
             rest_clean = rest.rstrip("/")
-            has_glob = "*" in rest_clean or "?" in rest_clean
+            has_glob = glob and ("*" in rest_clean or "?" in rest_clean)
 
             if has_glob:
                 # Pivot + glob: expand the full pattern and compute
@@ -291,7 +291,7 @@ def _resolve_disk_sources(sources: list[str]) -> list[tuple[str, str, str]]:
             continue
 
         contents_mode = src.endswith("/")
-        has_glob = "*" in src or "?" in src
+        has_glob = glob and ("*" in src or "?" in src)
 
         if has_glob:
             expanded = _expand_disk_glob(src.rstrip("/"))
@@ -317,7 +317,7 @@ def _resolve_disk_sources(sources: list[str]) -> list[tuple[str, str, str]]:
     return resolved
 
 
-def _resolve_repo_sources(fs: FS, sources: list[str]) -> list[tuple[str, str, str]]:
+def _resolve_repo_sources(fs: FS, sources: list[str], *, glob: bool = True) -> list[tuple[str, str, str]]:
     """Resolve repo source specs into ``(repo_path, mode, prefix)`` tuples.
 
     ``prefix`` is an intermediate path to inject between the destination and
@@ -335,7 +335,7 @@ def _resolve_repo_sources(fs: FS, sources: list[str]) -> list[tuple[str, str, st
             rest = src[idx + 3:].replace("\\", "/")   # normalise for repo paths
             contents_mode = rest.endswith("/")
             rest_clean = rest.rstrip("/")
-            has_glob = "*" in rest_clean or "?" in rest_clean
+            has_glob = glob and ("*" in rest_clean or "?" in rest_clean)
 
             if has_glob:
                 # Pivot + glob: expand via repo glob and compute
@@ -369,7 +369,7 @@ def _resolve_repo_sources(fs: FS, sources: list[str]) -> list[tuple[str, str, st
             continue
 
         contents_mode = src.endswith("/")
-        has_glob = "*" in src or "?" in src
+        has_glob = glob and ("*" in src or "?" in src)
 
         if has_glob:
             expanded = fs.glob(src.rstrip("/"))

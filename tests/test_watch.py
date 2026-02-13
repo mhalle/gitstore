@@ -187,9 +187,11 @@ class TestRunSyncCycle:
         store = MagicMock()
         store.branches = {"main": MagicMock()}
 
-        with patch("gitstore.copy.sync_to_repo", return_value=new_fs):
-            _run_sync_cycle(store, "main", "/tmp/test", "",
-                            message=None, ignore_errors=False, checksum=False)
+        fs = store.branches["main"]
+        fs.sync_in.return_value = new_fs
+
+        _run_sync_cycle(store, "main", "/tmp/test", "",
+                        message=None, ignore_errors=False, checksum=False)
 
         captured = capsys.readouterr()
         assert "+1 ~1" in captured.out
@@ -203,10 +205,11 @@ class TestRunSyncCycle:
 
         store = MagicMock()
         store.branches = {"main": MagicMock()}
+        fs = store.branches["main"]
+        fs.sync_in.return_value = new_fs
 
-        with patch("gitstore.copy.sync_to_repo", return_value=new_fs):
-            _run_sync_cycle(store, "main", "/tmp/test", "",
-                            message=None, ignore_errors=False, checksum=False)
+        _run_sync_cycle(store, "main", "/tmp/test", "",
+                        message=None, ignore_errors=False, checksum=False)
 
         captured = capsys.readouterr()
         assert "no changes" in captured.out

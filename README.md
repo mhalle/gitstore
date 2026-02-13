@@ -158,30 +158,27 @@ fs = fs.redo()                                   # move branch forward 1 reflog 
 ### Export
 
 ```python
-fs.export_tree("/tmp/export")
+fs.export("/tmp/export")
 # Creates /tmp/export/hello.txt, /tmp/export/src/main.py, etc.
 ```
 
 ### Copy and sync
 
 ```python
-from gitstore import copy_to_repo, copy_from_repo, sync_to_repo, sync_from_repo
-
 # Disk to repo
-fs = copy_to_repo(fs, ["./data/"], "backup")
+fs = fs.copy_in(["./data/"], "backup")
 print(fs.changes.add)                            # [FileEntry(...), ...]
 
 # Repo to disk
-copy_from_repo(fs, ["docs"], "./local-docs")
+fs.copy_out(["docs"], "./local-docs")
 
 # Sync (make identical, including deletes)
-fs = sync_to_repo(fs, "./local", "data")
-sync_from_repo(fs, "data", "./local")
+fs = fs.sync_in("./local", "data")
+fs.sync_out("data", "./local")
 
 # Remove and move within repo
-from gitstore import remove_in_repo, move_in_repo
-fs = remove_in_repo(fs, ["old-dir"], recursive=True)
-fs = move_in_repo(fs, ["old.txt"], "new.txt")
+fs = fs.remove(["old-dir"], recursive=True)
+fs = fs.move(["old.txt"], "new.txt")
 ```
 
 ### Snapshot properties

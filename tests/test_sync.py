@@ -1,4 +1,4 @@
-"""Tests for path-level sync (sync_to_repo / sync_from_repo)."""
+"""Tests for path-level sync (fs.sync_in / fs.sync_out)."""
 
 import os
 
@@ -6,10 +6,6 @@ import pytest
 
 from gitstore import (
     GitStore,
-    sync_to_repo,
-    sync_from_repo,
-    sync_to_repo_dry_run,
-    sync_from_repo_dry_run,
     ChangeReport,
     ChangeAction,
     FileEntry,
@@ -49,12 +45,12 @@ def local_dir(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# sync_to_repo
+# sync_in (local → repo)
 # ---------------------------------------------------------------------------
 
 class TestSyncToRepo:
     def test_basic_sync(self, fs, local_dir):
-        new_fs = sync_to_repo(fs, str(local_dir), "data")
+        new_fs = fs.sync_in(str(local_dir), "data")
         assert sorted(new_fs.ls("data")) == ["a.txt", "b.txt"]
         assert new_fs.read("data/a.txt") == b"alpha"
         assert new_fs.read("data/b.txt") == b"beta"
@@ -62,47 +58,47 @@ class TestSyncToRepo:
     def test_deletes_repo_files_not_in_local(self, fs, local_dir):
         # Put extra file in repo first
         fs = fs.write("data/extra.txt", b"extra")
-        new_fs = sync_to_repo(fs, str(local_dir), "data")
+        new_fs = fs.sync_in(str(local_dir), "data")
         assert not new_fs.exists("data/extra.txt")
         assert new_fs.read("data/a.txt") == b"alpha"
 
     def test_overwrites_changed_files(self, fs, local_dir):
         # Write different content to repo
         fs = fs.write("data/a.txt", b"old content")
-        new_fs = sync_to_repo(fs, str(local_dir), "data")
+        new_fs = fs.sync_in(str(local_dir), "data")
         assert new_fs.read("data/a.txt") == b"alpha"
 
     def test_noop_when_identical(self, fs, local_dir):
-        fs1 = sync_to_repo(fs, str(local_dir), "data")
-        fs2 = sync_to_repo(fs1, str(local_dir), "data")
+        fs1 = fs.sync_in(str(local_dir), "data")
+        fs2 = fs1.sync_in(str(local_dir), "data")
         # Same commit — no new commit created
         assert fs1.commit_hash == fs2.commit_hash
 
     def test_custom_message(self, fs, local_dir):
-        new_fs = sync_to_repo(fs, str(local_dir), "data", message="my sync")
+        new_fs = fs.sync_in(str(local_dir), "data", message="my sync")
         assert new_fs.message == "my sync"
 
     def test_nested_directories(self, fs, local_dir):
         sub = local_dir / "sub" / "deep"
         sub.mkdir(parents=True)
         (sub / "nested.txt").write_text("nested")
-        new_fs = sync_to_repo(fs, str(local_dir), "data")
+        new_fs = fs.sync_in(str(local_dir), "data")
         assert new_fs.read("data/sub/deep/nested.txt") == b"nested"
 
     def test_empty_repo_path(self, fs, local_dir):
-        new_fs = sync_to_repo(fs, str(local_dir), "")
+        new_fs = fs.sync_in(str(local_dir), "")
         assert new_fs.read("a.txt") == b"alpha"
 
     def test_symlink_preserved(self, fs, local_dir):
         target = local_dir / "a.txt"
         link = local_dir / "link.txt"
         link.symlink_to("a.txt")
-        new_fs = sync_to_repo(fs, str(local_dir), "data")
+        new_fs = fs.sync_in(str(local_dir), "data")
         assert new_fs.readlink("data/link.txt") == "a.txt"
 
 
 # ---------------------------------------------------------------------------
-# sync_from_repo
+# sync_out (repo → local)
 # ---------------------------------------------------------------------------
 
 class TestSyncFromRepo:
@@ -111,7 +107,7 @@ class TestSyncFromRepo:
         fs = fs.write("data/y.txt", b"why")
         out = tmp_path / "output"
         out.mkdir()
-        sync_from_repo(fs, "data", str(out))
+        fs.sync_out("data", str(out))
         assert (out / "x.txt").read_text() == "ex"
         assert (out / "y.txt").read_text() == "why"
 
@@ -120,7 +116,7 @@ class TestSyncFromRepo:
         out = tmp_path / "output"
         out.mkdir()
         (out / "extra.txt").write_text("extra")
-        sync_from_repo(fs, "data", str(out))
+        fs.sync_out("data", str(out))
         assert not (out / "extra.txt").exists()
         assert (out / "x.txt").read_text() == "ex"
 
@@ -129,7 +125,7 @@ class TestSyncFromRepo:
         out = tmp_path / "output"
         out.mkdir()
         (out / "x.txt").write_text("old content")
-        sync_from_repo(fs, "data", str(out))
+        fs.sync_out("data", str(out))
         assert (out / "x.txt").read_text() == "new content"
 
     def test_noop_when_identical(self, fs, tmp_path):
@@ -138,14 +134,14 @@ class TestSyncFromRepo:
         out.mkdir()
         (out / "x.txt").write_bytes(b"ex")
         # Should not raise or change anything
-        sync_from_repo(fs, "data", str(out))
+        fs.sync_out("data", str(out))
         assert (out / "x.txt").read_bytes() == b"ex"
 
     def test_nested_directories(self, fs, tmp_path):
         fs = fs.write("data/sub/deep/nested.txt", b"nested")
         out = tmp_path / "output"
         out.mkdir()
-        sync_from_repo(fs, "data", str(out))
+        fs.sync_out("data", str(out))
         assert (out / "sub" / "deep" / "nested.txt").read_text() == "nested"
 
     def test_cleans_empty_dirs_after_delete(self, fs, tmp_path):
@@ -155,13 +151,13 @@ class TestSyncFromRepo:
         sub = out / "orphan" / "deep"
         sub.mkdir(parents=True)
         (sub / "old.txt").write_text("old")
-        sync_from_repo(fs, "data", str(out))
+        fs.sync_out("data", str(out))
         assert not (out / "orphan").exists()
 
     def test_creates_output_dir(self, fs, tmp_path):
         fs = fs.write("data/x.txt", b"ex")
         out = tmp_path / "new_dir"
-        sync_from_repo(fs, "data", str(out))
+        fs.sync_out("data", str(out))
         assert (out / "x.txt").read_text() == "ex"
 
     def test_symlink_preserved(self, fs, tmp_path):
@@ -169,7 +165,7 @@ class TestSyncFromRepo:
         fs = fs.write("data/target.txt", b"content")
         out = tmp_path / "output"
         out.mkdir()
-        sync_from_repo(fs, "data", str(out))
+        fs.sync_out("data", str(out))
         assert (out / "link.txt").is_symlink()
         assert os.readlink(out / "link.txt") == "target.txt"
 
@@ -180,7 +176,8 @@ class TestSyncFromRepo:
 
 class TestSyncToRepoDryRun:
     def test_returns_correct_plan(self, fs, local_dir):
-        plan = sync_to_repo_dry_run(fs, str(local_dir), "data")
+        result = fs.sync_in(str(local_dir), "data", dry_run=True)
+        plan = result.changes
         assert isinstance(plan, ChangeReport)
         assert sorted(paths(plan.add)) == ["a.txt", "b.txt"]
         assert len(plan.update) == 0
@@ -189,14 +186,15 @@ class TestSyncToRepoDryRun:
         assert not plan.in_sync
 
     def test_does_not_write(self, fs, local_dir):
-        plan = sync_to_repo_dry_run(fs, str(local_dir), "data")
+        result = fs.sync_in(str(local_dir), "data", dry_run=True)
+        plan = result.changes
         assert plan.total > 0
         # Repo should still be empty
         assert fs.ls() == []
 
     def test_detects_updates(self, fs, local_dir):
         fs = fs.write("data/a.txt", b"old")
-        plan = sync_to_repo_dry_run(fs, str(local_dir), "data")
+        plan = fs.sync_in(str(local_dir), "data", dry_run=True).changes
         assert "a.txt" in paths(plan.update)
         assert "b.txt" in paths(plan.add)
 
@@ -204,14 +202,14 @@ class TestSyncToRepoDryRun:
         fs = fs.write("data/a.txt", b"alpha")
         fs = fs.write("data/b.txt", b"beta")
         fs = fs.write("data/extra.txt", b"extra")
-        plan = sync_to_repo_dry_run(fs, str(local_dir), "data")
+        plan = fs.sync_in(str(local_dir), "data", dry_run=True).changes
         assert "extra.txt" in paths(plan.delete)
         assert len(plan.add) == 0
         assert len(plan.update) == 0
 
     def test_in_sync(self, fs, local_dir):
-        fs1 = sync_to_repo(fs, str(local_dir), "data")
-        plan = sync_to_repo_dry_run(fs1, str(local_dir), "data")
+        fs1 = fs.sync_in(str(local_dir), "data")
+        plan = fs1.sync_in(str(local_dir), "data", dry_run=True).changes
         assert plan is None
 
 
@@ -220,7 +218,7 @@ class TestSyncFromRepoDryRun:
         fs = fs.write("data/x.txt", b"ex")
         out = tmp_path / "output"
         out.mkdir()
-        plan = sync_from_repo_dry_run(fs, "data", str(out))
+        plan = fs.sync_out("data", str(out), dry_run=True).changes
         assert sorted(paths(plan.add)) == ["x.txt"]
         assert len(plan.update) == 0
         assert len(plan.delete) == 0
@@ -229,7 +227,7 @@ class TestSyncFromRepoDryRun:
         fs = fs.write("data/x.txt", b"ex")
         out = tmp_path / "output"
         out.mkdir()
-        plan = sync_from_repo_dry_run(fs, "data", str(out))
+        plan = fs.sync_out("data", str(out), dry_run=True).changes
         assert plan.total > 0
         assert not (out / "x.txt").exists()
 
@@ -238,7 +236,7 @@ class TestSyncFromRepoDryRun:
         out = tmp_path / "output"
         out.mkdir()
         (out / "x.txt").write_bytes(b"old")
-        plan = sync_from_repo_dry_run(fs, "data", str(out))
+        plan = fs.sync_out("data", str(out), dry_run=True).changes
         assert "x.txt" in paths(plan.update)
 
     def test_detects_deletes(self, fs, tmp_path):
@@ -247,7 +245,7 @@ class TestSyncFromRepoDryRun:
         out.mkdir()
         (out / "x.txt").write_bytes(b"ex")
         (out / "extra.txt").write_bytes(b"extra")
-        plan = sync_from_repo_dry_run(fs, "data", str(out))
+        plan = fs.sync_out("data", str(out), dry_run=True).changes
         assert "extra.txt" in paths(plan.delete)
         assert len(plan.add) == 0
         assert len(plan.update) == 0
@@ -256,8 +254,8 @@ class TestSyncFromRepoDryRun:
         fs = fs.write("data/x.txt", b"ex")
         out = tmp_path / "output"
         out.mkdir()
-        sync_from_repo(fs, "data", str(out))
-        plan = sync_from_repo_dry_run(fs, "data", str(out))
+        fs.sync_out("data", str(out))
+        plan = fs.sync_out("data", str(out), dry_run=True).changes
         assert plan is None
 
 
@@ -301,7 +299,7 @@ class TestSyncSymlinks:
         (local / "linked_dir").symlink_to(real_sub)
         (local / "regular.txt").write_text("regular")
 
-        new_fs = sync_to_repo(fs, str(local), "data")
+        new_fs = fs.sync_in(str(local), "data")
         assert new_fs.readlink("data/linked_dir") == str(real_sub)
         assert new_fs.read("data/regular.txt") == b"regular"
 
@@ -311,17 +309,17 @@ class TestSyncSymlinks:
         local.mkdir()
         (local / "link").symlink_to("target_v1")
 
-        fs1 = sync_to_repo(fs, str(local), "data")
+        fs1 = fs.sync_in(str(local), "data")
         assert fs1.readlink("data/link") == "target_v1"
 
         # Change the target
         (local / "link").unlink()
         (local / "link").symlink_to("target_v2")
 
-        plan = sync_to_repo_dry_run(fs1, str(local), "data")
+        plan = fs1.sync_in(str(local), "data", dry_run=True).changes
         assert "link" in paths(plan.update)
 
-        fs2 = sync_to_repo(fs1, str(local), "data")
+        fs2 = fs1.sync_in(str(local), "data")
         assert fs2.readlink("data/link") == "target_v2"
 
     def test_symlink_target_change_detected_from_repo(self, fs, tmp_path):
@@ -329,14 +327,14 @@ class TestSyncSymlinks:
         fs = fs.write_symlink("data/link", "target_v1")
         out = tmp_path / "output"
         out.mkdir()
-        sync_from_repo(fs, "data", str(out))
+        fs.sync_out("data", str(out))
         assert os.readlink(out / "link") == "target_v1"
 
         fs = fs.write_symlink("data/link", "target_v2")
-        plan = sync_from_repo_dry_run(fs, "data", str(out))
+        plan = fs.sync_out("data", str(out), dry_run=True).changes
         assert "link" in paths(plan.update)
 
-        sync_from_repo(fs, "data", str(out))
+        fs.sync_out("data", str(out))
         assert os.readlink(out / "link") == "target_v2"
 
     def test_symlink_replaces_regular_file_to_repo(self, fs, tmp_path):
@@ -346,7 +344,7 @@ class TestSyncSymlinks:
         local.mkdir()
         (local / "target").symlink_to("somewhere")
 
-        new_fs = sync_to_repo(fs, str(local), "data")
+        new_fs = fs.sync_in(str(local), "data")
         assert new_fs.readlink("data/target") == "somewhere"
 
     def test_regular_file_replaces_symlink_to_repo(self, fs, tmp_path):
@@ -356,7 +354,7 @@ class TestSyncSymlinks:
         local.mkdir()
         (local / "target").write_text("regular file")
 
-        new_fs = sync_to_repo(fs, str(local), "data")
+        new_fs = fs.sync_in(str(local), "data")
         assert new_fs.read("data/target") == b"regular file"
 
     def test_symlink_replaces_regular_file_from_repo(self, fs, tmp_path):
@@ -366,7 +364,7 @@ class TestSyncSymlinks:
         out.mkdir()
         (out / "target").write_text("regular file")
 
-        sync_from_repo(fs, "data", str(out))
+        fs.sync_out("data", str(out))
         assert (out / "target").is_symlink()
         assert os.readlink(out / "target") == "somewhere"
 
@@ -377,7 +375,7 @@ class TestSyncSymlinks:
         out.mkdir()
         (out / "target").symlink_to("somewhere")
 
-        sync_from_repo(fs, "data", str(out))
+        fs.sync_out("data", str(out))
         assert not (out / "target").is_symlink()
         assert (out / "target").read_text() == "regular file"
 
@@ -387,7 +385,7 @@ class TestSyncSymlinks:
         local.mkdir()
         (local / "broken").symlink_to("nonexistent_target")
 
-        new_fs = sync_to_repo(fs, str(local), "data")
+        new_fs = fs.sync_in(str(local), "data")
         assert new_fs.readlink("data/broken") == "nonexistent_target"
 
     def test_dangling_symlink_from_repo(self, fs, tmp_path):
@@ -396,7 +394,7 @@ class TestSyncSymlinks:
         out = tmp_path / "output"
         out.mkdir()
 
-        sync_from_repo(fs, "data", str(out))
+        fs.sync_out("data", str(out))
         assert (out / "broken").is_symlink()
         assert os.readlink(out / "broken") == "nonexistent_target"
 
@@ -407,7 +405,7 @@ class TestSyncSymlinks:
         (local / "sub" / "real.txt").write_text("content")
         (local / "sub" / "link.txt").symlink_to("real.txt")
 
-        new_fs = sync_to_repo(fs, str(local), "data")
+        new_fs = fs.sync_in(str(local), "data")
         assert new_fs.readlink("data/sub/link.txt") == "real.txt"
         assert new_fs.read("data/sub/real.txt") == b"content"
 
@@ -425,7 +423,7 @@ class TestSyncFileDirectoryCollisions:
         local.mkdir()
         (local / "foo").write_text("I am a file now")
 
-        new_fs = sync_to_repo(fs, str(local), "data")
+        new_fs = fs.sync_in(str(local), "data")
         assert new_fs.read("data/foo") == b"I am a file now"
         assert not new_fs.exists("data/foo/bar.txt")
         assert not new_fs.exists("data/foo/baz.txt")
@@ -437,7 +435,7 @@ class TestSyncFileDirectoryCollisions:
         (local / "foo").mkdir(parents=True)
         (local / "foo" / "bar.txt").write_text("nested")
 
-        new_fs = sync_to_repo(fs, str(local), "data")
+        new_fs = fs.sync_in(str(local), "data")
         assert new_fs.read("data/foo/bar.txt") == b"nested"
         assert new_fs.is_dir("data/foo")
 
@@ -448,7 +446,7 @@ class TestSyncFileDirectoryCollisions:
         (out / "foo").mkdir(parents=True)
         (out / "foo" / "bar.txt").write_text("nested")
 
-        sync_from_repo(fs, "data", str(out))
+        fs.sync_out("data", str(out))
         assert (out / "foo").is_file()
         assert (out / "foo").read_text() == "I am a file"
 
@@ -459,7 +457,7 @@ class TestSyncFileDirectoryCollisions:
         out.mkdir()
         (out / "foo").write_text("I was a file")
 
-        sync_from_repo(fs, "data", str(out))
+        fs.sync_out("data", str(out))
         assert (out / "foo").is_dir()
         assert (out / "foo" / "bar.txt").read_text() == "nested"
 
@@ -470,7 +468,7 @@ class TestSyncFileDirectoryCollisions:
         (local / "a").mkdir(parents=True)
         (local / "a" / "b").write_text("shallow file")
 
-        new_fs = sync_to_repo(fs, str(local), "data")
+        new_fs = fs.sync_in(str(local), "data")
         assert new_fs.read("data/a/b") == b"shallow file"
         assert not new_fs.exists("data/a/b/c/d.txt")
 
@@ -481,7 +479,7 @@ class TestSyncFileDirectoryCollisions:
         local.mkdir()
         (local / "foo").write_text("file")
 
-        plan = sync_to_repo_dry_run(fs, str(local), "data")
+        plan = fs.sync_in(str(local), "data", dry_run=True).changes
         assert "foo" in paths(plan.add)
         assert "foo/bar.txt" in paths(plan.delete)
 
@@ -497,7 +495,7 @@ class TestSyncContentEdgeCases:
         local.mkdir()
         (local / "empty.txt").write_bytes(b"")
 
-        new_fs = sync_to_repo(fs, str(local), "data")
+        new_fs = fs.sync_in(str(local), "data")
         assert new_fs.read("data/empty.txt") == b""
 
     def test_empty_file_from_repo(self, fs, tmp_path):
@@ -506,7 +504,7 @@ class TestSyncContentEdgeCases:
         out = tmp_path / "output"
         out.mkdir()
 
-        sync_from_repo(fs, "data", str(out))
+        fs.sync_out("data", str(out))
         assert (out / "empty.txt").read_bytes() == b""
 
     def test_binary_files(self, fs, tmp_path):
@@ -514,7 +512,7 @@ class TestSyncContentEdgeCases:
         local = tmp_path / "local"
         local.mkdir()
         (local / "bin.dat").write_bytes(bytes(range(256)))
-        new_fs = sync_to_repo(fs, str(local), "data")
+        new_fs = fs.sync_in(str(local), "data")
         assert new_fs.read("data/bin.dat") == bytes(range(256))
 
     def test_binary_files_from_repo(self, fs, tmp_path):
@@ -522,7 +520,7 @@ class TestSyncContentEdgeCases:
         fs = fs.write("data/bin.dat", data)
         out = tmp_path / "output"
         out.mkdir()
-        sync_from_repo(fs, "data", str(out))
+        fs.sync_out("data", str(out))
         assert (out / "bin.dat").read_bytes() == data
 
     def test_same_content_different_paths(self, fs, tmp_path):
@@ -532,13 +530,13 @@ class TestSyncContentEdgeCases:
         (local / "a.txt").write_text("same")
         (local / "b.txt").write_text("same")
 
-        new_fs = sync_to_repo(fs, str(local), "data")
+        new_fs = fs.sync_in(str(local), "data")
         assert new_fs.read("data/a.txt") == b"same"
         assert new_fs.read("data/b.txt") == b"same"
 
         # Delete just one locally
         (local / "b.txt").unlink()
-        new_fs2 = sync_to_repo(new_fs, str(local), "data")
+        new_fs2 = new_fs.sync_in(str(local), "data")
         assert new_fs2.read("data/a.txt") == b"same"
         assert not new_fs2.exists("data/b.txt")
 
@@ -549,7 +547,7 @@ class TestSyncContentEdgeCases:
         local.mkdir()
         (local / "f.txt").write_bytes(b"hello\n")
 
-        plan = sync_to_repo_dry_run(fs, str(local), "data")
+        plan = fs.sync_in(str(local), "data", dry_run=True).changes
         assert "f.txt" in paths(plan.update)
 
 
@@ -567,7 +565,7 @@ class TestSyncStructureEdgeCases:
         empty = tmp_path / "empty"
         empty.mkdir()
 
-        new_fs = sync_to_repo(fs, str(empty), "data")
+        new_fs = fs.sync_in(str(empty), "data")
         assert not new_fs.exists("data")
 
     def test_empty_repo_path_deletes_all_local_files(self, fs, tmp_path):
@@ -580,7 +578,7 @@ class TestSyncStructureEdgeCases:
         sub.mkdir()
         (sub / "b.txt").write_text("b")
 
-        sync_from_repo(fs, "data", str(out))
+        fs.sync_out("data", str(out))
         # All files should be deleted, empty dirs pruned
         assert list(out.iterdir()) == []
 
@@ -591,7 +589,7 @@ class TestSyncStructureEdgeCases:
         deep.mkdir(parents=True)
         (deep / "deep.txt").write_text("deep")
 
-        new_fs = sync_to_repo(fs, str(local), "data")
+        new_fs = fs.sync_in(str(local), "data")
         assert new_fs.read("data/a/b/c/d/e/deep.txt") == b"deep"
 
     def test_deeply_nested_delete_cleans_parents(self, fs, tmp_path):
@@ -603,7 +601,7 @@ class TestSyncStructureEdgeCases:
         deep.mkdir(parents=True)
         (deep / "orphan.txt").write_text("orphan")
 
-        sync_from_repo(fs, "data", str(out))
+        fs.sync_out("data", str(out))
         assert (out / "x.txt").read_text() == "keep"
         assert not (out / "a").exists()
 
@@ -619,30 +617,30 @@ class TestSyncStructureEdgeCases:
         (local / "change.txt").write_text("new")
         (local / "add.txt").write_text("new file")
 
-        plan = sync_to_repo_dry_run(fs, str(local), "data")
+        plan = fs.sync_in(str(local), "data", dry_run=True).changes
         assert "add.txt" in paths(plan.add)
         assert "change.txt" in paths(plan.update)
         assert "remove.txt" in paths(plan.delete)
         assert "keep.txt" not in (paths(plan.add) | paths(plan.update) | paths(plan.delete))
 
-        new_fs = sync_to_repo(fs, str(local), "data")
+        new_fs = fs.sync_in(str(local), "data")
         assert new_fs.read("data/keep.txt") == b"keep"
         assert new_fs.read("data/change.txt") == b"new"
         assert new_fs.read("data/add.txt") == b"new file"
         assert not new_fs.exists("data/remove.txt")
 
     def test_repo_path_is_a_file_not_directory(self, fs, tmp_path):
-        """sync_to_repo when repo_path currently points to a file, not a tree."""
+        """sync_in when repo_path currently points to a file, not a tree."""
         fs = fs.write("data", b"I am a file at 'data'")
         local = tmp_path / "local"
         local.mkdir()
         (local / "hello.txt").write_text("hello")
 
         # The dry run should treat the file as "no children" (all adds)
-        plan = sync_to_repo_dry_run(fs, str(local), "data")
+        plan = fs.sync_in(str(local), "data", dry_run=True).changes
         assert "hello.txt" in paths(plan.add)
 
-        new_fs = sync_to_repo(fs, str(local), "data")
+        new_fs = fs.sync_in(str(local), "data")
         assert new_fs.read("data/hello.txt") == b"hello"
         assert new_fs.is_dir("data")
 
@@ -662,8 +660,8 @@ class TestSyncRoundTrip:
         (local / "change.txt").write_text("v2")
         (local / "new.txt").write_text("new")
 
-        plan = sync_to_repo_dry_run(fs, str(local), "data")
-        new_fs = sync_to_repo(fs, str(local), "data")
+        plan = fs.sync_in(str(local), "data", dry_run=True).changes
+        new_fs = fs.sync_in(str(local), "data")
 
         # Verify adds
         for p in paths(plan.add):
@@ -672,7 +670,7 @@ class TestSyncRoundTrip:
         for p in paths(plan.delete):
             assert not new_fs.exists(f"data/{p}")
         # After sync, dry run should show in_sync
-        plan2 = sync_to_repo_dry_run(new_fs, str(local), "data")
+        plan2 = new_fs.sync_in(str(local), "data", dry_run=True).changes
         assert plan2 is None
 
     def test_dry_run_matches_actual_sync_from_repo(self, fs, tmp_path):
@@ -684,8 +682,8 @@ class TestSyncRoundTrip:
         out.mkdir()
         (out / "extra.txt").write_text("extra")
 
-        plan = sync_from_repo_dry_run(fs, "data", str(out))
-        sync_from_repo(fs, "data", str(out))
+        plan = fs.sync_out("data", str(out), dry_run=True).changes
+        fs.sync_out("data", str(out))
 
         # Verify adds
         for p in paths(plan.add):
@@ -694,11 +692,11 @@ class TestSyncRoundTrip:
         for p in paths(plan.delete):
             assert not (out / p).exists()
         # After sync, dry run should show in_sync
-        plan2 = sync_from_repo_dry_run(fs, "data", str(out))
+        plan2 = fs.sync_out("data", str(out), dry_run=True).changes
         assert plan2 is None
 
     def test_round_trip_to_repo_and_back(self, fs, tmp_path):
-        """sync_to_repo then sync_from_repo produces identical directory."""
+        """sync_in then sync_out produces identical directory."""
         local = tmp_path / "local"
         local.mkdir()
         (local / "a.txt").write_text("alpha")
@@ -708,11 +706,11 @@ class TestSyncRoundTrip:
         (sub / "c.txt").write_text("charlie")
         (local / "link").symlink_to("a.txt")
 
-        new_fs = sync_to_repo(fs, str(local), "data")
+        new_fs = fs.sync_in(str(local), "data")
 
         out = tmp_path / "output"
         out.mkdir()
-        sync_from_repo(new_fs, "data", str(out))
+        new_fs.sync_out("data", str(out))
 
         # Compare contents
         assert (out / "a.txt").read_text() == "alpha"
@@ -722,17 +720,17 @@ class TestSyncRoundTrip:
         assert os.readlink(out / "link") == "a.txt"
 
     def test_round_trip_from_repo_and_back(self, fs, tmp_path):
-        """sync_from_repo then sync_to_repo produces identical repo state."""
+        """sync_out then sync_in produces identical repo state."""
         fs = fs.write("data/x.txt", b"ex")
         fs = fs.write("data/sub/y.txt", b"why")
         fs = fs.write_symlink("data/link", "x.txt")
 
         out = tmp_path / "output"
         out.mkdir()
-        sync_from_repo(fs, "data", str(out))
+        fs.sync_out("data", str(out))
 
         # Now sync back to a different repo path
-        new_fs = sync_to_repo(fs, str(out), "data2")
+        new_fs = fs.sync_in(str(out), "data2")
 
         # Contents should match
         assert new_fs.read("data2/x.txt") == b"ex"
@@ -749,8 +747,8 @@ class TestSyncRoundTrip:
         (sub / "deep.txt").write_text("deep")
         (local / "link").symlink_to("a.txt")
 
-        fs1 = sync_to_repo(fs, str(local), "data")
-        fs2 = sync_to_repo(fs1, str(local), "data")
+        fs1 = fs.sync_in(str(local), "data")
+        fs2 = fs1.sync_in(str(local), "data")
         assert fs1.commit_hash == fs2.commit_hash
 
 
@@ -762,7 +760,7 @@ class TestDryRunExactMatch:
     """Verify that dry-run plans exactly predict what execution does."""
 
     def test_dry_run_plan_exact_match_to_repo(self, fs, tmp_path):
-        """Dry-run plan exactly predicts every change sync_to_repo makes."""
+        """Dry-run plan exactly predicts every change sync_in makes."""
         # Set up repo with mix of files
         fs = fs.write("data/keep.txt", b"keep")
         fs = fs.write("data/change.txt", b"old")
@@ -782,8 +780,8 @@ class TestDryRunExactMatch:
             for fe in fnames:
                 repo_before.add(f"{dp}/{fe.name}" if dp else fe.name)
 
-        plan = sync_to_repo_dry_run(fs, str(local), "data")
-        new_fs = sync_to_repo(fs, str(local), "data")
+        plan = fs.sync_in(str(local), "data", dry_run=True).changes
+        new_fs = fs.sync_in(str(local), "data")
 
         # Snapshot repo files after
         repo_after = set()
@@ -817,11 +815,11 @@ class TestDryRunExactMatch:
                 assert rp not in all_plan_paths
 
         # After sync, second dry-run shows in_sync
-        plan2 = sync_to_repo_dry_run(new_fs, str(local), "data")
+        plan2 = new_fs.sync_in(str(local), "data", dry_run=True).changes
         assert plan2 is None
 
     def test_dry_run_plan_exact_match_from_repo(self, fs, tmp_path):
-        """Dry-run plan exactly predicts every change sync_from_repo makes."""
+        """Dry-run plan exactly predicts every change sync_out makes."""
         fs = fs.write("data/a.txt", b"alpha")
         fs = fs.write("data/sub/b.txt", b"beta")
         fs = fs.write("data/keep.txt", b"keep")
@@ -842,8 +840,8 @@ class TestDryRunExactMatch:
                 rel = os.path.relpath(full, out).replace(os.sep, "/")
                 local_before.add(rel)
 
-        plan = sync_from_repo_dry_run(fs, "data", str(out))
-        sync_from_repo(fs, "data", str(out))
+        plan = fs.sync_out("data", str(out), dry_run=True).changes
+        fs.sync_out("data", str(out))
 
         # Walk local after
         local_after = set()
@@ -866,7 +864,7 @@ class TestDryRunExactMatch:
             assert p in local_after
 
         # After sync, should be in_sync
-        plan2 = sync_from_repo_dry_run(fs, "data", str(out))
+        plan2 = fs.sync_out("data", str(out), dry_run=True).changes
         assert plan2 is None
 
     def test_dry_run_plan_matches_with_collisions(self, fs, tmp_path):
@@ -882,8 +880,8 @@ class TestDryRunExactMatch:
         (local / "foo").write_text("I am a file now")
         (local / "other.txt").write_bytes(b"other")
 
-        plan = sync_to_repo_dry_run(fs, str(local), "data")
-        new_fs = sync_to_repo(fs, str(local), "data")
+        plan = fs.sync_in(str(local), "data", dry_run=True).changes
+        new_fs = fs.sync_in(str(local), "data")
 
         # Plan should show 'foo' added and sub-files deleted
         assert "foo" in paths(plan.add)
@@ -895,7 +893,7 @@ class TestDryRunExactMatch:
         assert new_fs.read("data/other.txt") == b"other"
 
         # And in_sync after
-        plan2 = sync_to_repo_dry_run(new_fs, str(local), "data")
+        plan2 = new_fs.sync_in(str(local), "data", dry_run=True).changes
         assert plan2 is None
 
 
@@ -904,9 +902,9 @@ class TestDryRunExactMatch:
 # ---------------------------------------------------------------------------
 
 class TestDeleteSafety:
-    """Verify sync_from_repo doesn't delete outside target or follow symlinks."""
+    """Verify sync_out doesn't delete outside target or follow symlinks."""
 
-    def test_sync_from_repo_does_not_touch_files_outside_target(self, fs, tmp_path):
+    def test_sync_out_does_not_touch_files_outside_target(self, fs, tmp_path):
         """Files in sibling directories are untouched after sync."""
         fs = fs.write("data/x.txt", b"ex")
 
@@ -922,13 +920,13 @@ class TestDeleteSafety:
         out.mkdir()
         (out / "old.txt").write_text("should be deleted")
 
-        sync_from_repo(fs, "data", str(out))
+        fs.sync_out("data", str(out))
 
         # Sibling directory untouched
         assert (sibling / "precious.txt").read_text() == "do not delete"
         assert (sibling / "sub" / "deep.txt").read_text() == "deep precious"
 
-    def test_sync_from_repo_symlink_escape(self, fs, tmp_path):
+    def test_sync_out_symlink_escape(self, fs, tmp_path):
         """Sync does NOT follow symlinks to delete files outside target."""
         fs = fs.write("data/x.txt", b"ex")
 
@@ -943,13 +941,13 @@ class TestDeleteSafety:
         (out / "escape_link").symlink_to(str(precious))
         (out / "regular.txt").write_text("delete me")
 
-        sync_from_repo(fs, "data", str(out))
+        fs.sync_out("data", str(out))
 
         # Precious files must still exist
         assert (precious / "important.txt").read_text() == "do not delete"
         assert precious.is_dir()
 
-    def test_sync_from_repo_preserves_base_dir(self, fs, tmp_path):
+    def test_sync_out_preserves_base_dir(self, fs, tmp_path):
         """After syncing to empty, the base directory itself still exists."""
         # Empty repo path — should delete all local files
         out = tmp_path / "output"
@@ -959,13 +957,13 @@ class TestDeleteSafety:
         sub.mkdir()
         (sub / "b.txt").write_text("b")
 
-        sync_from_repo(fs, "data", str(out))
+        fs.sync_out("data", str(out))
 
         # Base dir still exists, just empty
         assert out.is_dir()
         assert list(out.iterdir()) == []
 
-    def test_sync_from_repo_delete_only_planned_files(self, fs, tmp_path):
+    def test_sync_out_delete_only_planned_files(self, fs, tmp_path):
         """Exactly the right files are deleted — no more, no fewer."""
         # Repo has 5 files
         for i in range(5):
@@ -979,13 +977,13 @@ class TestDeleteSafety:
         for i in range(5):
             (out / f"delete_{i}.txt").write_text(f"delete {i}")
 
-        plan = sync_from_repo_dry_run(fs, "data", str(out))
+        plan = fs.sync_out("data", str(out), dry_run=True).changes
         assert len(plan.delete) == 5
         assert sorted(paths(plan.delete)) == [f"delete_{i}.txt" for i in range(5)]
         assert len(plan.add) == 0
         assert len(plan.update) == 0
 
-        sync_from_repo(fs, "data", str(out))
+        fs.sync_out("data", str(out))
 
         # Verify exactly the right files remain
         remaining = sorted(f.name for f in out.iterdir())
@@ -1017,7 +1015,7 @@ class TestSyncSymlinkEdgeCases:
         out.mkdir()
         (out / "sub").symlink_to(str(elsewhere))
 
-        sync_from_repo(fs, "data", str(out))
+        fs.sync_out("data", str(out))
 
         # 'sub' should now be a real directory, not a symlink
         assert (out / "sub").is_dir()
@@ -1039,7 +1037,7 @@ class TestSyncSymlinkEdgeCases:
         out.mkdir()
         (out / "sub").symlink_to(str(elsewhere))
 
-        sync_from_repo(fs, "data", str(out))
+        fs.sync_out("data", str(out))
 
         assert (out / "sub").is_file()
         assert not (out / "sub").is_symlink()
@@ -1054,12 +1052,12 @@ class TestSyncSymlinkEdgeCases:
         local.mkdir()
         (local / "abs_link").symlink_to("/usr/bin/env")
 
-        new_fs = sync_to_repo(fs, str(local), "data")
+        new_fs = fs.sync_in(str(local), "data")
         assert new_fs.readlink("data/abs_link") == "/usr/bin/env"
 
         out = tmp_path / "output"
         out.mkdir()
-        sync_from_repo(new_fs, "data", str(out))
+        new_fs.sync_out("data", str(out))
         assert (out / "abs_link").is_symlink()
         assert os.readlink(out / "abs_link") == "/usr/bin/env"
 
@@ -1069,12 +1067,12 @@ class TestSyncSymlinkEdgeCases:
         (local / "sub").mkdir(parents=True)
         (local / "sub" / "uplink").symlink_to("../sibling/file")
 
-        new_fs = sync_to_repo(fs, str(local), "data")
+        new_fs = fs.sync_in(str(local), "data")
         assert new_fs.readlink("data/sub/uplink") == "../sibling/file"
 
         out = tmp_path / "output"
         out.mkdir()
-        sync_from_repo(new_fs, "data", str(out))
+        new_fs.sync_out("data", str(out))
         assert os.readlink(out / "sub" / "uplink") == "../sibling/file"
 
     def test_symlink_to_self_circular(self, fs, tmp_path):
@@ -1083,12 +1081,12 @@ class TestSyncSymlinkEdgeCases:
         local.mkdir()
         (local / "selfref").symlink_to("selfref")
 
-        new_fs = sync_to_repo(fs, str(local), "data")
+        new_fs = fs.sync_in(str(local), "data")
         assert new_fs.readlink("data/selfref") == "selfref"
 
         out = tmp_path / "output"
         out.mkdir()
-        sync_from_repo(new_fs, "data", str(out))
+        new_fs.sync_out("data", str(out))
         assert (out / "selfref").is_symlink()
         assert os.readlink(out / "selfref") == "selfref"
 
@@ -1107,7 +1105,7 @@ class TestSyncSymlinkEdgeCases:
 
         (local / "linked_dir").symlink_to(str(target_dir))
 
-        new_fs = sync_to_repo(fs, str(local), "data")
+        new_fs = fs.sync_in(str(local), "data")
 
         # linked_dir should be stored as a symlink, not traversed
         assert new_fs.readlink("data/linked_dir") == str(target_dir)
@@ -1130,8 +1128,8 @@ class TestSyncSymlinksInSync:
         (local / "link").symlink_to("target")
         (local / "file.txt").write_text("hello")
 
-        fs1 = sync_to_repo(fs, str(local), "data")
-        plan = sync_to_repo_dry_run(fs1, str(local), "data")
+        fs1 = fs.sync_in(str(local), "data")
+        plan = fs1.sync_in(str(local), "data", dry_run=True).changes
         assert plan is None
 
     def test_dir_symlink_in_sync_to_repo(self, fs, tmp_path):
@@ -1144,8 +1142,8 @@ class TestSyncSymlinksInSync:
         local.mkdir()
         (local / "linked_dir").symlink_to(str(target_dir))
 
-        fs1 = sync_to_repo(fs, str(local), "data")
-        plan = sync_to_repo_dry_run(fs1, str(local), "data")
+        fs1 = fs.sync_in(str(local), "data")
+        plan = fs1.sync_in(str(local), "data", dry_run=True).changes
         assert plan is None
 
     def test_file_symlink_in_sync_from_repo(self, fs, tmp_path):
@@ -1155,9 +1153,9 @@ class TestSyncSymlinksInSync:
 
         out = tmp_path / "output"
         out.mkdir()
-        sync_from_repo(fs, "data", str(out))
+        fs.sync_out("data", str(out))
 
-        plan = sync_from_repo_dry_run(fs, "data", str(out))
+        plan = fs.sync_out("data", str(out), dry_run=True).changes
         assert plan is None
 
     def test_dir_symlink_from_repo_no_false_update(self, fs, tmp_path):
@@ -1171,10 +1169,10 @@ class TestSyncSymlinksInSync:
 
         out = tmp_path / "output"
         out.mkdir()
-        sync_from_repo(fs, "data", str(out))
+        fs.sync_out("data", str(out))
 
         # Re-sync should produce no changes
-        plan = sync_from_repo_dry_run(fs, "data", str(out))
+        plan = fs.sync_out("data", str(out), dry_run=True).changes
         assert plan is None
 
 
@@ -1192,7 +1190,7 @@ class TestSyncUnicodeFilenames:
         (local / "café.txt").write_text("coffee")
         (local / "日本語.txt").write_text("japanese")
 
-        new_fs = sync_to_repo(fs, str(local), "data")
+        new_fs = fs.sync_in(str(local), "data")
         assert new_fs.read("data/café.txt") == b"coffee"
         assert new_fs.read("data/日本語.txt") == b"japanese"
 
@@ -1203,7 +1201,7 @@ class TestSyncUnicodeFilenames:
 
         out = tmp_path / "output"
         out.mkdir()
-        sync_from_repo(fs, "data", str(out))
+        fs.sync_out("data", str(out))
 
         assert (out / "café.txt").read_text() == "coffee"
         assert (out / "日本語.txt").read_text() == "japanese"
@@ -1214,16 +1212,16 @@ class TestSyncUnicodeFilenames:
         local.mkdir()
         (local / "café.txt").write_text("coffee")
 
-        new_fs = sync_to_repo(fs, str(local), "data")
+        new_fs = fs.sync_in(str(local), "data")
 
         out = tmp_path / "output"
         out.mkdir()
-        sync_from_repo(new_fs, "data", str(out))
+        new_fs.sync_out("data", str(out))
 
         assert (out / "café.txt").read_text() == "coffee"
 
         # And syncing back should be in_sync
-        plan = sync_to_repo_dry_run(new_fs, str(out), "data")
+        plan = new_fs.sync_in(str(out), "data", dry_run=True).changes
         assert plan is None
 
     def test_filename_with_spaces(self, fs, tmp_path):
@@ -1234,13 +1232,13 @@ class TestSyncUnicodeFilenames:
         (local / "sub dir").mkdir()
         (local / "sub dir" / "another file.txt").write_text("nested spaces")
 
-        new_fs = sync_to_repo(fs, str(local), "data")
+        new_fs = fs.sync_in(str(local), "data")
         assert new_fs.read("data/my file.txt") == b"spaces"
         assert new_fs.read("data/sub dir/another file.txt") == b"nested spaces"
 
         out = tmp_path / "output"
         out.mkdir()
-        sync_from_repo(new_fs, "data", str(out))
+        new_fs.sync_out("data", str(out))
         assert (out / "my file.txt").read_text() == "spaces"
         assert (out / "sub dir" / "another file.txt").read_text() == "nested spaces"
 
@@ -1253,7 +1251,7 @@ class TestSyncUnicodeFilenames:
         (local / "a=b.txt").write_text("equals")
         (local / "c+d.txt").write_text("plus")
 
-        new_fs = sync_to_repo(fs, str(local), "data")
+        new_fs = fs.sync_in(str(local), "data")
         assert new_fs.read("data/file#1.txt") == b"hash"
         assert new_fs.read("data/file@2.txt") == b"at"
         assert new_fs.read("data/a=b.txt") == b"equals"
@@ -1261,7 +1259,7 @@ class TestSyncUnicodeFilenames:
 
         out = tmp_path / "output"
         out.mkdir()
-        sync_from_repo(new_fs, "data", str(out))
+        new_fs.sync_out("data", str(out))
         assert (out / "file#1.txt").read_text() == "hash"
         assert (out / "file@2.txt").read_text() == "at"
         assert (out / "a=b.txt").read_text() == "equals"
@@ -1285,8 +1283,8 @@ class TestSyncOverlappingPaths:
         local_b.mkdir()
         (local_b / "b.txt").write_text("from b")
 
-        fs1 = sync_to_repo(fs, str(local_a), "path_a")
-        fs2 = sync_to_repo(fs1, str(local_b), "path_b")
+        fs1 = fs.sync_in(str(local_a), "path_a")
+        fs2 = fs1.sync_in(str(local_b), "path_b")
 
         assert fs2.read("path_a/a.txt") == b"from a"
         assert fs2.read("path_b/b.txt") == b"from b"
@@ -1297,8 +1295,8 @@ class TestSyncOverlappingPaths:
         out_a.mkdir()
         out_b.mkdir()
 
-        sync_from_repo(fs2, "path_a", str(out_a))
-        sync_from_repo(fs2, "path_b", str(out_b))
+        fs2.sync_out("path_a", str(out_a))
+        fs2.sync_out("path_b", str(out_b))
 
         assert (out_a / "a.txt").read_text() == "from a"
         assert not (out_a / "b.txt").exists()
@@ -1313,14 +1311,14 @@ class TestSyncOverlappingPaths:
         (local_root / "sub").mkdir()
         (local_root / "sub" / "original.txt").write_text("original")
 
-        fs1 = sync_to_repo(fs, str(local_root), "")
+        fs1 = fs.sync_in(str(local_root), "")
 
         # Now sync different content to just the 'sub' path
         local_sub = tmp_path / "sub_content"
         local_sub.mkdir()
         (local_sub / "replacement.txt").write_text("replaced")
 
-        fs2 = sync_to_repo(fs1, str(local_sub), "sub")
+        fs2 = fs1.sync_in(str(local_sub), "sub")
 
         # 'top.txt' should still exist
         assert fs2.read("top.txt") == b"top"
@@ -1351,7 +1349,7 @@ class TestSyncStress:
             (local / subdir / f"file_{i}.txt").write_text(content)
             expected[name] = content
 
-        new_fs = sync_to_repo(fs, str(local), "data")
+        new_fs = fs.sync_in(str(local), "data")
 
         # Verify all files in repo
         for name, content in expected.items():
@@ -1360,13 +1358,13 @@ class TestSyncStress:
         # Round-trip back
         out = tmp_path / "output"
         out.mkdir()
-        sync_from_repo(new_fs, "data", str(out))
+        new_fs.sync_out("data", str(out))
 
         for name, content in expected.items():
             assert (out / name).read_text() == content
 
         # Final dry-run should show in_sync
-        plan = sync_to_repo_dry_run(new_fs, str(out), "data")
+        plan = new_fs.sync_in(str(out), "data", dry_run=True).changes
         assert plan is None
 
     def test_large_file(self, fs, tmp_path):
@@ -1378,12 +1376,12 @@ class TestSyncStress:
         assert len(content) == 1_000_000
         (local / "large.bin").write_bytes(content)
 
-        new_fs = sync_to_repo(fs, str(local), "data")
+        new_fs = fs.sync_in(str(local), "data")
         assert new_fs.read("data/large.bin") == content
 
         out = tmp_path / "output"
         out.mkdir()
-        sync_from_repo(new_fs, "data", str(out))
+        new_fs.sync_out("data", str(out))
         assert (out / "large.bin").read_bytes() == content
 
 
@@ -1394,20 +1392,20 @@ class TestSyncStress:
 class TestSyncErrors:
     """Error handling and boundary conditions."""
 
-    def test_sync_to_repo_nonexistent_local_path_is_noop(self, fs):
+    def test_sync_in_nonexistent_local_path_is_noop(self, fs):
         """Syncing from nonexistent local path is a no-op (os.walk yields nothing)."""
         # os.walk on nonexistent path silently yields nothing,
         # so syncing treats it as empty. With empty repo, that's a no-op.
-        result = sync_to_repo(fs, "/nonexistent/path/that/does/not/exist", "data")
+        result = fs.sync_in("/nonexistent/path/that/does/not/exist", "data")
         assert result.ls() == []
 
-    def test_sync_to_repo_nonexistent_local_deletes_repo(self, fs):
+    def test_sync_in_nonexistent_local_deletes_repo(self, fs):
         """Syncing from nonexistent path deletes all existing repo content."""
         fs = fs.write("data/x.txt", b"ex")
-        result = sync_to_repo(fs, "/nonexistent/path", "data")
+        result = fs.sync_in("/nonexistent/path", "data")
         assert not result.exists("data/x.txt")
 
-    def test_sync_from_repo_nonexistent_repo_path_creates_empty(self, fs, tmp_path):
+    def test_sync_out_nonexistent_repo_path_creates_empty(self, fs, tmp_path):
         """If repo path doesn't exist, local dir becomes empty."""
         out = tmp_path / "output"
         out.mkdir()
@@ -1415,7 +1413,7 @@ class TestSyncErrors:
         (out / "sub").mkdir()
         (out / "sub" / "b.txt").write_text("also deleted")
 
-        sync_from_repo(fs, "nonexistent", str(out))
+        fs.sync_out("nonexistent", str(out))
         assert list(out.iterdir()) == []
         assert out.is_dir()  # base dir preserved
 
@@ -1427,29 +1425,29 @@ class TestSyncErrors:
         local.mkdir()
         (local / "b.txt").write_text("beta")
 
-        plan1 = sync_to_repo_dry_run(fs, str(local), "data")
-        plan2 = sync_to_repo_dry_run(fs, str(local), "data")
+        plan1 = fs.sync_in(str(local), "data", dry_run=True).changes
+        plan2 = fs.sync_in(str(local), "data", dry_run=True).changes
 
         assert plan1.add == plan2.add
         assert plan1.update == plan2.update
         assert plan1.delete == plan2.delete
 
     def test_sync_plan_immutability_from_repo(self, fs, tmp_path):
-        """Calling from_repo dry-run twice returns identical plans."""
+        """Calling sync_out dry-run twice returns identical plans."""
         fs = fs.write("data/a.txt", b"alpha")
 
         out = tmp_path / "output"
         out.mkdir()
         (out / "b.txt").write_text("beta")
 
-        plan1 = sync_from_repo_dry_run(fs, "data", str(out))
-        plan2 = sync_from_repo_dry_run(fs, "data", str(out))
+        plan1 = fs.sync_out("data", str(out), dry_run=True).changes
+        plan2 = fs.sync_out("data", str(out), dry_run=True).changes
 
         assert plan1.add == plan2.add
         assert plan1.update == plan2.update
         assert plan1.delete == plan2.delete
 
-    def test_sync_from_repo_to_readonly_parent(self, fs, tmp_path):
+    def test_sync_out_to_readonly_parent(self, fs, tmp_path):
         """If output parent can't be written to, raises clear error."""
         fs = fs.write("data/x.txt", b"ex")
         readonly = tmp_path / "readonly"
@@ -1457,7 +1455,7 @@ class TestSyncErrors:
         readonly.chmod(0o444)
         try:
             with pytest.raises(OSError):
-                sync_from_repo(fs, "data", str(readonly / "sub" / "output"))
+                fs.sync_out("data", str(readonly / "sub" / "output"))
         finally:
             readonly.chmod(0o755)
 
@@ -1469,24 +1467,24 @@ class TestSyncErrors:
 class TestSyncDeleteFileAtRepoPath:
     """Fix 1: sync should delete a file when repo_path points to a file."""
 
-    def test_sync_to_repo_deletes_file_at_repo_path(self, fs, tmp_path):
+    def test_sync_in_deletes_file_at_repo_path(self, fs, tmp_path):
         """When repo_path is a single file and local_path is empty, file is deleted."""
         fs = fs.write("data", b"I am a file at 'data'")
         assert fs.exists("data")
 
-        # Sync from nonexistent local → should delete the file
-        new_fs = sync_to_repo(fs, "/nonexistent/path", "data")
+        # Sync from nonexistent local -> should delete the file
+        new_fs = fs.sync_in("/nonexistent/path", "data")
         assert not new_fs.exists("data")
 
-    def test_sync_to_repo_dry_run_shows_file_delete(self, fs):
+    def test_sync_in_dry_run_shows_file_delete(self, fs):
         """Dry-run reports delete when repo_path is a file and local is empty."""
         fs = fs.write("data", b"I am a file at 'data'")
-        plan = sync_to_repo_dry_run(fs, "/nonexistent/path", "data")
+        plan = fs.sync_in("/nonexistent/path", "data", dry_run=True).changes
         assert "data" in paths(plan.delete)
 
-    def test_sync_to_repo_dry_run_file_delete_plan_path(self, fs):
+    def test_sync_in_dry_run_file_delete_plan_path(self, fs):
         """Verify delete path for file-at-dest uses the actual file path."""
         fs = fs.write("data", b"I am a file at 'data'")
-        plan = sync_to_repo_dry_run(fs, "/nonexistent/path", "data")
+        plan = fs.sync_in("/nonexistent/path", "data", dry_run=True).changes
         assert plan is not None
         assert sorted(paths(plan.delete)) == ["data"]

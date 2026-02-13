@@ -33,6 +33,7 @@ from .tree import (
 )
 
 if TYPE_CHECKING:
+    from ._exclude import ExcludeFilter
     from .copy._types import ChangeReport, FileType
     from .repo import GitStore
 
@@ -433,25 +434,126 @@ class FS:
             message,
         )
 
-    def remove(self, path: str | os.PathLike[str], *, message: str | None = None) -> FS:
-        path = _normalize_path(path)
-        if not self._writable:
-            raise PermissionError("Cannot write to a read-only snapshot")
-        if not self.exists(path):
-            raise FileNotFoundError(path)
-        # Reject directories — remove is for files only
-        obj = _walk_to(self._store._repo, self._tree_oid, path)
-        if obj.type == GIT_OBJECT_TREE:
-            raise IsADirectoryError(path)
-        return self._commit_changes({}, {path}, message)
-
     def batch(self, message: str | None = None, operation: str | None = None):
         from .batch import Batch
         return Batch(self, message=message, operation=operation)
 
-    # --- Export ---
+    # --- Copy / Sync / Remove / Move ---
 
-    def export_tree(self, path: str | os.PathLike[str]) -> None:
+    def copy_in(
+        self,
+        sources: str | list[str],
+        dest: str,
+        *,
+        dry_run: bool = False,
+        glob: bool = True,
+        follow_symlinks: bool = False,
+        message: str | None = None,
+        mode: int | None = None,
+        ignore_existing: bool = False,
+        delete: bool = False,
+        ignore_errors: bool = False,
+        checksum: bool = True,
+        exclude: ExcludeFilter | None = None,
+    ) -> FS:
+        """Copy local files/dirs/globs into the repo. Returns ``FS``."""
+        from .copy._ops import _copy_in
+        return _copy_in(
+            self, sources, dest, dry_run=dry_run, glob=glob,
+            follow_symlinks=follow_symlinks, message=message, mode=mode,
+            ignore_existing=ignore_existing, delete=delete,
+            ignore_errors=ignore_errors, checksum=checksum, exclude=exclude,
+        )
+
+    def copy_out(
+        self,
+        sources: str | list[str],
+        dest: str,
+        *,
+        dry_run: bool = False,
+        glob: bool = True,
+        ignore_existing: bool = False,
+        delete: bool = False,
+        ignore_errors: bool = False,
+        checksum: bool = True,
+    ) -> FS:
+        """Copy repo files/dirs/globs to local disk. Returns ``FS``."""
+        from .copy._ops import _copy_out
+        return _copy_out(
+            self, sources, dest, dry_run=dry_run, glob=glob,
+            ignore_existing=ignore_existing, delete=delete,
+            ignore_errors=ignore_errors, checksum=checksum,
+        )
+
+    def sync_in(
+        self,
+        local_path: str,
+        repo_path: str,
+        *,
+        dry_run: bool = False,
+        message: str | None = None,
+        ignore_errors: bool = False,
+        checksum: bool = True,
+        exclude: ExcludeFilter | None = None,
+    ) -> FS:
+        """Make *repo_path* identical to *local_path*. Returns ``FS``."""
+        from .copy._ops import _sync_in
+        return _sync_in(
+            self, local_path, repo_path, dry_run=dry_run,
+            message=message, ignore_errors=ignore_errors,
+            checksum=checksum, exclude=exclude,
+        )
+
+    def sync_out(
+        self,
+        repo_path: str,
+        local_path: str,
+        *,
+        dry_run: bool = False,
+        ignore_errors: bool = False,
+        checksum: bool = True,
+    ) -> FS:
+        """Make *local_path* identical to *repo_path*. Returns ``FS``."""
+        from .copy._ops import _sync_out
+        return _sync_out(
+            self, repo_path, local_path, dry_run=dry_run,
+            ignore_errors=ignore_errors, checksum=checksum,
+        )
+
+    def remove(
+        self,
+        sources: str | list[str],
+        *,
+        recursive: bool = False,
+        dry_run: bool = False,
+        glob: bool = True,
+        message: str | None = None,
+    ) -> FS:
+        """Remove files matching *sources* from the repo. Returns ``FS``."""
+        from .copy._ops import _remove
+        return _remove(
+            self, sources, dry_run=dry_run, glob=glob,
+            recursive=recursive, message=message,
+        )
+
+    def move(
+        self,
+        sources: str | list[str],
+        dest: str,
+        *,
+        recursive: bool = False,
+        dry_run: bool = False,
+        glob: bool = True,
+        message: str | None = None,
+    ) -> FS:
+        """Move/rename files within the repo. Returns ``FS``."""
+        from .copy._ops import _move
+        return _move(
+            self, sources, dest, dry_run=dry_run, glob=glob,
+            recursive=recursive, message=message,
+        )
+
+    def export(self, path: str | os.PathLike[str]) -> None:
         """Write the tree contents to a directory on the filesystem.
 
         The destination directory should be empty or non-existent.
