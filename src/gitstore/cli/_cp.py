@@ -10,7 +10,7 @@ import click
 from ..copy._io import _copy_blob_to_batch
 from ..copy._types import FileType
 from ..exceptions import StaleSnapshotError
-from ..tree import _entry_at_path
+from ..tree import GIT_FILEMODE_BLOB_EXECUTABLE, _entry_at_path
 from ._helpers import (
     main,
     _parse_ref_path,
@@ -354,7 +354,7 @@ def cp(ctx, args, branch, ref, at_path, match_pattern, before, back, message, fi
                 dest_path = _normalize_repo_path(dest_path)
 
         # Resolve source FS(es) and enumerate files
-        default_fs = _resolve_fs(store, dest_branch, ref, at_path=at_path,
+        default_fs = _resolve_fs(store, branch, ref, at_path=at_path,
                                  match_pattern=match_pattern, before=before, back=back)
 
         # Collect all (src_repo_path, dest_repo_path) pairs across source groups
@@ -375,21 +375,31 @@ def cp(ctx, args, branch, ref, at_path, match_pattern, before, back, message, fi
         if not all_pairs and not delete:
             return
 
+        # Precompute delete set and prefix for key-space normalization
+        _pfx = (dest_path + "/") if dest_path else ""
+        deleted_set: set[str] = set()
+        if delete:
+            from ..copy._resolve import _walk_repo
+            dest_files = set(_walk_repo(dest_fs, dest_path or "").keys())
+            src_dest_rels = {
+                dp[len(_pfx):] if _pfx and dp.startswith(_pfx) else dp
+                for _, _, dp in all_pairs
+            }
+            to_delete = sorted(dest_files - src_dest_rels)
+            deleted_set = set(to_delete)
+
         try:
             if dry_run:
-                # Build dest file set for --delete
                 if delete:
-                    from ..copy._resolve import _walk_repo
-                    dest_files = set(_walk_repo(dest_fs, dest_path or "").keys())
-                    src_dest_paths = {dp for _, _, dp in all_pairs}
-                    for dp in sorted(dest_files - src_dest_paths):
-                        full = f"{dest_path}/{dp}" if dest_path else dp
+                    for rel in to_delete:
+                        full = f"{dest_path}/{rel}" if dest_path else rel
                         click.echo(f"- :{full}")
                 for src_fs, sp, dp in all_pairs:
                     entry = _entry_at_path(src_fs._store._repo, src_fs._tree_oid, sp)
                     if entry is None:
                         continue
-                    if ignore_existing and dest_fs.exists(dp):
+                    dp_rel = dp[len(_pfx):] if _pfx and dp.startswith(_pfx) else dp
+                    if ignore_existing and dest_fs.exists(dp) and dp_rel not in deleted_set:
                         continue
                     # Check if it's add or update
                     if dest_fs.exists(dp):
@@ -400,18 +410,16 @@ def cp(ctx, args, branch, ref, at_path, match_pattern, before, back, message, fi
                 with dest_fs.batch(message=message, operation="cp") as b:
                     # Handle --delete
                     if delete:
-                        from ..copy._resolve import _walk_repo
-                        dest_files = set(_walk_repo(dest_fs, dest_path or "").keys())
-                        src_dest_paths = {dp for _, _, dp in all_pairs}
-                        for dp in sorted(dest_files - src_dest_paths):
-                            full = f"{dest_path}/{dp}" if dest_path else dp
+                        for rel in to_delete:
+                            full = f"{dest_path}/{rel}" if dest_path else rel
                             try:
                                 b.remove(full)
                             except (FileNotFoundError, IsADirectoryError):
                                 pass
 
                     for src_fs, sp, dp in all_pairs:
-                        if ignore_existing and dest_fs.exists(dp):
+                        dp_rel = dp[len(_pfx):] if _pfx and dp.startswith(_pfx) else dp
+                        if ignore_existing and dest_fs.exists(dp) and dp_rel not in deleted_set:
                             continue
                         _copy_blob_to_batch(b, src_fs, sp, dp, filemode=filemode)
                 _status(ctx, f"Copied -> :{dest_path or '/'}")
@@ -451,6 +459,8 @@ def _cp_single_repo_to_disk(ctx, fs, src_raw, dest_path, dry_run,
                 out.symlink_to(target)
             else:
                 out.write_bytes(fs.read(src_path))
+                if entry and entry[1] == GIT_FILEMODE_BLOB_EXECUTABLE:
+                    os.chmod(out, 0o755)
             cts = fs._store._repo[fs._commit_oid].commit_time
             os.utime(out, (cts, cts), follow_symlinks=False)
         except OSError as exc:

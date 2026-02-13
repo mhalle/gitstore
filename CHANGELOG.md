@@ -4,6 +4,15 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.51.3 (2026-02-12)
+
+**Bug fixes:**
+
+- Fix repo-to-repo `cp --delete` with non-root dest path deleting all destination files due to key-space mismatch between `_walk_repo` (relative) and `_enum_repo_to_repo` (absolute) paths
+- Fix repo-to-repo `cp --delete --ignore-existing` incorrectly skipping files that were scheduled for deletion
+- Fix implicit source in repo-to-repo `cp` resolving from the destination branch instead of the default branch
+- Fix single-file repo-to-disk `cp` dropping the executable bit on `0o755` files
+
 ## v0.51.2 (2026-02-12)
 
 **New features:**

@@ -92,7 +92,7 @@ wheels = [
 
 [[package]]
 name = "gitstore"
-version = "0.51.1"
+version = "0.51.2"
 source = { editable = "." }
 dependencies = [
     { name = "dulwich" },

@@ -1096,6 +1096,82 @@ class TestExcludeCLI:
         assert ".gitignore" not in r.output
 
 
+class TestRepoToRepoDeleteSubdir:
+    def test_repo_to_repo_delete_subdir(self, runner, initialized_repo, tmp_path):
+        """--delete in repo->repo should only remove dest files not in source."""
+        f = tmp_path / "a.txt"
+        f.write_text("aaa")
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":mirror/a.txt"])
+        f.write_text("bbb")
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":mirror/b.txt"])
+
+        # Put a source file on main
+        f.write_text("src_content")
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":src_a.txt"])
+
+        # Copy only src_a.txt to mirror/ with --delete — a.txt and b.txt should be removed
+        result = runner.invoke(main, [
+            "cp", "--repo", initialized_repo, ":src_a.txt", ":mirror/", "--delete"
+        ])
+        assert result.exit_code == 0, result.output
+        # mirror/src_a.txt should exist, mirror/a.txt and mirror/b.txt removed
+        r = runner.invoke(main, ["ls", "--repo", initialized_repo, "-R", ":mirror"])
+        lines = r.output.strip().splitlines()
+        basenames = [os.path.basename(l.strip()) for l in lines]
+        assert "src_a.txt" in basenames
+        assert "a.txt" not in basenames
+        assert "b.txt" not in basenames
+
+    def test_repo_to_repo_delete_ignore_existing(self, runner, initialized_repo, tmp_path):
+        """--delete --ignore-existing should not wipe destination."""
+        f = tmp_path / "data.txt"
+        f.write_text("content")
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":mirror/data.txt"])
+
+        # Copy same file with --delete --ignore-existing
+        result = runner.invoke(main, [
+            "cp", "--repo", initialized_repo,
+            ":mirror/data.txt", ":mirror/", "--delete", "--ignore-existing"
+        ])
+        assert result.exit_code == 0, result.output
+        r = runner.invoke(main, ["cat", "--repo", initialized_repo, ":mirror/data.txt"])
+        assert r.exit_code == 0
+        assert "content" in r.output
+
+
+class TestRepoToRepoImplicitSourceBranch:
+    def test_implicit_source_reads_from_default_branch(self, runner, initialized_repo, tmp_path):
+        """Implicit source reads from default branch, not dest branch."""
+        f = tmp_path / "file.txt"
+        f.write_text("main content")
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":file.txt"])
+        runner.invoke(main, ["branch", "--repo", initialized_repo, "set", "dev"])
+        f.write_text("dev content")
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":file.txt", "-b", "dev"])
+
+        # cp :file.txt dev:mirror/ — should copy from main (implicit), not dev
+        result = runner.invoke(main, [
+            "cp", "--repo", initialized_repo, ":file.txt", "dev:mirror/"
+        ])
+        assert result.exit_code == 0, result.output
+        r = runner.invoke(main, ["cat", "--repo", initialized_repo, "-b", "dev", ":mirror/file.txt"])
+        assert "main content" in r.output
+
+
+class TestSingleFileExecBitPreservation:
+    def test_single_file_repo_to_disk_exec_bit(self, runner, initialized_repo, tmp_path):
+        """Single-file cp from repo to disk preserves executable mode."""
+        f = tmp_path / "script.sh"
+        f.write_text("#!/bin/sh\necho hi")
+        runner.invoke(main, [
+            "cp", "--repo", initialized_repo, str(f), ":script.sh", "--type", "executable"
+        ])
+        dest = tmp_path / "out.sh"
+        result = runner.invoke(main, ["cp", "--repo", initialized_repo, ":script.sh", str(dest)])
+        assert result.exit_code == 0, result.output
+        assert os.stat(dest).st_mode & 0o111  # at least one exec bit set
+
+
 class TestSingleFileCpBugfixes:
     """Regression tests for single-file cp edge cases."""
 
