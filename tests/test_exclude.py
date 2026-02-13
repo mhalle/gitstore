@@ -118,6 +118,48 @@ class TestExcludeFilter:
         assert ef.is_excluded_in_walk("debug.log") is True
         assert ef.is_excluded_in_walk("app.py") is False
 
+    def test_nested_gitignore_negation(self, tmp_path):
+        """Child .gitignore negation overrides parent exclusion (git semantics)."""
+        root = tmp_path / "proj"
+        root.mkdir()
+        (root / ".gitignore").write_text("*.log\n")
+        sub = root / "sub"
+        sub.mkdir()
+        (sub / ".gitignore").write_text("!debug.log\n")
+
+        ef = ExcludeFilter(gitignore=True)
+        ef.enter_directory(root, "")
+        ef.enter_directory(sub, "sub")
+
+        # Root *.log excludes logs at root level
+        assert ef.is_excluded_in_walk("app.log") is True
+        # But sub/debug.log is negated by sub/.gitignore → NOT excluded
+        assert ef.is_excluded_in_walk("sub/debug.log") is False
+        # Other logs in sub are still excluded
+        assert ef.is_excluded_in_walk("sub/app.log") is True
+
+    def test_three_level_negation_precedence(self, tmp_path):
+        """Three-level: exclude → negate → re-exclude. Deepest wins."""
+        root = tmp_path / "proj"
+        root.mkdir()
+        (root / ".gitignore").write_text("*.log\n")
+        sub = root / "sub"
+        sub.mkdir()
+        (sub / ".gitignore").write_text("!debug.log\n")
+        deep = sub / "deep"
+        deep.mkdir()
+        (deep / ".gitignore").write_text("debug.log\n")
+
+        ef = ExcludeFilter(gitignore=True)
+        ef.enter_directory(root, "")
+        ef.enter_directory(sub, "sub")
+        ef.enter_directory(deep, "sub/deep")
+
+        # sub/debug.log → negated by sub/.gitignore → NOT excluded
+        assert ef.is_excluded_in_walk("sub/debug.log") is False
+        # sub/deep/debug.log → re-excluded by deep/.gitignore → excluded
+        assert ef.is_excluded_in_walk("sub/deep/debug.log") is True
+
 
 # ---------------------------------------------------------------------------
 # Integration tests via _walk_local_paths
@@ -196,3 +238,21 @@ class TestWalkWithExclude:
         assert "app.py" in result
         assert "sub/mod.py" in result
         assert "app.pyc" not in result
+
+    def test_walk_gitignore_negation(self, tmp_path):
+        """Integration: _walk_local_paths respects nested negation."""
+        root = tmp_path / "proj"
+        root.mkdir()
+        (root / ".gitignore").write_text("*.log\n")
+        (root / "app.log").write_text("root log")
+        sub = root / "sub"
+        sub.mkdir()
+        (sub / ".gitignore").write_text("!debug.log\n")
+        (sub / "debug.log").write_text("debug log")
+        (sub / "app.log").write_text("sub app log")
+
+        ef = ExcludeFilter(gitignore=True)
+        result = _walk_local_paths(str(root), exclude=ef)
+        assert "app.log" not in result          # excluded by root *.log
+        assert "sub/app.log" not in result      # still excluded
+        assert "sub/debug.log" in result        # negated by sub/.gitignore

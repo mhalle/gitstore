@@ -4,6 +4,14 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.54.1 (2026-02-13)
+
+**Bug fixes:**
+
+- Fix symlink parent directory escape: `copy_out`/`sync_out` could write outside the destination when a parent directory was a symlink
+- Fix `ignore_existing` overwriting dangling symlinks instead of skipping them
+- Fix `.gitignore` negation precedence: nested negation patterns (`!file`) now correctly override parent exclusions (deepest matching rule wins)
+
 ## v0.54.0 (2026-02-13)
 
 **New features:**
