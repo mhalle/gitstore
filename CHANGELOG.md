@@ -4,6 +4,12 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.51.4 (2026-02-12)
+
+**Documentation:**
+
+- Add dedicated "Repo paths and the `:` prefix" section near the top of README and CLI reference, covering syntax, when `:` is required, direction detection, and ref writability
+
 ## v0.51.3 (2026-02-12)
 
 **Bug fixes:**
