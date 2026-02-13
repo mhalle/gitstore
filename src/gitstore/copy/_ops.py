@@ -149,7 +149,6 @@ def _copy_in(
     dest: str,
     *,
     dry_run: bool = False,
-    glob: bool = True,
     follow_symlinks: bool = False,
     message: str | None = None,
     mode: int | None = None,
@@ -173,7 +172,7 @@ def _copy_in(
     if isinstance(sources, str):
         sources = [sources]
     if dry_run:
-        return _copy_in_dry(fs, sources, dest, glob=glob,
+        return _copy_in_dry(fs, sources, dest,
                             follow_symlinks=follow_symlinks,
                             ignore_existing=ignore_existing, delete=delete,
                             checksum=checksum, exclude=exclude)
@@ -184,7 +183,7 @@ def _copy_in(
         resolved: list[tuple[str, str, str]] = []
         for src in sources:
             try:
-                resolved.extend(_resolve_disk_sources([src], glob=glob))
+                resolved.extend(_resolve_disk_sources([src]))
             except (FileNotFoundError, NotADirectoryError) as exc:
                 changes.errors.append(ChangeError(path=src, error=str(exc)))
         if not resolved:
@@ -193,7 +192,7 @@ def _copy_in(
             fs._changes = _finalize_changes(changes)
             return fs
     else:
-        resolved = _resolve_disk_sources(sources, glob=glob)
+        resolved = _resolve_disk_sources(sources)
 
     pairs = _enum_disk_to_repo(resolved, dest, follow_symlinks=follow_symlinks,
                                exclude=exclude)
@@ -323,7 +322,6 @@ def _copy_in_dry(
     sources: list[str],
     dest: str,
     *,
-    glob: bool = True,
     follow_symlinks: bool = False,
     ignore_existing: bool = False,
     delete: bool = False,
@@ -331,7 +329,7 @@ def _copy_in_dry(
     exclude: ExcludeFilter | None = None,
 ) -> FS:
     """Dry-run for _copy_in. Returns input *fs* with ``.changes`` set."""
-    resolved = _resolve_disk_sources(sources, glob=glob)
+    resolved = _resolve_disk_sources(sources)
     pairs = _enum_disk_to_repo(resolved, dest, follow_symlinks=follow_symlinks,
                                exclude=exclude)
 
@@ -426,7 +424,6 @@ def _copy_out(
     dest: str,
     *,
     dry_run: bool = False,
-    glob: bool = True,
     ignore_existing: bool = False,
     delete: bool = False,
     ignore_errors: bool = False,
@@ -443,7 +440,7 @@ def _copy_out(
     if isinstance(sources, str):
         sources = [sources]
     if dry_run:
-        return _copy_out_dry(fs, sources, dest, glob=glob,
+        return _copy_out_dry(fs, sources, dest,
                              ignore_existing=ignore_existing, delete=delete,
                              checksum=checksum)
 
@@ -455,7 +452,7 @@ def _copy_out(
         resolved: list[tuple[str, str, str]] = []
         for src in sources:
             try:
-                resolved.extend(_resolve_repo_sources(fs, [src], glob=glob))
+                resolved.extend(_resolve_repo_sources(fs, [src]))
             except (FileNotFoundError, NotADirectoryError) as exc:
                 changes.errors.append(ChangeError(path=src, error=str(exc)))
         if not resolved:
@@ -464,7 +461,7 @@ def _copy_out(
             fs._changes = _finalize_changes(changes)
             return fs
     else:
-        resolved = _resolve_repo_sources(fs, sources, glob=glob)
+        resolved = _resolve_repo_sources(fs, sources)
 
     pairs = _enum_repo_to_disk(fs, resolved, dest)
 
@@ -633,13 +630,12 @@ def _copy_out_dry(
     sources: list[str],
     dest: str,
     *,
-    glob: bool = True,
     ignore_existing: bool = False,
     delete: bool = False,
     checksum: bool = True,
 ) -> FS:
     """Dry-run for _copy_out. Returns input *fs* with ``.changes`` set."""
-    resolved = _resolve_repo_sources(fs, sources, glob=glob)
+    resolved = _resolve_repo_sources(fs, sources)
     pairs = _enum_repo_to_disk(fs, resolved, dest)
 
     if delete:
@@ -735,14 +731,13 @@ def _collect_remove_paths(
     sources: list[str],
     *,
     recursive: bool = False,
-    glob: bool = True,
 ) -> list[str]:
     """Resolve *sources* against the repo and return full paths to delete.
 
     Raises ``FileNotFoundError`` when a source matches nothing and
     ``IsADirectoryError`` when a directory is matched without *recursive*.
     """
-    resolved = _resolve_repo_sources(fs, sources, glob=glob)
+    resolved = _resolve_repo_sources(fs, sources)
     delete_paths: list[str] = []
     for repo_path, mode, _prefix in resolved:
         if mode == "file":
@@ -765,7 +760,6 @@ def _remove(
     sources: str | list[str],
     *,
     dry_run: bool = False,
-    glob: bool = True,
     recursive: bool = False,
     message: str | None = None,
 ) -> FS:
@@ -779,8 +773,7 @@ def _remove(
     if isinstance(sources, (str, os.PathLike)):
         sources = [str(sources)]
 
-    delete_paths = _collect_remove_paths(fs, sources, recursive=recursive,
-                                         glob=glob)
+    delete_paths = _collect_remove_paths(fs, sources, recursive=recursive)
     if not delete_paths:
         raise FileNotFoundError(f"No matches for sources: {sources}")
 
@@ -949,7 +942,6 @@ def _resolve_move(
     dest: str,
     *,
     recursive: bool = False,
-    glob: bool = True,
 ) -> tuple[list[tuple[str, str]], list[str]]:
     """Common resolution for move operations.
 
@@ -962,7 +954,7 @@ def _resolve_move(
     the dest is the exact target path (rename).  Otherwise files are
     placed inside *dest*.
     """
-    resolved = _resolve_repo_sources(fs, sources, glob=glob)
+    resolved = _resolve_repo_sources(fs, sources)
 
     dest_norm = _normalize_path(dest.rstrip("/")) if dest.rstrip("/") else ""
     dest_exists_as_dir = dest_norm and fs.is_dir(dest_norm)
@@ -998,8 +990,7 @@ def _resolve_move(
             raise ValueError(f"Source and destination are the same: {src}")
 
     # Collect all source paths for deletion
-    delete_paths = _collect_remove_paths(fs, sources, recursive=recursive,
-                                         glob=glob)
+    delete_paths = _collect_remove_paths(fs, sources, recursive=recursive)
 
     return pairs, delete_paths
 
@@ -1010,7 +1001,6 @@ def _move(
     dest: str,
     *,
     dry_run: bool = False,
-    glob: bool = True,
     recursive: bool = False,
     message: str | None = None,
 ) -> FS:
@@ -1021,8 +1011,7 @@ def _move(
     """
     if isinstance(sources, str):
         sources = [sources]
-    pairs, delete_paths = _resolve_move(fs, sources, dest, recursive=recursive,
-                                        glob=glob)
+    pairs, delete_paths = _resolve_move(fs, sources, dest, recursive=recursive)
 
     # Build changes
     changes = ChangeReport()

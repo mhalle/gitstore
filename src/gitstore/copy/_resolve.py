@@ -132,7 +132,7 @@ def _walk_repo(fs: FS, repo_path: str) -> dict[str, tuple[bytes, int]]:
 # Disk-side glob expansion
 # ---------------------------------------------------------------------------
 
-def _expand_disk_glob(pattern: str) -> list[str]:
+def disk_glob(pattern: str) -> list[str]:
     """Expand a glob pattern against the local filesystem.
 
     Same dotfile rules as the repo-side ``fs.glob()``.
@@ -227,7 +227,7 @@ def _disk_glob_walk(segments: list[str], prefix: str) -> list[str]:
 # Source resolution
 # ---------------------------------------------------------------------------
 
-def _resolve_disk_sources(sources: list[str], *, glob: bool = True) -> list[tuple[str, str, str]]:
+def _resolve_disk_sources(sources: list[str]) -> list[tuple[str, str, str]]:
     """Resolve local source specs into ``(local_path, mode, prefix)`` tuples.
 
     ``mode`` is one of:
@@ -238,6 +238,9 @@ def _resolve_disk_sources(sources: list[str], *, glob: bool = True) -> list[tupl
     ``prefix`` is an intermediate path to inject between the destination and
     the file name.  It is ``""`` for normal sources and non-empty when the
     source contains an rsync-style ``/./`` pivot marker (with ``idx > 0``).
+
+    Sources must be literal paths (no glob expansion).  Use :func:`disk_glob`
+    to expand patterns before calling this function.
     """
     resolved: list[tuple[str, str, str]] = []
     for src in sources:
@@ -252,26 +255,6 @@ def _resolve_disk_sources(sources: list[str], *, glob: bool = True) -> list[tupl
             rest = rest_os.replace(os.sep, "/")            # normalised for contents_mode / prefix
             contents_mode = rest.endswith("/")
             rest_clean = rest.rstrip("/")
-            has_glob = glob and ("*" in rest_clean or "?" in rest_clean)
-
-            if has_glob:
-                # Pivot + glob: expand the full pattern and compute
-                # per-match prefix relative to the pivot base.
-                full_pattern = os.path.join(base, rest_clean) if rest_clean else base
-                expanded = _expand_disk_glob(full_pattern)
-                if not expanded:
-                    raise FileNotFoundError(f"No matches for pattern: {full_pattern}")
-                base_prefix = base.replace(os.sep, "/").rstrip("/") + "/"
-                for path in expanded:
-                    rel = path.replace(os.sep, "/")
-                    if rel.startswith(base_prefix):
-                        rel = rel[len(base_prefix):]
-                    prefix = "/".join(rel.split("/")[:-1])
-                    if os.path.isdir(path):
-                        resolved.append((path, "dir", prefix))
-                    else:
-                        resolved.append((path, "file", prefix))
-                continue
 
             rest_os_clean = rest_os.rstrip("/").rstrip(os.sep)
             full_path = os.path.join(base, rest_os_clean) if rest_os_clean else base
@@ -291,18 +274,8 @@ def _resolve_disk_sources(sources: list[str], *, glob: bool = True) -> list[tupl
             continue
 
         contents_mode = src.endswith("/")
-        has_glob = glob and ("*" in src or "?" in src)
 
-        if has_glob:
-            expanded = _expand_disk_glob(src.rstrip("/"))
-            if not expanded:
-                raise FileNotFoundError(f"No matches for pattern: {src}")
-            for path in expanded:
-                if os.path.isdir(path):
-                    resolved.append((path, "dir", ""))
-                else:
-                    resolved.append((path, "file", ""))
-        elif contents_mode:
+        if contents_mode:
             path = src.rstrip("/")
             if not os.path.isdir(path):
                 raise NotADirectoryError(f"Not a directory: {path}")
@@ -317,12 +290,15 @@ def _resolve_disk_sources(sources: list[str], *, glob: bool = True) -> list[tupl
     return resolved
 
 
-def _resolve_repo_sources(fs: FS, sources: list[str], *, glob: bool = True) -> list[tuple[str, str, str]]:
+def _resolve_repo_sources(fs: FS, sources: list[str]) -> list[tuple[str, str, str]]:
     """Resolve repo source specs into ``(repo_path, mode, prefix)`` tuples.
 
     ``prefix`` is an intermediate path to inject between the destination and
     the file name.  It is ``""`` for normal sources and non-empty when the
     source contains an rsync-style ``/./`` pivot marker (with ``idx > 0``).
+
+    Sources must be literal paths (no glob expansion).  Use ``fs.glob()``
+    to expand patterns before calling this function.
     """
     resolved: list[tuple[str, str, str]] = []
     for src in sources:
@@ -335,24 +311,6 @@ def _resolve_repo_sources(fs: FS, sources: list[str], *, glob: bool = True) -> l
             rest = src[idx + 3:].replace("\\", "/")   # normalise for repo paths
             contents_mode = rest.endswith("/")
             rest_clean = rest.rstrip("/")
-            has_glob = glob and ("*" in rest_clean or "?" in rest_clean)
-
-            if has_glob:
-                # Pivot + glob: expand via repo glob and compute
-                # per-match prefix relative to the pivot base.
-                full_pattern = f"{base}/{rest_clean}" if rest_clean else base
-                expanded = fs.glob(full_pattern)
-                if not expanded:
-                    raise FileNotFoundError(f"No matches for pattern in repo: {full_pattern}")
-                base_prefix = base.rstrip("/") + "/"
-                for path in expanded:
-                    rel = path[len(base_prefix):] if path.startswith(base_prefix) else path
-                    prefix = "/".join(rel.split("/")[:-1])
-                    if fs.is_dir(path):
-                        resolved.append((path, "dir", prefix))
-                    else:
-                        resolved.append((path, "file", prefix))
-                continue
 
             full_path = f"{base}/{rest_clean}" if rest_clean else base
             full_path = _normalize_path(full_path)
@@ -369,18 +327,8 @@ def _resolve_repo_sources(fs: FS, sources: list[str], *, glob: bool = True) -> l
             continue
 
         contents_mode = src.endswith("/")
-        has_glob = glob and ("*" in src or "?" in src)
 
-        if has_glob:
-            expanded = fs.glob(src.rstrip("/"))
-            if not expanded:
-                raise FileNotFoundError(f"No matches for pattern: {src}")
-            for path in expanded:
-                if fs.is_dir(path):
-                    resolved.append((path, "dir", ""))
-                else:
-                    resolved.append((path, "file", ""))
-        elif contents_mode:
+        if contents_mode:
             path = src.rstrip("/")
             if path:
                 path = _normalize_path(path)

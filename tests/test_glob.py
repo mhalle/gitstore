@@ -1,8 +1,10 @@
-"""Tests for FS.glob() and FS.is_dir()."""
+"""Tests for FS.glob(), FS.is_dir(), and disk_glob()."""
+
+import os
 
 import pytest
 
-from gitstore import GitStore
+from gitstore import GitStore, disk_glob
 
 
 @pytest.fixture
@@ -178,3 +180,50 @@ class TestGlobDoublestar:
     def test_doublestar_sorted(self, fs_with_tree):
         result = fs_with_tree.glob("**")
         assert result == sorted(result)  # sorted and unique
+
+
+class TestGlobPivot:
+    """Test /./  pivot preservation in fs.glob()."""
+
+    def test_glob_pivot_star(self, fs_with_tree):
+        result = fs_with_tree.glob("src/./sub/*.txt")
+        assert result == ["src/./sub/deep.txt"]
+
+    def test_glob_pivot_recursive(self, fs_with_tree):
+        result = fs_with_tree.glob("src/./**/*.py")
+        assert "src/./main.py" in result
+        assert "src/./util.py" in result
+
+    def test_glob_pivot_no_match(self, fs_with_tree):
+        result = fs_with_tree.glob("src/./sub/*.xyz")
+        assert result == []
+
+    def test_glob_pivot_sorted(self, fs_with_tree):
+        result = fs_with_tree.glob("src/./**/*.py")
+        assert result == sorted(result)
+
+
+class TestDiskGlobPivot:
+    """Test /./  pivot preservation in disk_glob()."""
+
+    def test_disk_glob_pivot(self, tmp_path):
+        d = tmp_path / "base" / "sub"
+        d.mkdir(parents=True)
+        (d / "a.txt").write_text("a")
+        (d / "b.txt").write_text("b")
+        result = disk_glob(str(tmp_path / "base") + "/./sub/*.txt")
+        assert len(result) == 2
+        for r in result:
+            assert "/./" in r
+
+    def test_disk_glob_pivot_recursive(self, tmp_path):
+        d = tmp_path / "base"
+        d.mkdir(parents=True)
+        (d / "x.py").write_text("x")
+        pkg = d / "pkg"
+        pkg.mkdir()
+        (pkg / "y.py").write_text("y")
+        result = disk_glob(str(tmp_path / "base") + "/./**/*.py")
+        assert len(result) == 2
+        for r in result:
+            assert "/./" in r

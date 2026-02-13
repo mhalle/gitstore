@@ -497,6 +497,50 @@ def _log_entry_dict(entry) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Glob expansion for CLI (pre-expand before calling library)
+# ---------------------------------------------------------------------------
+
+def _expand_sources_repo(fs, sources: list[str]) -> list[str]:
+    """Expand glob patterns in repo sources using ``fs.glob()``.
+
+    Non-glob sources are passed through unchanged.  Raises
+    :exc:`FileNotFoundError` when a glob pattern matches nothing.
+    """
+    result: list[str] = []
+    for src in sources:
+        if "*" in src or "?" in src:
+            expanded = fs.glob(src)
+            if not expanded:
+                raise FileNotFoundError(
+                    f"No matches for pattern in repo: {src}")
+            result.extend(expanded)
+        else:
+            result.append(src)
+    return result
+
+
+def _expand_sources_disk(sources: list[str]) -> list[str]:
+    """Expand glob patterns in disk sources using :func:`disk_glob`.
+
+    Non-glob sources are passed through unchanged.  Raises
+    :exc:`FileNotFoundError` when a glob pattern matches nothing.
+    """
+    from ..copy._resolve import disk_glob
+
+    result: list[str] = []
+    for src in sources:
+        if "*" in src or "?" in src:
+            expanded = disk_glob(src)
+            if not expanded:
+                raise FileNotFoundError(
+                    f"No matches for pattern: {src}")
+            result.extend(expanded)
+        else:
+            result.append(src)
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Main group
 # ---------------------------------------------------------------------------
 

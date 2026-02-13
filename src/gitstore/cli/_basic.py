@@ -27,6 +27,7 @@ from ._helpers import (
     _require_writable_ref,
     _resolve_same_branch,
     _check_ref_conflicts,
+    _expand_sources_repo,
     _repo_option,
     _branch_option,
     _message_option,
@@ -459,18 +460,20 @@ def rm(ctx, paths, recursive, dry_run, no_glob, branch, message, tag, force_tag)
 
     patterns = [_normalize_repo_path(rp.path if rp.is_repo else p)
                 for p, rp in zip(paths, parsed)]
+    if not no_glob:
+        patterns = _expand_sources_repo(fs, patterns)
 
     try:
         if dry_run:
             result_fs = fs.remove(patterns, recursive=recursive,
-                                   dry_run=True, glob=not no_glob)
+                                   dry_run=True)
             changes = result_fs.changes
             if changes:
                 for action in changes.actions():
                     click.echo(f"- :{action.path}")
         else:
             new_fs = fs.remove(patterns, recursive=recursive,
-                               glob=not no_glob, message=message)
+                               message=message)
             if tag:
                 _apply_tag(store, new_fs, tag, force_tag)
             changes = new_fs.changes
@@ -539,6 +542,8 @@ def mv(ctx, args, recursive, dry_run, no_glob, branch, message, tag, force_tag):
         _normalize_repo_path(rp.path) if rp.path else ""
         for rp in parsed[:-1]
     ]
+    if not no_glob:
+        source_patterns = _expand_sources_repo(fs, source_patterns)
     dest_rp = parsed[-1]
     dest_path = dest_rp.path
     # Preserve trailing slash for directory semantics
@@ -555,7 +560,7 @@ def mv(ctx, args, recursive, dry_run, no_glob, branch, message, tag, force_tag):
         if dry_run:
             result_fs = fs.move(
                 source_patterns, dest_path, recursive=recursive,
-                dry_run=True, glob=not no_glob,
+                dry_run=True,
             )
             changes = result_fs.changes
             if changes:
@@ -565,7 +570,7 @@ def mv(ctx, args, recursive, dry_run, no_glob, branch, message, tag, force_tag):
         else:
             new_fs = fs.move(
                 source_patterns, dest_path,
-                recursive=recursive, glob=not no_glob, message=message,
+                recursive=recursive, message=message,
             )
             if tag:
                 _apply_tag(store, new_fs, tag, force_tag)

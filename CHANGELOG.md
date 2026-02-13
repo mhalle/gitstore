@@ -4,6 +4,19 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.53.0 (2026-02-13)
+
+**Breaking changes:**
+
+- Remove `glob` parameter from `copy_in()`, `copy_out()`, `remove()`, and `move()` — callers now expand patterns before calling these methods using `fs.glob()` or `disk_glob()`
+- Rename `_expand_disk_glob` to `disk_glob` and export from top-level `gitstore` package
+
+**Enhancements:**
+
+- `fs.glob()` and `fs.iglob()` now preserve `/./` pivot markers (rsync `-R` style) in results
+- `disk_glob()` naturally preserves `/./` pivots via filesystem traversal
+- Simplify CLI glob helpers to trivial loops (pivot logic now handled by globs themselves)
+
 ## v0.52.0 (2026-02-12)
 
 **New features:**

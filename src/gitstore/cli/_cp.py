@@ -17,6 +17,8 @@ from ._helpers import (
     _resolve_ref_path,
     _require_writable_ref,
     _check_ref_conflicts,
+    _expand_sources_disk,
+    _expand_sources_repo,
     _repo_option,
     _branch_option,
     _message_option,
@@ -236,11 +238,13 @@ def cp(ctx, args, branch, ref, at_path, match_pattern, before, back, message, fi
                 raise click.ClickException("Branch modified concurrently — retry")
         else:
             source_paths = list(raw_sources)
+            if not no_glob:
+                source_paths = _expand_sources_disk(source_paths)
             try:
                 if dry_run:
                     _dry_fs = fs.copy_in(
                         source_paths, dest_path,
-                        dry_run=True, glob=not no_glob,
+                        dry_run=True,
                         follow_symlinks=follow_symlinks,
                         ignore_existing=ignore_existing,
                         delete=delete,
@@ -260,7 +264,6 @@ def cp(ctx, args, branch, ref, at_path, match_pattern, before, back, message, fi
                 else:
                     _new_fs = fs.copy_in(
                         source_paths, dest_path,
-                        glob=not no_glob,
                         follow_symlinks=follow_symlinks,
                         message=message, mode=filemode,
                         ignore_existing=ignore_existing,
@@ -367,7 +370,8 @@ def cp(ctx, args, branch, ref, at_path, match_pattern, before, back, message, fi
             else:
                 src_fs = default_fs
             src_path = rp.path if rp.is_repo else rp.path
-            resolved = _resolve_repo_sources(src_fs, [src_path])
+            src_paths = _expand_sources_repo(src_fs, [src_path]) if not no_glob else [src_path]
+            resolved = _resolve_repo_sources(src_fs, src_paths)
             pairs = _enum_repo_to_repo(src_fs, resolved, dest_path or "")
             for sp, dp in pairs:
                 all_pairs.append((src_fs, sp, dp))
@@ -477,11 +481,13 @@ def _cp_multi_repo_to_disk(ctx, fs, source_paths, dest_path, dry_run,
                              delete, ignore_existing, ignore_errors, checksum,
                              no_glob):
     """Handle multi-file repo → disk copy."""
+    if not no_glob:
+        source_paths = _expand_sources_repo(fs, source_paths)
     try:
         if dry_run:
             result_fs = fs.copy_out(
                 source_paths, dest_path,
-                dry_run=True, glob=not no_glob,
+                dry_run=True,
                 ignore_existing=ignore_existing,
                 delete=delete,
                 checksum=checksum,
@@ -496,7 +502,6 @@ def _cp_multi_repo_to_disk(ctx, fs, source_paths, dest_path, dry_run,
         else:
             result_fs = fs.copy_out(
                 source_paths, dest_path,
-                glob=not no_glob,
                 ignore_existing=ignore_existing,
                 delete=delete,
                 ignore_errors=ignore_errors,

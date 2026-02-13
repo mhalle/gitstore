@@ -1,7 +1,6 @@
 """Copy and sync files between local disk and a gitstore repo.
 
-Supports files, directories, trailing-slash "contents" mode, and glob
-patterns (``*``, ``?``) with dotfile-aware matching.
+Supports files, directories, and trailing-slash "contents" mode.
 
 Operations are available as methods on ``FS``:
 
@@ -11,6 +10,9 @@ Operations are available as methods on ``FS``:
 - ``fs.sync_out()`` — repo → disk (with delete)
 - ``fs.remove()``   — remove from repo
 - ``fs.move()``     — move within repo
+
+Use ``disk_glob()`` for local filesystem glob expansion and
+``fs.glob()`` for repo-side glob expansion.
 """
 
 from .._exclude import ExcludeFilter
@@ -26,7 +28,7 @@ from ._types import (
 from ._resolve import (
     _walk_local_paths,
     _walk_repo,
-    _expand_disk_glob,
+    disk_glob,
     _disk_glob_walk,
     _resolve_disk_sources,
     _resolve_repo_sources,
@@ -48,4 +50,6 @@ __all__ = [
     # Public types
     "ChangeAction", "ChangeError", "ChangeReport", "ExcludeFilter",
     "FileEntry", "FileType",
+    # Glob expansion
+    "disk_glob",
 ]

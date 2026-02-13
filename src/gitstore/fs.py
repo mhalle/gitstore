@@ -178,9 +178,24 @@ class FS:
         Like :meth:`glob` but returns an unordered iterator instead of a
         sorted list.  Useful when you only need to iterate once and don't
         need sorted output.
+
+        A ``/./`` pivot marker (rsync ``-R`` style) is preserved in the
+        output so that callers can reconstruct partial source paths.
         """
         pattern = pattern.strip("/")
         if not pattern:
+            return
+        pivot_idx = pattern.find("/./")
+        if pivot_idx > 0:
+            base = pattern[:pivot_idx]
+            rest = pattern[pivot_idx + 3:]
+            flat = f"{base}/{rest}" if rest else base
+            base_prefix = base + "/"
+            seen: set[str] = set()
+            for path in self._iglob_walk(flat.split("/"), None, self._tree_oid):
+                if path not in seen:
+                    seen.add(path)
+                    yield f"{base}/./{path[len(base_prefix):]}" if path.startswith(base_prefix) else f"{base}/./{path}"
             return
         seen: set[str] = set()
         for path in self._iglob_walk(pattern.split("/"), None, self._tree_oid):
@@ -490,7 +505,6 @@ class FS:
         dest: str,
         *,
         dry_run: bool = False,
-        glob: bool = True,
         follow_symlinks: bool = False,
         message: str | None = None,
         mode: int | None = None,
@@ -500,10 +514,14 @@ class FS:
         checksum: bool = True,
         exclude: ExcludeFilter | None = None,
     ) -> FS:
-        """Copy local files/dirs/globs into the repo. Returns ``FS``."""
+        """Copy local files into the repo. Returns ``FS``.
+
+        Sources must be literal paths; use :func:`~gitstore.disk_glob` to
+        expand patterns before calling.
+        """
         from .copy._ops import _copy_in
         return _copy_in(
-            self, sources, dest, dry_run=dry_run, glob=glob,
+            self, sources, dest, dry_run=dry_run,
             follow_symlinks=follow_symlinks, message=message, mode=mode,
             ignore_existing=ignore_existing, delete=delete,
             ignore_errors=ignore_errors, checksum=checksum, exclude=exclude,
@@ -515,16 +533,19 @@ class FS:
         dest: str,
         *,
         dry_run: bool = False,
-        glob: bool = True,
         ignore_existing: bool = False,
         delete: bool = False,
         ignore_errors: bool = False,
         checksum: bool = True,
     ) -> FS:
-        """Copy repo files/dirs/globs to local disk. Returns ``FS``."""
+        """Copy repo files to local disk. Returns ``FS``.
+
+        Sources must be literal paths; use :meth:`glob` to expand patterns
+        before calling.
+        """
         from .copy._ops import _copy_out
         return _copy_out(
-            self, sources, dest, dry_run=dry_run, glob=glob,
+            self, sources, dest, dry_run=dry_run,
             ignore_existing=ignore_existing, delete=delete,
             ignore_errors=ignore_errors, checksum=checksum,
         )
@@ -570,13 +591,16 @@ class FS:
         *,
         recursive: bool = False,
         dry_run: bool = False,
-        glob: bool = True,
         message: str | None = None,
     ) -> FS:
-        """Remove files matching *sources* from the repo. Returns ``FS``."""
+        """Remove files from the repo. Returns ``FS``.
+
+        Sources must be literal paths; use :meth:`glob` to expand patterns
+        before calling.
+        """
         from .copy._ops import _remove
         return _remove(
-            self, sources, dry_run=dry_run, glob=glob,
+            self, sources, dry_run=dry_run,
             recursive=recursive, message=message,
         )
 
@@ -587,13 +611,16 @@ class FS:
         *,
         recursive: bool = False,
         dry_run: bool = False,
-        glob: bool = True,
         message: str | None = None,
     ) -> FS:
-        """Move/rename files within the repo. Returns ``FS``."""
+        """Move/rename files within the repo. Returns ``FS``.
+
+        Sources must be literal paths; use :meth:`glob` to expand patterns
+        before calling.
+        """
         from .copy._ops import _move
         return _move(
-            self, sources, dest, dry_run=dry_run, glob=glob,
+            self, sources, dest, dry_run=dry_run,
             recursive=recursive, message=message,
         )
 

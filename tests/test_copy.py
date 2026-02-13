@@ -5,8 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from gitstore import GitStore, ChangeReport, FileEntry
-from gitstore.copy._resolve import _expand_disk_glob
+from gitstore import GitStore, ChangeReport, FileEntry, disk_glob
 
 
 def paths(entries):
@@ -82,16 +81,15 @@ class TestCopyToRepoGlob:
         (d / "a.txt").write_text("aaa")
         (d / "b.md").write_text("bbb")
         (d / ".hidden").write_text("hid")
-        glob_pattern = str(d / "*.txt")
-        new_fs = fs.copy_in([glob_pattern], "out")
+        expanded = disk_glob(str(d / "*.txt"))
+        new_fs = fs.copy_in(expanded, "out")
         assert new_fs.read("out/a.txt") == b"aaa"
         assert not new_fs.exists("out/b.md")
         assert not new_fs.exists("out/.hidden")
 
     def test_glob_no_matches(self, store_and_fs):
         _, fs, tmp_path = store_and_fs
-        with pytest.raises(FileNotFoundError, match="No matches"):
-            fs.copy_in([str(tmp_path / "*.zzz")], "out")
+        assert disk_glob(str(tmp_path / "*.zzz")) == []
 
 
 class TestCopyFromRepoFile:
@@ -133,7 +131,8 @@ class TestCopyFromRepoGlob:
         _, fs, tmp_path = store_and_fs
         out = tmp_path / "output"
         out.mkdir()
-        fs.copy_out(["dir/*.txt"], str(out))
+        expanded = fs.glob("dir/*.txt")
+        fs.copy_out(expanded, str(out))
         assert (out / "a.txt").read_text() == "aaa"
         assert (out / "b.txt").read_text() == "bbb"
         # Dotfile excluded by glob
@@ -830,19 +829,19 @@ class TestSourceDirSymlinkNoFollow:
 
 class TestExpandDiskGlobCrossPlatform:
     def test_expand_disk_glob_with_backslash_patterns(self, tmp_path):
-        """_expand_disk_glob normalizes os.sep in patterns."""
+        """disk_glob normalizes os.sep in patterns."""
         d = tmp_path / "globtest"
         d.mkdir()
         (d / "a.txt").write_text("a")
         (d / "b.txt").write_text("b")
 
         # Use forward-slash pattern (always works)
-        result = _expand_disk_glob(str(d) + "/*.txt")
+        result = disk_glob(str(d) + "/*.txt")
         assert len(result) == 2
 
         # Simulate what would happen with os.sep-based pattern
         pattern = os.path.join(str(d), "*.txt")
-        result2 = _expand_disk_glob(pattern)
+        result2 = disk_glob(pattern)
         assert len(result2) == 2
         assert sorted(result) == sorted(result2)
 
@@ -1127,7 +1126,7 @@ class TestCopyToRepoPivot:
         assert new_fs.read("dest/sub/file.txt") == b"hi"
 
     def test_pivot_with_glob(self, store_and_fs):
-        """base/./sub/*.txt expands glob and preserves pivot prefix."""
+        """disk_glob preserves /./  pivot in expanded paths."""
         _, fs, tmp_path = store_and_fs
         d = tmp_path / "base" / "sub"
         d.mkdir(parents=True)
@@ -1135,13 +1134,14 @@ class TestCopyToRepoPivot:
         (d / "b.txt").write_text("bbb")
         (d / "c.py").write_text("ccc")
         src = str(tmp_path / "base") + "/./sub/*.txt"
-        new_fs = fs.copy_in([src], "dest")
+        expanded = disk_glob(src)
+        new_fs = fs.copy_in(expanded, "dest")
         assert new_fs.read("dest/sub/a.txt") == b"aaa"
         assert new_fs.read("dest/sub/b.txt") == b"bbb"
         assert not new_fs.exists("dest/sub/c.py")
 
     def test_pivot_with_glob_recursive(self, store_and_fs):
-        """base/./**/*.py expands recursive glob with pivot prefix."""
+        """disk_glob preserves /./  pivot with recursive **."""
         _, fs, tmp_path = store_and_fs
         d = tmp_path / "base"
         d.mkdir(parents=True)
@@ -1150,19 +1150,19 @@ class TestCopyToRepoPivot:
         pkg.mkdir()
         (pkg / "y.py").write_text("y")
         src = str(tmp_path / "base") + "/./**/*.py"
-        new_fs = fs.copy_in([src], "dest")
+        expanded = disk_glob(src)
+        new_fs = fs.copy_in(expanded, "dest")
         assert new_fs.read("dest/x.py") == b"x"
         assert new_fs.read("dest/pkg/y.py") == b"y"
 
     def test_pivot_with_glob_no_match(self, store_and_fs):
-        """base/./sub/*.xyz raises FileNotFoundError when nothing matches."""
+        """disk_glob returns [] for no-match pivot pattern."""
         _, fs, tmp_path = store_and_fs
         d = tmp_path / "base" / "sub"
         d.mkdir(parents=True)
         (d / "a.txt").write_text("aaa")
         src = str(tmp_path / "base") + "/./sub/*.xyz"
-        with pytest.raises(FileNotFoundError):
-            fs.copy_in([src], "dest")
+        assert disk_glob(src) == []
 
 
 # ---------------------------------------------------------------------------
@@ -1252,37 +1252,36 @@ class TestCopyFromRepoPivot:
         assert (out / "sub" / "file.txt").read_text() == "hi"
 
     def test_pivot_with_glob(self, store_and_fs):
-        """base/./sub/*.txt expands glob and preserves pivot prefix."""
+        """fs.glob preserves /./  pivot in expanded paths."""
         _, fs, tmp_path = store_and_fs
         fs = fs.write("base/sub/a.txt", b"aaa")
         fs = fs.write("base/sub/b.txt", b"bbb")
         fs = fs.write("base/sub/c.py", b"ccc")
         out = tmp_path / "output"
         out.mkdir()
-        fs.copy_out(["base/./sub/*.txt"], str(out))
+        expanded = fs.glob("base/./sub/*.txt")
+        fs.copy_out(expanded, str(out))
         assert (out / "sub" / "a.txt").read_text() == "aaa"
         assert (out / "sub" / "b.txt").read_text() == "bbb"
         assert not (out / "sub" / "c.py").exists()
 
     def test_pivot_with_glob_recursive(self, store_and_fs):
-        """base/./**/*.py expands recursive glob with pivot prefix."""
+        """fs.glob preserves /./  pivot with recursive **."""
         _, fs, tmp_path = store_and_fs
         fs = fs.write("base/x.py", b"x")
         fs = fs.write("base/pkg/y.py", b"y")
         out = tmp_path / "output"
         out.mkdir()
-        fs.copy_out(["base/./**/*.py"], str(out))
+        expanded = fs.glob("base/./**/*.py")
+        fs.copy_out(expanded, str(out))
         assert (out / "x.py").read_text() == "x"
         assert (out / "pkg" / "y.py").read_text() == "y"
 
     def test_pivot_with_glob_no_match(self, store_and_fs):
-        """base/./sub/*.xyz raises FileNotFoundError when nothing matches."""
+        """fs.glob returns [] for no-match pivot pattern."""
         _, fs, tmp_path = store_and_fs
         fs = fs.write("base/sub/a.txt", b"aaa")
-        out = tmp_path / "output"
-        out.mkdir()
-        with pytest.raises(FileNotFoundError):
-            fs.copy_out(["base/./sub/*.xyz"], str(out))
+        assert fs.glob("base/./sub/*.xyz") == []
 
 
 # ---------------------------------------------------------------------------
@@ -1298,7 +1297,8 @@ class TestRemoveFromRepo:
 
     def test_remove_glob(self, store_and_fs):
         _, fs, tmp_path = store_and_fs
-        new_fs = fs.remove(["dir/*.txt"])
+        expanded = fs.glob("dir/*.txt")
+        new_fs = fs.remove(expanded)
         assert not new_fs.exists("dir/a.txt")
         assert not new_fs.exists("dir/b.txt")
         # dotfiles are not matched by *
@@ -1306,7 +1306,8 @@ class TestRemoveFromRepo:
 
     def test_remove_glob_recursive(self, store_and_fs):
         _, fs, tmp_path = store_and_fs
-        new_fs = fs.remove(["**/*.txt"])
+        expanded = fs.glob("**/*.txt")
+        new_fs = fs.remove(expanded)
         assert not new_fs.exists("existing.txt")
         assert not new_fs.exists("dir/a.txt")
         assert not new_fs.exists("dir/b.txt")
@@ -1358,5 +1359,4 @@ class TestRemoveFromRepo:
 
     def test_remove_glob_no_match(self, store_and_fs):
         _, fs, tmp_path = store_and_fs
-        with pytest.raises(FileNotFoundError):
-            fs.remove(["*.xyz"])
+        assert fs.glob("*.xyz") == []
