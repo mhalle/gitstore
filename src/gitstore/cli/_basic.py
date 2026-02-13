@@ -160,19 +160,22 @@ def _ls_entry_dict(name, we, size, object_store):
     """Build a JSON-ready dict for a single ls -l entry."""
     if we is not None and we.file_type == FileType.LINK:
         target = _read_link_target(object_store, we.oid)
-        return {"name": name, "size": size, "type": "link", "target": target}
+        return {"name": name, "hash": str(we.oid), "size": size, "type": "link", "target": target}
     if we is not None and we.file_type != FileType.TREE:
-        return {"name": name, "size": size, "type": str(we.file_type)}
+        return {"name": name, "hash": str(we.oid), "size": size, "type": str(we.file_type)}
+    if we is not None:
+        return {"name": name, "hash": str(we.oid), "type": "tree"}
     return {"name": name, "type": "tree"}
 
 
-def _format_ls_output(results, long, fmt, object_store):
+def _format_ls_output(results, long, fmt, object_store, *, full_hash=False):
     """Format and emit ls results.
 
     *results* is ``dict[str, WalkEntry | None]`` when *long* is True,
     else ``dict[str, None]``.
     """
     sorted_names = sorted(results)
+    hash_len = 40 if full_hash else 7
 
     if fmt == "text" and not long:
         for name in sorted_names:
@@ -185,17 +188,20 @@ def _format_ls_output(results, long, fmt, object_store):
             for name in sorted_names:
                 we = results[name]
                 if we is not None and we.file_type == FileType.LINK:
+                    h = str(we.oid)[:hash_len]
                     size = sizer.size(we.oid.raw)
                     target = _read_link_target(object_store, we.oid)
-                    rows.append((str(size), f"{name} -> {target}"))
+                    rows.append((h, str(size), f"{name} -> {target}"))
                 elif we is not None and we.file_type != FileType.TREE:
+                    h = str(we.oid)[:hash_len]
                     size = sizer.size(we.oid.raw)
-                    rows.append((str(size), name))
+                    rows.append((h, str(size), name))
                 else:
-                    rows.append(("", name))
-        width = max((len(s) for s, _ in rows if s), default=0)
-        for size_str, display in rows:
-            click.echo(f"{size_str:>{width}}  {display}")
+                    h = str(we.oid)[:hash_len] if we is not None else ""
+                    rows.append((h, "", name))
+        width = max((len(s) for _, s, _ in rows if s), default=0)
+        for hash_str, size_str, display in rows:
+            click.echo(f"{hash_str}  {size_str:>{width}}  {display}")
 
     elif fmt == "json" and not long:
         click.echo(json.dumps(sorted_names))
@@ -236,12 +242,14 @@ def _format_ls_output(results, long, fmt, object_store):
 @click.argument("paths", nargs=-1)
 @_branch_option
 @click.option("-R", "--recursive", is_flag=True, help="List all files recursively with full paths.")
-@click.option("-l", "--long", "long_", is_flag=True, help="Show file sizes, types, and modes.")
+@click.option("-l", "--long", "long_", is_flag=True, help="Show file sizes, types, and hashes.")
+@click.option("--full-hash", "full_hash", is_flag=True, default=False,
+              help="Show full 40-character object hashes (default: 7-char short hash).")
 @_format_option
 @_no_glob_option
 @_snapshot_options
 @click.pass_context
-def ls(ctx, paths, branch, recursive, long_, fmt, no_glob, ref, at_path, match_pattern, before, back):
+def ls(ctx, paths, branch, recursive, long_, full_hash, fmt, no_glob, ref, at_path, match_pattern, before, back):
     """List files/directories at PATH(s) (or root).
 
     Accepts multiple paths and glob patterns.  Results are coalesced and
@@ -255,7 +263,7 @@ def ls(ctx, paths, branch, recursive, long_, fmt, no_glob, ref, at_path, match_p
         gitstore ls :src :docs              # multiple directories
         gitstore ls -R                      # all files recursively
         gitstore ls -R :src :docs           # recursive under multiple dirs
-        gitstore ls -l                      # long listing with sizes
+        gitstore ls -l                      # long listing with sizes and hashes
         gitstore ls --format json           # JSON output
     """
     store = _open_store(_require_repo(ctx))
@@ -378,7 +386,7 @@ def ls(ctx, paths, branch, recursive, long_, fmt, no_glob, ref, at_path, match_p
                 else:
                     results.setdefault(rp_norm, None)
 
-    _format_ls_output(results, long_, fmt, store._repo.object_store)
+    _format_ls_output(results, long_, fmt, store._repo.object_store, full_hash=full_hash)
 
 
 # ---------------------------------------------------------------------------

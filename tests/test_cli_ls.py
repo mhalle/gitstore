@@ -250,15 +250,14 @@ class TestLsLong:
         result = runner.invoke(main, ["ls", "-l", "--repo", repo_with_tree])
         assert result.exit_code == 0, result.output
         lines = result.output.strip().splitlines()
-        # Should have entries with sizes for files
+        # Format: hash  size  name — find lines with a numeric size (2nd column)
         found_file = False
         for line in lines:
-            stripped = line.strip()
-            # File lines have a number followed by two spaces and name
-            if stripped and stripped[0].isdigit():
+            parts = line.split()
+            if len(parts) >= 3 and parts[1].isdigit():
                 found_file = True
-                parts = line.split()
-                assert int(parts[0]) > 0  # size is positive
+                assert int(parts[1]) > 0  # size is positive
+                assert len(parts[0]) == 7  # short hash
         assert found_file
 
     def test_ls_l_recursive(self, runner, repo_with_tree):
@@ -279,8 +278,11 @@ class TestLsLong:
         dir_lines = [l for l in lines if l.rstrip().endswith("/")]
         assert len(dir_lines) > 0  # at least src/ or docs/
         for dl in dir_lines:
-            # The size field should be empty — leading spaces only
-            assert dl.lstrip().startswith("docs/") or dl.lstrip().startswith("src/")
+            # Format: hash       name/ — hash then empty size column then name
+            parts = dl.split()
+            name = parts[-1]
+            assert name.endswith("/")
+            assert name in ("docs/", "src/")
 
     def test_ls_l_json(self, runner, repo_with_tree):
         result = runner.invoke(main, ["ls", "-l", "--format", "json", "--repo", repo_with_tree])
@@ -295,6 +297,8 @@ class TestLsLong:
             assert "size" in e
             assert "type" in e
             assert isinstance(e["size"], int)
+            assert "hash" in e
+            assert len(e["hash"]) == 40  # full hash in JSON
         # Find a dir entry
         dir_entries = [e for e in data if e.get("type") == "tree"]
         assert len(dir_entries) > 0

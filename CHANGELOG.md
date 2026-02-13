@@ -4,6 +4,13 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.53.1 (2026-02-13)
+
+**Enhancements:**
+
+- `ls -l` now shows object hashes (7-char short hash by default, `--full-hash` for full 40-char)
+- JSON output from `ls -l` always includes the full hash
+
 ## v0.53.0 (2026-02-13)
 
 **Breaking changes:**
