@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Iterator
@@ -37,7 +38,33 @@ if TYPE_CHECKING:
     from .copy._types import ChangeReport, FileType
     from .repo import GitStore
 
-__all__ = ["FS", "retry_write"]
+__all__ = ["FS", "WriteEntry", "retry_write"]
+
+
+@dataclass(frozen=True, slots=True)
+class WriteEntry:
+    """Describes a single file write for :meth:`FS.apply`.
+
+    Exactly one of *data* or *target* must be provided.
+
+    *data* may be ``bytes``, ``str`` (UTF-8 text), or a :class:`~pathlib.Path`
+    to a local file.  *mode* optionally overrides the filemode
+    (e.g. ``FileType.EXECUTABLE``).
+
+    *target* creates a symbolic link entry; *mode* is not allowed with it.
+    """
+
+    data: bytes | str | Path | None = None
+    mode: FileType | int | None = None
+    target: str | None = None
+
+    def __post_init__(self):
+        if self.data is not None and self.target is not None:
+            raise ValueError("Cannot specify both data and target")
+        if self.data is None and self.target is None:
+            raise ValueError("Must specify either data or target")
+        if self.target is not None and self.mode is not None:
+            raise ValueError("Cannot specify mode for symlinks")
 
 
 class FS:
@@ -492,6 +519,83 @@ class FS:
             {path: (data, GIT_FILEMODE_LINK)}, set(),
             message,
         )
+
+    def apply(
+        self,
+        writes: dict[str, WriteEntry | bytes | str | Path] | None = None,
+        removes: str | list[str] | set[str] | None = None,
+        *,
+        message: str | None = None,
+        operation: str | None = None,
+    ) -> FS:
+        """Apply multiple writes and removes in a single atomic commit.
+
+        *writes* maps repo paths to content.  Values may be:
+
+        - ``bytes`` — raw blob data
+        - ``str`` — UTF-8 text (encoded automatically)
+        - :class:`~pathlib.Path` — read from local file (mode auto-detected)
+        - :class:`WriteEntry` — full control over source, mode, and symlinks
+
+        *removes* lists repo paths to delete (``str``, ``list``, or ``set``).
+
+        Returns a new :class:`FS` snapshot with the changes committed.
+        """
+        from .copy._types import FileType
+
+        repo = self._store._repo
+        internal_writes: dict[str, bytes | tuple[bytes, int] | pygit2.Oid | tuple[pygit2.Oid, int]] = {}
+
+        for path, value in (writes or {}).items():
+            path = _normalize_path(path)
+
+            # Wrap bare values into WriteEntry
+            if isinstance(value, (bytes, str, Path)):
+                value = WriteEntry(data=value)
+
+            if not isinstance(value, WriteEntry):
+                raise TypeError(
+                    f"Expected WriteEntry, bytes, str, or Path for {path!r}, "
+                    f"got {type(value).__name__}"
+                )
+
+            if value.target is not None:
+                # Symlink entry
+                blob_oid = repo.create_blob(value.target.encode())
+                internal_writes[path] = (blob_oid, GIT_FILEMODE_LINK)
+            elif isinstance(value.data, Path):
+                # Local file
+                local_path = os.fspath(value.data)
+                mode = value.mode
+                if isinstance(mode, FileType):
+                    mode = mode.filemode
+                if mode is None:
+                    mode = _mode_from_disk(local_path)
+                blob_oid = repo.create_blob_fromdisk(local_path)
+                internal_writes[path] = (blob_oid, mode) if mode != GIT_FILEMODE_BLOB else blob_oid
+            else:
+                # bytes or str data
+                data = value.data
+                if isinstance(data, str):
+                    data = data.encode("utf-8")
+                mode = value.mode
+                if isinstance(mode, FileType):
+                    mode = mode.filemode
+                if mode is not None:
+                    blob_oid = repo.create_blob(data)
+                    internal_writes[path] = (blob_oid, mode)
+                else:
+                    internal_writes[path] = data
+
+        # Normalize removes
+        if removes is None:
+            remove_set: set[str] = set()
+        elif isinstance(removes, str):
+            remove_set = {_normalize_path(removes)}
+        else:
+            remove_set = {_normalize_path(r) for r in removes}
+
+        return self._commit_changes(internal_writes, remove_set, message, operation)
 
     def batch(self, message: str | None = None, operation: str | None = None):
         from .batch import Batch

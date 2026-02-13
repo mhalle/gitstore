@@ -4,6 +4,14 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.54.0 (2026-02-13)
+
+**New features:**
+
+- Add `WriteEntry` dataclass for describing file writes (bytes, str, Path, or symlink target with optional mode)
+- Add `FS.apply()` method for atomic multi-write + multi-remove in a single commit
+- `WriteEntry` and `FS.apply()` exported from top-level `gitstore` package
+
 ## v0.53.1 (2026-02-13)
 
 **Enhancements:**

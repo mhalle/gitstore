@@ -1,7 +1,7 @@
 # API Reference
 
 ```python
-from gitstore import GitStore, FS, StaleSnapshotError, retry_write
+from gitstore import GitStore, FS, WriteEntry, StaleSnapshotError, retry_write
 from gitstore import ChangeReport, ChangeAction, ChangeError, FileEntry, FileType
 from gitstore import MirrorDiff, RefChange, ReflogEntry, WalkEntry
 ```
@@ -194,6 +194,43 @@ Write from a file on disk. Auto-detects executable permission unless *mode* is s
 ### fs.write_symlink(path, target, *, message=None) -> FS
 
 Create a symbolic link.
+
+### fs.apply(writes=None, removes=None, *, message=None, operation=None) -> FS
+
+Apply multiple writes and removes in a single atomic commit. Returns new FS with `.changes` set.
+
+```python
+fs.apply(
+    writes={
+        "data.txt": b"raw bytes",
+        "hello.txt": "hello world",
+        "large.bin": Path("/local/large-file"),
+        "script.sh": WriteEntry(data=Path("/local/script.sh"), mode=FileType.EXECUTABLE),
+        "link": WriteEntry(target="symlink-target"),
+    },
+    removes=["old.txt", "stale.log"],
+    message="bulk update",
+)
+```
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `writes` | `dict[str, WriteEntry \| bytes \| str \| Path] \| None` | `None` | Map of repo paths to content. |
+| `removes` | `str \| list[str] \| set[str] \| None` | `None` | Repo paths to delete. |
+| `message` | `str \| None` | `None` | Commit message (supports [placeholders](#commit-messages)). |
+| `operation` | `str \| None` | `None` | Operation name for auto-generated messages. |
+
+**Write values** -- bare values are shorthand for `WriteEntry`:
+
+| Value | Meaning |
+|-------|---------|
+| `b"..."` (bytes) | Raw blob data. |
+| `"..."` (str) | UTF-8 text (encoded automatically). |
+| `Path(...)` | Read from local file; mode auto-detected from disk. |
+| `WriteEntry(data=..., mode=...)` | Explicit source with optional mode override. |
+| `WriteEntry(target="...")` | Symbolic link to target. |
+
+Identical writes (same content and mode as existing file) produce no commit.
 
 ### fs.remove(sources, *, recursive=False, dry_run=False, glob=True, message=None) -> FS
 
@@ -497,6 +534,20 @@ class FileType(str, Enum):
 ```
 
 `FileType.from_filemode(mode)` converts a git filemode integer. `entry.filemode` converts back.
+
+### WriteEntry
+
+Describes a single file write for `fs.apply()`. Frozen (immutable) dataclass.
+
+```python
+@dataclass(frozen=True, slots=True)
+class WriteEntry:
+    data: bytes | str | Path | None = None
+    mode: FileType | int | None = None
+    target: str | None = None
+```
+
+Exactly one of `data` or `target` must be provided. `mode` cannot be combined with `target` (symlinks have no mode).
 
 ### WalkEntry
 
