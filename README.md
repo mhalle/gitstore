@@ -254,6 +254,22 @@ gitstore includes a command-line interface. Install with `pip install gitstore[c
 export GITSTORE_REPO=/path/to/repo.git    # or pass --repo/-r per command
 ```
 
+### Repo paths and the `:` prefix
+
+Because gitstore commands work with both local files and files stored in the repo, you need a way to tell them apart. **A leading `:` marks a repo path.** Without it, the argument is a local filesystem path.
+
+```
+:file.txt              repo path on the current branch
+:                      repo root
+main:file.txt          repo path on the "main" branch
+v1.0:data/             repo path on the "v1.0" tag
+main~3:file.txt        3 commits back on main
+```
+
+This applies to `cp`, `sync`, `rm`, `mv`, `ls`, `cat`, and other commands. For `ls`, `cat`, `rm`, and `write` the `:` is optional (arguments are always repo paths), but it is **required** for `cp`, `sync`, and `mv` to distinguish repo paths from local paths.
+
+For full details on path parsing, ancestor syntax (`~N`), and interaction with flags, see [Path Syntax](docs/paths.md).
+
 ```bash
 # Repository management
 gitstore init

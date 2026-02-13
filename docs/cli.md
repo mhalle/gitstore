@@ -12,6 +12,54 @@ Or pass `--repo`/`-r` per command. Use `--branch`/`-b` to target a branch (defau
 
 Pass `-v` before any command for status messages on stderr.
 
+---
+
+## Repo paths and the `:` prefix
+
+Commands like `cp` and `sync` work with both local files and files inside the repo. **A leading `:` marks a repo path.** Without it, the argument is treated as a local filesystem path.
+
+| Syntax | Meaning |
+|--------|---------|
+| `file.txt` | Local file on disk |
+| `:file.txt` | Repo file on the current branch |
+| `:` | Repo root on the current branch |
+| `:data/` | Repo directory (trailing `/` = contents mode in `cp`) |
+| `main:file.txt` | Repo file on the `main` branch |
+| `main:` | Repo root on `main` |
+| `v1.0:data/file` | Repo file on the `v1.0` tag (read-only) |
+| `main~3:file.txt` | 3 commits back on `main` |
+| `~2:file.txt` | 2 commits back on the current branch |
+
+### When is `:` required?
+
+- **`cp`, `sync`, `mv`** -- the `:` is how the command knows which arguments are repo paths and which are local paths. It is required.
+- **`ls`, `cat`, `rm`, `write`** -- arguments are always repo paths, so the `:` is optional. `gitstore cat file.txt` and `gitstore cat :file.txt` are equivalent. However, the `:` is required to use explicit ref syntax (`main:file.txt`).
+
+### Direction detection in `cp`
+
+The `:` prefix on each argument determines the copy direction:
+
+```bash
+gitstore cp file.txt :             # local  -> repo  (disk to repo)
+gitstore cp :file.txt ./out        # :repo  -> local (repo to disk)
+gitstore cp :a.txt :backup/        # :repo  -> :repo (repo to repo)
+gitstore cp main:a.txt dev:backup/ # cross-branch repo to repo
+```
+
+### Writing to refs
+
+Only branches are writable. Tags, commit hashes, and historical commits (`~N`) are read-only:
+
+```bash
+gitstore cp file.txt dev:          # OK -- writes to dev branch
+gitstore cp file.txt v1.0:         # ERROR -- cannot write to a tag
+gitstore cp file.txt main~1:       # ERROR -- cannot write to history
+```
+
+For the full path syntax specification, see [Path Syntax](paths.md).
+
+---
+
 ### init
 
 Create a new bare git repository.
@@ -585,7 +633,7 @@ git clone http://127.0.0.1:8000/                 # clone from another terminal
 
 ### The `:` prefix
 
-For `cp`, `sync`, and `mv`, prefix repo-side paths with `:` to distinguish them from local paths. For `mv`, all paths must be repo paths. For other commands (`ls`, `cat`, `rm`, `write`) the `:` is optional.
+See [Repo paths and the `:` prefix](#repo-paths-and-the--prefix) near the top of this document for full details.
 
 ### Snapshot filters
 
