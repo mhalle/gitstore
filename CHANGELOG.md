@@ -4,6 +4,12 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.51.1 (2026-02-12)
+
+**New features:**
+
+- Add `--no-glob` flag to `cp`, `rm`, and `mv` CLI commands — treats source paths as literal (no `*` or `?` expansion)
+
 ## v0.51.0 (2026-02-12)
 
 **Breaking changes:**

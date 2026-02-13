@@ -23,6 +23,7 @@ from ._helpers import (
     _dry_run_option,
     _checksum_option,
     _ignore_errors_option,
+    _no_glob_option,
     _no_create_option,
     _require_repo,
     _status,
@@ -60,10 +61,11 @@ from ._helpers import (
               help="Read exclude patterns from file.")
 @_ignore_errors_option
 @_checksum_option
+@_no_glob_option
 @_no_create_option
 @_tag_option
 @click.pass_context
-def cp(ctx, args, branch, ref, at_path, match_pattern, before, back, message, file_type, deprecated_mode, follow_symlinks, dry_run, ignore_existing, delete, ignore_errors, checksum, no_create, tag, force_tag, exclude, exclude_from):
+def cp(ctx, args, branch, ref, at_path, match_pattern, before, back, message, file_type, deprecated_mode, follow_symlinks, dry_run, ignore_existing, delete, ignore_errors, checksum, no_glob, no_create, tag, force_tag, exclude, exclude_from):
     """Copy files and directories between disk and repo, or between repo refs.
 
     Requires --repo or GITSTORE_REPO environment variable.
@@ -238,7 +240,7 @@ def cp(ctx, args, branch, ref, at_path, match_pattern, before, back, message, fi
                 if dry_run:
                     _dry_fs = fs.copy_in(
                         source_paths, dest_path,
-                        dry_run=True,
+                        dry_run=True, glob=not no_glob,
                         follow_symlinks=follow_symlinks,
                         ignore_existing=ignore_existing,
                         delete=delete,
@@ -258,6 +260,7 @@ def cp(ctx, args, branch, ref, at_path, match_pattern, before, back, message, fi
                 else:
                     _new_fs = fs.copy_in(
                         source_paths, dest_path,
+                        glob=not no_glob,
                         follow_symlinks=follow_symlinks,
                         message=message, mode=filemode,
                         ignore_existing=ignore_existing,
@@ -310,7 +313,8 @@ def cp(ctx, args, branch, ref, at_path, match_pattern, before, back, message, fi
                                          delete, ignore_existing, ignore_errors)
             else:
                 _cp_multi_repo_to_disk(ctx, fs, source_paths, dest_path, dry_run,
-                                        delete, ignore_existing, ignore_errors, checksum)
+                                        delete, ignore_existing, ignore_errors, checksum,
+                                        no_glob)
         else:
             # Per-source ref grouping
             for rp in parsed_sources:
@@ -332,7 +336,8 @@ def cp(ctx, args, branch, ref, at_path, match_pattern, before, back, message, fi
                                              delete, ignore_existing, ignore_errors)
                 else:
                     _cp_multi_repo_to_disk(ctx, src_fs, source_paths, dest_path, dry_run,
-                                            delete, ignore_existing, ignore_errors, checksum)
+                                            delete, ignore_existing, ignore_errors, checksum,
+                                            no_glob)
 
     elif direction == "repo_to_repo":
         # ---- Repo → repo ----
@@ -459,13 +464,14 @@ def _cp_single_repo_to_disk(ctx, fs, src_raw, dest_path, dry_run,
 
 
 def _cp_multi_repo_to_disk(ctx, fs, source_paths, dest_path, dry_run,
-                             delete, ignore_existing, ignore_errors, checksum):
+                             delete, ignore_existing, ignore_errors, checksum,
+                             no_glob):
     """Handle multi-file repo → disk copy."""
     try:
         if dry_run:
             result_fs = fs.copy_out(
                 source_paths, dest_path,
-                dry_run=True,
+                dry_run=True, glob=not no_glob,
                 ignore_existing=ignore_existing,
                 delete=delete,
                 checksum=checksum,
@@ -480,6 +486,7 @@ def _cp_multi_repo_to_disk(ctx, fs, source_paths, dest_path, dry_run,
         else:
             result_fs = fs.copy_out(
                 source_paths, dest_path,
+                glob=not no_glob,
                 ignore_existing=ignore_existing,
                 delete=delete,
                 ignore_errors=ignore_errors,

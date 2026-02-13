@@ -248,6 +248,14 @@ def _ignore_errors_option(f):
     )(f)
 
 
+def _no_glob_option(f):
+    """Shared --no-glob option for cp/rm/mv."""
+    return click.option(
+        "--no-glob", "no_glob", is_flag=True, default=False,
+        help="Treat source paths as literal (no * or ? expansion).",
+    )(f)
+
+
 def _format_option(f):
     """Shared --format option for log/reflog output."""
     return click.option(

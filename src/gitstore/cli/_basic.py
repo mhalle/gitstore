@@ -46,6 +46,7 @@ from ._helpers import (
     _resolve_fs,
     _log_entry_dict,
     _no_create_option,
+    _no_glob_option,
     _snapshot_options,
     _tag_option,
     _apply_tag,
@@ -429,11 +430,12 @@ def cat(ctx, paths, branch, ref, at_path, match_pattern, before, back):
 @click.option("-R", "--recursive", is_flag=True, default=False,
               help="Remove directories recursively.")
 @_dry_run_option
+@_no_glob_option
 @_branch_option
 @_message_option
 @_tag_option
 @click.pass_context
-def rm(ctx, paths, recursive, dry_run, branch, message, tag, force_tag):
+def rm(ctx, paths, recursive, dry_run, no_glob, branch, message, tag, force_tag):
     """Remove files from the repo.
 
     Accepts multiple paths and glob patterns.  Quote glob patterns to
@@ -459,14 +461,15 @@ def rm(ctx, paths, recursive, dry_run, branch, message, tag, force_tag):
 
     try:
         if dry_run:
-            result_fs = fs.remove(patterns, recursive=recursive, dry_run=True)
+            result_fs = fs.remove(patterns, recursive=recursive,
+                                   dry_run=True, glob=not no_glob)
             changes = result_fs.changes
             if changes:
                 for action in changes.actions():
                     click.echo(f"- :{action.path}")
         else:
             new_fs = fs.remove(patterns, recursive=recursive,
-                               message=message)
+                               glob=not no_glob, message=message)
             if tag:
                 _apply_tag(store, new_fs, tag, force_tag)
             changes = new_fs.changes
@@ -492,11 +495,12 @@ def rm(ctx, paths, recursive, dry_run, branch, message, tag, force_tag):
 @click.option("-R", "--recursive", is_flag=True, default=False,
               help="Move directories recursively.")
 @_dry_run_option
+@_no_glob_option
 @_branch_option
 @_message_option
 @_tag_option
 @click.pass_context
-def mv(ctx, args, recursive, dry_run, branch, message, tag, force_tag):
+def mv(ctx, args, recursive, dry_run, no_glob, branch, message, tag, force_tag):
     """Move/rename files in the repo.
 
     All arguments are repo paths (colon prefix required). The last
@@ -549,7 +553,8 @@ def mv(ctx, args, recursive, dry_run, branch, message, tag, force_tag):
     try:
         if dry_run:
             result_fs = fs.move(
-                source_patterns, dest_path, recursive=recursive, dry_run=True,
+                source_patterns, dest_path, recursive=recursive,
+                dry_run=True, glob=not no_glob,
             )
             changes = result_fs.changes
             if changes:
@@ -559,7 +564,7 @@ def mv(ctx, args, recursive, dry_run, branch, message, tag, force_tag):
         else:
             new_fs = fs.move(
                 source_patterns, dest_path,
-                recursive=recursive, message=message,
+                recursive=recursive, glob=not no_glob, message=message,
             )
             if tag:
                 _apply_tag(store, new_fs, tag, force_tag)
