@@ -126,6 +126,18 @@ List entries at *path* (or root). Raises `NotADirectoryError` if *path* is a fil
 
 `True` if *path* exists (file or directory).
 
+### fs.file_type(path) -> FileType
+
+Return the `FileType` of *path*: `BLOB`, `EXECUTABLE`, `LINK`, or `TREE`. Raises `FileNotFoundError`.
+
+### fs.size(path) -> int
+
+Return the size in bytes of the object at *path*. Works without reading the full blob into memory. Raises `FileNotFoundError`.
+
+### fs.object_hash(path) -> str
+
+Return the 40-character hex SHA of the object at *path*. For files this is the blob SHA; for directories the tree SHA. Raises `FileNotFoundError`.
+
 ### fs.is_dir(path) -> bool
 
 `True` if *path* is a directory. `False` if missing.

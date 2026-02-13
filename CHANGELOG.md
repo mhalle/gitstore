@@ -4,6 +4,14 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.52.0 (2026-02-12)
+
+**New features:**
+
+- Add `fs.file_type(path)` — return the `FileType` of a path (`BLOB`, `EXECUTABLE`, `LINK`, `TREE`)
+- Add `fs.size(path)` — return file size in bytes without reading the full blob
+- Add `fs.object_hash(path)` — return the 40-char hex SHA of a blob or tree
+
 ## v0.51.5 (2026-02-12)
 
 **New features:**

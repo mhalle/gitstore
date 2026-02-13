@@ -128,7 +128,7 @@ class FS:
             return False
         return entry[1] == GIT_FILEMODE_TREE
 
-    def type(self, path: str | os.PathLike[str]) -> FileType:
+    def file_type(self, path: str | os.PathLike[str]) -> FileType:
         """Return the :class:`FileType` of *path*.
 
         Returns ``FileType.BLOB``, ``FileType.EXECUTABLE``,
@@ -159,7 +159,7 @@ class FS:
         with ObjectSizer(self._store._repo.object_store) as sizer:
             return sizer.size(oid.raw)
 
-    def hash(self, path: str | os.PathLike[str]) -> str:
+    def object_hash(self, path: str | os.PathLike[str]) -> str:
         """Return the 40-character hex SHA of the object at *path*.
 
         For files this is the blob SHA; for directories the tree SHA.

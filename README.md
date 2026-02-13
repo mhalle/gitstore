@@ -84,6 +84,9 @@ text = fs.read_text("config.json")           # str (UTF-8)
 entries = fs.ls()                             # root listing
 entries = fs.ls("src")                        # subdirectory listing
 exists = fs.exists("path/to/file.bin")        # bool
+ftype = fs.file_type("run.sh")               # FileType.EXECUTABLE
+nbytes = fs.size("path/to/file.bin")         # int (bytes)
+sha = fs.object_hash("path/to/file.bin")     # 40-char hex SHA
 
 # Walk the tree (like os.walk)
 for dirpath, dirnames, file_entries in fs.walk():
