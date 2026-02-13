@@ -63,6 +63,17 @@ fs_dev = repo.branches.set("dev", fs)   # correct
 # fs_dev = repo.branches["dev"] = fs    # WRONG: fs_dev not bound to "dev"
 ```
 
+### branches.default
+
+Read/write property. Returns the default branch name (`str`), or `None` if HEAD is dangling.
+
+Setting validates the branch exists; raises `KeyError` if not. Raises `ValueError` on `repo.tags`.
+
+```python
+repo.branches.default              # "main"
+repo.branches.default = "dev"      # set default branch
+```
+
 ### branches.reflog(name) -> list[ReflogEntry]
 
 Reflog entries (chronological). Each `ReflogEntry` has fields: `old_sha`, `new_sha`, `committer`, `timestamp`, `message`.

@@ -218,14 +218,15 @@ def branch_default(ctx, branch):
     """
     store = _open_store(_require_repo(ctx))
     if branch is None:
-        name = store._repo.get_head_branch()
+        name = store.branches.default
         if name is None:
             raise click.ClickException("HEAD does not point to an existing branch")
         click.echo(name)
     else:
-        if branch not in store.branches:
+        try:
+            store.branches.default = branch
+        except KeyError:
             raise click.ClickException(f"Branch not found: {branch}")
-        store._repo.set_head_branch(branch)
         _status(ctx, f"Default branch set to {branch}")
 
 

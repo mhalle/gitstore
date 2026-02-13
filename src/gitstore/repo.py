@@ -232,6 +232,26 @@ class RefDict(MutableMapping):
         self[name] = fs
         return self[name]
 
+    @property
+    def default(self) -> str | None:
+        """The repository's default branch name, or ``None`` if HEAD is dangling.
+
+        Only valid for branches; raises ``ValueError`` for tags.
+
+        Setting validates the branch exists; raises ``KeyError`` if not.
+        """
+        if self._is_tags:
+            raise ValueError("Tags do not have a default")
+        return self._store._repo.get_head_branch()
+
+    @default.setter
+    def default(self, name: str) -> None:
+        if self._is_tags:
+            raise ValueError("Tags do not have a default")
+        if name not in self:
+            raise KeyError(f"Branch not found: {name!r}")
+        self._store._repo.set_head_branch(name)
+
     def reflog(self, name: str) -> list[ReflogEntry]:
         """Read reflog entries for a branch.
 

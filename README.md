@@ -68,6 +68,9 @@ del repo.branches["experiment"]    # delete a branch
 repo.tags["v1.0"] = fs            # create a tag
 snapshot = repo.tags["v1.0"]       # read-only FS
 
+repo.branches.default                # "main"
+repo.branches.default = "dev"        # set default branch
+
 for name in repo.branches:
     print(name)
 "main" in repo.branches           # True

@@ -4,6 +4,13 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.51.5 (2026-02-12)
+
+**New features:**
+
+- Add `branches.default` read/write property to `RefDict` for discovering and setting the default branch
+- CLI `branch default` now uses the public `branches.default` property
+
 ## v0.51.4 (2026-02-12)
 
 **Documentation:**

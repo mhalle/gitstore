@@ -210,3 +210,34 @@ class TestRefDictMapping:
         assert len(items) == 1
         assert items[0][0] == "main"
         assert items[0][1].branch == "main"
+
+
+class TestRefDictDefault:
+    def test_default_read(self, tmp_path):
+        repo = GitStore.open(tmp_path / "test.git")
+        assert repo.branches.default == "main"
+
+    def test_default_custom(self, tmp_path):
+        repo = GitStore.open(tmp_path / "test.git", branch="data")
+        assert repo.branches.default == "data"
+
+    def test_default_set(self, tmp_path):
+        repo = GitStore.open(tmp_path / "test.git")
+        fs = repo.branches["main"]
+        repo.branches["dev"] = fs
+        repo.branches.default = "dev"
+        assert repo.branches.default == "dev"
+
+    def test_default_set_nonexistent(self, tmp_path):
+        repo = GitStore.open(tmp_path / "test.git")
+        with pytest.raises(KeyError):
+            repo.branches.default = "nope"
+
+    def test_default_dangling(self, tmp_path):
+        repo = GitStore.open(tmp_path / "test.git", branch=None)
+        assert repo.branches.default is None
+
+    def test_default_on_tags_raises(self, tmp_path):
+        repo = GitStore.open(tmp_path / "test.git")
+        with pytest.raises(ValueError):
+            repo.tags.default
