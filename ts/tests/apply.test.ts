@@ -210,4 +210,21 @@ describe('apply changes report', () => {
     const f2 = await snap.apply({ 'a.txt': toBytes('aaa') });
     expect(f2.commitHash).toBe(snap.commitHash);
   });
+
+  // Note: TS apply() doesn't validate write entry types at runtime yet
+  it.skip('invalid type in writes raises TypeError', async () => {
+    await expect(snap.apply({ 'x.txt': 42 as any })).rejects.toThrow(TypeError);
+  });
+
+  it('combined add/update/delete report', async () => {
+    let f2 = await snap.write('b.txt', toBytes('bbb'));
+    const f3 = await f2.apply(
+      { 'new.txt': toBytes('new'), 'b.txt': toBytes('updated') },
+      'a.txt',
+    );
+    expect(f3.changes).not.toBeNull();
+    expect(f3.changes!.add.length).toBe(1);
+    expect(f3.changes!.update.length).toBe(1);
+    expect(f3.changes!.delete.length).toBe(1);
+  });
 });

@@ -267,3 +267,88 @@ describe('readlink', () => {
     await expect(snap.readlink('hello.txt')).rejects.toThrow(/Not a symlink/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// glob ** patterns on repo (ported from Python)
+// ---------------------------------------------------------------------------
+
+describe('glob', () => {
+  it('** recursive pattern', async () => {
+    const matches = await snap.glob('**/*.py');
+    expect(matches).toContain('src/main.py');
+    expect(matches).toContain('src/lib/util.py');
+  });
+
+  it('* single level', async () => {
+    const matches = await snap.glob('src/*.py');
+    expect(matches).toContain('src/main.py');
+    expect(matches).not.toContain('src/lib/util.py');
+  });
+
+  it('no matches returns empty', async () => {
+    const matches = await snap.glob('*.xyz');
+    expect(matches).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// walk validates full tuple structure
+// ---------------------------------------------------------------------------
+
+describe('walk tuple structure', () => {
+  it('yields [dirpath, subdirs, files] tuples', async () => {
+    const entries = [];
+    for await (const e of snap.walk()) entries.push(e);
+
+    // Each entry is a 3-tuple
+    for (const entry of entries) {
+      expect(entry).toHaveLength(3);
+      const [dirpath, subdirs, files] = entry;
+      expect(typeof dirpath).toBe('string');
+      expect(Array.isArray(subdirs)).toBe(true);
+      expect(Array.isArray(files)).toBe(true);
+    }
+
+    // Root should have 'src' subdir and 'hello.txt' file
+    const root = entries.find(([dp]) => dp === '');
+    expect(root).toBeDefined();
+    const [, rootDirs, rootFiles] = root!;
+    expect(rootDirs).toContain('src');
+    expect(rootFiles.some((f) => f.name === 'hello.txt')).toBe(true);
+  });
+
+  it('file entries have name, oid, mode', async () => {
+    const entries = [];
+    for await (const e of snap.walk()) entries.push(e);
+    const root = entries.find(([dp]) => dp === '');
+    expect(root).toBeDefined();
+    const [, , files] = root!;
+    const helloFile = files.find((f) => f.name === 'hello.txt');
+    expect(helloFile).toBeDefined();
+    expect(helloFile!.name).toBe('hello.txt');
+    expect(helloFile!.oid).toMatch(/^[0-9a-f]{40}$/);
+    expect(typeof helloFile!.mode).toBe('string');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isDir checks
+// ---------------------------------------------------------------------------
+
+describe('isDir', () => {
+  it('directory returns true', async () => {
+    expect(await snap.isDir('src')).toBe(true);
+  });
+
+  it('file returns false', async () => {
+    expect(await snap.isDir('hello.txt')).toBe(false);
+  });
+
+  it('missing returns false', async () => {
+    expect(await snap.isDir('nope')).toBe(false);
+  });
+
+  it('nested directory', async () => {
+    expect(await snap.isDir('src/lib')).toBe(true);
+  });
+});

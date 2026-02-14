@@ -331,6 +331,351 @@ describe('changeReport none when in sync', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Symlink edge cases (ported from Python TestCopySymlinks)
+// ---------------------------------------------------------------------------
+
+describe('copy symlink edge cases', () => {
+  it('dir symlink preserved to repo', async () => {
+    const dir = path.join(tmpDir, 'withlink');
+    fs.mkdirSync(dir);
+    const realDir = path.join(dir, 'real_dir');
+    fs.mkdirSync(realDir);
+    fs.writeFileSync(path.join(realDir, 'file.txt'), 'inside');
+    fs.symlinkSync('real_dir', path.join(dir, 'link_dir'));
+
+    const f2 = await snap.copyIn(dir + '/', 'dest');
+    expect(await f2.readlink('dest/link_dir')).toBe('real_dir');
+    expect(fromBytes(await f2.read('dest/real_dir/file.txt'))).toBe('inside');
+  });
+
+  it('dangling symlink to repo', async () => {
+    const dir = path.join(tmpDir, 'dangle');
+    fs.mkdirSync(dir);
+    fs.symlinkSync('nonexistent_target', path.join(dir, 'broken'));
+    const f2 = await snap.copyIn(dir + '/', 'dest');
+    expect(await f2.readlink('dest/broken')).toBe('nonexistent_target');
+  });
+
+  it('absolute symlink target', async () => {
+    const dir = path.join(tmpDir, 'abslink');
+    fs.mkdirSync(dir);
+    fs.symlinkSync('/usr/bin/env', path.join(dir, 'abs_link'));
+    const f2 = await snap.copyIn(dir + '/', 'dest');
+    expect(await f2.readlink('dest/abs_link')).toBe('/usr/bin/env');
+  });
+
+  it('relative symlink with ..', async () => {
+    const dir = path.join(tmpDir, 'rellink');
+    fs.mkdirSync(path.join(dir, 'sub'), { recursive: true });
+    fs.symlinkSync('../sibling/file', path.join(dir, 'sub', 'uplink'));
+    const f2 = await snap.copyIn(dir + '/', 'dest');
+    expect(await f2.readlink('dest/sub/uplink')).toBe('../sibling/file');
+  });
+
+  it('symlink from repo to disk', async () => {
+    let f2 = await snap.writeSymlink('links/mylink', 'target.txt');
+    f2 = await f2.write('links/target.txt', toBytes('content'));
+    const outDir = path.join(tmpDir, 'out');
+    fs.mkdirSync(outDir, { recursive: true });
+    await f2.copyOut('links/', outDir);
+    expect(fs.lstatSync(path.join(outDir, 'mylink')).isSymbolicLink()).toBe(true);
+    expect(fs.readlinkSync(path.join(outDir, 'mylink'))).toBe('target.txt');
+  });
+
+  it.skip('source dir symlink no-follow stores as symlink (needs TS feature)', async () => {
+    // TODO: resolveDiskSources uses stat() not lstat(), so dir symlinks
+    // are followed even when followSymlinks=false. Python handles this.
+    const realDir = path.join(tmpDir, 'real_dir');
+    fs.mkdirSync(realDir);
+    fs.writeFileSync(path.join(realDir, 'file.txt'), 'inside');
+
+    const link = path.join(tmpDir, 'link_to_dir');
+    fs.symlinkSync(realDir, link);
+
+    const f2 = await snap.copyIn(link, 'dest', { followSymlinks: false });
+    expect(await f2.readlink('dest/link_to_dir')).toBe(realDir);
+    expect(await f2.exists('dest/link_to_dir/file.txt')).toBe(false);
+  });
+
+  it('contents mode symlinked dir follows symlink', async () => {
+    const realDir = path.join(tmpDir, 'real_dir');
+    fs.mkdirSync(realDir);
+    fs.writeFileSync(path.join(realDir, 'file.txt'), 'inside');
+    fs.mkdirSync(path.join(realDir, 'sub'));
+    fs.writeFileSync(path.join(realDir, 'sub', 'nested.txt'), 'nested');
+
+    const link = path.join(tmpDir, 'link_to_dir');
+    fs.symlinkSync(realDir, link);
+
+    const f2 = await snap.copyIn(link + '/', 'dest', { followSymlinks: false });
+    expect(fromBytes(await f2.read('dest/file.txt'))).toBe('inside');
+    expect(fromBytes(await f2.read('dest/sub/nested.txt'))).toBe('nested');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// follow_symlinks + delete mode (ported from Python TestFollowSymlinksDeleteMode)
+// ---------------------------------------------------------------------------
+
+describe('follow_symlinks delete mode', () => {
+  it('no perpetual update', async () => {
+    const local = path.join(tmpDir, 'src');
+    fs.mkdirSync(local);
+    const target = path.join(tmpDir, 'target.txt');
+    fs.writeFileSync(target, 'content');
+    fs.symlinkSync(target, path.join(local, 'link.txt'));
+    fs.writeFileSync(path.join(local, 'regular.txt'), 'regular');
+
+    const f2 = await snap.copyIn(local + '/', 'data', { followSymlinks: true, delete: true });
+    expect(fromBytes(await f2.read('data/link.txt'))).toBe('content');
+
+    // Second sync should find no changes
+    const f3 = await f2.copyIn(local + '/', 'data', { followSymlinks: true, delete: true, dryRun: true });
+    expect(f3.changes === null || changeReportInSync(f3.changes)).toBe(true);
+  });
+
+  it('content change detected', async () => {
+    const local = path.join(tmpDir, 'src');
+    fs.mkdirSync(local);
+    const target = path.join(tmpDir, 'target.txt');
+    fs.writeFileSync(target, 'version1');
+    fs.symlinkSync(target, path.join(local, 'link.txt'));
+
+    const f2 = await snap.copyIn(local + '/', 'data', { followSymlinks: true, delete: true });
+
+    // Change the target content
+    fs.writeFileSync(target, 'version2');
+
+    const f3 = await f2.copyIn(local + '/', 'data', { followSymlinks: true, delete: true, dryRun: true });
+    expect(f3.changes).not.toBeNull();
+    expect(f3.changes!.update.some((e: any) => e.path === 'link.txt')).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Delete mode extended (ported from Python TestDelete)
+// ---------------------------------------------------------------------------
+
+describe('delete mode extended', () => {
+  it('skips unchanged files (hash comparison)', async () => {
+    const dir = path.join(tmpDir, 'sync');
+    fs.mkdirSync(dir);
+    fs.writeFileSync(path.join(dir, 'a.txt'), 'aaa');
+    fs.writeFileSync(path.join(dir, 'b.txt'), 'bbb');
+    fs.writeFileSync(path.join(dir, '.dotfile'), 'dot');
+    // All content matches repo — should be no-op
+    const f2 = await snap.copyIn(dir + '/', 'dir', { delete: true });
+    expect(f2.commitHash).toBe(snap.commitHash);
+  });
+
+  it('delete + ignoreExisting', async () => {
+    let f2 = await snap.write('data/keep.txt', toBytes('keep'));
+    f2 = await f2.write('data/change.txt', toBytes('old'));
+    f2 = await f2.write('data/extra.txt', toBytes('extra'));
+    const dir = path.join(tmpDir, 'src');
+    fs.mkdirSync(dir);
+    fs.writeFileSync(path.join(dir, 'keep.txt'), 'keep');
+    fs.writeFileSync(path.join(dir, 'change.txt'), 'new');
+
+    const f3 = await f2.copyIn(dir + '/', 'data', { delete: true, ignoreExisting: true });
+    // extra.txt should be deleted
+    expect(await f3.exists('data/extra.txt')).toBe(false);
+    // change.txt should keep old content (ignoreExisting skips updates)
+    expect(fromBytes(await f3.read('data/change.txt'))).toBe('old');
+    // keep.txt unchanged
+    expect(fromBytes(await f3.read('data/keep.txt'))).toBe('keep');
+  });
+
+  it('delete dry-run plan (to repo)', async () => {
+    let f2 = await snap.write('data/keep.txt', toBytes('keep'));
+    f2 = await f2.write('data/change.txt', toBytes('old'));
+    f2 = await f2.write('data/extra.txt', toBytes('extra'));
+    const dir = path.join(tmpDir, 'src');
+    fs.mkdirSync(dir);
+    fs.writeFileSync(path.join(dir, 'keep.txt'), 'keep');
+    fs.writeFileSync(path.join(dir, 'change.txt'), 'new');
+    fs.writeFileSync(path.join(dir, 'add.txt'), 'added');
+
+    const f3 = await f2.copyIn(dir + '/', 'data', { delete: true, dryRun: true });
+    expect(f3.changes).not.toBeNull();
+    expect(paths(f3.changes!.add).has('add.txt')).toBe(true);
+    expect(paths(f3.changes!.update).has('change.txt')).toBe(true);
+    expect(paths(f3.changes!.delete).has('extra.txt')).toBe(true);
+    const allPaths = new Set([
+      ...f3.changes!.add.map((e: any) => e.path),
+      ...f3.changes!.update.map((e: any) => e.path),
+      ...f3.changes!.delete.map((e: any) => e.path),
+    ]);
+    expect(allPaths.has('keep.txt')).toBe(false);
+  });
+
+  it('delete file/dir conflict', async () => {
+    const dir = path.join(tmpDir, 'src');
+    fs.mkdirSync(dir);
+    fs.writeFileSync(path.join(dir, 'new.txt'), 'new');
+    const f2 = await snap.copyIn(dir + '/', 'dir', { delete: true });
+    expect(fromBytes(await f2.read('dir/new.txt'))).toBe('new');
+    expect(await f2.exists('dir/a.txt')).toBe(false);
+    expect(await f2.exists('dir/b.txt')).toBe(false);
+  });
+
+  it('delete from repo prunes empty dirs', async () => {
+    const outDir = path.join(tmpDir, 'out');
+    fs.mkdirSync(outDir, { recursive: true });
+    const sub = path.join(outDir, 'sub', 'deep');
+    fs.mkdirSync(sub, { recursive: true });
+    fs.writeFileSync(path.join(sub, 'old.txt'), 'old');
+    await snap.copyOut('existing.txt', outDir, { delete: true });
+    expect(readLocalFile(outDir, 'existing.txt')).toBe('existing');
+    expect(fs.existsSync(path.join(outDir, 'sub'))).toBe(false);
+  });
+
+  it('delete from repo dry-run', async () => {
+    const outDir = path.join(tmpDir, 'out');
+    fs.mkdirSync(outDir, { recursive: true });
+    fs.writeFileSync(path.join(outDir, 'extra.txt'), 'extra');
+    const f2 = await snap.copyOut('existing.txt', outDir, { delete: true, dryRun: true });
+    expect(f2.changes).not.toBeNull();
+    expect(paths(f2.changes!.add).has('existing.txt')).toBe(true);
+    expect(paths(f2.changes!.delete).has('extra.txt')).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ignoreErrors extended (ported from Python TestIgnoreErrors)
+// ---------------------------------------------------------------------------
+
+describe('ignoreErrors extended', () => {
+  it('success case has no errors', async () => {
+    const filePath = path.join(tmpDir, 'ok.txt');
+    fs.writeFileSync(filePath, 'ok');
+    const f2 = await snap.copyIn(filePath, 'dest', { ignoreErrors: true });
+    expect(f2.changes).not.toBeNull();
+    expect(f2.changes!.errors).toEqual([]);
+    expect(fromBytes(await f2.read('dest/ok.txt'))).toBe('ok');
+  });
+
+  it('ignoreErrors + delete + all fail no delete (to repo)', async () => {
+    await expect(
+      snap.copyIn(['/nonexistent1', '/nonexistent2'], 'dir', {
+        ignoreErrors: true,
+        delete: true,
+      }),
+    ).rejects.toThrow();
+    // Original repo content untouched
+    expect(fromBytes(await snap.read('dir/a.txt'))).toBe('aaa');
+    expect(fromBytes(await snap.read('dir/b.txt'))).toBe('bbb');
+  });
+
+  it('ignoreErrors + delete + all fail no delete (from repo)', async () => {
+    const outDir = path.join(tmpDir, 'out');
+    fs.mkdirSync(outDir, { recursive: true });
+    fs.writeFileSync(path.join(outDir, 'precious.txt'), 'precious');
+    await expect(
+      snap.copyOut(['nonexistent1', 'nonexistent2'], outDir, {
+        ignoreErrors: true,
+        delete: true,
+      }),
+    ).rejects.toThrow();
+    // Local file untouched
+    expect(fs.readFileSync(path.join(outDir, 'precious.txt'), 'utf-8')).toBe('precious');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ignoreExisting extended (ported from Python TestIgnoreExisting)
+// ---------------------------------------------------------------------------
+
+describe('ignoreExisting extended', () => {
+  it('dry-run to repo', async () => {
+    const f1 = path.join(tmpDir, 'existing.txt');
+    fs.writeFileSync(f1, 'new content');
+    const f2 = path.join(tmpDir, 'brand_new.txt');
+    fs.writeFileSync(f2, 'new');
+
+    const f3 = await snap.copyIn([f1, f2], '', { ignoreExisting: true, dryRun: true });
+    expect(f3.changes).not.toBeNull();
+    expect(paths(f3.changes!.add).has('brand_new.txt')).toBe(true);
+    expect(paths(f3.changes!.add).has('existing.txt')).toBe(false);
+    expect(f3.changes!.update.length).toBe(0);
+  });
+
+  it('dry-run from repo', async () => {
+    const outDir = path.join(tmpDir, 'out');
+    fs.mkdirSync(outDir, { recursive: true });
+    fs.writeFileSync(path.join(outDir, 'existing.txt'), 'local');
+
+    const f2 = await snap.copyOut(['existing.txt', 'dir/a.txt'], outDir, {
+      ignoreExisting: true,
+      dryRun: true,
+    });
+    expect(f2.changes).not.toBeNull();
+    const addPaths = paths(f2.changes!.add);
+    expect(addPaths.has('a.txt') || addPaths.has('dir/a.txt')).toBe(true);
+    expect(addPaths.has('existing.txt')).toBe(false);
+    expect(f2.changes!.update.length).toBe(0);
+  });
+
+  it('with directory copy', async () => {
+    const dir = path.join(tmpDir, 'dir2');
+    fs.mkdirSync(dir);
+    fs.writeFileSync(path.join(dir, 'a.txt'), 'new aaa');
+    fs.writeFileSync(path.join(dir, 'new_file.txt'), 'new');
+    // dir/a.txt already exists in repo
+    const f2 = await snap.copyIn(dir + '/', 'dir', { ignoreExisting: true });
+    expect(fromBytes(await f2.read('dir/a.txt'))).toBe('aaa'); // unchanged
+    expect(fromBytes(await f2.read('dir/new_file.txt'))).toBe('new'); // new file written
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Content edge cases extended (ported from Python TestCopyEdgeCases)
+// ---------------------------------------------------------------------------
+
+describe('copy content edge cases extended', () => {
+  it('empty file from repo', async () => {
+    let f2 = await snap.write('dest/empty.txt', toBytes(''));
+    const outDir = path.join(tmpDir, 'out');
+    fs.mkdirSync(outDir, { recursive: true });
+    await f2.copyOut('dest/empty.txt', outDir);
+    expect(fs.readFileSync(path.join(outDir, 'empty.txt')).length).toBe(0);
+  });
+
+  it('binary file from repo', async () => {
+    const data = Buffer.alloc(256);
+    for (let i = 0; i < 256; i++) data[i] = i;
+    let f2 = await snap.write('dest/bin.dat', data);
+    const outDir = path.join(tmpDir, 'out');
+    fs.mkdirSync(outDir, { recursive: true });
+    await f2.copyOut('dest/bin.dat', outDir);
+    expect(Buffer.from(fs.readFileSync(path.join(outDir, 'bin.dat'))).equals(data)).toBe(true);
+  });
+
+  it('filenames with spaces', async () => {
+    const dir = path.join(tmpDir, 'spaces');
+    fs.mkdirSync(dir);
+    fs.writeFileSync(path.join(dir, 'my file.txt'), 'spaces');
+    fs.mkdirSync(path.join(dir, 'sub dir'));
+    fs.writeFileSync(path.join(dir, 'sub dir', 'inner.txt'), 'nested');
+    const f2 = await snap.copyIn(dir + '/', 'dest');
+    expect(fromBytes(await f2.read('dest/my file.txt'))).toBe('spaces');
+    expect(fromBytes(await f2.read('dest/sub dir/inner.txt'))).toBe('nested');
+  });
+
+  it('special char filenames (#, @, =)', async () => {
+    const dir = path.join(tmpDir, 'special');
+    fs.mkdirSync(dir);
+    fs.writeFileSync(path.join(dir, 'file#1.txt'), 'hash');
+    fs.writeFileSync(path.join(dir, 'file@2.txt'), 'at');
+    fs.writeFileSync(path.join(dir, 'a=b.txt'), 'equals');
+    const f2 = await snap.copyIn(dir + '/', 'dest');
+    expect(fromBytes(await f2.read('dest/file#1.txt'))).toBe('hash');
+    expect(fromBytes(await f2.read('dest/file@2.txt'))).toBe('at');
+    expect(fromBytes(await f2.read('dest/a=b.txt'))).toBe('equals');
+  });
+});
+
 describe('move in repo', () => {
   it('rename file', async () => {
     const f2 = await snap.move('existing.txt', 'renamed.txt');

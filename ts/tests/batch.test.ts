@@ -204,4 +204,28 @@ describe('batch', () => {
     const f2 = await b.commit();
     expect(f2.commitHash).toBe(snap.commitHash);
   });
+
+  it('writeFromFile with directory raises IsADirectoryError', async () => {
+    const dir = path.join(tmpDir, 'adir');
+    fs.mkdirSync(dir);
+    const b = snap.batch();
+    await expect(b.writeFromFile('x.txt', dir)).rejects.toThrow(IsADirectoryError);
+  });
+
+  it('changes report attached to committed batch', async () => {
+    const b = snap.batch();
+    await b.write('new.txt', toBytes('new'));
+    await b.remove('a.txt');
+    const f2 = await b.commit();
+    expect(f2.changes).not.toBeNull();
+    expect(f2.changes!.add.length).toBe(1);
+    expect(f2.changes!.delete.length).toBe(1);
+  });
+
+  it('double commit raises', async () => {
+    const b = snap.batch();
+    await b.write('x.txt', toBytes('x'));
+    await b.commit();
+    await expect(b.commit()).rejects.toThrow(/already committed/);
+  });
 });

@@ -449,12 +449,30 @@ async function writeFilesToDisk(
   const fsModule = fs._store._fsModule;
   for (const [repoPath, localPath] of pairs) {
     try {
+      // Clear blocking parent paths: if a parent is a file, remove it
       const parentDir = dirname(localPath);
+      const parts = parentDir.split('/');
+      for (let i = 1; i <= parts.length; i++) {
+        const p = parts.slice(0, i).join('/');
+        if (!p) continue;
+        try {
+          const st = await fsModule.promises.lstat(p);
+          if (!st.isDirectory()) {
+            await fsModule.promises.unlink(p);
+            break;
+          }
+        } catch { /* doesn't exist yet */ break; }
+      }
       await fsModule.promises.mkdir(parentDir, { recursive: true });
 
-      // Remove existing file/symlink
+      // If dest is a directory but we need a file, remove the dir tree
       try {
-        await fsModule.promises.unlink(localPath);
+        const st = await fsModule.promises.lstat(localPath);
+        if (st.isDirectory() && !st.isSymbolicLink()) {
+          await fsModule.promises.rm(localPath, { recursive: true, force: true });
+        } else {
+          await fsModule.promises.unlink(localPath);
+        }
       } catch { /* doesn't exist */ }
 
       const entry = await entryAtPath(

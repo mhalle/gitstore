@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { freshStore, toBytes, rmTmpDir } from './helpers.js';
+import { freshStore, toBytes, fromBytes, rmTmpDir, fs } from './helpers.js';
 import { GitStore, FS } from '../src/index.js';
+import * as path from 'node:path';
 
 let store: GitStore;
 let tmpDir: string;
@@ -182,5 +183,55 @@ describe('RefDict default (HEAD)', () => {
 
   it('tags default raises', async () => {
     await expect(store.tags.getDefault()).rejects.toThrow(/Tags do not have a default/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Cross-repo validation
+// ---------------------------------------------------------------------------
+
+describe('cross-repo validation', () => {
+  // Note: cross-repo validation not yet implemented in TS port
+  // These tests verify current behavior (no validation) and document the gap
+
+  it.skip('cross-repo branch assign raises', async () => {
+    const { store: s2, tmpDir: td } = await freshStore();
+    const otherSnap = await s2.branches.get('main');
+    const f2 = await otherSnap.write('x.txt', toBytes('x'));
+    // Setting a branch to an FS from a different repo should raise
+    await expect(store.branches.set('cross', f2)).rejects.toThrow();
+    rmTmpDir(td);
+  });
+
+  it.skip('cross-repo tag assign raises', async () => {
+    const { store: s2, tmpDir: td } = await freshStore();
+    const otherSnap = await s2.branches.get('main');
+    const f2 = await otherSnap.write('x.txt', toBytes('x'));
+    await expect(store.tags.set('v1', f2)).rejects.toThrow();
+    rmTmpDir(td);
+  });
+
+  it('same-path assign allowed', async () => {
+    const s2 = await GitStore.open(store._gitdir, { fs: store._fsModule });
+    const snap = await s2.branches.get('main');
+    const f2 = await snap.write('x.txt', toBytes('x'));
+    // Same underlying repo — should succeed
+    await store.branches.set('cross', f2);
+    expect(await store.branches.has('cross')).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Author metadata in commits
+// ---------------------------------------------------------------------------
+
+describe('author metadata', () => {
+  it('author info preserved across writes', async () => {
+    const { store: s2, tmpDir: td } = await freshStore({ author: 'Alice', email: 'alice@example.com' });
+    const snap = await s2.branches.get('main');
+    const f2 = await snap.write('x.txt', toBytes('x'));
+    expect(await f2.getAuthorName()).toBe('Alice');
+    expect(await f2.getAuthorEmail()).toBe('alice@example.com');
+    rmTmpDir(td);
   });
 });

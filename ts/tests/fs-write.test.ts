@@ -483,3 +483,45 @@ describe('filemode-only change detected in log', () => {
     expect(entries.length).toBeGreaterThanOrEqual(2);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Large binary and special filenames (ported from Python)
+// ---------------------------------------------------------------------------
+
+describe('large binary roundtrip', () => {
+  it('1MB binary data', async () => {
+    const data = new Uint8Array(1024 * 1024);
+    for (let i = 0; i < data.length; i++) data[i] = i % 256;
+    const f2 = await snap.write('large.bin', data);
+    const read = await f2.read('large.bin');
+    expect(read.length).toBe(1024 * 1024);
+    expect(Buffer.from(read).equals(Buffer.from(data))).toBe(true);
+  });
+});
+
+describe('special character filenames write/read', () => {
+  it('filenames with spaces', async () => {
+    const f2 = await snap.write('my file.txt', toBytes('spaces'));
+    expect(fromBytes(await f2.read('my file.txt'))).toBe('spaces');
+  });
+
+  it('filenames with special chars', async () => {
+    const f2 = await snap.write('file#1.txt', toBytes('hash'));
+    const f3 = await f2.write('file@2.txt', toBytes('at'));
+    const f4 = await f3.write('a=b.txt', toBytes('equals'));
+    expect(fromBytes(await f4.read('file#1.txt'))).toBe('hash');
+    expect(fromBytes(await f4.read('file@2.txt'))).toBe('at');
+    expect(fromBytes(await f4.read('a=b.txt'))).toBe('equals');
+  });
+
+  it('unicode filenames', async () => {
+    const f2 = await snap.write('café.txt', toBytes('coffee'));
+    expect(fromBytes(await f2.read('café.txt'))).toBe('coffee');
+  });
+
+  it('writeFromFile with directory raises IsADirectoryError', async () => {
+    const dir = path.join(tmpDir, 'adir');
+    fs.mkdirSync(dir);
+    await expect(snap.writeFromFile('x.txt', dir)).rejects.toThrow(IsADirectoryError);
+  });
+});

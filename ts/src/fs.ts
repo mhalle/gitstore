@@ -524,7 +524,7 @@ export class FS {
   async writeText(
     path: string,
     text: string,
-    opts?: { encoding?: string; message?: string; mode?: FileType | string },
+    opts?: { message?: string; mode?: FileType | string },
   ): Promise<FS> {
     const data = new TextEncoder().encode(text);
     return this.write(path, data, opts);
