@@ -1,0 +1,58 @@
+{
+  "basic_tree": {
+    "files": {
+      "hello.txt": "Hello, world!",
+      "dir/a.txt": "aaa",
+      "dir/b.txt": "bbb"
+    },
+    "branch": "main"
+  },
+  "symlinks": {
+    "files": {
+      "target.txt": "symlink target content"
+    },
+    "symlinks": {
+      "link.txt": "target.txt",
+      "dir/deep_link": "target.txt"
+    },
+    "branch": "main"
+  },
+  "binary": {
+    "files": {
+      "readme.txt": "text file"
+    },
+    "binary_files": {
+      "data.bin": "AAECAwQFBgcICQ==",
+      "nested/img.dat": "/wD/AA=="
+    },
+    "branch": "main"
+  },
+  "executable": {
+    "files": {
+      "readme.txt": "plain file"
+    },
+    "executable_files": {
+      "run.sh": "#!/bin/sh\necho hello\n",
+      "scripts/deploy.sh": "#!/bin/sh\nexit 0\n"
+    },
+    "branch": "main"
+  },
+  "history": {
+    "commits": [
+      {
+        "message": "first commit",
+        "files": { "a.txt": "version 1" }
+      },
+      {
+        "message": "second commit",
+        "files": { "a.txt": "version 2", "b.txt": "added in v2" }
+      },
+      {
+        "message": "third commit",
+        "files": { "a.txt": "version 3" },
+        "removes": ["b.txt"]
+      }
+    ],
+    "branch": "main"
+  }
+}
