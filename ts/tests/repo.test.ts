@@ -235,3 +235,31 @@ describe('author metadata', () => {
     rmTmpDir(td);
   });
 });
+
+// ---------------------------------------------------------------------------
+// getCommitInfo
+// ---------------------------------------------------------------------------
+
+describe('getCommitInfo', () => {
+  it('returns all commit fields in one call', async () => {
+    const { store: s2, tmpDir: td } = await freshStore({ author: 'Bob', email: 'bob@test.com' });
+    const snap = await s2.branches.get('main');
+    const f2 = await snap.write('x.txt', toBytes('x'));
+    const info = await f2.getCommitInfo();
+    expect(info.authorName).toBe('Bob');
+    expect(info.authorEmail).toBe('bob@test.com');
+    expect(info.message).toContain('x.txt');
+    expect(info.time).toBeInstanceOf(Date);
+    rmTmpDir(td);
+  });
+
+  it('matches individual getters', async () => {
+    const snap = await store.branches.get('main');
+    const f2 = await snap.write('y.txt', toBytes('y'));
+    const info = await f2.getCommitInfo();
+    expect(info.message).toBe(await f2.getMessage());
+    expect(info.time.getTime()).toBe((await f2.getTime()).getTime());
+    expect(info.authorName).toBe(await f2.getAuthorName());
+    expect(info.authorEmail).toBe(await f2.getAuthorEmail());
+  });
+});

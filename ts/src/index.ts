@@ -59,6 +59,7 @@ export {
   type ChangeReport,
   type RefChange,
   type MirrorDiff,
+  type CommitInfo,
   type ReflogEntry,
   type Signature,
   type FsModule,

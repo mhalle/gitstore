@@ -346,3 +346,10 @@ export interface Signature {
   name: string;
   email: string;
 }
+
+export interface CommitInfo {
+  message: string;
+  time: Date;
+  authorName: string;
+  authorEmail: string;
+}

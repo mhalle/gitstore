@@ -26,6 +26,7 @@ import {
   type WalkEntry,
   type WriteEntry,
   type ChangeReport,
+  type CommitInfo,
 } from './types.js';
 import { normalizePath, isRootPath } from './paths.js';
 import {
@@ -114,41 +115,35 @@ export class FS {
     return this._branch;
   }
 
-  async getMessage(): Promise<string> {
-    const { commit } = await git.readCommit({
-      fs: this._fsModule,
-      gitdir: this._gitdir,
-      oid: this._commitOid,
-    });
-    return commit.message.replace(/\n$/, '');
-  }
-
-  async getTime(): Promise<Date> {
+  async getCommitInfo(): Promise<CommitInfo> {
     const { commit } = await git.readCommit({
       fs: this._fsModule,
       gitdir: this._gitdir,
       oid: this._commitOid,
     });
     const offsetMs = commit.author.timezoneOffset * 60 * 1000;
-    return new Date(commit.author.timestamp * 1000 - offsetMs);
+    return {
+      message: commit.message.replace(/\n$/, ''),
+      time: new Date(commit.author.timestamp * 1000 - offsetMs),
+      authorName: commit.author.name,
+      authorEmail: commit.author.email,
+    };
+  }
+
+  async getMessage(): Promise<string> {
+    return (await this.getCommitInfo()).message;
+  }
+
+  async getTime(): Promise<Date> {
+    return (await this.getCommitInfo()).time;
   }
 
   async getAuthorName(): Promise<string> {
-    const { commit } = await git.readCommit({
-      fs: this._fsModule,
-      gitdir: this._gitdir,
-      oid: this._commitOid,
-    });
-    return commit.author.name;
+    return (await this.getCommitInfo()).authorName;
   }
 
   async getAuthorEmail(): Promise<string> {
-    const { commit } = await git.readCommit({
-      fs: this._fsModule,
-      gitdir: this._gitdir,
-      oid: this._commitOid,
-    });
-    return commit.author.email;
+    return (await this.getCommitInfo()).authorEmail;
   }
 
   get changes(): ChangeReport | null {
