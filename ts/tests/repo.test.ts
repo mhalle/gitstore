@@ -191,10 +191,7 @@ describe('RefDict default (HEAD)', () => {
 // ---------------------------------------------------------------------------
 
 describe('cross-repo validation', () => {
-  // Note: cross-repo validation not yet implemented in TS port
-  // These tests verify current behavior (no validation) and document the gap
-
-  it.skip('cross-repo branch assign raises', async () => {
+  it('cross-repo branch assign raises', async () => {
     const { store: s2, tmpDir: td } = await freshStore();
     const otherSnap = await s2.branches.get('main');
     const f2 = await otherSnap.write('x.txt', toBytes('x'));
@@ -203,7 +200,7 @@ describe('cross-repo validation', () => {
     rmTmpDir(td);
   });
 
-  it.skip('cross-repo tag assign raises', async () => {
+  it('cross-repo tag assign raises', async () => {
     const { store: s2, tmpDir: td } = await freshStore();
     const otherSnap = await s2.branches.get('main');
     const f2 = await otherSnap.write('x.txt', toBytes('x'));

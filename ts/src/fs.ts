@@ -568,8 +568,12 @@ export class FS {
         entry = { data: value };
       } else if (typeof value === 'string') {
         entry = { data: value };
+      } else if (typeof value === 'object' && value !== null) {
+        entry = value as WriteEntry;
       } else {
-        entry = value;
+        throw new TypeError(
+          `Expected WriteEntry, Uint8Array, or string for '${path}', got ${typeof value}`
+        );
       }
 
       if (entry.target != null) {

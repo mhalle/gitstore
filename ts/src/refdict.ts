@@ -74,6 +74,12 @@ export class RefDict {
     validateRefName(name);
     if (!(fs instanceof FS)) throw new TypeError(`Expected FS, got ${typeof fs}`);
 
+    const selfPath = this._fsModule.realpathSync(this._gitdir);
+    const fsPath = this._fsModule.realpathSync(fs._gitdir);
+    if (selfPath !== fsPath) {
+      throw new Error('FS belongs to a different repository');
+    }
+
     const refName = this._refName(name);
     const sig = this._store._signature;
     const committerStr = `${sig.name} <${sig.email}>`;

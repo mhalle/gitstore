@@ -211,8 +211,7 @@ describe('apply changes report', () => {
     expect(f2.commitHash).toBe(snap.commitHash);
   });
 
-  // Note: TS apply() doesn't validate write entry types at runtime yet
-  it.skip('invalid type in writes raises TypeError', async () => {
+  it('invalid type in writes raises TypeError', async () => {
     await expect(snap.apply({ 'x.txt': 42 as any })).rejects.toThrow(TypeError);
   });
 
