@@ -123,7 +123,7 @@ class _Repository:
     @property
     def path(self) -> str:
         p = self._drepo.path
-        if not p.endswith("/"):
+        if os.path.isdir(p) and not p.endswith("/"):
             p += "/"
         return p
 
