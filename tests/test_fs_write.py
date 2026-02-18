@@ -112,14 +112,14 @@ class TestRemove:
 class TestLog:
     def test_filemode_only_change_detected(self, repo_fs):
         """log(at=path) should detect filemode-only changes (no content change)."""
-        from gitstore.tree import GIT_FILEMODE_BLOB_EXECUTABLE
+        from gitstore.copy._types import FileType
         _, fs = repo_fs
         # Write a file with default mode (644)
         fs2 = fs.write("script.sh", b"#!/bin/sh\necho hi")
         # Re-write with same content but executable mode (755)
         fs3 = fs2.write(
             "script.sh", b"#!/bin/sh\necho hi",
-            mode=GIT_FILEMODE_BLOB_EXECUTABLE, message="Make executable",
+            mode=FileType.EXECUTABLE, message="Make executable",
         )
         # log --at script.sh should see both commits (content write + mode change)
         entries = list(fs3.log(path="script.sh"))

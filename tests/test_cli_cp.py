@@ -500,7 +500,7 @@ class TestSymlinks:
     def test_cp_dir_disk_to_repo_preserves_symlinks(self, runner, initialized_repo, tmp_path):
         """cp dir/ :stuff preserves file symlinks by default."""
         from gitstore import GitStore
-        from gitstore.tree import GIT_FILEMODE_LINK
+        from gitstore.copy._types import FileType
 
         src = tmp_path / "treesrc"
         src.mkdir()
@@ -513,15 +513,12 @@ class TestSymlinks:
         store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         assert fs.readlink("stuff/link.txt") == "real.txt"
-        from gitstore.tree import _entry_at_path
-        entry = _entry_at_path(store._repo, fs._tree_oid, "stuff/link.txt")
-        assert entry is not None
-        assert entry[1] == GIT_FILEMODE_LINK
+        assert fs.file_type("stuff/link.txt") == FileType.LINK
 
     def test_cp_dir_disk_to_repo_symlink_to_dir(self, runner, initialized_repo, tmp_path):
         """cp dir/ :stuff preserves symlinked directories as symlink entries."""
         from gitstore import GitStore
-        from gitstore.tree import GIT_FILEMODE_LINK
+        from gitstore.copy._types import FileType
 
         src = tmp_path / "treesrc"
         src.mkdir()
@@ -536,15 +533,12 @@ class TestSymlinks:
         store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         assert fs.readlink("stuff/link_dir") == "real_dir"
-        from gitstore.tree import _entry_at_path
-        entry = _entry_at_path(store._repo, fs._tree_oid, "stuff/link_dir")
-        assert entry is not None
-        assert entry[1] == GIT_FILEMODE_LINK
+        assert fs.file_type("stuff/link_dir") == FileType.LINK
 
     def test_cp_dir_disk_to_repo_follow_symlinks(self, runner, initialized_repo, tmp_path):
         """cp dir/ :stuff --follow-symlinks dereferences file symlinks."""
         from gitstore import GitStore
-        from gitstore.tree import GIT_FILEMODE_LINK
+        from gitstore.copy._types import FileType
 
         src = tmp_path / "treesrc"
         src.mkdir()
@@ -560,15 +554,12 @@ class TestSymlinks:
         fs = store.branches["main"]
         # Should be a regular file, not a symlink
         assert fs.read("stuff/link.txt") == b"hello"
-        from gitstore.tree import _entry_at_path
-        entry = _entry_at_path(store._repo, fs._tree_oid, "stuff/link.txt")
-        assert entry is not None
-        assert entry[1] != GIT_FILEMODE_LINK
+        assert fs.file_type("stuff/link.txt") != FileType.LINK
 
     def test_cp_dir_disk_to_repo_follow_symlinks_dir(self, runner, initialized_repo, tmp_path):
         """cp dir/ :stuff --follow-symlinks follows symlinked directories."""
         from gitstore import GitStore
-        from gitstore.tree import GIT_FILEMODE_LINK
+        from gitstore.copy._types import FileType
 
         src = tmp_path / "treesrc"
         src.mkdir()
@@ -588,11 +579,8 @@ class TestSymlinks:
         # The symlinked dir's contents should be stored as regular files
         assert fs.read("stuff/link_dir/a.txt") == b"aaa"
         assert fs.read("stuff/link_dir/b.txt") == b"bbb"
-        # It should NOT be a symlink entry
-        from gitstore.tree import _entry_at_path
-        entry = _entry_at_path(store._repo, fs._tree_oid, "stuff/link_dir")
-        assert entry is not None
-        assert entry[1] != GIT_FILEMODE_LINK
+        # It should NOT be a symlink entry — it's a tree (directory)
+        assert fs.file_type("stuff/link_dir") == FileType.TREE
 
     def test_cp_dir_disk_to_repo_follow_symlinks_cycle(self, runner, initialized_repo, tmp_path):
         """cp dir/ :stuff --follow-symlinks handles symlink cycles without infinite loop."""
@@ -658,15 +646,15 @@ class TestNonUtf8Symlink:
         """Non-UTF-8 symlink targets produce a clear error on zip export."""
         import zipfile
         from gitstore import GitStore
-        from gitstore.tree import GIT_FILEMODE_LINK
+        from gitstore.copy._types import FileType
         store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
-        # Write a symlink with non-UTF-8 target bytes directly via pygit2
+        # Write a symlink with non-UTF-8 target bytes directly
         repo = store._repo
         bad_target = b"caf\xe9"  # not valid UTF-8
         blob_oid = repo.create_blob(bad_target)
         from gitstore.tree import rebuild_tree
-        new_tree = rebuild_tree(repo, fs._tree_oid, {"bad-link": (blob_oid, GIT_FILEMODE_LINK)}, set())
+        new_tree = rebuild_tree(repo, fs._tree_oid, {"bad-link": (blob_oid, FileType.LINK.filemode)}, set())
         sig = store._signature
         commit_oid = repo.create_commit(
             "refs/heads/main", sig, sig, "add bad symlink", new_tree, [fs._commit_oid],
@@ -679,14 +667,14 @@ class TestNonUtf8Symlink:
     def test_tar_export_non_utf8_symlink(self, runner, initialized_repo, tmp_path):
         """Non-UTF-8 symlink targets produce a clear error on tar export."""
         from gitstore import GitStore
-        from gitstore.tree import GIT_FILEMODE_LINK
+        from gitstore.copy._types import FileType
         store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         repo = store._repo
         bad_target = b"caf\xe9"
         blob_oid = repo.create_blob(bad_target)
         from gitstore.tree import rebuild_tree
-        new_tree = rebuild_tree(repo, fs._tree_oid, {"bad-link": (blob_oid, GIT_FILEMODE_LINK)}, set())
+        new_tree = rebuild_tree(repo, fs._tree_oid, {"bad-link": (blob_oid, FileType.LINK.filemode)}, set())
         sig = store._signature
         commit_oid = repo.create_commit(
             "refs/heads/main", sig, sig, "add bad symlink", new_tree, [fs._commit_oid],
@@ -1174,7 +1162,7 @@ class TestSingleFileCpBugfixes:
     def test_single_file_disk_to_repo_preserves_symlink(self, runner, initialized_repo, tmp_path):
         """Single-file cp from disk to repo should preserve symlinks (not dereference)."""
         from gitstore import GitStore
-        from gitstore.tree import GIT_FILEMODE_LINK, _entry_at_path
+        from gitstore.copy._types import FileType
 
         target = tmp_path / "target.txt"
         target.write_text("content")
@@ -1186,15 +1174,13 @@ class TestSingleFileCpBugfixes:
 
         store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
-        entry = _entry_at_path(store._repo, fs._tree_oid, "link.txt")
-        assert entry is not None
-        assert entry[1] == GIT_FILEMODE_LINK
+        assert fs.file_type("link.txt") == FileType.LINK
         assert fs.readlink("link.txt") == "target.txt"
 
     def test_single_file_disk_to_repo_follow_symlinks_dereferences(self, runner, initialized_repo, tmp_path):
         """Single-file cp with --follow-symlinks should dereference."""
         from gitstore import GitStore
-        from gitstore.tree import GIT_FILEMODE_LINK, _entry_at_path
+        from gitstore.copy._types import FileType
 
         target = tmp_path / "target.txt"
         target.write_text("content")
@@ -1208,9 +1194,7 @@ class TestSingleFileCpBugfixes:
 
         store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
-        entry = _entry_at_path(store._repo, fs._tree_oid, "link.txt")
-        assert entry is not None
-        assert entry[1] != GIT_FILEMODE_LINK
+        assert fs.file_type("link.txt") != FileType.LINK
         assert fs.read("link.txt") == b"content"
 
     def test_single_file_repo_to_disk_overwrites_existing(self, runner, initialized_repo, tmp_path):

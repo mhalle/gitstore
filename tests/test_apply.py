@@ -7,7 +7,6 @@ from pathlib import Path
 import pytest
 
 from gitstore import GitStore, FileType, StaleSnapshotError, WriteEntry
-from gitstore.tree import GIT_FILEMODE_BLOB, GIT_FILEMODE_BLOB_EXECUTABLE, GIT_FILEMODE_LINK
 
 
 @pytest.fixture
