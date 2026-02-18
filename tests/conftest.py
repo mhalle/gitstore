@@ -3,15 +3,15 @@
 import pytest
 from click.testing import CliRunner
 
-from gitstore import _compat as pygit2
 from gitstore.cli import main
+from gitstore.repo import init_repository
 
 
 @pytest.fixture
 def bare_repo(tmp_path):
-    """Create a bare pygit2-compatible repository."""
+    """Create a bare repository."""
     repo_path = str(tmp_path / "test.git")
-    return pygit2.init_repository(repo_path, bare=True)
+    return init_repository(repo_path, bare=True)
 
 
 # ---------------------------------------------------------------------------

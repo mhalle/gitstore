@@ -92,8 +92,9 @@ class ExcludeFilter:
             return True
 
         # Walk .gitignore filters from root → deepest ancestor.
-        # Each filter checks the path *relative to its own directory*.
+        # Git semantics: last (deepest) matching rule wins.
         parts = rel_path.split("/")
+        excluded = None
         for depth in range(len(parts)):
             if depth == 0:
                 dir_key = ""
@@ -105,10 +106,7 @@ class ExcludeFilter:
                 sub = "/".join(parts[depth:])
                 sub_check = sub + "/" if is_dir else sub
                 result = filt.is_ignored(sub_check)
-                if result is True:
-                    return True
-                if result is False:
-                    # Explicit negation — stop checking higher-level filters
-                    return False
+                if result is not None:
+                    excluded = result
 
-        return False
+        return excluded is True

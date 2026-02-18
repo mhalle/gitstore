@@ -8,8 +8,6 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Iterator
 
-from . import _compat as pygit2
-
 from ._glob import _glob_match
 from ._lock import repo_lock
 from .exceptions import StaleSnapshotError
@@ -79,7 +77,7 @@ class FS:
         self._commit_oid = commit_oid
         self._branch = branch
         commit = gitstore._repo[commit_oid]
-        self._tree_oid = commit.tree_id
+        self._tree_oid = commit.tree
         self._changes = None
 
     @property
@@ -87,14 +85,14 @@ class FS:
         return self._branch is not None
 
     def __repr__(self) -> str:
-        short = str(self._commit_oid)[:7]
+        short = self._commit_oid.decode()[:7]
         if self._branch:
             return f"FS(branch={self._branch!r}, commit={short})"
         return f"FS(commit={short})"
 
     @property
     def commit_hash(self) -> str:
-        return str(self._commit_oid)
+        return self._commit_oid.decode()
 
     @property
     def branch(self) -> str | None:
@@ -102,21 +100,25 @@ class FS:
 
     @property
     def message(self) -> str:
-        return self._store._repo[self._commit_oid].message.rstrip("\n")
+        return self._store._repo[self._commit_oid].message.decode().rstrip("\n")
 
     @property
     def time(self) -> datetime:
         commit = self._store._repo[self._commit_oid]
-        tz = timezone(timedelta(minutes=commit.commit_time_offset))
+        tz = timezone(timedelta(minutes=commit.commit_timezone // 60))
         return datetime.fromtimestamp(commit.commit_time, tz=tz)
 
     @property
     def author_name(self) -> str:
-        return self._store._repo[self._commit_oid].author.name
+        ident = self._store._repo[self._commit_oid].author.decode()
+        name, _, _ = ident.partition(" <")
+        return name
 
     @property
     def author_email(self) -> str:
-        return self._store._repo[self._commit_oid].author.email
+        ident = self._store._repo[self._commit_oid].author.decode()
+        _, _, email_part = ident.partition(" <")
+        return email_part.rstrip(">")
 
     @property
     def changes(self) -> ChangeReport | None:
@@ -140,7 +142,7 @@ class FS:
         else:
             path = _normalize_path(path)
             obj = _walk_to(self._store._repo, self._tree_oid, path)
-            if obj.type != GIT_OBJECT_TREE:
+            if obj.type_num != GIT_OBJECT_TREE:
                 raise NotADirectoryError(path)
             yield from walk_tree(self._store._repo, obj.id, path)
 
@@ -184,7 +186,7 @@ class FS:
         oid, _filemode = entry
         from ._objsize import ObjectSizer
         with ObjectSizer(self._store._repo.object_store) as sizer:
-            return sizer.size(oid.raw)
+            return sizer.size(oid)
 
     def object_hash(self, path: str | os.PathLike[str]) -> str:
         """Return the 40-character hex SHA of the object at *path*.
@@ -197,7 +199,7 @@ class FS:
         entry = _entry_at_path(self._store._repo, self._tree_oid, path)
         if entry is None:
             raise FileNotFoundError(path)
-        return str(entry[0])
+        return entry[0].decode()
 
     def iglob(self, pattern: str) -> Iterator[str]:
         """Expand a glob pattern against the repo tree, yielding unique matches.
@@ -245,7 +247,7 @@ class FS:
         """Return [(name, is_dir, oid), ...] for entries in a tree."""
         repo = self._store._repo
         tree = repo[tree_oid]
-        return [(e.name, e.filemode == GIT_FILEMODE_TREE, e.id) for e in tree]
+        return [(e.path.decode(), e.mode == GIT_FILEMODE_TREE, e.sha) for e in tree.iteritems()]
 
     def _iglob_walk(self, segments: list[str], prefix: str | None, tree_oid) -> Iterator[str]:
         """Recursive glob generator — carries tree OID to avoid root walks."""
@@ -297,12 +299,12 @@ class FS:
             # Literal segment — look up directly in current tree
             try:
                 tree = repo[tree_oid]
-                entry = tree[seg]
+                _mode, sha = tree[seg.encode()]
             except (KeyError, TypeError):
                 return
             full = f"{prefix}/{seg}" if prefix else seg
             if rest:
-                yield from self._iglob_walk(rest, full, entry.id)
+                yield from self._iglob_walk(rest, full, sha)
             else:
                 yield full
 
@@ -364,7 +366,7 @@ class FS:
 
     def _build_changes(
         self,
-        writes: dict[str, bytes | tuple[bytes, int] | pygit2.Oid | tuple[pygit2.Oid, int]],
+        writes: dict[str, bytes | tuple[bytes, int] | bytes | tuple[bytes, int]],
         removes: set[str],
     ):
         """Build ChangeReport from writes and removes with type detection."""
@@ -385,10 +387,11 @@ class FS:
             if existing is not None:
                 # Compare OID + mode to skip unchanged files
                 existing_oid, existing_mode = existing
-                if isinstance(data_or_oid, bytes):
-                    new_oid = repo.create_blob(data_or_oid)
-                else:
+                from .tree import BlobOid
+                if isinstance(data_or_oid, BlobOid):
                     new_oid = data_or_oid
+                else:
+                    new_oid = repo.create_blob(data_or_oid)
                 if new_oid == existing_oid and mode == existing_mode:
                     continue  # identical — not a real update
                 update_entries.append(FileEntry.from_mode(path, mode))
@@ -410,7 +413,7 @@ class FS:
 
     def _commit_changes(
         self,
-        writes: dict[str, bytes | tuple[bytes, int] | pygit2.Oid | tuple[pygit2.Oid, int]],
+        writes: dict[str, bytes | tuple[bytes, int] | bytes | tuple[bytes, int]],
         removes: set[str],
         message: str | None,
         operation: str | None = None,
@@ -503,7 +506,7 @@ class FS:
             mode = detected_mode
         repo = self._store._repo
         blob_oid = repo.create_blob_fromdisk(local_path)
-        value: pygit2.Oid | tuple[pygit2.Oid, int] = (blob_oid, mode) if mode != GIT_FILEMODE_BLOB else blob_oid
+        value: bytes | tuple[bytes, int] = (blob_oid, mode) if mode != GIT_FILEMODE_BLOB else blob_oid
         return self._commit_changes({path: value}, set(), message)
 
     def write_symlink(
@@ -544,7 +547,7 @@ class FS:
         from .copy._types import FileType
 
         repo = self._store._repo
-        internal_writes: dict[str, bytes | tuple[bytes, int] | pygit2.Oid | tuple[pygit2.Oid, int]] = {}
+        internal_writes: dict[str, bytes | tuple[bytes, int] | bytes | tuple[bytes, int]] = {}
 
         for path, value in (writes or {}).items():
             path = _normalize_path(path)
@@ -759,7 +762,7 @@ class FS:
         commit = self._store._repo[self._commit_oid]
         if not commit.parents:
             return None
-        return FS(self._store, commit.parents[0].id, branch=self._branch)
+        return FS(self._store, commit.parents[0], branch=self._branch)
 
     def back(self, n: int = 1) -> FS:
         """Return the FS at the *n*-th ancestor commit.
@@ -862,25 +865,14 @@ class FS:
                 f"Branch {self._branch!r} has advanced since this snapshot"
             )
 
-        from dulwich import reflog as dreflog
-
         # Read reflog for this branch (safe to do outside the lock — read-only)
-        reflog_path = os.path.join(
-            self._store._repo.path,
-            "logs", "refs", "heads", self._branch
-        )
-
-        if not os.path.exists(reflog_path):
+        ref_bytes = f"refs/heads/{self._branch}".encode()
+        entries = list(self._store._repo._drepo.read_reflog(ref_bytes))
+        if not entries:
             raise ValueError(f"No reflog found for branch {self._branch!r}")
 
-        with open(reflog_path, 'rb') as f:
-            entries = list(dreflog.read_reflog(f))
-
-        if len(entries) == 0:
-            raise ValueError("Reflog is empty")
-
         # Find current position in reflog (search backwards to get most recent)
-        current_sha = self._commit_oid.raw if hasattr(self._commit_oid, 'raw') else self._commit_oid
+        current_sha = self._commit_oid
         current_index = None
 
         for i in range(len(entries) - 1, -1, -1):
@@ -913,8 +905,7 @@ class FS:
                 )
             index -= 1
 
-        target_oid = pygit2.Oid(target_sha)
-        target_fs = FS(self._store, target_oid, branch=self._branch)
+        target_fs = FS(self._store, target_sha, branch=self._branch)
 
         # Atomic stale-check + ref update under a single lock
         repo = self._store._repo
@@ -925,7 +916,7 @@ class FS:
                 raise StaleSnapshotError(
                     f"Branch {self._branch!r} has advanced since this snapshot"
                 )
-            ref.set_target(target_oid, message=b"redo: move forward", committer=self._store._signature._identity)
+            ref.set_target(target_sha, message=b"redo: move forward", committer=self._store._signature._identity)
 
         return target_fs
 

@@ -376,6 +376,37 @@ gitstore diff --back 3 --reverse          # swap direction (new → old)
 | `--ref`, `--path`, `--match`, `--before`, `--back` | Snapshot filters (select baseline). |
 | `--reverse` | Swap comparison direction (A↔D flipped, M stays M). |
 
+### cmp
+
+Compare two files by content hash. Files can be repo paths, local disk paths, or a mix. Exit code follows POSIX `cmp` convention: 0 = identical, 1 = different.
+
+```bash
+gitstore cmp :file1.txt :file2.txt           # two repo files
+gitstore cmp main:f.txt dev:f.txt             # cross-branch
+gitstore cmp main~3:f.txt main:f.txt          # ancestor
+gitstore cmp :data.bin /tmp/data.bin           # repo vs disk
+gitstore cmp /tmp/a.txt /tmp/b.txt             # two disk files
+gitstore -v cmp :old.txt :new.txt             # verbose — show hashes on stderr
+```
+
+| Option | Description |
+|--------|-------------|
+| `-b`, `--branch` | Branch (default: `main`). |
+| `--ref`, `--path`, `--match`, `--before`, `--back` | Snapshot filters. |
+
+**Exit codes:**
+
+| Code | Meaning |
+|------|---------|
+| `0` | Files are identical (same blob SHA). |
+| `1` | Files differ. |
+
+With `-v` (verbose, before the subcommand), both hashes are printed to stderr.
+
+---
+
+## History
+
 ### undo
 
 ```bash
@@ -647,7 +678,7 @@ Several commands accept filters to select a specific commit:
 | `--before DATE` | Latest commit on or before this date (ISO 8601). |
 | `--back N` | Walk back N commits from tip. |
 
-Filters combine with AND. Available on `cp`, `sync`, `ls`, `cat`, `log`, `diff`, `branch set`, `branch hash`, `tag set`, `archive`, `zip`, `tar`.
+Filters combine with AND. Available on `cp`, `sync`, `ls`, `cat`, `log`, `diff`, `cmp`, `branch set`, `branch hash`, `tag set`, `archive`, `zip`, `tar`.
 
 ### Dry-run output format
 

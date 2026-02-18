@@ -81,6 +81,8 @@ class ObjectSizer:
 
     def _read_loose_header(self, sha_hex: bytes) -> int:
         """Read size from a loose object header."""
+        if not hasattr(self._store, 'path') or not os.path.isdir(self._store.path):
+            return self._store[sha_hex].raw_length()
         h = sha_hex.decode() if isinstance(sha_hex, bytes) else sha_hex
         path = os.path.join(self._store.path, h[:2], h[2:])
         with open(path, "rb") as f:

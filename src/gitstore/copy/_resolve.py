@@ -124,7 +124,7 @@ def _walk_repo(fs: FS, repo_path: str) -> dict[str, tuple[bytes, int]]:
                 rel = store_path[len(repo_path) + 1:]
             else:
                 rel = store_path
-            result[rel] = (fe.oid._sha, fe.filemode)
+            result[rel] = (fe.oid, fe.filemode)
     return result
 
 

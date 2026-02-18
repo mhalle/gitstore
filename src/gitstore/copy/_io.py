@@ -101,6 +101,9 @@ def _write_files_to_disk(fs: FS, pairs, *, base: Path | None = None,
                 if parent.exists() and not parent.is_dir():
                     parent.unlink()
                     break
+                if base is not None and parent.is_symlink():
+                    parent.unlink()
+                    break
             # If dest is a directory but we need a file, remove the dir
             if out.is_dir() and not out.is_symlink():
                 import shutil

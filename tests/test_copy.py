@@ -1360,3 +1360,100 @@ class TestRemoveFromRepo:
     def test_remove_glob_no_match(self, store_and_fs):
         _, fs, tmp_path = store_and_fs
         assert fs.glob("*.xyz") == []
+
+
+# ---------------------------------------------------------------------------
+# Symlink parent directory escape
+# ---------------------------------------------------------------------------
+
+class TestSymlinkParentEscape:
+    """copy_out/sync_out must not follow symlinked parent directories."""
+
+    def test_copy_out_replaces_symlink_parent(self, store_and_fs):
+        """A symlinked parent is replaced with a real dir during copy_out."""
+        _, fs, tmp_path = store_and_fs
+        dest = tmp_path / "dest"
+        dest.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        # Create dest/dir as a symlink to outside — copy_out ["dir"] places
+        # files as dest/dir/a.txt, so dest/dir is a parent that gets followed.
+        (dest / "dir").symlink_to(outside)
+        assert (dest / "dir").is_symlink()
+
+        fs.copy_out(["dir"], str(dest))
+
+        # Symlink should have been replaced with a real directory
+        assert not (dest / "dir").is_symlink()
+        assert (dest / "dir").is_dir()
+        assert (dest / "dir" / "a.txt").read_bytes() == b"aaa"
+        # Nothing should have been written outside dest
+        assert not (outside / "a.txt").exists()
+
+    def test_copy_out_delete_replaces_symlink_parent(self, store_and_fs):
+        """Delete-mode copy_out also replaces symlinked parents."""
+        _, fs, tmp_path = store_and_fs
+        dest = tmp_path / "dest"
+        dest.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (dest / "dir").symlink_to(outside)
+
+        fs.copy_out(["dir"], str(dest), delete=True)
+
+        assert not (dest / "dir").is_symlink()
+        assert (dest / "dir").is_dir()
+        assert (dest / "dir" / "a.txt").read_bytes() == b"aaa"
+        assert not (outside / "a.txt").exists()
+
+
+# ---------------------------------------------------------------------------
+# Dangling symlink + ignore_existing
+# ---------------------------------------------------------------------------
+
+class TestDanglingSymlinkIgnoreExisting:
+    """ignore_existing should skip dangling symlinks (treat as existing)."""
+
+    def test_ignore_existing_preserves_dangling_symlink(self, store_and_fs):
+        _, fs, tmp_path = store_and_fs
+        out = tmp_path / "output"
+        out.mkdir()
+        # Create dangling symlink
+        target = out / "existing.txt"
+        target.symlink_to("/nonexistent/path")
+        assert target.is_symlink()
+        assert not target.exists()  # dangling
+
+        fs.copy_out(["existing.txt"], str(out), ignore_existing=True)
+
+        # Dangling symlink should be preserved (not overwritten)
+        assert target.is_symlink()
+        assert os.readlink(str(target)) == "/nonexistent/path"
+
+    def test_dangling_symlink_classified_as_update(self, store_and_fs):
+        """Non-delete dry-run classifies dangling symlink as update, not add."""
+        _, fs, tmp_path = store_and_fs
+        out = tmp_path / "output"
+        out.mkdir()
+        target = out / "existing.txt"
+        target.symlink_to("/nonexistent/path")
+
+        plan = fs.copy_out(
+            ["existing.txt"], str(out), dry_run=True,
+        ).changes
+        assert "existing.txt" in paths(plan.update)
+        assert "existing.txt" not in paths(plan.add)
+
+    def test_dangling_symlink_filtered_by_ignore_existing_dry_run(self, store_and_fs):
+        """Dry-run with ignore_existing filters out dangling symlink."""
+        _, fs, tmp_path = store_and_fs
+        out = tmp_path / "output"
+        out.mkdir()
+        target = out / "existing.txt"
+        target.symlink_to("/nonexistent/path")
+
+        plan = fs.copy_out(
+            ["existing.txt"], str(out), ignore_existing=True, dry_run=True,
+        ).changes
+        # Should have no updates (filtered by ignore_existing)
+        assert plan is None or len(plan.update) == 0

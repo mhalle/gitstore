@@ -5,7 +5,7 @@ import stat
 import pytest
 
 from gitstore import GitStore, StaleSnapshotError, retry_write
-from gitstore.tree import GIT_FILEMODE_BLOB_EXECUTABLE, GIT_FILEMODE_LINK
+from gitstore.copy._types import FileType
 
 
 @pytest.fixture
@@ -70,11 +70,9 @@ class TestWrite:
         assert fs2.message == "custom msg"
 
     def test_write_with_mode(self, repo_fs):
-        from gitstore.tree import GIT_FILEMODE_BLOB_EXECUTABLE
         _, fs = repo_fs
-        fs2 = fs.write("run.sh", b"#!/bin/sh", mode=GIT_FILEMODE_BLOB_EXECUTABLE)
-        tree = fs2._store._repo[fs2._tree_oid]
-        assert tree["run.sh"].filemode == GIT_FILEMODE_BLOB_EXECUTABLE
+        fs2 = fs.write("run.sh", b"#!/bin/sh", mode=FileType.EXECUTABLE)
+        assert fs2.file_type("run.sh") == FileType.EXECUTABLE
 
     def test_write_on_tag_raises(self, tmp_path):
         repo = GitStore.open(tmp_path / "test.git")
@@ -169,17 +167,15 @@ class TestWriteFrom:
         local.write_bytes(b"#!/bin/sh\necho hi")
         local.chmod(local.stat().st_mode | stat.S_IXUSR)
         fs2 = fs.write_from_file("run.sh", local)
-        tree = fs2._store._repo[fs2._tree_oid]
-        assert tree["run.sh"].filemode == GIT_FILEMODE_BLOB_EXECUTABLE
+        assert fs2.file_type("run.sh") == FileType.EXECUTABLE
 
     def test_write_from_mode_override(self, repo_fs, tmp_path):
         _, fs = repo_fs
         local = tmp_path / "script.sh"
         local.write_bytes(b"#!/bin/sh")
         # File is NOT executable on disk, but we override
-        fs2 = fs.write_from_file("script.sh", local, mode=GIT_FILEMODE_BLOB_EXECUTABLE)
-        tree = fs2._store._repo[fs2._tree_oid]
-        assert tree["script.sh"].filemode == GIT_FILEMODE_BLOB_EXECUTABLE
+        fs2 = fs.write_from_file("script.sh", local, mode=FileType.EXECUTABLE)
+        assert fs2.file_type("script.sh") == FileType.EXECUTABLE
 
     def test_write_from_custom_message(self, repo_fs, tmp_path):
         _, fs = repo_fs
@@ -218,8 +214,7 @@ class TestSymlink:
     def test_write_symlink_filemode(self, repo_fs):
         _, fs = repo_fs
         fs2 = fs.write_symlink("link.txt", "target.txt")
-        tree = fs2._store._repo[fs2._tree_oid]
-        assert tree["link.txt"].filemode == GIT_FILEMODE_LINK
+        assert fs2.file_type("link.txt") == FileType.LINK
 
     def test_write_symlink_nested_target(self, repo_fs):
         _, fs = repo_fs

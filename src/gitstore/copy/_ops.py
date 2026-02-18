@@ -486,7 +486,7 @@ def _copy_out(
         for rel, rp in pair_map.items():
             entry = _entry_at_path(fs._store._repo, fs._tree_oid, rp)
             if entry is not None:
-                repo_files[rel] = (entry[0]._sha, entry[1])
+                repo_files[rel] = (entry[0], entry[1])
 
         local_paths = _walk_local_paths(dest)
         source_rels = set(pair_map.keys())
@@ -550,6 +550,9 @@ def _copy_out(
                 if parent.exists() and not parent.is_dir():
                     parent.unlink()
                     break
+                if parent.is_symlink():
+                    parent.unlink()
+                    break
 
         write_pairs = []
         for rel in add_rels + update_rels:
@@ -580,7 +583,7 @@ def _copy_out(
         return fs
     else:
         if ignore_existing:
-            pairs = [(r, l) for r, l in pairs if not Path(l).exists()]
+            pairs = [(r, l) for r, l in pairs if not (Path(l).exists() or Path(l).is_symlink())]
 
         if not pairs:
             if ignore_errors and changes.errors:
@@ -598,7 +601,8 @@ def _copy_out(
             rel = os.path.relpath(local_path, dest).replace(os.sep, "/")
             repo_rel_to_path[rel] = repo_path
             try:
-                exists = Path(local_path).exists()
+                p = Path(local_path)
+                exists = p.exists() or p.is_symlink()
             except OSError:
                 exists = False
             if exists:
@@ -657,7 +661,7 @@ def _copy_out_dry(
         for rel, rp in pair_map.items():
             entry = _entry_at_path(fs._store._repo, fs._tree_oid, rp)
             if entry is not None:
-                repo_files[rel] = (entry[0]._sha, entry[1])
+                repo_files[rel] = (entry[0], entry[1])
 
         local_paths = _walk_local_paths(dest) if base.exists() else set()
         source_rels = set(pair_map.keys())
@@ -707,7 +711,8 @@ def _copy_out_dry(
         for repo_path, local_path in pairs:
             rel = os.path.relpath(local_path, dest).replace(os.sep, "/")
             repo_rel_to_path[rel] = repo_path
-            if Path(local_path).exists():
+            p = Path(local_path)
+            if p.exists() or p.is_symlink():
                 update.append(rel)
             else:
                 add.append(rel)

@@ -5,8 +5,6 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING
 
-from . import _compat as pygit2
-
 from .tree import GIT_FILEMODE_BLOB, GIT_FILEMODE_LINK, GIT_OBJECT_TREE, _mode_from_disk, _normalize_path, _walk_to, exists_at_path
 
 if TYPE_CHECKING:
@@ -24,7 +22,7 @@ class Batch:
         self._repo = fs._store._repo
         self._message = message
         self._operation = operation
-        self._writes: dict[str, bytes | tuple[bytes, int] | pygit2.Oid | tuple[pygit2.Oid, int]] = {}
+        self._writes: dict[str, bytes | tuple[bytes, int] | bytes | tuple[bytes, int]] = {}
         self._removes: set[str] = set()
         self._closed = False
         self.fs: FS | None = None
@@ -76,7 +74,7 @@ class Batch:
         # write, we must not add a directory path to _removes.
         if exists_in_base:
             obj = _walk_to(repo, self._fs._tree_oid, path)
-            if obj.type == GIT_OBJECT_TREE:
+            if obj.type_num == GIT_OBJECT_TREE:
                 raise IsADirectoryError(path)
         self._writes.pop(path, None)
         if exists_in_base:

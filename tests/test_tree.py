@@ -72,13 +72,13 @@ class TestRebuildTree:
         # b subtree should be identical
         tree1 = bare_repo[oid1]
         tree2 = bare_repo[oid2]
-        b_oid1 = tree1["b"].id
-        b_oid2 = tree2["b"].id
+        _, b_oid1 = tree1[b"b"]
+        _, b_oid2 = tree2[b"b"]
         assert b_oid1 == b_oid2
 
         # a subtree should differ
-        a_oid1 = tree1["a"].id
-        a_oid2 = tree2["a"].id
+        _, a_oid1 = tree1[b"a"]
+        _, a_oid2 = tree2[b"a"]
         assert a_oid1 != a_oid2
 
     def test_remove_file(self, bare_repo):

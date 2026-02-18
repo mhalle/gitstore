@@ -3,16 +3,242 @@
 from __future__ import annotations
 
 import os
+import time as _time
 from collections.abc import Callable, Iterator, MutableMapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from . import _compat as pygit2
+from dulwich.objects import Blob as _DBlob
+from dulwich.objects import Commit as _DCommit
+from dulwich.objects import Tag as _DTag
+from dulwich.objects import Tree as _DTree
+from dulwich.repo import Repo as _DRepo
+
 from .mirror import RefChange, MirrorDiff
+from .tree import BlobOid, GitError, TreeBuilder
 
 if TYPE_CHECKING:
     from .fs import FS
+
+
+# ---------------------------------------------------------------------------
+# Signature
+# ---------------------------------------------------------------------------
+
+class Signature:
+    """Author/committer identity."""
+
+    def __init__(self, name: str, email: str):
+        self.name = name
+        self.email = email
+        self._identity = f"{name} <{email}>".encode()
+
+
+# ---------------------------------------------------------------------------
+# References
+# ---------------------------------------------------------------------------
+
+class _Reference:
+    """Wraps a dulwich ref."""
+
+    def __init__(self, refs_container, ref_name: bytes, repo):
+        self._refs = refs_container
+        self._name = ref_name
+
+    def resolve(self) -> _Reference:
+        return self
+
+    @property
+    def target(self) -> bytes:
+        return self._refs[self._name]
+
+    def set_target(self, oid: bytes, message: bytes | None = None, committer: bytes | None = None):
+        try:
+            old_sha = self._refs[self._name]
+        except KeyError:
+            old_sha = None
+        if message is None:
+            message = b"update ref"
+        if committer is None:
+            committer = b"gitstore <gitstore@localhost>"
+        self._refs.set_if_equals(
+            self._name, old_sha, oid,
+            committer=committer, message=message,
+        )
+
+
+class _References:
+    """Wraps dulwich refs to match repo.references API."""
+
+    def __init__(self, dulwich_repo: _DRepo):
+        self._dulwich_repo = dulwich_repo
+        self._refs = dulwich_repo.refs
+
+    def __getitem__(self, name: str) -> _Reference:
+        ref_bytes = name.encode() if isinstance(name, str) else name
+        if ref_bytes not in self._refs:
+            raise KeyError(name)
+        return _Reference(self._refs, ref_bytes, self._dulwich_repo)
+
+    def __contains__(self, name: str) -> bool:
+        ref_bytes = name.encode() if isinstance(name, str) else name
+        return ref_bytes in self._refs
+
+    def __iter__(self):
+        for ref_bytes in self._refs.allkeys():
+            yield ref_bytes.decode()
+
+    def create(self, name: str, oid: bytes, message: bytes | None = None, committer: bytes | None = None):
+        ref_bytes = name.encode() if isinstance(name, str) else name
+        if message is None:
+            message = b"create ref"
+        if committer is None:
+            committer = b"gitstore <gitstore@localhost>"
+        self._refs.set_if_equals(
+            ref_bytes, None, oid,
+            committer=committer, message=message,
+        )
+
+    def delete(self, name: str):
+        ref_bytes = name.encode() if isinstance(name, str) else name
+        del self._refs[ref_bytes]
+
+
+# ---------------------------------------------------------------------------
+# Repository
+# ---------------------------------------------------------------------------
+
+class _Repository:
+    """Thin wrapper around dulwich Repo."""
+
+    def __init__(self, path_or_repo):
+        if isinstance(path_or_repo, str):
+            self._drepo = _DRepo(path_or_repo)
+        elif isinstance(path_or_repo, _DRepo):
+            self._drepo = path_or_repo
+        else:
+            self._drepo = path_or_repo
+
+    @property
+    def path(self) -> str:
+        p = self._drepo.path
+        if not p.endswith("/"):
+            p += "/"
+        return p
+
+    def __getitem__(self, oid: bytes):
+        return self._drepo.object_store[oid]
+
+    def get(self, ref_str: str):
+        """Lookup by full or short hex hash."""
+        ref_bytes = ref_str.encode() if isinstance(ref_str, str) else ref_str
+        if len(ref_bytes) == 40:
+            try:
+                return self[ref_bytes]
+            except KeyError:
+                return None
+        for sha in self._drepo.object_store:
+            if sha.startswith(ref_bytes):
+                return self[sha]
+        return None
+
+    def create_blob(self, data: bytes) -> BlobOid:
+        blob = _DBlob.from_string(data)
+        self._drepo.object_store.add_object(blob)
+        return BlobOid(blob.id)
+
+    def create_blob_fromdisk(self, path: str) -> BlobOid:
+        with open(path, "rb") as f:
+            data = f.read()
+        return self.create_blob(data)
+
+    def create_commit(
+        self,
+        ref_name,
+        author: Signature,
+        committer: Signature,
+        message: str,
+        tree_oid: bytes,
+        parent_oids: list[bytes],
+    ) -> bytes:
+        c = _DCommit()
+        c.tree = tree_oid
+        c.parents = list(parent_oids)
+        c.author = author._identity
+        c.committer = committer._identity
+        now = int(_time.time())
+        c.author_time = c.commit_time = now
+        c.author_timezone = c.commit_timezone = 0
+        msg = message.encode() if isinstance(message, str) else message
+        if not msg.endswith(b"\n"):
+            msg += b"\n"
+        c.message = msg
+        c.encoding = b"UTF-8"
+        self._drepo.object_store.add_object(c)
+
+        if ref_name is not None:
+            ref_bytes = ref_name.encode() if isinstance(ref_name, str) else ref_name
+            self._drepo.refs[ref_bytes] = c.id
+
+        return c.id
+
+    def create_tag(
+        self,
+        name: str,
+        target_oid: bytes,
+        target_type: int,
+        tagger: Signature,
+        message: str,
+    ) -> bytes:
+        _type_map = {1: _DCommit, 2: _DTree, 3: _DBlob, 4: _DTag}
+        type_class = _type_map.get(target_type, _DCommit)
+        tag = _DTag()
+        tag.name = name.encode()
+        tag.object = (type_class, target_oid)
+        tag.tagger = tagger._identity
+        tag.tag_time = int(_time.time())
+        tag.tag_timezone = 0
+        msg = message.encode() if isinstance(message, str) else message
+        if not msg.endswith(b"\n"):
+            msg += b"\n"
+        tag.message = msg
+        self._drepo.object_store.add_object(tag)
+        ref_bytes = f"refs/tags/{name}".encode()
+        self._drepo.refs[ref_bytes] = tag.id
+        return tag.id
+
+    def TreeBuilder(self, tree=None) -> TreeBuilder:
+        return TreeBuilder(self._drepo, tree)
+
+    @property
+    def references(self) -> _References:
+        return _References(self._drepo)
+
+    def get_head_branch(self) -> str | None:
+        symrefs = self._drepo.refs.get_symrefs()
+        target = symrefs.get(b"HEAD")
+        if target is None:
+            return None
+        prefix = b"refs/heads/"
+        if target.startswith(prefix):
+            name = target[len(prefix):].decode()
+            if target in self._drepo.refs:
+                return name
+        return None
+
+    def set_head_branch(self, name: str):
+        self._drepo.refs.set_symbolic_ref(b"HEAD", f"refs/heads/{name}".encode())
+
+    @property
+    def object_store(self):
+        return self._drepo.object_store
+
+
+def init_repository(path: str, bare: bool = True) -> _Repository:
+    """Create a new bare git repository."""
+    repo = _DRepo.init_bare(path, mkdir=True)
+    return _Repository(repo)
 
 
 @dataclass
@@ -35,9 +261,9 @@ def _validate_ref_name(name: str) -> None:
 class GitStore:
     """A versioned filesystem backed by a bare git repository."""
 
-    def __init__(self, pygit2_repo: pygit2.Repository, author: str, email: str):
-        self._repo = pygit2_repo
-        self._signature = pygit2.Signature(author, email)
+    def __init__(self, repo: _Repository, author: str, email: str):
+        self._repo = repo
+        self._signature = Signature(author, email)
         self.branches = RefDict(self, "refs/heads/")
         self.tags = RefDict(self, "refs/tags/")
 
@@ -68,13 +294,13 @@ class GitStore:
         path = Path(path)
 
         if path.exists():
-            repo = pygit2.Repository(str(path))
+            repo = _Repository(str(path))
             return cls(repo, author, email)
 
         if not create:
             raise FileNotFoundError(f"Repository not found: {path}")
 
-        repo = pygit2.init_repository(str(path), bare=True)
+        repo = init_repository(str(path), bare=True)
         store = cls(repo, author, email)
 
         if branch is not None:
@@ -139,11 +365,17 @@ class RefDict(MutableMapping):
         oid = ref.resolve().target
         if self._is_tags:
             obj = repo[oid]
-            try:
-                commit = obj.peel(pygit2.Commit)
-            except Exception:
+            for _ in range(50):
+                if obj.type_num == 1:  # GIT_OBJECT_COMMIT
+                    break
+                if not isinstance(obj, _DTag):
+                    raise ValueError(f"Tag {name!r} does not point to a commit")
+                obj = repo[obj.object[1]]
+            else:
                 raise ValueError(f"Tag {name!r} does not point to a commit")
-            return FS(self._store, commit.id, branch=None)
+            if obj.type_num != 1:
+                raise ValueError(f"Tag {name!r} does not point to a commit")
+            return FS(self._store, obj.id, branch=None)
         else:
             return FS(self._store, oid, branch=name)
 
@@ -171,12 +403,12 @@ class RefDict(MutableMapping):
                     raise KeyError(f"Tag {name!r} already exists")
                 # Get commit message for reflog
                 commit = repo[fs._commit_oid]
-                msg_str = commit.message.splitlines()[0] if commit.message else ""
+                msg_str = commit.message.decode().splitlines()[0] if commit.message else ""
                 msg = f"branch: set to {msg_str}".encode()
                 repo.references[ref_name].set_target(fs._commit_oid, message=msg, committer=committer)
             else:
                 commit = repo[fs._commit_oid]
-                msg_str = commit.message.splitlines()[0] if commit.message else ""
+                msg_str = commit.message.decode().splitlines()[0] if commit.message else ""
                 msg = f"branch: Created from {msg_str}".encode()
                 repo.references.create(ref_name, fs._commit_oid, message=msg, committer=committer)
 
@@ -270,8 +502,6 @@ class RefDict(MutableMapping):
             >>> for e in entries:
             ...     print(f"{e.message}: {e.new_sha[:7]}")
         """
-        from dulwich import reflog as dreflog
-
         if self._is_tags:
             raise ValueError("Tags do not have reflog")
 
@@ -280,24 +510,17 @@ class RefDict(MutableMapping):
         if ref_name not in self._store._repo.references:
             raise KeyError(name)
 
-        # Read reflog file
-        reflog_path = os.path.join(
-            self._store._repo.path,
-            "logs", "refs", "heads", name
-        )
-
-        if not os.path.exists(reflog_path):
+        ref_bytes = ref_name.encode() if isinstance(ref_name, str) else ref_name
+        entries = list(self._store._repo._drepo.read_reflog(ref_bytes))
+        if not entries:
             raise FileNotFoundError(f"No reflog found for branch {name!r}")
-
-        # Parse reflog entries
-        with open(reflog_path, 'rb') as f:
-            entries = []
-            for entry in dreflog.read_reflog(f):
-                entries.append(ReflogEntry(
-                    old_sha=entry.old_sha.decode(),
-                    new_sha=entry.new_sha.decode(),
-                    committer=entry.committer.decode(),
-                    timestamp=entry.timestamp,
-                    message=entry.message.decode(),
-                ))
-            return entries
+        return [
+            ReflogEntry(
+                old_sha=e.old_sha.decode(),
+                new_sha=e.new_sha.decode(),
+                committer=e.committer.decode(),
+                timestamp=e.timestamp,
+                message=e.message.decode(),
+            )
+            for e in entries
+        ]

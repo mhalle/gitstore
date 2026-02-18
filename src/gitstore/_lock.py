@@ -29,12 +29,17 @@ def _get_thread_lock(repo_path: str) -> threading.Lock:
 try:
     import fcntl
 
+    def _lock_path(repo_path: str) -> str:
+        if os.path.isdir(repo_path):
+            return os.path.join(repo_path, "gitstore.lock")
+        return repo_path + ".lock"
+
     @contextmanager
     def repo_lock(repo_path: str):
         tlock = _get_thread_lock(repo_path)
         tlock.acquire()
         try:
-            lock_path = os.path.join(repo_path, "gitstore.lock")
+            lock_path = _lock_path(repo_path)
             fd = os.open(lock_path, os.O_CREAT | os.O_RDWR | getattr(os, "O_CLOEXEC", 0))
             try:
                 fcntl.flock(fd, fcntl.LOCK_EX)
@@ -48,12 +53,17 @@ try:
 except ImportError:
     import msvcrt
 
+    def _lock_path(repo_path: str) -> str:
+        if os.path.isdir(repo_path):
+            return os.path.join(repo_path, "gitstore.lock")
+        return repo_path + ".lock"
+
     @contextmanager
     def repo_lock(repo_path: str):
         tlock = _get_thread_lock(repo_path)
         tlock.acquire()
         try:
-            lock_path = os.path.join(repo_path, "gitstore.lock")
+            lock_path = _lock_path(repo_path)
             fd = os.open(lock_path, os.O_CREAT | os.O_RDWR)
             os.set_inheritable(fd, False)
             try:

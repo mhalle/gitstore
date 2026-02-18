@@ -31,7 +31,7 @@ class TestObjectSizer:
     def test_blob_sizes_match_content(self, store_with_files):
         store = store_with_files
         fs = store.branches["main"]
-        obj_store = store._repo._repo.object_store
+        obj_store = store._repo._drepo.object_store
 
         expected = {
             "empty.txt": 0,
@@ -43,25 +43,25 @@ class TestObjectSizer:
         with ObjectSizer(obj_store) as sizer:
             for path, fe in _all_file_entries(fs):
                 if path in expected:
-                    assert sizer.size(fe.oid.raw) == expected[path], path
+                    assert sizer.size(fe.oid) == expected[path], path
 
     def test_matches_raw_length(self, store_with_files):
         """ObjectSizer must agree with dulwich raw_length() for every blob."""
         store = store_with_files
         fs = store.branches["main"]
-        obj_store = store._repo._repo.object_store
+        obj_store = store._repo._drepo.object_store
 
         with ObjectSizer(obj_store) as sizer:
             for path, fe in _all_file_entries(fs):
-                fast = sizer.size(fe.oid.raw)
-                full = obj_store[fe.oid.raw].raw_length()
+                fast = sizer.size(fe.oid)
+                full = obj_store[fe.oid].raw_length()
                 assert fast == full, f"{path}: sizer={fast}, raw_length={full}"
 
     def test_tree_and_commit_sizes(self, store_with_files):
         """ObjectSizer works on any object type, not just blobs."""
         store = store_with_files
         fs = store.branches["main"]
-        obj_store = store._repo._repo.object_store
+        obj_store = store._repo._drepo.object_store
 
         # Commit
         commit_sha = fs.commit_hash.encode()
@@ -78,12 +78,12 @@ class TestObjectSizer:
 
     def test_context_manager_closes_fds(self, store_with_files):
         store = store_with_files
-        obj_store = store._repo._repo.object_store
+        obj_store = store._repo._drepo.object_store
 
         sizer = ObjectSizer(obj_store)
         fs = store.branches["main"]
         _, fe = next(_all_file_entries(fs))
-        sizer.size(fe.oid.raw)
+        sizer.size(fe.oid)
 
         sizer.close()
         assert sizer._pack_fds == {}
@@ -93,12 +93,12 @@ class TestObjectSizer:
         """Single sizer instance handles repeated lookups correctly."""
         store = store_with_files
         fs = store.branches["main"]
-        obj_store = store._repo._repo.object_store
+        obj_store = store._repo._drepo.object_store
 
         with ObjectSizer(obj_store) as sizer:
             for _, fe in _all_file_entries(fs):
-                s1 = sizer.size(fe.oid.raw)
-                s2 = sizer.size(fe.oid.raw)
+                s1 = sizer.size(fe.oid)
+                s2 = sizer.size(fe.oid)
                 assert s1 == s2
 
     def test_large_blob(self, tmp_path):
@@ -108,10 +108,10 @@ class TestObjectSizer:
         big = b"x" * 100_000
         fs = fs.write("big.bin", big)
 
-        obj_store = store._repo._repo.object_store
+        obj_store = store._repo._drepo.object_store
         _, fe = next(
             (p, e) for p, e in _all_file_entries(fs) if p == "big.bin"
         )
 
         with ObjectSizer(obj_store) as sizer:
-            assert sizer.size(fe.oid.raw) == 100_000
+            assert sizer.size(fe.oid) == 100_000

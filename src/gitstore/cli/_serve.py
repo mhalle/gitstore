@@ -47,7 +47,7 @@ def gitserve(ctx, host, port):
     # Ensure HEAD points to an existing branch so git clone checks out files.
     _fix_head(store)
 
-    dulwich_repo = store._repo._repo
+    dulwich_repo = store._repo._drepo
     backend = DictBackend({"/": dulwich_repo})
     git_app = HTTPGitApplication(backend)
     # Replace default handlers — only allow git-upload-pack (clone/fetch).
