@@ -3,11 +3,11 @@
 import os
 import stat
 
-from gitstore import _compat as pygit2
+from gitstore.tree import BlobOid
 import pytest
 
 from gitstore import GitStore, StaleSnapshotError
-from gitstore.tree import GIT_FILEMODE_BLOB_EXECUTABLE, GIT_FILEMODE_LINK
+from gitstore.copy._types import FileType
 
 
 @pytest.fixture
@@ -182,8 +182,7 @@ class TestBatch:
         local.chmod(local.stat().st_mode | stat.S_IXUSR)
         with fs.batch() as b:
             b.write_from_file("run.sh", local)
-        tree = b.fs._store._repo[b.fs._tree_oid]
-        assert tree["run.sh"].filemode == GIT_FILEMODE_BLOB_EXECUTABLE
+        assert b.fs.file_type("run.sh") == FileType.EXECUTABLE
 
     def test_write_from_mode_override(self, repo_fs, tmp_path):
         _, fs = repo_fs
@@ -191,9 +190,8 @@ class TestBatch:
         local.write_bytes(b"#!/bin/sh")
         # File is NOT executable on disk, but we override
         with fs.batch() as b:
-            b.write_from_file("script.sh", local, mode=GIT_FILEMODE_BLOB_EXECUTABLE)
-        tree = b.fs._store._repo[b.fs._tree_oid]
-        assert tree["script.sh"].filemode == GIT_FILEMODE_BLOB_EXECUTABLE
+            b.write_from_file("script.sh", local, mode=FileType.EXECUTABLE)
+        assert b.fs.file_type("script.sh") == FileType.EXECUTABLE
 
     def test_write_from_missing_file(self, repo_fs):
         _, fs = repo_fs
@@ -210,9 +208,8 @@ class TestBatch:
     def test_batch_mode_parameter(self, repo_fs):
         _, fs = repo_fs
         with fs.batch() as b:
-            b.write("exec.sh", b"#!/bin/sh", mode=GIT_FILEMODE_BLOB_EXECUTABLE)
-        tree = b.fs._store._repo[b.fs._tree_oid]
-        assert tree["exec.sh"].filemode == GIT_FILEMODE_BLOB_EXECUTABLE
+            b.write("exec.sh", b"#!/bin/sh", mode=FileType.EXECUTABLE)
+        assert b.fs.file_type("exec.sh") == FileType.EXECUTABLE
 
     def test_eager_blob_memory(self, repo_fs):
         _, fs = repo_fs
@@ -222,9 +219,9 @@ class TestBatch:
             # Values should be OIDs, not raw bytes
             for value in b._writes.values():
                 if isinstance(value, tuple):
-                    assert isinstance(value[0], pygit2.Oid)
+                    assert isinstance(value[0], BlobOid)
                 else:
-                    assert isinstance(value, pygit2.Oid)
+                    assert isinstance(value, BlobOid)
 
     def test_write_symlink_basic(self, repo_fs):
         _, fs = repo_fs
@@ -236,8 +233,7 @@ class TestBatch:
         _, fs = repo_fs
         with fs.batch() as b:
             b.write_symlink("link.txt", "a.txt")
-        tree = b.fs._store._repo[b.fs._tree_oid]
-        assert tree["link.txt"].filemode == GIT_FILEMODE_LINK
+        assert b.fs.file_type("link.txt") == FileType.LINK
 
     def test_write_symlink_with_other_ops(self, repo_fs):
         _, fs = repo_fs

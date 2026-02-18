@@ -176,10 +176,10 @@ class TestUnzip:
         assert result.exit_code == 0, result.output
 
         from gitstore import GitStore
+        from gitstore.copy._types import FileType
         store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
-        tree = store._repo[fs._tree_oid]
-        assert tree["script.sh"].filemode == 0o100755
+        assert fs.file_type("script.sh") == FileType.EXECUTABLE
 
     def test_unzip_roundtrip_permissions(self, runner, initialized_repo, tmp_path):
         """Zip then unzip preserves executable bit."""
@@ -201,11 +201,11 @@ class TestUnzip:
         assert result.exit_code == 0, result.output
 
         from gitstore import GitStore
+        from gitstore.copy._types import FileType
         store = GitStore.open(p2, create=False)
         fs = store.branches["main"]
-        tree = store._repo[fs._tree_oid]
-        assert tree["run.sh"].filemode == 0o100755
-        assert tree["data.txt"].filemode == 0o100644
+        assert fs.file_type("run.sh") == FileType.EXECUTABLE
+        assert fs.file_type("data.txt") == FileType.BLOB
 
     def test_unzip_invalid_zip(self, runner, initialized_repo, tmp_path):
         bad = tmp_path / "notazip.bin"
@@ -234,17 +234,16 @@ class TestUnzip:
         assert result.exit_code == 0, result.output
 
         from gitstore import GitStore
-        from gitstore.tree import GIT_FILEMODE_LINK
+        from gitstore.copy._types import FileType
         store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
-        tree = store._repo[fs._tree_oid]
-        assert tree["link.txt"].filemode == GIT_FILEMODE_LINK
+        assert fs.file_type("link.txt") == FileType.LINK
         assert fs.readlink("link.txt") == "target.txt"
 
     def test_unzip_roundtrip_symlinks(self, runner, initialized_repo, tmp_path):
         """Zip then unzip preserves symlinks."""
         from gitstore import GitStore
-        from gitstore.tree import GIT_FILEMODE_LINK
+        from gitstore.copy._types import FileType
         store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         fs = fs.write("target.txt", b"content")
@@ -263,9 +262,8 @@ class TestUnzip:
         store2 = GitStore.open(p2, create=False)
         fs2 = store2.branches["main"]
         assert fs2.readlink("link.txt") == "target.txt"
-        tree = store2._repo[fs2._tree_oid]
-        assert tree["link.txt"].filemode == GIT_FILEMODE_LINK
-        assert tree["target.txt"].filemode == 0o100644
+        assert fs2.file_type("link.txt") == FileType.LINK
+        assert fs2.file_type("target.txt") == FileType.BLOB
 
     def test_unzip_leading_dot_slash(self, runner, initialized_repo, tmp_path):
         """Zip entries with leading ./ are accepted and normalized."""
@@ -475,10 +473,10 @@ class TestUntar:
         assert result.exit_code == 0, result.output
 
         from gitstore import GitStore
+        from gitstore.copy._types import FileType
         store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
-        tree = store._repo[fs._tree_oid]
-        assert tree["script.sh"].filemode == 0o100755
+        assert fs.file_type("script.sh") == FileType.EXECUTABLE
 
     def test_untar_roundtrip_permissions(self, runner, initialized_repo, tmp_path):
         """Tar then untar preserves executable bit."""
@@ -500,11 +498,11 @@ class TestUntar:
         assert result.exit_code == 0, result.output
 
         from gitstore import GitStore
+        from gitstore.copy._types import FileType
         store = GitStore.open(p2, create=False)
         fs = store.branches["main"]
-        tree = store._repo[fs._tree_oid]
-        assert tree["run.sh"].filemode == 0o100755
-        assert tree["data.txt"].filemode == 0o100644
+        assert fs.file_type("run.sh") == FileType.EXECUTABLE
+        assert fs.file_type("data.txt") == FileType.BLOB
 
     def test_untar_invalid_archive(self, runner, initialized_repo, tmp_path):
         bad = tmp_path / "notatar.bin"
@@ -567,18 +565,17 @@ class TestUntar:
         assert result.exit_code == 0, result.output
 
         from gitstore import GitStore
-        from gitstore.tree import GIT_FILEMODE_LINK
+        from gitstore.copy._types import FileType
         store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
-        tree = store._repo[fs._tree_oid]
-        assert tree["link.txt"].filemode == GIT_FILEMODE_LINK
+        assert fs.file_type("link.txt") == FileType.LINK
         assert fs.readlink("link.txt") == "target.txt"
 
     def test_untar_roundtrip_symlinks(self, runner, initialized_repo, tmp_path):
         """Tar then untar preserves symlinks."""
         import tarfile
         from gitstore import GitStore
-        from gitstore.tree import GIT_FILEMODE_LINK
+        from gitstore.copy._types import FileType
         store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         fs = fs.write("target.txt", b"content")
@@ -597,9 +594,8 @@ class TestUntar:
         store2 = GitStore.open(p2, create=False)
         fs2 = store2.branches["main"]
         assert fs2.readlink("link.txt") == "target.txt"
-        tree = store2._repo[fs2._tree_oid]
-        assert tree["link.txt"].filemode == GIT_FILEMODE_LINK
-        assert tree["target.txt"].filemode == 0o100644
+        assert fs2.file_type("link.txt") == FileType.LINK
+        assert fs2.file_type("target.txt") == FileType.BLOB
 
     def test_untar_leading_dot_slash(self, runner, initialized_repo, tmp_path):
         """Tar entries with leading ./ are accepted and normalized."""
@@ -660,10 +656,10 @@ class TestUntar:
         result = runner.invoke(main, ["untar", "--repo", initialized_repo, tpath])
         assert result.exit_code == 0, result.output
         from gitstore import GitStore
+        from gitstore.copy._types import FileType
         store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
-        tree = store._repo[fs._tree_oid]
-        assert tree["link.sh"].filemode == 0o100755
+        assert fs.file_type("link.sh") == FileType.EXECUTABLE
 
     def test_untar_hard_link_stdin_skip_warning(self, runner, initialized_repo, tmp_path):
         """Hard links that can't be resolved in streaming mode are skipped with a warning."""

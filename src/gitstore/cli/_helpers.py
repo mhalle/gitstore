@@ -8,7 +8,6 @@ import sys
 from dataclasses import dataclass
 
 import click
-from gitstore import _compat as pygit2
 
 from ..exceptions import StaleSnapshotError
 from ..repo import GitStore
@@ -378,7 +377,7 @@ def _resolve_ref(store: GitStore, ref_str: str):
         repo = store._repo
         obj = repo.get(ref_str)
         if obj is not None:
-            if obj.type != pygit2.GIT_OBJECT_COMMIT:
+            if obj.type_num != 1:  # GIT_OBJECT_COMMIT
                 raise click.ClickException(
                     f"Object {ref_str} is not a commit"
                 )

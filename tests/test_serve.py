@@ -38,7 +38,7 @@ def _make_app(repo_path):
 
     store = GitStore.open(repo_path, create=False)
     _fix_head(store)
-    dulwich_repo = store._repo._repo
+    dulwich_repo = store._repo._drepo
     backend = DictBackend({"/": dulwich_repo})
     git_app = HTTPGitApplication(backend)
     git_app.handlers = {b"git-upload-pack": UploadPackHandler}

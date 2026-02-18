@@ -165,7 +165,6 @@ class TestRefDictTags:
             repo.tags["bad"]
 
     def test_annotated_tag(self, tmp_path):
-        from gitstore import _compat as pygit2
         repo = GitStore.open(tmp_path / "test.git")
         fs = repo.branches["main"]
         # Create an annotated tag via compat layer
@@ -173,8 +172,8 @@ class TestRefDictTags:
         raw.create_tag(
             "v-annotated",
             fs._commit_oid,
-            pygit2.GIT_OBJECT_COMMIT,
-            raw.default_signature,
+            1,  # GIT_OBJECT_COMMIT
+            repo._signature,
             "release tag",
         )
         tag_fs = repo.tags["v-annotated"]

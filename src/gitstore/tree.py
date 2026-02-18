@@ -1,7 +1,7 @@
 """Low-level tree manipulation for gitstore.
 
 Provides recursive tree rebuild and path-based read helpers
-on top of pygit2's TreeBuilder.
+using dulwich's tree objects.
 """
 
 from __future__ import annotations
@@ -9,16 +9,55 @@ from __future__ import annotations
 import os
 import stat
 from collections import defaultdict
-from typing import Iterator, NamedTuple
+from typing import TYPE_CHECKING, Iterator, NamedTuple
 
-from . import _compat as pygit2
+from dulwich.objects import Tree as _DTree
+
+if TYPE_CHECKING:
+    from .repo import _Repository
+
+
+class BlobOid(bytes):
+    """Marker: a blob SHA (vs raw data bytes) in write dicts."""
+    __slots__ = ()
+
+
+class GitError(Exception):
+    """Git operation error."""
+
+
+class TreeBuilder:
+    """Wraps dulwich Tree construction."""
+
+    def __init__(self, repo, base_tree=None):
+        self._drepo = repo
+        self._entries: dict[bytes, tuple[int, bytes]] = {}
+        if base_tree is not None:
+            for entry in base_tree.iteritems():
+                self._entries[entry.path] = (entry.mode, entry.sha)
+
+    def insert(self, name: str, oid: bytes, mode: int):
+        self._entries[name.encode()] = (mode, oid)
+
+    def remove(self, name: str):
+        key = name.encode()
+        if key not in self._entries:
+            raise GitError(f"Entry not found: {name}")
+        del self._entries[key]
+
+    def write(self) -> bytes:
+        tree = _DTree()
+        for name_bytes, (mode, sha) in sorted(self._entries.items()):
+            tree.add(name_bytes, mode, sha)
+        self._drepo.object_store.add_object(tree)
+        return tree.id
 
 
 class WalkEntry(NamedTuple):
     """A file entry yielded by :func:`walk_tree`."""
 
     name: str
-    oid: pygit2.Oid
+    oid: bytes
     filemode: int
 
     @property
@@ -32,7 +71,7 @@ GIT_FILEMODE_TREE = 0o040000
 GIT_FILEMODE_BLOB = 0o100644
 GIT_FILEMODE_BLOB_EXECUTABLE = 0o100755
 GIT_FILEMODE_LINK = 0o120000
-GIT_OBJECT_TREE = pygit2.GIT_OBJECT_TREE
+GIT_OBJECT_TREE = 2  # dulwich Tree.type_num
 
 
 def _mode_from_disk(local_path: str) -> int:
@@ -75,11 +114,11 @@ def _normalize_path(path: str | os.PathLike[str]) -> str:
 
 
 def rebuild_tree(
-    repo: pygit2.Repository,
-    base_tree_oid: pygit2.Oid | None,
-    writes: dict[str, bytes | tuple[bytes, int] | pygit2.Oid | tuple[pygit2.Oid, int]],
+    repo: _Repository,
+    base_tree_oid: bytes | None,
+    writes: dict[str, bytes | tuple[bytes, int] | bytes | tuple[bytes, int]],
     removes: set[str],
-) -> pygit2.Oid:
+) -> bytes:
     """Rebuild a tree with writes and removes applied.
 
     Only the ancestor chain from changed leaves to root is rebuilt.
@@ -95,8 +134,8 @@ def rebuild_tree(
         OID of the new root tree.
     """
     # Group changes by first path segment
-    sub_writes: dict[str, dict[str, bytes | tuple[bytes, int] | pygit2.Oid | tuple[pygit2.Oid, int]]] = defaultdict(dict)
-    leaf_writes: dict[str, bytes | tuple[bytes, int] | pygit2.Oid | tuple[pygit2.Oid, int]] = {}
+    sub_writes: dict[str, dict[str, bytes | tuple[bytes, int] | bytes | tuple[bytes, int]]] = defaultdict(dict)
+    leaf_writes: dict[str, bytes | tuple[bytes, int] | bytes | tuple[bytes, int]] = {}
     sub_removes: dict[str, set[str]] = defaultdict(set)
     leaf_removes: set[str] = set()
 
@@ -121,12 +160,12 @@ def rebuild_tree(
         tb = repo.TreeBuilder()
 
     # Collect existing subtree entries for dirs we need to recurse into
-    existing_subtrees: dict[str, pygit2.Oid] = {}
+    existing_subtrees: dict[str, bytes] = {}
     if base_tree_oid is not None:
         tree = repo[base_tree_oid]
-        for entry in tree:
-            if entry.filemode == GIT_FILEMODE_TREE:
-                existing_subtrees[entry.name] = entry.id
+        for entry in tree.iteritems():
+            if entry.mode == GIT_FILEMODE_TREE:
+                existing_subtrees[entry.path.decode()] = entry.sha
 
     # Apply leaf writes (may overwrite existing tree entries)
     for name, value in leaf_writes.items():
@@ -134,7 +173,7 @@ def rebuild_tree(
             data_or_oid, mode = value
         else:
             data_or_oid, mode = value, GIT_FILEMODE_BLOB
-        if isinstance(data_or_oid, pygit2.Oid):
+        if isinstance(data_or_oid, BlobOid):
             blob_oid = data_or_oid
         else:
             blob_oid = repo.create_blob(data_or_oid)
@@ -144,7 +183,7 @@ def rebuild_tree(
     for name in leaf_removes:
         try:
             tb.remove(name)
-        except pygit2.GitError:
+        except GitError:
             pass
 
     # Recurse into subtrees
@@ -154,8 +193,8 @@ def rebuild_tree(
         # Check if there's a non-tree entry at this name that we need to replace
         if existing_oid is None and base_tree_oid is not None:
             try:
-                entry = tree[subdir]
-                if entry.filemode != GIT_FILEMODE_TREE:
+                mode, _sha = tree[subdir.encode()]
+                if mode != GIT_FILEMODE_TREE:
                     # Remove the blob entry so we can replace with a tree
                     tb.remove(subdir)
             except KeyError:
@@ -173,7 +212,7 @@ def rebuild_tree(
         if len(new_subtree) == 0:
             try:
                 tb.remove(subdir)
-            except pygit2.GitError:
+            except GitError:
                 pass
         else:
             tb.insert(subdir, new_subtree_oid, GIT_FILEMODE_TREE)
@@ -182,63 +221,63 @@ def rebuild_tree(
 
 
 def _walk_to(
-    repo: pygit2.Repository, tree_oid: pygit2.Oid, path: str
-) -> pygit2.Object:
+    repo: _Repository, tree_oid: bytes, path: str
+):
     """Walk tree to the object at the given path."""
     segments = path.split("/")
     obj = repo[tree_oid]
     for i, seg in enumerate(segments):
-        if obj.type != GIT_OBJECT_TREE:
+        if obj.type_num != GIT_OBJECT_TREE:
             partial = "/".join(segments[: i])
             raise NotADirectoryError(partial)
         try:
-            entry = obj[seg]
+            _mode, sha = obj[seg.encode()]
         except KeyError:
             raise FileNotFoundError(path)
-        obj = repo[entry.id]
+        obj = repo[sha]
     return obj
 
 
 def _entry_at_path(
-    repo: pygit2.Repository, tree_oid: pygit2.Oid, path: str
-) -> tuple[pygit2.Oid, int] | None:
+    repo: _Repository, tree_oid: bytes, path: str
+) -> tuple[bytes, int] | None:
     """Return (oid, filemode) of the entry at *path*, or None if missing."""
     segments = path.split("/")
     tree = repo[tree_oid]
     for i, seg in enumerate(segments):
-        if tree.type != GIT_OBJECT_TREE:
+        if tree.type_num != GIT_OBJECT_TREE:
             return None
         try:
-            entry = tree[seg]
+            mode, sha = tree[seg.encode()]
         except KeyError:
             return None
         if i < len(segments) - 1:
-            tree = repo[entry.id]
+            tree = repo[sha]
         else:
-            return (entry.id, entry.filemode)
+            return (sha, mode)
     return None
 
 
 def read_blob_at_path(
-    repo: pygit2.Repository, tree_oid: pygit2.Oid, path: str | os.PathLike[str]
+    repo: _Repository, tree_oid: bytes, path: str | os.PathLike[str]
 ) -> bytes:
     """Read a blob at the given path in the tree."""
     path = _normalize_path(path)
     obj = _walk_to(repo, tree_oid, path)
-    if obj.type == GIT_OBJECT_TREE:
+    if obj.type_num == GIT_OBJECT_TREE:
         raise IsADirectoryError(path)
     return obj.data
 
 
 def list_tree_at_path(
-    repo: pygit2.Repository, tree_oid: pygit2.Oid, path: str | os.PathLike[str] | None = None
+    repo: _Repository, tree_oid: bytes, path: str | os.PathLike[str] | None = None
 ) -> list[str]:
     """List entries at the given path (or root if path is None)."""
     return [e.name for e in list_entries_at_path(repo, tree_oid, path)]
 
 
 def list_entries_at_path(
-    repo: pygit2.Repository, tree_oid: pygit2.Oid, path: str | os.PathLike[str] | None = None
+    repo: _Repository, tree_oid: bytes, path: str | os.PathLike[str] | None = None
 ) -> list[WalkEntry]:
     """List entries at the given path (or root if path is None).
 
@@ -250,15 +289,15 @@ def list_entries_at_path(
     else:
         path = _normalize_path(path)
         obj = _walk_to(repo, tree_oid, path)
-        if obj.type != GIT_OBJECT_TREE:
+        if obj.type_num != GIT_OBJECT_TREE:
             raise NotADirectoryError(path)
         tree = obj
-    return [WalkEntry(entry.name, entry.id, entry.filemode) for entry in tree]
+    return [WalkEntry(entry.path.decode(), entry.sha, entry.mode) for entry in tree.iteritems()]
 
 
 def walk_tree(
-    repo: pygit2.Repository,
-    tree_oid: pygit2.Oid,
+    repo: _Repository,
+    tree_oid: bytes,
     prefix: str = "",
 ) -> Iterator[tuple[str, list[str], list[WalkEntry]]]:
     """Walk the tree recursively, yielding (dirpath, dirnames, file_entries).
@@ -268,14 +307,15 @@ def walk_tree(
     tree = repo[tree_oid]
     dirs: list[str] = []
     files: list[WalkEntry] = []
-    dir_oids: list[tuple[str, pygit2.Oid]] = []
+    dir_oids: list[tuple[str, bytes]] = []
 
-    for entry in tree:
-        if entry.filemode == GIT_FILEMODE_TREE:
-            dirs.append(entry.name)
-            dir_oids.append((entry.name, entry.id))
+    for entry in tree.iteritems():
+        name = entry.path.decode()
+        if entry.mode == GIT_FILEMODE_TREE:
+            dirs.append(name)
+            dir_oids.append((name, entry.sha))
         else:
-            files.append(WalkEntry(entry.name, entry.id, entry.filemode))
+            files.append(WalkEntry(name, entry.sha, entry.mode))
 
     yield (prefix, dirs, files)
 
@@ -285,7 +325,7 @@ def walk_tree(
 
 
 def exists_at_path(
-    repo: pygit2.Repository, tree_oid: pygit2.Oid, path: str | os.PathLike[str]
+    repo: _Repository, tree_oid: bytes, path: str | os.PathLike[str]
 ) -> bool:
     """Check if a path exists in the tree."""
     path = _normalize_path(path)

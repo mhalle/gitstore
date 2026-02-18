@@ -475,7 +475,7 @@ class TestResolveRef:
         store = GitStore.open(repo_with_files, create=False)
         fs = store.branches["main"]
         # Get the tree OID (not a commit)
-        tree_oid = str(fs._tree_oid)
+        tree_oid = fs._tree_oid.decode()
         result = runner.invoke(main, [
             "tag", "--repo", repo_with_files, "set", "bad-ref", "--ref", tree_oid
         ])

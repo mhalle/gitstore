@@ -4,6 +4,7 @@ import pytest
 from dulwich.repo import Repo as DulwichRepo
 
 from gitstore import GitStore, MirrorDiff, RefChange
+from gitstore.mirror import _diff_refs
 
 
 # ---------------------------------------------------------------------------
@@ -140,22 +141,22 @@ class TestMirrorDiffStructure:
 class TestScpStyleUrl:
     def test_scp_style_with_user_raises(self, store):
         with pytest.raises(ValueError, match="scp-style URL not supported"):
-            store._repo.diff_refs("git@github.com:org/repo.git", "push")
+            _diff_refs(store._repo._drepo,"git@github.com:org/repo.git", "push")
 
     def test_scp_style_without_user_raises(self, store):
         """host:path (no @) is also scp-style and must be rejected."""
         with pytest.raises(ValueError, match="scp-style URL not supported"):
-            store._repo.diff_refs("github.com:org/repo.git", "push")
+            _diff_refs(store._repo._drepo,"github.com:org/repo.git", "push")
 
     def test_scp_style_suggests_ssh(self, store):
         with pytest.raises(ValueError, match="ssh:// format"):
-            store._repo.diff_refs("git@github.com:org/repo.git", "pull")
+            _diff_refs(store._repo._drepo,"git@github.com:org/repo.git", "pull")
 
     def test_ssh_url_not_rejected(self, store):
         """ssh:// URLs should not be caught by scp detection."""
         # Will fail at the network level, but must not be the scp guard
         try:
-            store._repo.diff_refs("ssh://git@github.com/org/repo.git", "pull")
+            _diff_refs(store._repo._drepo,"ssh://git@github.com/org/repo.git", "pull")
         except ValueError as exc:
             assert "scp-style" not in str(exc), f"scp guard fired on ssh:// URL: {exc}"
         except Exception:
@@ -165,4 +166,4 @@ class TestScpStyleUrl:
         """file:// URLs should not be caught by scp detection."""
         target = str(tmp_path / "remote.git")
         # Should not raise ValueError — will auto-create for push
-        store._repo.diff_refs(f"file://{target}", "push")
+        _diff_refs(store._repo._drepo,f"file://{target}", "push")

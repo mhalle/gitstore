@@ -65,11 +65,10 @@ class TestCp:
         assert result.exit_code == 0, result.output
         # Verify mode via library
         from gitstore import GitStore
+        from gitstore.copy._types import FileType
         store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
-        tree = store._repo[fs._tree_oid]
-        entry = tree["script.sh"]
-        assert entry.filemode == 0o100755
+        assert fs.file_type("script.sh") == FileType.EXECUTABLE
 
     def test_type_blob_explicit(self, runner, initialized_repo, tmp_path):
         f = tmp_path / "plain.txt"
@@ -79,11 +78,10 @@ class TestCp:
         ])
         assert result.exit_code == 0, result.output
         from gitstore import GitStore
+        from gitstore.copy._types import FileType
         store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
-        tree = store._repo[fs._tree_oid]
-        entry = tree["plain.txt"]
-        assert entry.filemode == 0o100644
+        assert fs.file_type("plain.txt") == FileType.BLOB
 
     def test_type_default_is_blob(self, runner, initialized_repo, tmp_path):
         f = tmp_path / "default.txt"
@@ -93,11 +91,10 @@ class TestCp:
         ])
         assert result.exit_code == 0, result.output
         from gitstore import GitStore
+        from gitstore.copy._types import FileType
         store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
-        tree = store._repo[fs._tree_oid]
-        entry = tree["default.txt"]
-        assert entry.filemode == 0o100644
+        assert fs.file_type("default.txt") == FileType.BLOB
 
     def test_deprecated_mode_755_still_works(self, runner, initialized_repo, tmp_path):
         f = tmp_path / "legacy.sh"
@@ -107,11 +104,10 @@ class TestCp:
         ])
         assert result.exit_code == 0, result.output
         from gitstore import GitStore
+        from gitstore.copy._types import FileType
         store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
-        tree = store._repo[fs._tree_oid]
-        entry = tree["legacy.sh"]
-        assert entry.filemode == 0o100755
+        assert fs.file_type("legacy.sh") == FileType.EXECUTABLE
 
     def test_missing_local_file(self, runner, initialized_repo):
         result = runner.invoke(main, ["cp", "--repo", initialized_repo, "/nonexistent", ":dest.txt"])

@@ -154,18 +154,18 @@ def gc(ctx):
 
 def _read_link_target(object_store, oid) -> str:
     """Read symlink target from the blob."""
-    return object_store[oid.raw].data.decode()
+    return object_store[oid].data.decode()
 
 
 def _ls_entry_dict(name, we, size, object_store):
     """Build a JSON-ready dict for a single ls -l entry."""
     if we is not None and we.file_type == FileType.LINK:
         target = _read_link_target(object_store, we.oid)
-        return {"name": name, "hash": str(we.oid), "size": size, "type": "link", "target": target}
+        return {"name": name, "hash": we.oid.decode(), "size": size, "type": "link", "target": target}
     if we is not None and we.file_type != FileType.TREE:
-        return {"name": name, "hash": str(we.oid), "size": size, "type": str(we.file_type)}
+        return {"name": name, "hash": we.oid.decode(), "size": size, "type": str(we.file_type)}
     if we is not None:
-        return {"name": name, "hash": str(we.oid), "type": "tree"}
+        return {"name": name, "hash": we.oid.decode(), "type": "tree"}
     return {"name": name, "type": "tree"}
 
 
@@ -189,16 +189,16 @@ def _format_ls_output(results, long, fmt, object_store, *, full_hash=False):
             for name in sorted_names:
                 we = results[name]
                 if we is not None and we.file_type == FileType.LINK:
-                    h = str(we.oid)[:hash_len]
-                    size = sizer.size(we.oid.raw)
+                    h = we.oid.decode()[:hash_len]
+                    size = sizer.size(we.oid)
                     target = _read_link_target(object_store, we.oid)
                     rows.append((h, str(size), f"{name} -> {target}"))
                 elif we is not None and we.file_type != FileType.TREE:
-                    h = str(we.oid)[:hash_len]
-                    size = sizer.size(we.oid.raw)
+                    h = we.oid.decode()[:hash_len]
+                    size = sizer.size(we.oid)
                     rows.append((h, str(size), name))
                 else:
-                    h = str(we.oid)[:hash_len] if we is not None else ""
+                    h = we.oid.decode()[:hash_len] if we is not None else ""
                     rows.append((h, "", name))
         width = max((len(s) for _, s, _ in rows if s), default=0)
         for hash_str, size_str, display in rows:
@@ -214,7 +214,7 @@ def _format_ls_output(results, long, fmt, object_store, *, full_hash=False):
             for name in sorted_names:
                 we = results[name]
                 if we is not None and we.file_type != FileType.TREE:
-                    size = sizer.size(we.oid.raw)
+                    size = sizer.size(we.oid)
                 else:
                     size = None
                 entries.append(_ls_entry_dict(name, we, size, object_store))
@@ -230,7 +230,7 @@ def _format_ls_output(results, long, fmt, object_store, *, full_hash=False):
             for name in sorted_names:
                 we = results[name]
                 if we is not None and we.file_type != FileType.TREE:
-                    size = sizer.size(we.oid.raw)
+                    size = sizer.size(we.oid)
                 else:
                     size = None
                 click.echo(json.dumps(

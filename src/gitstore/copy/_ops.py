@@ -486,7 +486,7 @@ def _copy_out(
         for rel, rp in pair_map.items():
             entry = _entry_at_path(fs._store._repo, fs._tree_oid, rp)
             if entry is not None:
-                repo_files[rel] = (entry[0]._sha, entry[1])
+                repo_files[rel] = (entry[0], entry[1])
 
         local_paths = _walk_local_paths(dest)
         source_rels = set(pair_map.keys())
@@ -661,7 +661,7 @@ def _copy_out_dry(
         for rel, rp in pair_map.items():
             entry = _entry_at_path(fs._store._repo, fs._tree_oid, rp)
             if entry is not None:
-                repo_files[rel] = (entry[0]._sha, entry[1])
+                repo_files[rel] = (entry[0], entry[1])
 
         local_paths = _walk_local_paths(dest) if base.exists() else set()
         source_rels = set(pair_map.keys())
