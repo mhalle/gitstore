@@ -4,6 +4,12 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.54.2 (2026-02-16)
+
+**Internal:**
+
+- Use dulwich's reflog API (`set_if_equals` with message, `Repo.read_reflog()`) instead of direct file I/O, making reflog handling backend-agnostic and enabling `dulwich-sqlite` support
+
 ## v0.54.1 (2026-02-13)
 
 **Bug fixes:**
