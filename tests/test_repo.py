@@ -3,6 +3,7 @@
 import pytest
 
 from gitstore import GitStore
+from gitstore.repo import _Repository
 
 
 class TestGitStoreOpen:
@@ -149,6 +150,22 @@ class TestRefDictTags:
         repo_b = GitStore.open(link, create=False)
         repo_b.tags["v1"] = fs  # symlink to same repo — should work
         assert "v1" in repo_b.tags
+
+    def test_path_trailing_slash_on_directory(self, tmp_path):
+        repo = GitStore.open(tmp_path / "test.git")
+        assert repo._repo.path.endswith("/")
+
+    def test_path_no_trailing_slash_on_file(self, tmp_path):
+        """Non-directory path (e.g. SQLite) must not get a trailing slash."""
+        fake_file = tmp_path / "repo.sqlite"
+        fake_file.write_bytes(b"")
+
+        class _FakeRepo:
+            path = str(fake_file)
+
+        r = _Repository(_FakeRepo())
+        assert not r.path.endswith("/")
+        assert r.path == str(fake_file)
 
     def test_create_false_missing_raises(self, tmp_path):
         with pytest.raises(FileNotFoundError):
