@@ -270,8 +270,6 @@ class RefDict(MutableMapping):
             >>> for e in entries:
             ...     print(f"{e.message}: {e.new_sha[:7]}")
         """
-        from dulwich import reflog as dreflog
-
         if self._is_tags:
             raise ValueError("Tags do not have reflog")
 
@@ -280,24 +278,17 @@ class RefDict(MutableMapping):
         if ref_name not in self._store._repo.references:
             raise KeyError(name)
 
-        # Read reflog file
-        reflog_path = os.path.join(
-            self._store._repo.path,
-            "logs", "refs", "heads", name
-        )
-
-        if not os.path.exists(reflog_path):
+        ref_bytes = ref_name.encode() if isinstance(ref_name, str) else ref_name
+        entries = list(self._store._repo._repo.read_reflog(ref_bytes))
+        if not entries:
             raise FileNotFoundError(f"No reflog found for branch {name!r}")
-
-        # Parse reflog entries
-        with open(reflog_path, 'rb') as f:
-            entries = []
-            for entry in dreflog.read_reflog(f):
-                entries.append(ReflogEntry(
-                    old_sha=entry.old_sha.decode(),
-                    new_sha=entry.new_sha.decode(),
-                    committer=entry.committer.decode(),
-                    timestamp=entry.timestamp,
-                    message=entry.message.decode(),
-                ))
-            return entries
+        return [
+            ReflogEntry(
+                old_sha=e.old_sha.decode(),
+                new_sha=e.new_sha.decode(),
+                committer=e.committer.decode(),
+                timestamp=e.timestamp,
+                message=e.message.decode(),
+            )
+            for e in entries
+        ]

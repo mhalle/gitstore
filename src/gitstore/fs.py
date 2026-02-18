@@ -862,22 +862,11 @@ class FS:
                 f"Branch {self._branch!r} has advanced since this snapshot"
             )
 
-        from dulwich import reflog as dreflog
-
         # Read reflog for this branch (safe to do outside the lock — read-only)
-        reflog_path = os.path.join(
-            self._store._repo.path,
-            "logs", "refs", "heads", self._branch
-        )
-
-        if not os.path.exists(reflog_path):
+        ref_bytes = f"refs/heads/{self._branch}".encode()
+        entries = list(self._store._repo._repo.read_reflog(ref_bytes))
+        if not entries:
             raise ValueError(f"No reflog found for branch {self._branch!r}")
-
-        with open(reflog_path, 'rb') as f:
-            entries = list(dreflog.read_reflog(f))
-
-        if len(entries) == 0:
-            raise ValueError("Reflog is empty")
 
         # Find current position in reflog (search backwards to get most recent)
         current_sha = self._commit_oid.raw if hasattr(self._commit_oid, 'raw') else self._commit_oid
