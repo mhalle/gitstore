@@ -151,9 +151,9 @@ fn write_entry_validation() {
 #[test]
 fn change_report_actions() {
     let mut report = ChangeReport::new();
-    report.add.push("c.txt".into());
-    report.update.push("a.txt".into());
-    report.delete.push("b.txt".into());
+    report.add.push(FileEntry::new("c.txt", FileType::Blob));
+    report.update.push(FileEntry::new("a.txt", FileType::Blob));
+    report.delete.push(FileEntry::new("b.txt", FileType::Blob));
 
     assert!(!report.in_sync());
     assert_eq!(report.total(), 3);

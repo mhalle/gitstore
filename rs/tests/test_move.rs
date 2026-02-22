@@ -155,7 +155,7 @@ fn rename_custom_message() {
     })
     .unwrap();
     let fs = store.branches().get("main").unwrap();
-    let log = fs.log(fs::LogOptions { limit: Some(1), skip: None }).unwrap();
+    let log = fs.log(fs::LogOptions { limit: Some(1), ..Default::default() }).unwrap();
     assert_eq!(log[0].message, "renamed hello");
 }
 

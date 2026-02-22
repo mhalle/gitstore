@@ -117,6 +117,7 @@ fn apply_single_bytes() {
     let fs = store.branches().get("main").unwrap();
     fs.apply(
         &[("data.bin", WriteEntry::from_bytes(b"\x00\x01\x02".to_vec()))],
+        &[],
         Default::default(),
     )
     .unwrap();
@@ -131,6 +132,7 @@ fn apply_single_text() {
     let fs = store.branches().get("main").unwrap();
     fs.apply(
         &[("hello.txt", WriteEntry::from_text("hello world"))],
+        &[],
         Default::default(),
     )
     .unwrap();
@@ -146,6 +148,7 @@ fn apply_symlink_entry() {
     let fs = store.branches().get("main").unwrap();
     fs.apply(
         &[("link", WriteEntry::symlink("target.txt"))],
+        &[],
         Default::default(),
     )
     .unwrap();
@@ -165,7 +168,7 @@ fn apply_executable_entry() {
         target: None,
         mode: MODE_BLOB_EXEC,
     };
-    fs.apply(&[("run.sh", entry)], Default::default()).unwrap();
+    fs.apply(&[("run.sh", entry)], &[], Default::default()).unwrap();
     let fs = store.branches().get("main").unwrap();
     assert_eq!(fs.file_type("run.sh").unwrap(), FileType::Executable);
     assert_eq!(fs.read("run.sh").unwrap(), b"#!/bin/sh");
@@ -188,6 +191,7 @@ fn apply_multiple_entries_single_commit() {
             ("b.txt", WriteEntry::from_text("bbb")),
             ("c.txt", WriteEntry::from_text("ccc")),
         ],
+        &[],
         Default::default(),
     )
     .unwrap();
@@ -199,7 +203,7 @@ fn apply_multiple_entries_single_commit() {
     assert_eq!(fs.read_text("c.txt").unwrap(), "ccc");
 
     // Single commit
-    let log = fs.log(fs::LogOptions { limit: Some(5), skip: None }).unwrap();
+    let log = fs.log(fs::LogOptions { limit: Some(5), ..Default::default() }).unwrap();
     assert_eq!(log.len(), 2); // init + apply
 }
 
@@ -221,6 +225,7 @@ fn apply_mixed_types() {
             ("link", WriteEntry::symlink("file.txt")),
             ("script.sh", exec_entry),
         ],
+        &[],
         Default::default(),
     )
     .unwrap();
@@ -246,6 +251,7 @@ fn apply_nested_paths() {
             ("a/b/c/deep.txt", WriteEntry::from_text("deep")),
             ("a/b/sibling.txt", WriteEntry::from_text("sibling")),
         ],
+        &[],
         Default::default(),
     )
     .unwrap();
@@ -269,6 +275,7 @@ fn apply_custom_message() {
 
     fs.apply(
         &[("x.txt", WriteEntry::from_text("x"))],
+        &[],
         fs::ApplyOptions {
             message: Some("custom apply msg".into()),
         },
@@ -276,7 +283,7 @@ fn apply_custom_message() {
     .unwrap();
 
     let fs = store.branches().get("main").unwrap();
-    let log = fs.log(fs::LogOptions { limit: Some(1), skip: None }).unwrap();
+    let log = fs.log(fs::LogOptions { limit: Some(1), ..Default::default() }).unwrap();
     assert_eq!(log[0].message, "custom apply msg");
 }
 
@@ -292,6 +299,7 @@ fn apply_noop_identical_content() {
 
     fs.apply(
         &[("a.txt", WriteEntry::from_text("aaa"))],
+        &[],
         Default::default(),
     )
     .unwrap();
@@ -301,6 +309,7 @@ fn apply_noop_identical_content() {
     // Same content again
     fs.apply(
         &[("a.txt", WriteEntry::from_text("aaa"))],
+        &[],
         Default::default(),
     )
     .unwrap();
@@ -326,6 +335,7 @@ fn apply_stale_snapshot_errors() {
 
     let result = fs_old.apply(
         &[("stale.txt", WriteEntry::from_text("fail"))],
+        &[],
         Default::default(),
     );
     assert!(result.is_err());
@@ -342,7 +352,7 @@ fn apply_empty_is_noop() {
     let fs = store.branches().get("main").unwrap();
     let hash_before = fs.commit_hash().unwrap();
 
-    fs.apply(&[], Default::default()).unwrap();
+    fs.apply(&[], &[], Default::default()).unwrap();
 
     let fs = store.branches().get("main").unwrap();
     assert_eq!(fs.commit_hash().unwrap(), hash_before);
@@ -359,6 +369,7 @@ fn apply_overwrites_existing() {
 
     fs.apply(
         &[("hello.txt", WriteEntry::from_text("overwritten"))],
+        &[],
         Default::default(),
     )
     .unwrap();
@@ -384,7 +395,7 @@ fn apply_invalid_entry_errors() {
         target: None,
         mode: MODE_BLOB,
     };
-    assert!(fs.apply(&[("bad.txt", bad)], Default::default()).is_err());
+    assert!(fs.apply(&[("bad.txt", bad)], &[], Default::default()).is_err());
 }
 
 // ---------------------------------------------------------------------------
@@ -399,6 +410,7 @@ fn apply_empty_file() {
 
     fs.apply(
         &[("empty.txt", WriteEntry::from_bytes(vec![]))],
+        &[],
         Default::default(),
     )
     .unwrap();
@@ -421,6 +433,7 @@ fn apply_binary_data() {
     let data: Vec<u8> = (0u8..=255).collect();
     fs.apply(
         &[("binary.bin", WriteEntry::from_bytes(data.clone()))],
+        &[],
         Default::default(),
     )
     .unwrap();
@@ -440,6 +453,7 @@ fn apply_preserves_existing_files() {
 
     fs.apply(
         &[("new.txt", WriteEntry::from_text("new"))],
+        &[],
         Default::default(),
     )
     .unwrap();

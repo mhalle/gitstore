@@ -3,7 +3,7 @@ use std::path::Path;
 use crate::error::{Error, Result};
 use crate::fs::TreeWrite;
 use crate::tree;
-use crate::types::{ChangeReport, MODE_BLOB, MODE_LINK, MODE_TREE};
+use crate::types::{ChangeReport, FileEntry, FileType, MODE_BLOB, MODE_LINK, MODE_TREE};
 
 /// Copy files from disk into a tree, returning a list of (path, TreeWrite) pairs.
 pub fn copy_in(
@@ -36,6 +36,7 @@ pub fn copy_in(
             std::fs::read(&full_disk).map_err(|e| Error::io(&full_disk, e))?
         };
 
+        let file_type = FileType::from_mode(mode).unwrap_or(FileType::Blob);
         let blob_oid = repo.write_blob(&data).map_err(Error::git)?;
         writes.push((
             store_path.clone(),
@@ -45,7 +46,7 @@ pub fn copy_in(
                 mode,
             },
         ));
-        report.add.push(store_path);
+        report.add.push(FileEntry::with_src(&store_path, file_type, &full_disk));
     }
 
     Ok((writes, report))
@@ -114,13 +115,17 @@ pub fn copy_out(
             }
         }
 
-        report.add.push(rel_path.clone());
+        let file_type = FileType::from_mode(entry.mode).unwrap_or(FileType::Blob);
+        report.add.push(FileEntry::with_src(rel_path, file_type, &dest_path));
     }
 
     Ok(report)
 }
 
 /// Sync files from disk into a tree (add + update + delete).
+///
+/// Unlike `copy_in`, this also deletes files in the destination tree that
+/// are not present on disk, and classifies changes as add/update/delete.
 pub fn sync_in(
     repo: &gix::Repository,
     base_tree: gix::ObjectId,
@@ -128,9 +133,109 @@ pub fn sync_in(
     dest: &str,
     include: Option<&[&str]>,
     exclude: Option<&[&str]>,
-) -> Result<(Vec<(String, TreeWrite)>, ChangeReport)> {
-    // For now, just delegate to copy_in (full sync would also delete)
-    copy_in(repo, base_tree, src, dest, include, exclude)
+    checksum: bool,
+) -> Result<(Vec<(String, Option<TreeWrite>)>, ChangeReport)> {
+    let mut writes: Vec<(String, Option<TreeWrite>)> = Vec::new();
+    let mut report = ChangeReport::new();
+    let dest_norm = crate::paths::normalize_path(dest)?;
+
+    // Collect disk files
+    let disk_files = disk_glob(src, include, exclude)?;
+    let disk_set: std::collections::HashSet<&str> = disk_files.iter().map(|s| s.as_str()).collect();
+
+    // Collect existing tree entries at dest
+    let existing = {
+        let target_oid = if dest_norm.is_empty() {
+            base_tree
+        } else {
+            match tree::entry_at_path(repo, base_tree, &dest_norm)? {
+                Some(entry) if entry.mode == MODE_TREE => entry.oid,
+                Some(_) => {
+                    // dest exists but is a file — treat as empty subtree
+                    gix::ObjectId::empty_tree(gix::hash::Kind::Sha1)
+                }
+                None => gix::ObjectId::empty_tree(gix::hash::Kind::Sha1),
+            }
+        };
+        if target_oid == gix::ObjectId::empty_tree(gix::hash::Kind::Sha1) {
+            Vec::new()
+        } else {
+            tree::walk_tree(repo, target_oid)?
+        }
+    };
+
+    let existing_map: std::collections::HashMap<&str, &crate::types::WalkEntry> =
+        existing.iter().map(|(p, e)| (p.as_str(), e)).collect();
+
+    // Process disk files: add or update
+    for rel_path in &disk_files {
+        let full_disk = src.join(rel_path);
+        let store_path = if dest_norm.is_empty() {
+            rel_path.clone()
+        } else {
+            format!("{}/{}", dest_norm, rel_path)
+        };
+
+        let mode = tree::mode_from_disk(&full_disk).unwrap_or(MODE_BLOB);
+        let data = if mode == MODE_LINK {
+            let target = std::fs::read_link(&full_disk).map_err(|e| Error::io(&full_disk, e))?;
+            target.to_string_lossy().into_owned().into_bytes()
+        } else {
+            std::fs::read(&full_disk).map_err(|e| Error::io(&full_disk, e))?
+        };
+
+        let blob_oid = repo.write_blob(&data).map_err(Error::git)?;
+        let file_type = FileType::from_mode(mode).unwrap_or(FileType::Blob);
+
+        // Check if this is an update vs add
+        let is_changed = if let Some(existing_entry) = existing_map.get(rel_path.as_str()) {
+            if checksum {
+                existing_entry.oid != blob_oid.detach() || existing_entry.mode != mode
+            } else {
+                // Without checksum, always treat as changed
+                true
+            }
+        } else {
+            true
+        };
+
+        if is_changed {
+            writes.push((
+                store_path.clone(),
+                Some(TreeWrite {
+                    data,
+                    oid: blob_oid.detach(),
+                    mode,
+                }),
+            ));
+
+            if existing_map.contains_key(rel_path.as_str()) {
+                report.update.push(FileEntry::with_src(&store_path, file_type, &full_disk));
+            } else {
+                report.add.push(FileEntry::with_src(&store_path, file_type, &full_disk));
+            }
+        }
+    }
+
+    // Delete files in tree that are not on disk
+    for (rel_path, entry) in &existing {
+        if !disk_set.contains(rel_path.as_str()) {
+            // Also apply include/exclude filters to deletions
+            if !matches_filters(rel_path, include, exclude) {
+                continue;
+            }
+            let store_path = if dest_norm.is_empty() {
+                rel_path.clone()
+            } else {
+                format!("{}/{}", dest_norm, rel_path)
+            };
+            let file_type = FileType::from_mode(entry.mode).unwrap_or(FileType::Blob);
+            writes.push((store_path.clone(), None));
+            report.delete.push(FileEntry::new(&store_path, file_type));
+        }
+    }
+
+    Ok((writes, report))
 }
 
 /// Sync files from a tree to disk (add + update + delete).
@@ -146,7 +251,7 @@ pub fn sync_out(
 }
 
 /// Remove files from disk that match patterns.
-pub fn remove(
+pub fn remove_from_disk(
     dest: &Path,
     include: Option<&[&str]>,
     exclude: Option<&[&str]>,
@@ -157,7 +262,7 @@ pub fn remove(
         let full = dest.join(rel);
         if full.exists() {
             std::fs::remove_file(&full).map_err(|e| Error::io(&full, e))?;
-            report.delete.push(rel.clone());
+            report.delete.push(FileEntry::with_src(rel.as_str(), FileType::Blob, &full));
         }
     }
     Ok(report)

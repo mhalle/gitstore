@@ -47,9 +47,9 @@ fn change_report_default_empty() {
 #[test]
 fn change_report_total() {
     let r = ChangeReport {
-        add: vec!["a.txt".into(), "b.txt".into()],
-        update: vec!["c.txt".into()],
-        delete: vec!["d.txt".into(), "e.txt".into(), "f.txt".into()],
+        add: vec![FileEntry::new("a.txt", FileType::Blob), FileEntry::new("b.txt", FileType::Blob)],
+        update: vec![FileEntry::new("c.txt", FileType::Blob)],
+        delete: vec![FileEntry::new("d.txt", FileType::Blob), FileEntry::new("e.txt", FileType::Blob), FileEntry::new("f.txt", FileType::Blob)],
         ..Default::default()
     };
     assert_eq!(r.total(), 6);
@@ -69,8 +69,8 @@ fn change_report_in_sync_when_empty() {
 #[test]
 fn change_report_actions_sorted() {
     let r = ChangeReport {
-        add: vec!["z.txt".into(), "a.txt".into()],
-        delete: vec!["m.txt".into()],
+        add: vec![FileEntry::new("z.txt", FileType::Blob), FileEntry::new("a.txt", FileType::Blob)],
+        delete: vec![FileEntry::new("m.txt", FileType::Blob)],
         ..Default::default()
     };
     let actions = r.actions();
@@ -86,7 +86,7 @@ fn change_report_actions_sorted() {
 #[test]
 fn change_report_finalize_ok() {
     let r = ChangeReport {
-        add: vec!["a.txt".into()],
+        add: vec![FileEntry::new("a.txt", FileType::Blob)],
         ..Default::default()
     };
     assert!(r.finalize().is_ok());

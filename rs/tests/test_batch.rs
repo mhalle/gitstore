@@ -26,7 +26,7 @@ fn batch_multiple_writes_single_commit() {
     assert_eq!(fs.read_text("c.txt").unwrap(), "ccc");
 
     // Only one commit was added (not three)
-    let log = fs.log(fs::LogOptions { limit: Some(5), skip: None }).unwrap();
+    let log = fs.log(fs::LogOptions { limit: Some(5), ..Default::default() }).unwrap();
     // init commit + 1 batch commit = 2
     assert_eq!(log.len(), 2);
 }
@@ -296,7 +296,7 @@ fn batch_custom_message() {
     batch.commit().unwrap();
 
     let fs = store.branches().get("main").unwrap();
-    let log = fs.log(fs::LogOptions { limit: Some(1), skip: None }).unwrap();
+    let log = fs.log(fs::LogOptions { limit: Some(1), ..Default::default() }).unwrap();
     assert_eq!(log[0].message, "my batch");
 }
 

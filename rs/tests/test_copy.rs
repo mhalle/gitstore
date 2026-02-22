@@ -22,10 +22,9 @@ fn copy_in_basic() {
 
     let store = common::create_store(dir.path(), "main");
     let fs = store.branches().get("main").unwrap();
-    let report = fs.copy_in(&src, "", Default::default()).unwrap();
+    let (report, fs) = fs.copy_in(&src, "", Default::default()).unwrap();
     assert!(report.total() > 0);
 
-    let fs = store.branches().get("main").unwrap();
     assert_eq!(fs.read_text("file1.txt").unwrap(), "one");
     assert_eq!(fs.read_text("sub/deep.txt").unwrap(), "deep");
 }
@@ -230,10 +229,9 @@ fn sync_in_basic() {
 
     let store = common::create_store(dir.path(), "main");
     let fs = store.branches().get("main").unwrap();
-    let report = fs.sync_in(&src, "", Default::default()).unwrap();
+    let (report, fs) = fs.sync_in(&src, "", Default::default()).unwrap();
     assert!(report.total() > 0);
 
-    let fs = store.branches().get("main").unwrap();
     assert_eq!(fs.read_text("file1.txt").unwrap(), "one");
 }
 
@@ -263,7 +261,7 @@ fn remove_disk_files() {
 
     let store = common::create_store(dir.path(), "main");
     let fs = store.branches().get("main").unwrap();
-    let report = fs.remove(&target, Default::default()).unwrap();
+    let report = fs.remove_from_disk(&target, Default::default()).unwrap();
     assert!(report.total() > 0);
     assert!(!target.join("a.txt").exists());
     assert!(!target.join("b.txt").exists());
@@ -279,7 +277,7 @@ fn remove_with_include_filter() {
 
     let store = common::create_store(dir.path(), "main");
     let fs = store.branches().get("main").unwrap();
-    fs.remove(&target, fs::RemoveOptions {
+    fs.remove_from_disk(&target, fs::RemoveFromDiskOptions {
         include: Some(vec!["*.txt".into()]),
         ..Default::default()
     })
@@ -385,7 +383,7 @@ fn copy_in_custom_message() {
     .unwrap();
 
     let fs = store.branches().get("main").unwrap();
-    let log = fs.log(fs::LogOptions { limit: Some(1), skip: None }).unwrap();
+    let log = fs.log(fs::LogOptions { limit: Some(1), ..Default::default() }).unwrap();
     assert_eq!(log[0].message, "import files");
 }
 
@@ -503,7 +501,7 @@ fn rename_custom_message() {
     })
     .unwrap();
     let fs = store.branches().get("main").unwrap();
-    let log = fs.log(fs::LogOptions { limit: Some(1), skip: None }).unwrap();
+    let log = fs.log(fs::LogOptions { limit: Some(1), ..Default::default() }).unwrap();
     assert_eq!(log[0].message, "move hello");
 }
 
@@ -595,7 +593,7 @@ fn remove_nonexistent_path() {
 
     let store = common::create_store(dir.path(), "main");
     let fs = store.branches().get("main").unwrap();
-    let result = fs.remove(&target, Default::default());
+    let result = fs.remove_from_disk(&target, Default::default());
     // Either returns empty report or errors — either is acceptable
     match result {
         Ok(report) => assert_eq!(report.total(), 0),
@@ -613,7 +611,7 @@ fn remove_with_exclude_filter() {
 
     let store = common::create_store(dir.path(), "main");
     let fs = store.branches().get("main").unwrap();
-    fs.remove(&target, fs::RemoveOptions {
+    fs.remove_from_disk(&target, fs::RemoveFromDiskOptions {
         exclude: Some(vec!["*.md".into()]),
         ..Default::default()
     })

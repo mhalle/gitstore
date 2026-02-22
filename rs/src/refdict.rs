@@ -75,6 +75,13 @@ impl<'a> RefDict<'a> {
         Ok(())
     }
 
+    /// Point the named ref at the commit of `fs` and return a new writable `Fs`
+    /// for the updated ref.
+    pub fn set_to(&self, name: &str, fs: &Fs) -> Result<Fs> {
+        self.set(name, fs)?;
+        self.get(name)
+    }
+
     /// Point the named ref at the commit of `fs` and return the previous `Fs`.
     pub fn set_and_get(&self, name: &str, fs: &Fs) -> Result<Option<Fs>> {
         let old = self.try_get(name)?;

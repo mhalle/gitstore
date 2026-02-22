@@ -161,7 +161,7 @@ fn log_limit() {
 
     let log = fs.log(fs::LogOptions {
         limit: Some(2),
-        skip: None,
+        ..Default::default()
     })
     .unwrap();
     assert_eq!(log.len(), 2);
@@ -186,8 +186,8 @@ fn log_skip() {
     let fs = store.branches().get("main").unwrap();
 
     let log = fs.log(fs::LogOptions {
-        limit: None,
         skip: Some(1),
+        ..Default::default()
     })
     .unwrap();
     // Skipped most recent, so first entry should be "write a"
@@ -209,6 +209,7 @@ fn log_skip_and_limit() {
     let log = fs.log(fs::LogOptions {
         limit: Some(1),
         skip: Some(1),
+        ..Default::default()
     })
     .unwrap();
     assert_eq!(log.len(), 1);
@@ -227,7 +228,7 @@ fn undo_single_step() {
     let fs = store.branches().get("main").unwrap();
     let hash_before_undo = fs.commit_hash().unwrap();
 
-    let undone = fs.undo().unwrap();
+    let undone = fs.undo(1).unwrap();
     assert_ne!(undone.commit_hash().unwrap(), hash_before_undo);
     assert!(!undone.exists("a.txt").unwrap());
 }
@@ -240,7 +241,7 @@ fn undo_updates_branch() {
     fs.write("a.txt", b"a", Default::default()).unwrap();
     let fs = store.branches().get("main").unwrap();
 
-    let undone = fs.undo().unwrap();
+    let undone = fs.undo(1).unwrap();
     // Re-fetch from store — branch should have moved back
     let fs_fresh = store.branches().get("main").unwrap();
     assert_eq!(fs_fresh.commit_hash(), undone.commit_hash());
@@ -252,7 +253,7 @@ fn undo_no_parent_errors() {
     let store = common::create_store(dir.path(), "main");
     let fs = store.branches().get("main").unwrap();
     // Only init commit, no parent to undo to
-    assert!(fs.undo().is_err());
+    assert!(fs.undo(1).is_err());
 }
 
 // ---------------------------------------------------------------------------
@@ -268,10 +269,10 @@ fn redo_after_undo() {
     let fs = store.branches().get("main").unwrap();
     let hash_with_a = fs.commit_hash().unwrap();
 
-    let undone = fs.undo().unwrap();
+    let undone = fs.undo(1).unwrap();
     assert!(!undone.exists("a.txt").unwrap());
 
-    let redone = undone.redo().unwrap();
+    let redone = undone.redo(1).unwrap();
     assert_eq!(redone.commit_hash().unwrap(), hash_with_a);
     assert!(redone.exists("a.txt").unwrap());
 }
@@ -284,8 +285,8 @@ fn redo_updates_branch() {
     fs.write("a.txt", b"a", Default::default()).unwrap();
     let fs = store.branches().get("main").unwrap();
 
-    let undone = fs.undo().unwrap();
-    let redone = undone.redo().unwrap();
+    let undone = fs.undo(1).unwrap();
+    let redone = undone.redo(1).unwrap();
 
     let fs_fresh = store.branches().get("main").unwrap();
     assert_eq!(fs_fresh.commit_hash(), redone.commit_hash());
@@ -307,15 +308,15 @@ fn undo_redo_undo_sequence() {
     let hash_with_a = fs.commit_hash().unwrap();
 
     // undo -> init
-    let undone = fs.undo().unwrap();
+    let undone = fs.undo(1).unwrap();
     assert_eq!(undone.commit_hash().unwrap(), hash_init);
 
     // redo -> with_a
-    let redone = undone.redo().unwrap();
+    let redone = undone.redo(1).unwrap();
     assert_eq!(redone.commit_hash().unwrap(), hash_with_a);
 
     // undo again -> init
-    let undone2 = redone.undo().unwrap();
+    let undone2 = redone.undo(1).unwrap();
     assert_eq!(undone2.commit_hash().unwrap(), hash_init);
 }
 
@@ -341,7 +342,7 @@ fn reflog_includes_undo() {
     let fs = store.branches().get("main").unwrap();
     fs.write("a.txt", b"a", Default::default()).unwrap();
     let fs = store.branches().get("main").unwrap();
-    fs.undo().unwrap();
+    fs.undo(1).unwrap();
 
     let entries = store.branches().reflog("main").unwrap();
     let has_undo = entries.iter().any(|e| e.message.contains("undo"));
@@ -366,7 +367,7 @@ fn commit_info_author() {
     fs.write("a.txt", b"a", Default::default()).unwrap();
     let fs = store.branches().get("main").unwrap();
 
-    let log = fs.log(fs::LogOptions { limit: Some(1), skip: None }).unwrap();
+    let log = fs.log(fs::LogOptions { limit: Some(1), ..Default::default() }).unwrap();
     assert_eq!(log[0].author_name.as_deref(), Some("Bob"));
     assert_eq!(log[0].author_email.as_deref(), Some("bob@example.com"));
 }
@@ -395,9 +396,9 @@ fn undo_too_many_errors() {
     let fs = store.branches().get("main").unwrap();
 
     // undo once succeeds
-    let undone = fs.undo().unwrap();
+    let undone = fs.undo(1).unwrap();
     // undo again on init commit fails
-    assert!(undone.undo().is_err());
+    assert!(undone.undo(1).is_err());
 }
 
 #[test]
@@ -409,7 +410,7 @@ fn redo_on_init_commit_errors() {
     // Init commit has no reflog entries with new_sha matching, so redo fails
     // (The 0000 -> init entry has new_sha=init but old_sha=0000 which is invalid)
     // Just verify redo doesn't panic — it may error or succeed depending on reflog
-    let _ = fs.redo();
+    let _ = fs.redo(1);
 }
 
 #[test]
@@ -429,13 +430,13 @@ fn undo_redo_with_batch() {
     assert_ne!(hash_batch, hash_init);
 
     // undo the batch
-    let undone = fs.undo().unwrap();
+    let undone = fs.undo(1).unwrap();
     assert_eq!(undone.commit_hash().unwrap(), hash_init);
     assert!(!undone.exists("a.txt").unwrap());
     assert!(!undone.exists("b.txt").unwrap());
 
     // redo the batch
-    let redone = undone.redo().unwrap();
+    let redone = undone.redo(1).unwrap();
     assert_eq!(redone.commit_hash().unwrap(), hash_batch);
     assert!(redone.exists("a.txt").unwrap());
 }
@@ -452,7 +453,7 @@ fn log_after_undo_reflects_earlier_state() {
     .unwrap();
     let fs = store.branches().get("main").unwrap();
 
-    let _undone = fs.undo().unwrap();
+    let _undone = fs.undo(1).unwrap();
     // After undo, the log should only show the init commit
     let fs_fresh = store.branches().get("main").unwrap();
     let log = fs_fresh.log(Default::default()).unwrap();
@@ -475,12 +476,12 @@ fn multiple_undos() {
     let fs = store.branches().get("main").unwrap();
 
     // undo twice
-    let u1 = fs.undo().unwrap();
+    let u1 = fs.undo(1).unwrap();
     assert_eq!(u1.commit_hash().unwrap(), h1);
     assert!(u1.exists("a.txt").unwrap());
     assert!(!u1.exists("b.txt").unwrap());
 
-    let u2 = u1.undo().unwrap();
+    let u2 = u1.undo(1).unwrap();
     assert_eq!(u2.commit_hash().unwrap(), h0);
     assert!(!u2.exists("a.txt").unwrap());
 
@@ -555,7 +556,7 @@ fn undo_on_detached_errors() {
 
     // back(1) returns a detached Fs (no branch)
     let detached = fs.back(1).unwrap();
-    let result = detached.undo();
+    let result = detached.undo(1);
     assert!(result.is_err());
 }
 
@@ -569,7 +570,7 @@ fn redo_on_detached_errors() {
 
     // back(1) returns a detached Fs (no branch)
     let detached = fs.back(1).unwrap();
-    let result = detached.redo();
+    let result = detached.redo(1);
     assert!(result.is_err());
 }
 
@@ -616,14 +617,14 @@ fn double_redo_after_undo_errors() {
     let fs = store.branches().get("main").unwrap();
 
     // Undo once, then redo once — second redo should not succeed further
-    let undone = fs.undo().unwrap();
-    let redone = undone.redo().unwrap();
+    let undone = fs.undo(1).unwrap();
+    let redone = undone.redo(1).unwrap();
     assert!(redone.exists("a.txt").unwrap());
 
     // A second redo from this state: the reflog entry for the redo will
     // find the undo entry (new_sha == current), which goes back to the
     // undone state — this is the expected reflog behavior
-    let result = redone.redo();
+    let result = redone.redo(1);
     // Whether this errors or goes back to the undo state, verify it doesn't panic
     let _ = result;
 }
@@ -636,11 +637,11 @@ fn redo_stale_snapshot_still_works() {
     fs.write("a.txt", b"a", Default::default()).unwrap();
     let fs = store.branches().get("main").unwrap();
 
-    let undone = fs.undo().unwrap();
+    let _undone = fs.undo(1).unwrap();
     // Get a stale snapshot of the undone state
     let stale = store.branches().get("main").unwrap();
     // Redo should still work because it uses reflog
-    let redone = stale.redo().unwrap();
+    let redone = stale.redo(1).unwrap();
     assert!(redone.exists("a.txt").unwrap());
 }
 
@@ -655,7 +656,7 @@ fn undo_preserves_content() {
     let fs = store.branches().get("main").unwrap();
 
     // Undo removes b.txt but preserves a.txt with original content
-    let undone = fs.undo().unwrap();
+    let undone = fs.undo(1).unwrap();
     assert_eq!(undone.read_text("a.txt").unwrap(), "original content");
     assert!(!undone.exists("b.txt").unwrap());
 }

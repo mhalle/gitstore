@@ -96,12 +96,12 @@ impl Batch {
         Ok(())
     }
 
-    /// Commit all accumulated writes. Consumes the `Batch`.
-    pub fn commit(mut self) -> Result<()> {
+    /// Commit all accumulated writes. Consumes the `Batch` and returns the new `Fs` snapshot.
+    pub fn commit(mut self) -> Result<Fs> {
         self.closed = true;
 
         if self.writes.is_empty() && self.removes.is_empty() {
-            return Ok(());
+            return Ok(self.fs);
         }
 
         // Merge removes into writes as (path, None)
@@ -117,8 +117,7 @@ impl Batch {
             )
         });
 
-        self.fs.commit_changes(&all_writes, &message)?;
-        Ok(())
+        self.fs.commit_changes(&all_writes, &message)
     }
 
     /// Returns `true` if `commit()` has already been called.

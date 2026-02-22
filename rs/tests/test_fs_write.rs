@@ -80,7 +80,7 @@ fn write_custom_message() {
     })
     .unwrap();
     let fs = store.branches().get("main").unwrap();
-    let log = fs.log(fs::LogOptions { limit: Some(1), skip: None }).unwrap();
+    let log = fs.log(fs::LogOptions { limit: Some(1), ..Default::default() }).unwrap();
     assert_eq!(log[0].message, "custom msg");
 }
 
@@ -267,6 +267,7 @@ fn apply_bytes() {
             ("a.txt", WriteEntry::from_bytes(b"aaa".to_vec())),
             ("b.txt", WriteEntry::from_bytes(b"bbb".to_vec())),
         ],
+        &[],
         Default::default(),
     )
     .unwrap();
@@ -283,6 +284,7 @@ fn apply_symlink() {
     let fs = store.branches().get("main").unwrap();
     fs.apply(
         &[("link", WriteEntry::symlink("target.txt"))],
+        &[],
         Default::default(),
     )
     .unwrap();
@@ -302,7 +304,7 @@ fn apply_executable() {
         target: None,
         mode: MODE_BLOB_EXEC,
     };
-    fs.apply(&[("run.sh", entry)], Default::default()).unwrap();
+    fs.apply(&[("run.sh", entry)], &[], Default::default()).unwrap();
     let fs = store.branches().get("main").unwrap();
     assert_eq!(fs.file_type("run.sh").unwrap(), FileType::Executable);
 }
@@ -319,6 +321,7 @@ fn apply_multiple() {
             ("y.txt", WriteEntry::from_text("y")),
             ("z.txt", WriteEntry::from_text("z")),
         ],
+        &[],
         Default::default(),
     )
     .unwrap();
@@ -341,6 +344,7 @@ fn apply_stale_errors() {
 
     let result = fs_old.apply(
         &[("stale.txt", WriteEntry::from_text("fail"))],
+        &[],
         Default::default(),
     );
     assert!(result.is_err());
@@ -481,7 +485,7 @@ fn write_symlink_custom_message() {
     })
     .unwrap();
     let fs = store.branches().get("main").unwrap();
-    let log = fs.log(fs::LogOptions { limit: Some(1), skip: None }).unwrap();
+    let log = fs.log(fs::LogOptions { limit: Some(1), ..Default::default() }).unwrap();
     assert_eq!(log[0].message, "add symlink");
 }
 
@@ -615,7 +619,7 @@ fn remove_file_via_batch_custom_message() {
     batch.commit().unwrap();
     let fs = store.branches().get("main").unwrap();
     assert!(!fs.exists("hello.txt").unwrap());
-    let log = fs.log(fs::LogOptions { limit: Some(1), skip: None }).unwrap();
+    let log = fs.log(fs::LogOptions { limit: Some(1), ..Default::default() }).unwrap();
     assert_eq!(log[0].message, "remove hello");
 }
 
@@ -685,6 +689,6 @@ fn rename_custom_message() {
     })
     .unwrap();
     let fs = store.branches().get("main").unwrap();
-    let log = fs.log(fs::LogOptions { limit: Some(1), skip: None }).unwrap();
+    let log = fs.log(fs::LogOptions { limit: Some(1), ..Default::default() }).unwrap();
     assert_eq!(log[0].message, "move file");
 }

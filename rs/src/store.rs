@@ -13,6 +13,15 @@ pub(crate) struct GitStoreInner {
     pub(crate) signature: Signature,
 }
 
+impl std::fmt::Debug for GitStoreInner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GitStoreInner")
+            .field("path", &self.path)
+            .field("signature", &self.signature)
+            .finish_non_exhaustive()
+    }
+}
+
 /// A versioned filesystem backed by a bare git repository.
 ///
 /// Cheap to clone (`Arc` internally).

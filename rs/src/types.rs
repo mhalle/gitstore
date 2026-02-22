@@ -159,15 +159,47 @@ impl WriteEntry {
 // FileEntry
 // ---------------------------------------------------------------------------
 
-/// Describes a file on disk that should be imported/exported.
-#[derive(Debug, Clone)]
+/// Describes a file in a change report.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileEntry {
     /// Relative path within the store.
     pub path: String,
     /// Type of the file.
     pub file_type: FileType,
-    /// Source path on disk (for copy_in) or destination (for copy_out).
-    pub src: PathBuf,
+    /// Source path on disk (for copy_in/copy_out), if applicable.
+    pub src: Option<PathBuf>,
+}
+
+impl FileEntry {
+    /// Create a FileEntry without a source path.
+    pub fn new(path: impl Into<String>, file_type: FileType) -> Self {
+        Self {
+            path: path.into(),
+            file_type,
+            src: None,
+        }
+    }
+
+    /// Create a FileEntry with a source path.
+    pub fn with_src(path: impl Into<String>, file_type: FileType, src: impl Into<PathBuf>) -> Self {
+        Self {
+            path: path.into(),
+            file_type,
+            src: Some(src.into()),
+        }
+    }
+}
+
+impl PartialOrd for FileEntry {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for FileEntry {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.path.cmp(&other.path)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -229,9 +261,9 @@ impl ChangeError {
 /// Report summarising the outcome of a sync / copy / import operation.
 #[derive(Debug, Clone, Default)]
 pub struct ChangeReport {
-    pub add: Vec<String>,
-    pub update: Vec<String>,
-    pub delete: Vec<String>,
+    pub add: Vec<FileEntry>,
+    pub update: Vec<FileEntry>,
+    pub delete: Vec<FileEntry>,
     pub errors: Vec<ChangeError>,
     pub warnings: Vec<String>,
 }
@@ -254,14 +286,14 @@ impl ChangeReport {
     /// Return a sorted list of all change actions.
     pub fn actions(&self) -> Vec<ChangeAction> {
         let mut out = Vec::with_capacity(self.total());
-        for p in &self.add {
-            out.push(ChangeAction::new(ChangeActionKind::Add, p.as_str()));
+        for fe in &self.add {
+            out.push(ChangeAction::new(ChangeActionKind::Add, &fe.path));
         }
-        for p in &self.update {
-            out.push(ChangeAction::new(ChangeActionKind::Update, p.as_str()));
+        for fe in &self.update {
+            out.push(ChangeAction::new(ChangeActionKind::Update, &fe.path));
         }
-        for p in &self.delete {
-            out.push(ChangeAction::new(ChangeActionKind::Delete, p.as_str()));
+        for fe in &self.delete {
+            out.push(ChangeAction::new(ChangeActionKind::Delete, &fe.path));
         }
         out.sort();
         out
@@ -301,6 +333,7 @@ impl Default for Signature {
 /// Information for creating a commit.
 #[derive(Debug, Clone)]
 pub struct CommitInfo {
+    pub commit_hash: String,
     pub message: String,
     pub time: Option<u64>,
     pub author_name: Option<String>,

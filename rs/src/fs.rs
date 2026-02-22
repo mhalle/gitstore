@@ -7,7 +7,8 @@ use crate::lock::with_repo_lock;
 use crate::store::GitStoreInner;
 use crate::tree;
 use crate::types::{
-    ChangeReport, CommitInfo, FileType, WalkEntry, WriteEntry, MODE_BLOB, MODE_LINK, MODE_TREE,
+    ChangeReport, CommitInfo, FileEntry, FileType, WalkEntry, WriteEntry, MODE_BLOB, MODE_LINK,
+    MODE_TREE,
 };
 
 // ---------------------------------------------------------------------------
@@ -47,6 +48,8 @@ pub struct CopyInOptions {
     pub include: Option<Vec<String>>,
     pub exclude: Option<Vec<String>>,
     pub message: Option<String>,
+    pub dry_run: bool,
+    pub checksum: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -60,12 +63,27 @@ pub struct SyncOptions {
     pub include: Option<Vec<String>>,
     pub exclude: Option<Vec<String>>,
     pub message: Option<String>,
+    pub dry_run: bool,
+    pub checksum: bool,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct RemoveOptions {
+    pub recursive: bool,
+    pub dry_run: bool,
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct RemoveFromDiskOptions {
     pub include: Option<Vec<String>>,
     pub exclude: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct MoveOptions {
+    pub recursive: bool,
+    pub dry_run: bool,
     pub message: Option<String>,
 }
 
@@ -73,6 +91,12 @@ pub struct RemoveOptions {
 pub struct LogOptions {
     pub limit: Option<usize>,
     pub skip: Option<usize>,
+    /// Only include commits that changed this path.
+    pub path: Option<String>,
+    /// Only include commits whose message matches this glob pattern.
+    pub match_pattern: Option<String>,
+    /// Only include commits with timestamp <= this value (seconds since epoch).
+    pub before: Option<u64>,
 }
 
 // ---------------------------------------------------------------------------
@@ -83,12 +107,13 @@ pub struct LogOptions {
 ///
 /// Cheap to clone (`Arc` internally). No lifetime parameter — can be stored
 /// in structs, returned from functions, sent across threads.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Fs {
     pub(crate) inner: Arc<GitStoreInner>,
     pub(crate) commit_oid: Option<gix::ObjectId>,
     pub(crate) tree_oid: Option<gix::ObjectId>,
     pub(crate) branch: Option<String>,
+    pub(crate) changes: Option<ChangeReport>,
 }
 
 impl Fs {
@@ -114,6 +139,73 @@ impl Fs {
     /// The commit hash as hex string.
     pub fn commit_hash(&self) -> Option<String> {
         self.commit_oid.map(|oid| format!("{}", oid))
+    }
+
+    /// The branch name, if this Fs is attached to a branch.
+    pub fn branch(&self) -> Option<&str> {
+        self.branch.as_deref()
+    }
+
+    /// The commit message (trailing newline stripped).
+    pub fn message(&self) -> Result<String> {
+        let commit_oid = self
+            .commit_oid
+            .ok_or_else(|| Error::not_found("no commit in snapshot"))?;
+        self.with_repo(|repo| {
+            let obj = repo.find_object(commit_oid).map_err(Error::git)?;
+            let data = obj.data.to_vec();
+            let commit_ref =
+                gix::objs::CommitRef::from_bytes(&data).map_err(Error::git)?;
+            let msg = commit_ref.message.to_string();
+            Ok(msg.trim_end_matches('\n').to_string())
+        })
+    }
+
+    /// The commit timestamp (seconds since epoch).
+    pub fn time(&self) -> Result<u64> {
+        let commit_oid = self
+            .commit_oid
+            .ok_or_else(|| Error::not_found("no commit in snapshot"))?;
+        self.with_repo(|repo| {
+            let obj = repo.find_object(commit_oid).map_err(Error::git)?;
+            let data = obj.data.to_vec();
+            let commit_ref =
+                gix::objs::CommitRef::from_bytes(&data).map_err(Error::git)?;
+            Ok(commit_ref.author.time().map(|t| t.seconds as u64).unwrap_or(0))
+        })
+    }
+
+    /// The commit author name.
+    pub fn author_name(&self) -> Result<String> {
+        let commit_oid = self
+            .commit_oid
+            .ok_or_else(|| Error::not_found("no commit in snapshot"))?;
+        self.with_repo(|repo| {
+            let obj = repo.find_object(commit_oid).map_err(Error::git)?;
+            let data = obj.data.to_vec();
+            let commit_ref =
+                gix::objs::CommitRef::from_bytes(&data).map_err(Error::git)?;
+            Ok(commit_ref.author.name.to_string())
+        })
+    }
+
+    /// The commit author email.
+    pub fn author_email(&self) -> Result<String> {
+        let commit_oid = self
+            .commit_oid
+            .ok_or_else(|| Error::not_found("no commit in snapshot"))?;
+        self.with_repo(|repo| {
+            let obj = repo.find_object(commit_oid).map_err(Error::git)?;
+            let data = obj.data.to_vec();
+            let commit_ref =
+                gix::objs::CommitRef::from_bytes(&data).map_err(Error::git)?;
+            Ok(commit_ref.author.email.to_string())
+        })
+    }
+
+    /// The change report from the last operation, if any.
+    pub fn changes(&self) -> Option<&ChangeReport> {
+        self.changes.as_ref()
     }
 
     // -- Read ---------------------------------------------------------------
@@ -254,13 +346,13 @@ impl Fs {
 
     // -- Write --------------------------------------------------------------
 
-    /// Write raw bytes to `path`.
+    /// Write raw bytes to `path`. Returns the new `Fs` snapshot.
     pub fn write(
         &self,
         path: &str,
         data: &[u8],
         opts: WriteOptions,
-    ) -> Result<()> {
+    ) -> Result<Fs> {
         let path = crate::paths::normalize_path(path)?;
         let mode = opts.mode.unwrap_or(MODE_BLOB);
         let message = opts
@@ -277,27 +369,26 @@ impl Fs {
         })?;
 
         let writes = vec![(path, Some(tw))];
-        self.commit_changes(&writes, &message)?;
-        Ok(())
+        self.commit_changes(&writes, &message)
     }
 
-    /// Write UTF-8 text to `path`.
+    /// Write UTF-8 text to `path`. Returns the new `Fs` snapshot.
     pub fn write_text(
         &self,
         path: &str,
         text: &str,
         opts: WriteOptions,
-    ) -> Result<()> {
+    ) -> Result<Fs> {
         self.write(path, text.as_bytes(), opts)
     }
 
-    /// Write the contents of a file on disk to `path`.
+    /// Write the contents of a file on disk to `path`. Returns the new `Fs` snapshot.
     pub fn write_from_file(
         &self,
         path: &str,
         src: &Path,
         opts: WriteOptions,
-    ) -> Result<()> {
+    ) -> Result<Fs> {
         let data = std::fs::read(src).map_err(|e| Error::io(src, e))?;
         let mode = opts
             .mode
@@ -309,13 +400,13 @@ impl Fs {
         self.write(path, &data, opts)
     }
 
-    /// Write a symlink at `path`.
+    /// Write a symlink at `path`. Returns the new `Fs` snapshot.
     pub fn write_symlink(
         &self,
         path: &str,
         target: &str,
         opts: WriteOptions,
-    ) -> Result<()> {
+    ) -> Result<Fs> {
         let opts = WriteOptions {
             mode: Some(MODE_LINK),
             ..opts
@@ -323,12 +414,14 @@ impl Fs {
         self.write(path, target.as_bytes(), opts)
     }
 
-    /// Apply a map of path → WriteEntry atomically.
+    /// Apply a map of path → WriteEntry atomically, with optional removes.
+    /// Returns the new `Fs` snapshot.
     pub fn apply(
         &self,
         entries: &[(&str, WriteEntry)],
+        removes: &[&str],
         opts: ApplyOptions,
-    ) -> Result<()> {
+    ) -> Result<Fs> {
         let mut writes = Vec::new();
         for (path, entry) in entries {
             entry.validate()?;
@@ -352,11 +445,16 @@ impl Fs {
             writes.push((path, Some(tw)));
         }
 
+        // Append removes
+        for path in removes {
+            let path = crate::paths::normalize_path(path)?;
+            writes.push((path, None));
+        }
+
         let message = opts
             .message
             .unwrap_or_else(|| crate::paths::format_commit_message("apply", None));
-        self.commit_changes(&writes, &message)?;
-        Ok(())
+        self.commit_changes(&writes, &message)
     }
 
     /// Open a `Batch` for accumulating writes.
@@ -373,28 +471,33 @@ impl Fs {
 
     // -- Copy / sync --------------------------------------------------------
 
-    /// Copy files from disk into the store.
+    /// Copy files from disk into the store. Returns `(report, new_fs)`.
     pub fn copy_in(
         &self,
         src: &Path,
         dest: &str,
         opts: CopyInOptions,
-    ) -> Result<ChangeReport> {
+    ) -> Result<(ChangeReport, Fs)> {
         let tree_oid = self.require_tree()?;
         let (writes, report) = self.with_repo(|repo| {
             let inc: Option<Vec<&str>> = opts.include.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect());
             let exc: Option<Vec<&str>> = opts.exclude.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect());
             crate::copy::copy_in(repo, tree_oid, src, dest, inc.as_deref(), exc.as_deref())
         })?;
-        if !writes.is_empty() {
+        if opts.dry_run {
+            return Ok((report, self.clone()));
+        }
+        let new_fs = if !writes.is_empty() {
             let tw_writes: Vec<(String, Option<TreeWrite>)> = writes
                 .into_iter()
                 .map(|(p, tw)| (p, Some(tw)))
                 .collect();
             let msg = opts.message.unwrap_or_else(|| crate::paths::format_commit_message("copy_in", None));
-            self.commit_changes(&tw_writes, &msg)?;
-        }
-        Ok(report)
+            self.commit_changes(&tw_writes, &msg)?
+        } else {
+            self.clone()
+        };
+        Ok((report, new_fs))
     }
 
     /// Copy files from the store to disk.
@@ -412,28 +515,33 @@ impl Fs {
         })
     }
 
-    /// Sync files from disk into the store.
+    /// Sync files from disk into the store. Returns `(report, new_fs)`.
+    ///
+    /// Unlike `copy_in`, this also deletes files in the destination that are
+    /// not present on disk, and classifies changes as add/update/delete.
     pub fn sync_in(
         &self,
         src: &Path,
         dest: &str,
         opts: SyncOptions,
-    ) -> Result<ChangeReport> {
+    ) -> Result<(ChangeReport, Fs)> {
         let tree_oid = self.require_tree()?;
+        let checksum = opts.checksum;
         let (writes, report) = self.with_repo(|repo| {
             let inc: Option<Vec<&str>> = opts.include.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect());
             let exc: Option<Vec<&str>> = opts.exclude.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect());
-            crate::copy::sync_in(repo, tree_oid, src, dest, inc.as_deref(), exc.as_deref())
+            crate::copy::sync_in(repo, tree_oid, src, dest, inc.as_deref(), exc.as_deref(), checksum)
         })?;
-        if !writes.is_empty() {
-            let tw_writes: Vec<(String, Option<TreeWrite>)> = writes
-                .into_iter()
-                .map(|(p, tw)| (p, Some(tw)))
-                .collect();
-            let msg = opts.message.unwrap_or_else(|| crate::paths::format_commit_message("sync_in", None));
-            self.commit_changes(&tw_writes, &msg)?;
+        if opts.dry_run {
+            return Ok((report, self.clone()));
         }
-        Ok(report)
+        let new_fs = if !writes.is_empty() {
+            let msg = opts.message.unwrap_or_else(|| crate::paths::format_commit_message("sync_in", None));
+            self.commit_changes(&writes, &msg)?
+        } else {
+            self.clone()
+        };
+        Ok((report, new_fs))
     }
 
     /// Sync files from the store to disk.
@@ -452,32 +560,174 @@ impl Fs {
     }
 
     /// Remove files from disk that match a pattern.
-    pub fn remove(
+    pub fn remove_from_disk(
         &self,
         path: &Path,
-        opts: RemoveOptions,
+        opts: RemoveFromDiskOptions,
     ) -> Result<ChangeReport> {
         let inc: Option<Vec<&str>> = opts.include.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect());
         let exc: Option<Vec<&str>> = opts.exclude.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect());
-        crate::copy::remove(path, inc.as_deref(), exc.as_deref())
+        crate::copy::remove_from_disk(path, inc.as_deref(), exc.as_deref())
     }
 
-    /// Rename a path within the store.
+    /// Remove paths from the git tree. Returns the new `Fs` snapshot.
+    pub fn remove(
+        &self,
+        sources: &[&str],
+        opts: RemoveOptions,
+    ) -> Result<Fs> {
+        let tree_oid = self.require_tree()?;
+        let mut writes: Vec<(String, Option<TreeWrite>)> = Vec::new();
+        let mut report = ChangeReport::new();
+
+        self.with_repo(|repo| {
+            for src in sources {
+                let path = crate::paths::normalize_path(src)?;
+                let entry = tree::entry_at_path(repo, tree_oid, &path)?
+                    .ok_or_else(|| Error::not_found(&path))?;
+
+                if entry.mode == MODE_TREE {
+                    if !opts.recursive {
+                        return Err(Error::is_a_directory(&path));
+                    }
+                    // Walk subtree and collect all leaf paths for removal
+                    let sub_entries = tree::walk_tree(repo, entry.oid)?;
+                    for (rel_path, we) in &sub_entries {
+                        let full_path = format!("{}/{}", path, rel_path);
+                        let ft = FileType::from_mode(we.mode).unwrap_or(FileType::Blob);
+                        if !opts.dry_run {
+                            writes.push((full_path.clone(), None));
+                        }
+                        report.delete.push(FileEntry::new(&full_path, ft));
+                    }
+                } else {
+                    let ft = FileType::from_mode(entry.mode).unwrap_or(FileType::Blob);
+                    if !opts.dry_run {
+                        writes.push((path.clone(), None));
+                    }
+                    report.delete.push(FileEntry::new(&path, ft));
+                }
+            }
+            Ok(())
+        })?;
+
+        if opts.dry_run || writes.is_empty() {
+            let mut fs = self.clone();
+            fs.changes = Some(report);
+            return Ok(fs);
+        }
+
+        let msg = opts.message.unwrap_or_else(|| {
+            crate::paths::format_commit_message("remove", None)
+        });
+        let mut new_fs = self.commit_changes(&writes, &msg)?;
+        new_fs.changes = Some(report);
+        Ok(new_fs)
+    }
+
+    /// Rename a path within the store. Returns the new `Fs` snapshot.
     pub fn rename(
         &self,
         src: &str,
         dest: &str,
         opts: WriteOptions,
-    ) -> Result<()> {
+    ) -> Result<Fs> {
         let tree_oid = self.require_tree()?;
         let writes = self.with_repo(|repo| crate::copy::rename(repo, tree_oid, src, dest))?;
         if !writes.is_empty() {
             let msg = opts.message.unwrap_or_else(|| {
                 crate::paths::format_commit_message("rename", Some(&format!("{} -> {}", src, dest)))
             });
-            self.commit_changes(&writes, &msg)?;
+            self.commit_changes(&writes, &msg)
+        } else {
+            Ok(self.clone())
         }
-        Ok(())
+    }
+
+    /// Move multiple source paths to a destination. Follows POSIX mv semantics:
+    /// - Single source to non-existing destination: rename
+    /// - Multiple sources: destination must be an existing directory
+    pub fn move_paths(
+        &self,
+        sources: &[&str],
+        dest: &str,
+        opts: MoveOptions,
+    ) -> Result<Fs> {
+        let tree_oid = self.require_tree()?;
+        let dest_norm = crate::paths::normalize_path(dest)?;
+
+        // Check if dest is an existing directory
+        let dest_is_dir = self.with_repo(|repo| {
+            match tree::entry_at_path(repo, tree_oid, &dest_norm)? {
+                Some(entry) => Ok(entry.mode == MODE_TREE),
+                None => Ok(false),
+            }
+        })?;
+
+        if sources.len() > 1 && !dest_is_dir {
+            return Err(Error::not_a_directory(&dest_norm));
+        }
+
+        let mut all_writes: Vec<(String, Option<TreeWrite>)> = Vec::new();
+
+        self.with_repo(|repo| {
+            for src in sources {
+                let src_norm = crate::paths::normalize_path(src)?;
+                let entry = tree::entry_at_path(repo, tree_oid, &src_norm)?
+                    .ok_or_else(|| Error::not_found(&src_norm))?;
+
+                // Determine final destination path
+                let final_dest = if dest_is_dir {
+                    // Move into directory: use source basename
+                    let basename = src_norm.rsplit('/').next().unwrap_or(&src_norm);
+                    format!("{}/{}", dest_norm, basename)
+                } else {
+                    dest_norm.clone()
+                };
+
+                if entry.mode == MODE_TREE {
+                    if !opts.recursive {
+                        return Err(Error::is_a_directory(&src_norm));
+                    }
+                    let sub_entries = tree::walk_tree(repo, entry.oid)?;
+                    for (rel_path, we) in &sub_entries {
+                        let old_path = format!("{}/{}", src_norm, rel_path);
+                        let new_path = format!("{}/{}", final_dest, rel_path);
+                        let obj = repo.find_object(we.oid).map_err(Error::git)?;
+                        all_writes.push((old_path, None));
+                        all_writes.push((
+                            new_path,
+                            Some(TreeWrite {
+                                data: obj.data.to_vec(),
+                                oid: we.oid,
+                                mode: we.mode,
+                            }),
+                        ));
+                    }
+                } else {
+                    let obj = repo.find_object(entry.oid).map_err(Error::git)?;
+                    all_writes.push((src_norm, None));
+                    all_writes.push((
+                        final_dest,
+                        Some(TreeWrite {
+                            data: obj.data.to_vec(),
+                            oid: entry.oid,
+                            mode: entry.mode,
+                        }),
+                    ));
+                }
+            }
+            Ok(())
+        })?;
+
+        if opts.dry_run || all_writes.is_empty() {
+            return Ok(self.clone());
+        }
+
+        let msg = opts.message.unwrap_or_else(|| {
+            crate::paths::format_commit_message("move", None)
+        });
+        self.commit_changes(&all_writes, &msg)
     }
 
     /// Export the tree to a directory on disk.
@@ -528,19 +778,24 @@ impl Fs {
         Ok(current)
     }
 
-    /// Undo the last commit (soft reset).
-    pub fn undo(&self) -> Result<Fs> {
+    /// Undo the last `n` commits (soft reset).
+    pub fn undo(&self, n: usize) -> Result<Fs> {
         let branch = self
             .branch
             .as_ref()
             .ok_or_else(|| Error::permission("undo requires a branch"))?;
-        let parent = self
-            .parent()?
-            .ok_or_else(|| Error::not_found("no parent commit to undo to"))?;
 
-        let parent_oid = parent
+        // Walk back n parents
+        let mut target = self.clone();
+        for _ in 0..n {
+            target = target
+                .parent()?
+                .ok_or_else(|| Error::not_found("no parent commit to undo to"))?;
+        }
+
+        let target_oid = target
             .commit_oid
-            .ok_or_else(|| Error::not_found("parent has no commit"))?;
+            .ok_or_else(|| Error::not_found("target has no commit"))?;
 
         let refname = format!("refs/heads/{}", branch);
         let inner = Arc::clone(&self.inner);
@@ -557,7 +812,7 @@ impl Fs {
         with_repo_lock(&inner.path, || {
             repo.reference(
                 refname.as_str(),
-                parent_oid,
+                target_oid,
                 PreviousValue::Any,
                 "undo: move back",
             )
@@ -574,7 +829,7 @@ impl Fs {
             &refname,
             &crate::types::ReflogEntry {
                 old_sha: format!("{}", current_oid),
-                new_sha: format!("{}", parent_oid),
+                new_sha: format!("{}", target_oid),
                 committer: format!(
                     "{} <{}>",
                     inner.signature.name, inner.signature.email
@@ -584,31 +839,36 @@ impl Fs {
             },
         );
 
-        Ok(parent)
+        Ok(target)
     }
 
-    /// Redo (re-apply an undone commit).
-    pub fn redo(&self) -> Result<Fs> {
+    /// Redo `n` undone commits by scanning the reflog forward.
+    pub fn redo(&self, n: usize) -> Result<Fs> {
         let branch = self
             .branch
             .as_ref()
             .ok_or_else(|| Error::permission("redo requires a branch"))?;
         let refname = format!("refs/heads/{}", branch);
 
-        // Read reflog to find the forward commit
-        let reflog_entries = crate::reflog::read_reflog(&self.inner.path, &refname)?;
         let current_hex = self
             .commit_oid
             .map(|oid| format!("{}", oid))
             .unwrap_or_default();
 
-        // Find entry where new_sha matches current commit — old_sha is the "forward" one
-        let forward_sha = reflog_entries
-            .iter()
-            .rev()
-            .find(|e| e.new_sha == current_hex)
-            .map(|e| e.old_sha.clone())
-            .ok_or_else(|| Error::not_found("no redo target found in reflog"))?;
+        // Read reflog to find forward commits
+        let reflog_entries = crate::reflog::read_reflog(&self.inner.path, &refname)?;
+
+        let mut forward_sha = current_hex.clone();
+        for _ in 0..n {
+            // Find entry where new_sha matches current — old_sha is the "forward" one
+            let next = reflog_entries
+                .iter()
+                .rev()
+                .find(|e| e.new_sha == forward_sha)
+                .map(|e| e.old_sha.clone())
+                .ok_or_else(|| Error::not_found("no redo target found in reflog"))?;
+            forward_sha = next;
+        }
 
         let forward_oid =
             gix::ObjectId::from_hex(forward_sha.as_bytes()).map_err(Error::git)?;
@@ -654,7 +914,7 @@ impl Fs {
         Fs::from_commit(inner, forward_oid, self.branch.clone())
     }
 
-    /// Return commit log entries.
+    /// Return commit log entries, with optional filtering.
     pub fn log(&self, opts: LogOptions) -> Result<Vec<CommitInfo>> {
         let mut commit_oid = self
             .commit_oid
@@ -662,6 +922,9 @@ impl Fs {
 
         let skip = opts.skip.unwrap_or(0);
         let limit = opts.limit.unwrap_or(usize::MAX);
+        let filter_path = opts.path.as_deref().map(|p| crate::paths::normalize_path(p)).transpose()?;
+        let match_pattern = opts.match_pattern.as_deref();
+        let before = opts.before;
 
         let repo = self
             .inner
@@ -670,7 +933,7 @@ impl Fs {
             .map_err(|e| Error::git_msg(e.to_string()))?;
 
         let mut results = Vec::new();
-        let mut count = 0usize;
+        let mut matched = 0usize;
 
         loop {
             let obj = repo.find_object(commit_oid).map_err(Error::git)?;
@@ -678,23 +941,75 @@ impl Fs {
             let commit_ref =
                 gix::objs::CommitRef::from_bytes(&data).map_err(Error::git)?;
 
-            if count >= skip {
-                results.push(CommitInfo {
-                    message: commit_ref.message.to_string(),
-                    time: Some(commit_ref.author.time().map(|t| t.seconds as u64).unwrap_or(0)),
-                    author_name: Some(commit_ref.author.name.to_string()),
-                    author_email: Some(commit_ref.author.email.to_string()),
-                });
+            let timestamp = commit_ref.author.time().map(|t| t.seconds as u64).unwrap_or(0);
+            let message = commit_ref.message.to_string();
+            let tree_oid: gix::ObjectId = commit_ref.tree().into();
+            let parent_oid: Option<gix::ObjectId> =
+                commit_ref.parents().next().map(|p| p.into());
+
+            // Apply filters
+            let mut include = true;
+
+            // before filter
+            if let Some(cutoff) = before {
+                if timestamp > cutoff {
+                    include = false;
+                }
             }
 
-            count += 1;
+            // match_pattern filter (glob on message)
+            if include {
+                if let Some(pat) = match_pattern {
+                    if !crate::glob::glob_match(pat, &message) {
+                        include = false;
+                    }
+                }
+            }
+
+            // path filter: skip if the path has the same OID in this commit and its parent
+            if include {
+                if let Some(ref filter) = filter_path {
+                    let this_entry = tree::entry_at_path(&repo, tree_oid, filter)?;
+                    let parent_entry = if let Some(pid) = parent_oid {
+                        let pobj = repo.find_object(pid).map_err(Error::git)?;
+                        let pdata = pobj.data.to_vec();
+                        let parent_commit =
+                            gix::objs::CommitRef::from_bytes(&pdata).map_err(Error::git)?;
+                        let parent_tree: gix::ObjectId = parent_commit.tree().into();
+                        tree::entry_at_path(&repo, parent_tree, filter)?
+                    } else {
+                        None
+                    };
+
+                    let same = match (&this_entry, &parent_entry) {
+                        (Some(a), Some(b)) => a.oid == b.oid,
+                        (None, None) => true,
+                        _ => false,
+                    };
+                    if same {
+                        include = false;
+                    }
+                }
+            }
+
+            if include {
+                matched += 1;
+                if matched > skip {
+                    results.push(CommitInfo {
+                        commit_hash: format!("{}", commit_oid),
+                        message,
+                        time: Some(timestamp),
+                        author_name: Some(commit_ref.author.name.to_string()),
+                        author_email: Some(commit_ref.author.email.to_string()),
+                    });
+                }
+            }
+
             if results.len() >= limit {
                 break;
             }
 
-            let next_parent: Option<gix::ObjectId> =
-                commit_ref.parents().next().map(|p| p.into());
-            match next_parent {
+            match parent_oid {
                 Some(parent) => commit_oid = parent,
                 None => break,
             }
@@ -729,15 +1044,16 @@ impl Fs {
             commit_oid: Some(commit_oid),
             tree_oid: Some(tree_oid),
             branch,
+            changes: None,
         })
     }
 
-    /// Commit accumulated changes.
+    /// Commit accumulated changes and return the new `Fs` snapshot.
     pub(crate) fn commit_changes(
         &self,
         writes: &[(String, Option<TreeWrite>)],
         message: &str,
-    ) -> Result<gix::ObjectId> {
+    ) -> Result<Fs> {
         let branch = self
             .branch
             .as_ref()
@@ -750,7 +1066,7 @@ impl Fs {
             .lock()
             .map_err(|e| Error::git_msg(e.to_string()))?;
 
-        with_repo_lock(&self.inner.path, || {
+        let (new_commit_oid, new_tree_oid) = with_repo_lock(&self.inner.path, || {
             // Stale snapshot check
             let current_ref = repo
                 .find_reference(refname.as_str())
@@ -772,7 +1088,7 @@ impl Fs {
 
             // No-op check: if tree didn't change, skip
             if Some(new_tree_oid) == self.tree_oid {
-                return Ok(current_oid);
+                return Ok((current_oid, self.tree_oid.unwrap()));
             }
 
             // Build commit
@@ -831,7 +1147,15 @@ impl Fs {
                 },
             );
 
-            Ok(new_commit_oid.detach())
+            Ok((new_commit_oid.detach(), new_tree_oid))
+        })?;
+
+        Ok(Fs {
+            inner: Arc::clone(&self.inner),
+            commit_oid: Some(new_commit_oid),
+            tree_oid: Some(new_tree_oid),
+            branch: self.branch.clone(),
+            changes: None,
         })
     }
 }
