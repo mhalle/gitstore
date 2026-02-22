@@ -501,3 +501,48 @@ fn branches_independent_content() {
     assert!(!dev_fs.exists("main_only.txt").unwrap());
     assert!(dev_fs.exists("dev_only.txt").unwrap());
 }
+
+// ---------------------------------------------------------------------------
+// set_to — returns writable Fs
+// ---------------------------------------------------------------------------
+
+#[test]
+fn branches_set_to_returns_writable_fs() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let main_fs = store.branches().get("main").unwrap();
+    main_fs.write("a.txt", b"hello", Default::default()).unwrap();
+    let main_fs = store.branches().get("main").unwrap();
+
+    // Create a new branch using set_to
+    let new_fs = store.branches().set_to("dev", &main_fs).unwrap();
+
+    // The returned Fs should be writable (has branch "dev")
+    assert_eq!(new_fs.branch(), Some("dev"));
+    assert_eq!(new_fs.read_text("a.txt").unwrap(), "hello");
+
+    // Should be writable
+    new_fs.write("b.txt", b"world", Default::default()).unwrap();
+    let dev_fs = store.branches().get("dev").unwrap();
+    assert_eq!(dev_fs.read_text("b.txt").unwrap(), "world");
+}
+
+#[test]
+fn branches_set_to_updates_existing() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let main_fs = store.branches().get("main").unwrap();
+    main_fs.write("a.txt", b"a", Default::default()).unwrap();
+    let main_fs = store.branches().get("main").unwrap();
+
+    // Create dev branch
+    store.branches().set("dev", &main_fs).unwrap();
+
+    // Write to main
+    main_fs.write("b.txt", b"b", Default::default()).unwrap();
+    let main_fs = store.branches().get("main").unwrap();
+
+    // Update dev to match main
+    let dev_fs = store.branches().set_to("dev", &main_fs).unwrap();
+    assert!(dev_fs.exists("b.txt").unwrap());
+}

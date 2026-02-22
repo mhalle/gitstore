@@ -464,3 +464,83 @@ fn apply_preserves_existing_files() {
     assert_eq!(fs.read_text("dir/b.txt").unwrap(), "bbb");
     assert_eq!(fs.read_text("new.txt").unwrap(), "new");
 }
+
+// ---------------------------------------------------------------------------
+// apply — removes
+// ---------------------------------------------------------------------------
+
+#[test]
+fn apply_removes_single() {
+    let dir = tempfile::tempdir().unwrap();
+    let (store, fs) = common::store_with_files(dir.path());
+
+    fs.apply(&[], &["hello.txt"], Default::default()).unwrap();
+
+    let fs = store.branches().get("main").unwrap();
+    assert!(!fs.exists("hello.txt").unwrap());
+    // Other files preserved
+    assert_eq!(fs.read_text("dir/a.txt").unwrap(), "aaa");
+}
+
+#[test]
+fn apply_removes_multiple() {
+    let dir = tempfile::tempdir().unwrap();
+    let (store, fs) = common::store_with_files(dir.path());
+
+    fs.apply(&[], &["hello.txt", "dir/a.txt"], Default::default()).unwrap();
+
+    let fs = store.branches().get("main").unwrap();
+    assert!(!fs.exists("hello.txt").unwrap());
+    assert!(!fs.exists("dir/a.txt").unwrap());
+    assert_eq!(fs.read_text("dir/b.txt").unwrap(), "bbb");
+}
+
+#[test]
+fn apply_writes_and_removes_combined() {
+    let dir = tempfile::tempdir().unwrap();
+    let (store, fs) = common::store_with_files(dir.path());
+
+    fs.apply(
+        &[("new.txt", WriteEntry::from_text("new"))],
+        &["hello.txt"],
+        Default::default(),
+    )
+    .unwrap();
+
+    let fs = store.branches().get("main").unwrap();
+    assert!(!fs.exists("hello.txt").unwrap());
+    assert_eq!(fs.read_text("new.txt").unwrap(), "new");
+    assert_eq!(fs.read_text("dir/a.txt").unwrap(), "aaa");
+}
+
+#[test]
+fn apply_writes_and_removes_single_commit() {
+    let dir = tempfile::tempdir().unwrap();
+    let (store, fs) = common::store_with_files(dir.path());
+    let log_before = fs.log(Default::default()).unwrap();
+
+    fs.apply(
+        &[("new.txt", WriteEntry::from_text("new"))],
+        &["hello.txt"],
+        Default::default(),
+    )
+    .unwrap();
+
+    let fs = store.branches().get("main").unwrap();
+    let log_after = fs.log(Default::default()).unwrap();
+    assert_eq!(log_after.len(), log_before.len() + 1);
+}
+
+#[test]
+fn apply_removes_only_is_noop_for_empty() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.branches().get("main").unwrap();
+    let hash_before = fs.commit_hash().unwrap();
+
+    // No writes, no removes
+    fs.apply(&[], &[], Default::default()).unwrap();
+
+    let fs = store.branches().get("main").unwrap();
+    assert_eq!(fs.commit_hash().unwrap(), hash_before);
+}

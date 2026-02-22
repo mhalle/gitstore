@@ -692,3 +692,143 @@ fn rename_custom_message() {
     let log = fs.log(fs::LogOptions { limit: Some(1), ..Default::default() }).unwrap();
     assert_eq!(log[0].message, "move file");
 }
+
+// ---------------------------------------------------------------------------
+// remove (repo-level)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn remove_single_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let (store, fs) = common::store_with_files(dir.path());
+    let new_fs = fs.remove(&["hello.txt"], Default::default()).unwrap();
+
+    // Verify via the returned Fs
+    let fs = store.branches().get("main").unwrap();
+    assert!(!fs.exists("hello.txt").unwrap());
+    assert_eq!(fs.read_text("dir/a.txt").unwrap(), "aaa");
+
+    // Changes report attached
+    let changes = new_fs.changes().unwrap();
+    assert_eq!(changes.delete.len(), 1);
+    assert_eq!(changes.delete[0].path, "hello.txt");
+}
+
+#[test]
+fn remove_multiple_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let (store, fs) = common::store_with_files(dir.path());
+    fs.remove(&["hello.txt", "dir/a.txt"], Default::default()).unwrap();
+
+    let fs = store.branches().get("main").unwrap();
+    assert!(!fs.exists("hello.txt").unwrap());
+    assert!(!fs.exists("dir/a.txt").unwrap());
+    assert_eq!(fs.read_text("dir/b.txt").unwrap(), "bbb");
+}
+
+#[test]
+fn remove_directory_requires_recursive() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_, fs) = common::store_with_files(dir.path());
+    let result = fs.remove(&["dir"], Default::default());
+    assert!(result.is_err());
+}
+
+#[test]
+fn remove_directory_recursive() {
+    let dir = tempfile::tempdir().unwrap();
+    let (store, fs) = common::store_with_files(dir.path());
+    let new_fs = fs.remove(&["dir"], fs::RemoveOptions {
+        recursive: true,
+        ..Default::default()
+    })
+    .unwrap();
+
+    let fs = store.branches().get("main").unwrap();
+    assert!(!fs.exists("dir/a.txt").unwrap());
+    assert!(!fs.exists("dir/b.txt").unwrap());
+    assert_eq!(fs.read_text("hello.txt").unwrap(), "hello");
+
+    let changes = new_fs.changes().unwrap();
+    assert_eq!(changes.delete.len(), 2);
+}
+
+#[test]
+fn remove_nonexistent_errors() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_, fs) = common::store_with_files(dir.path());
+    assert!(fs.remove(&["missing.txt"], Default::default()).is_err());
+}
+
+#[test]
+fn remove_dry_run() {
+    let dir = tempfile::tempdir().unwrap();
+    let (store, fs) = common::store_with_files(dir.path());
+    let hash_before = fs.commit_hash().unwrap();
+
+    let new_fs = fs.remove(&["hello.txt"], fs::RemoveOptions {
+        dry_run: true,
+        ..Default::default()
+    })
+    .unwrap();
+
+    // No commit was made
+    let fs = store.branches().get("main").unwrap();
+    assert_eq!(fs.commit_hash().unwrap(), hash_before);
+    assert!(fs.exists("hello.txt").unwrap());
+
+    // But report shows what would be deleted
+    let changes = new_fs.changes().unwrap();
+    assert_eq!(changes.delete.len(), 1);
+    assert_eq!(changes.delete[0].path, "hello.txt");
+}
+
+#[test]
+fn remove_dry_run_recursive() {
+    let dir = tempfile::tempdir().unwrap();
+    let (store, fs) = common::store_with_files(dir.path());
+    let hash_before = fs.commit_hash().unwrap();
+
+    let new_fs = fs.remove(&["dir"], fs::RemoveOptions {
+        recursive: true,
+        dry_run: true,
+        ..Default::default()
+    })
+    .unwrap();
+
+    // No commit
+    let fs = store.branches().get("main").unwrap();
+    assert_eq!(fs.commit_hash().unwrap(), hash_before);
+
+    // Report shows planned deletes
+    let changes = new_fs.changes().unwrap();
+    assert_eq!(changes.delete.len(), 2);
+}
+
+#[test]
+fn remove_custom_message() {
+    let dir = tempfile::tempdir().unwrap();
+    let (store, fs) = common::store_with_files(dir.path());
+    fs.remove(&["hello.txt"], fs::RemoveOptions {
+        message: Some("deleted hello".into()),
+        ..Default::default()
+    })
+    .unwrap();
+
+    let fs = store.branches().get("main").unwrap();
+    let log = fs.log(fs::LogOptions { limit: Some(1), ..Default::default() }).unwrap();
+    assert_eq!(log[0].message, "deleted hello");
+}
+
+#[test]
+fn remove_is_single_commit() {
+    let dir = tempfile::tempdir().unwrap();
+    let (store, fs) = common::store_with_files(dir.path());
+    let log_before = fs.log(Default::default()).unwrap();
+
+    fs.remove(&["hello.txt", "dir/a.txt"], Default::default()).unwrap();
+
+    let fs = store.branches().get("main").unwrap();
+    let log_after = fs.log(Default::default()).unwrap();
+    assert_eq!(log_after.len(), log_before.len() + 1);
+}

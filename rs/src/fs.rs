@@ -43,7 +43,7 @@ pub struct BatchOptions {
     pub message: Option<String>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct CopyInOptions {
     pub include: Option<Vec<String>>,
     pub exclude: Option<Vec<String>>,
@@ -52,19 +52,43 @@ pub struct CopyInOptions {
     pub checksum: bool,
 }
 
+impl Default for CopyInOptions {
+    fn default() -> Self {
+        Self {
+            include: None,
+            exclude: None,
+            message: None,
+            dry_run: false,
+            checksum: true,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct CopyOutOptions {
     pub include: Option<Vec<String>>,
     pub exclude: Option<Vec<String>>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct SyncOptions {
     pub include: Option<Vec<String>>,
     pub exclude: Option<Vec<String>>,
     pub message: Option<String>,
     pub dry_run: bool,
     pub checksum: bool,
+}
+
+impl Default for SyncOptions {
+    fn default() -> Self {
+        Self {
+            include: None,
+            exclude: None,
+            message: None,
+            dry_run: false,
+            checksum: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default)]

@@ -200,3 +200,157 @@ fn rename_directory_deep() {
     assert_eq!(fs.read_text("dest/a/b/c.txt").unwrap(), "deep");
     assert_eq!(fs.read_text("dest/x.txt").unwrap(), "x");
 }
+
+// ---------------------------------------------------------------------------
+// move_paths — multiple sources
+// ---------------------------------------------------------------------------
+
+#[test]
+fn move_multiple_files_into_directory() {
+    let dir = tempfile::tempdir().unwrap();
+    let (store, fs) = store_with_move_files(dir.path());
+
+    fs.move_paths(
+        &["hello.txt", "other/c.txt"],
+        "dir",
+        Default::default(),
+    )
+    .unwrap();
+
+    let fs = store.branches().get("main").unwrap();
+    // Moved files should be inside dir/
+    assert_eq!(fs.read_text("dir/hello.txt").unwrap(), "hello world");
+    assert_eq!(fs.read_text("dir/c.txt").unwrap(), "ccc");
+    // Originals gone
+    assert!(!fs.exists("hello.txt").unwrap());
+    assert!(!fs.exists("other/c.txt").unwrap());
+    // Pre-existing dir files still there
+    assert_eq!(fs.read_text("dir/a.txt").unwrap(), "aaa");
+    assert_eq!(fs.read_text("dir/b.txt").unwrap(), "bbb");
+}
+
+#[test]
+fn move_multiple_requires_dest_dir() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_, fs) = store_with_move_files(dir.path());
+
+    // Multiple sources to non-existent dest should error
+    let result = fs.move_paths(
+        &["hello.txt", "dir/a.txt"],
+        "nonexistent",
+        Default::default(),
+    );
+    assert!(result.is_err());
+}
+
+#[test]
+fn move_single_to_new_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let (store, fs) = store_with_move_files(dir.path());
+
+    fs.move_paths(&["hello.txt"], "renamed.txt", Default::default()).unwrap();
+
+    let fs = store.branches().get("main").unwrap();
+    assert!(!fs.exists("hello.txt").unwrap());
+    assert_eq!(fs.read_text("renamed.txt").unwrap(), "hello world");
+}
+
+// ---------------------------------------------------------------------------
+// move_paths — dry run
+// ---------------------------------------------------------------------------
+
+#[test]
+fn move_dry_run_no_changes() {
+    let dir = tempfile::tempdir().unwrap();
+    let (store, fs) = store_with_move_files(dir.path());
+    let hash_before = fs.commit_hash().unwrap();
+
+    fs.move_paths(&["hello.txt"], "moved.txt", fs::MoveOptions {
+        dry_run: true,
+        ..Default::default()
+    })
+    .unwrap();
+
+    let fs = store.branches().get("main").unwrap();
+    assert_eq!(fs.commit_hash().unwrap(), hash_before);
+    assert!(fs.exists("hello.txt").unwrap());
+    assert!(!fs.exists("moved.txt").unwrap());
+}
+
+// ---------------------------------------------------------------------------
+// move_paths — directory without recursive
+// ---------------------------------------------------------------------------
+
+#[test]
+fn move_directory_without_recursive_errors() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_, fs) = store_with_move_files(dir.path());
+
+    let result = fs.move_paths(&["dir"], "newdir", Default::default());
+    assert!(result.is_err());
+}
+
+#[test]
+fn move_directory_recursive() {
+    let dir = tempfile::tempdir().unwrap();
+    let (store, fs) = store_with_move_files(dir.path());
+
+    fs.move_paths(&["dir"], "newdir", fs::MoveOptions {
+        recursive: true,
+        ..Default::default()
+    })
+    .unwrap();
+
+    let fs = store.branches().get("main").unwrap();
+    assert!(!fs.exists("dir/a.txt").unwrap());
+    assert_eq!(fs.read_text("newdir/a.txt").unwrap(), "aaa");
+    assert_eq!(fs.read_text("newdir/b.txt").unwrap(), "bbb");
+}
+
+// ---------------------------------------------------------------------------
+// move_paths — custom message
+// ---------------------------------------------------------------------------
+
+#[test]
+fn move_paths_custom_message() {
+    let dir = tempfile::tempdir().unwrap();
+    let (store, fs) = store_with_move_files(dir.path());
+
+    fs.move_paths(&["hello.txt"], "moved.txt", fs::MoveOptions {
+        message: Some("custom move msg".into()),
+        ..Default::default()
+    })
+    .unwrap();
+
+    let fs = store.branches().get("main").unwrap();
+    let log = fs.log(fs::LogOptions { limit: Some(1), ..Default::default() }).unwrap();
+    assert_eq!(log[0].message, "custom move msg");
+}
+
+// ---------------------------------------------------------------------------
+// move_paths — single commit
+// ---------------------------------------------------------------------------
+
+#[test]
+fn move_multiple_is_single_commit() {
+    let dir = tempfile::tempdir().unwrap();
+    let (store, fs) = store_with_move_files(dir.path());
+    let log_before = fs.log(Default::default()).unwrap();
+
+    fs.move_paths(&["hello.txt", "other/c.txt"], "dir", Default::default()).unwrap();
+
+    let fs = store.branches().get("main").unwrap();
+    let log_after = fs.log(Default::default()).unwrap();
+    assert_eq!(log_after.len(), log_before.len() + 1);
+}
+
+// ---------------------------------------------------------------------------
+// move_paths — nonexistent source
+// ---------------------------------------------------------------------------
+
+#[test]
+fn move_nonexistent_source_errors() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_, fs) = store_with_move_files(dir.path());
+    assert!(fs.move_paths(&["missing.txt"], "dest.txt", Default::default()).is_err());
+}

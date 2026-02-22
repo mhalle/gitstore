@@ -660,3 +660,366 @@ fn undo_preserves_content() {
     assert_eq!(undone.read_text("a.txt").unwrap(), "original content");
     assert!(!undone.exists("b.txt").unwrap());
 }
+
+// ---------------------------------------------------------------------------
+// Fs metadata accessors
+// ---------------------------------------------------------------------------
+
+#[test]
+fn fs_branch_accessor() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.branches().get("main").unwrap();
+    assert_eq!(fs.branch(), Some("main"));
+}
+
+#[test]
+fn fs_branch_none_for_detached() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.branches().get("main").unwrap();
+    let hash = fs.commit_hash().unwrap();
+    let detached = store.fs(&hash).unwrap();
+    assert_eq!(detached.branch(), None);
+}
+
+#[test]
+fn fs_message_accessor() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.branches().get("main").unwrap();
+    fs.write("a.txt", b"a", fs::WriteOptions {
+        message: Some("my message".into()),
+        ..Default::default()
+    })
+    .unwrap();
+    let fs = store.branches().get("main").unwrap();
+    assert_eq!(fs.message().unwrap(), "my message");
+}
+
+#[test]
+fn fs_time_accessor() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.branches().get("main").unwrap();
+    let t = fs.time().unwrap();
+    // Should be a reasonable timestamp (after 2020)
+    assert!(t > 1_577_836_800);
+}
+
+#[test]
+fn fs_author_name_accessor() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.branches().get("main").unwrap();
+    let name = fs.author_name().unwrap();
+    assert!(!name.is_empty());
+}
+
+#[test]
+fn fs_author_email_accessor() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.branches().get("main").unwrap();
+    let email = fs.author_email().unwrap();
+    assert!(!email.is_empty());
+}
+
+#[test]
+fn fs_custom_author() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = GitStore::open(dir.path().join("test.git"), OpenOptions {
+        create: true,
+        branch: Some("main".into()),
+        author: Some("Test User".into()),
+        email: Some("test@example.com".into()),
+    })
+    .unwrap();
+    let fs = store.branches().get("main").unwrap();
+    assert_eq!(fs.author_name().unwrap(), "Test User");
+    assert_eq!(fs.author_email().unwrap(), "test@example.com");
+}
+
+#[test]
+fn fs_changes_none_by_default() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.branches().get("main").unwrap();
+    assert!(fs.changes().is_none());
+}
+
+// ---------------------------------------------------------------------------
+// CommitInfo.commit_hash
+// ---------------------------------------------------------------------------
+
+#[test]
+fn commit_info_has_commit_hash() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.branches().get("main").unwrap();
+    fs.write("a.txt", b"a", Default::default()).unwrap();
+    let fs = store.branches().get("main").unwrap();
+    let log = fs.log(Default::default()).unwrap();
+    // Each CommitInfo should have a non-empty commit_hash
+    for entry in &log {
+        assert_eq!(entry.commit_hash.len(), 40);
+        assert!(entry.commit_hash.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+    // The most recent should match fs.commit_hash
+    assert_eq!(log[0].commit_hash, fs.commit_hash().unwrap());
+}
+
+// ---------------------------------------------------------------------------
+// Multi-step undo
+// ---------------------------------------------------------------------------
+
+#[test]
+fn undo_multiple_steps() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.branches().get("main").unwrap();
+    fs.write("a.txt", b"a", Default::default()).unwrap();
+    let fs = store.branches().get("main").unwrap();
+    fs.write("b.txt", b"b", Default::default()).unwrap();
+    let fs = store.branches().get("main").unwrap();
+    fs.write("c.txt", b"c", Default::default()).unwrap();
+    let fs = store.branches().get("main").unwrap();
+
+    // Undo 2 steps at once — should go back past c and b
+    let undone = fs.undo(2).unwrap();
+    assert!(undone.exists("a.txt").unwrap());
+    assert!(!undone.exists("b.txt").unwrap());
+    assert!(!undone.exists("c.txt").unwrap());
+}
+
+#[test]
+fn undo_all_the_way() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.branches().get("main").unwrap();
+    fs.write("a.txt", b"a", Default::default()).unwrap();
+    let fs = store.branches().get("main").unwrap();
+    fs.write("b.txt", b"b", Default::default()).unwrap();
+    let fs = store.branches().get("main").unwrap();
+
+    // Undo back to the initial commit
+    let undone = fs.undo(2).unwrap();
+    assert!(!undone.exists("a.txt").unwrap());
+    assert!(!undone.exists("b.txt").unwrap());
+}
+
+// ---------------------------------------------------------------------------
+// Multi-step redo
+// ---------------------------------------------------------------------------
+
+#[test]
+fn redo_multiple_steps() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.branches().get("main").unwrap();
+    fs.write("a.txt", b"a", Default::default()).unwrap();
+    let fs = store.branches().get("main").unwrap();
+    fs.write("b.txt", b"b", Default::default()).unwrap();
+    let fs = store.branches().get("main").unwrap();
+
+    // Undo 1 twice (creates 2 reflog entries), then redo 2 at once
+    let u1 = fs.undo(1).unwrap();
+    assert!(u1.exists("a.txt").unwrap());
+    assert!(!u1.exists("b.txt").unwrap());
+    let u2 = u1.undo(1).unwrap();
+    assert!(!u2.exists("a.txt").unwrap());
+    let redone = u2.redo(2).unwrap();
+    assert!(redone.exists("a.txt").unwrap());
+    assert!(redone.exists("b.txt").unwrap());
+}
+
+#[test]
+fn multiple_undos_then_redo_multi() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.branches().get("main").unwrap();
+    fs.write("a.txt", b"a", Default::default()).unwrap();
+    let fs = store.branches().get("main").unwrap();
+    fs.write("b.txt", b"b", Default::default()).unwrap();
+    let fs = store.branches().get("main").unwrap();
+    fs.write("c.txt", b"c", Default::default()).unwrap();
+    let fs = store.branches().get("main").unwrap();
+
+    // Undo one at a time
+    let u1 = fs.undo(1).unwrap();
+    let u2 = u1.undo(1).unwrap();
+    assert!(u2.exists("a.txt").unwrap());
+    assert!(!u2.exists("b.txt").unwrap());
+    assert!(!u2.exists("c.txt").unwrap());
+
+    // Redo 2 at once
+    let redone = u2.redo(2).unwrap();
+    assert!(redone.exists("a.txt").unwrap());
+    assert!(redone.exists("b.txt").unwrap());
+    assert!(redone.exists("c.txt").unwrap());
+}
+
+// ---------------------------------------------------------------------------
+// Log filtering — path
+// ---------------------------------------------------------------------------
+
+#[test]
+fn log_filter_by_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.branches().get("main").unwrap();
+    fs.write("a.txt", b"a", Default::default()).unwrap();
+    let fs = store.branches().get("main").unwrap();
+    fs.write("b.txt", b"b", Default::default()).unwrap();
+    let fs = store.branches().get("main").unwrap();
+    fs.write("a.txt", b"a2", Default::default()).unwrap();
+    let fs = store.branches().get("main").unwrap();
+
+    let log = fs.log(fs::LogOptions {
+        path: Some("a.txt".into()),
+        ..Default::default()
+    })
+    .unwrap();
+    // a.txt changed in 2 commits (initial write + overwrite)
+    assert_eq!(log.len(), 2);
+}
+
+#[test]
+fn log_filter_by_path_no_matches() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.branches().get("main").unwrap();
+    fs.write("a.txt", b"a", Default::default()).unwrap();
+    let fs = store.branches().get("main").unwrap();
+
+    let log = fs.log(fs::LogOptions {
+        path: Some("nonexistent.txt".into()),
+        ..Default::default()
+    })
+    .unwrap();
+    assert!(log.is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// Log filtering — match_pattern
+// ---------------------------------------------------------------------------
+
+#[test]
+fn log_filter_by_match_pattern() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.branches().get("main").unwrap();
+    fs.write("a.txt", b"a", fs::WriteOptions {
+        message: Some("feat: add a".into()),
+        ..Default::default()
+    })
+    .unwrap();
+    let fs = store.branches().get("main").unwrap();
+    fs.write("b.txt", b"b", fs::WriteOptions {
+        message: Some("fix: repair b".into()),
+        ..Default::default()
+    })
+    .unwrap();
+    let fs = store.branches().get("main").unwrap();
+
+    let log = fs.log(fs::LogOptions {
+        match_pattern: Some("feat:*".into()),
+        ..Default::default()
+    })
+    .unwrap();
+    assert_eq!(log.len(), 1);
+    assert_eq!(log[0].message, "feat: add a");
+}
+
+#[test]
+fn log_filter_by_match_no_results() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.branches().get("main").unwrap();
+    fs.write("a.txt", b"a", Default::default()).unwrap();
+    let fs = store.branches().get("main").unwrap();
+
+    let log = fs.log(fs::LogOptions {
+        match_pattern: Some("zzz*".into()),
+        ..Default::default()
+    })
+    .unwrap();
+    assert!(log.is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// Log filtering — before
+// ---------------------------------------------------------------------------
+
+#[test]
+fn log_filter_by_before() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.branches().get("main").unwrap();
+    fs.write("a.txt", b"a", Default::default()).unwrap();
+    let fs = store.branches().get("main").unwrap();
+
+    // Use a timestamp far in the past — should exclude everything
+    let log = fs.log(fs::LogOptions {
+        before: Some(1),
+        ..Default::default()
+    })
+    .unwrap();
+    assert!(log.is_empty());
+}
+
+#[test]
+fn log_filter_by_before_includes_all() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.branches().get("main").unwrap();
+    fs.write("a.txt", b"a", Default::default()).unwrap();
+    let fs = store.branches().get("main").unwrap();
+
+    // Use a timestamp far in the future — should include everything
+    let log = fs.log(fs::LogOptions {
+        before: Some(u64::MAX),
+        ..Default::default()
+    })
+    .unwrap();
+    assert_eq!(log.len(), 2); // init + write
+}
+
+// ---------------------------------------------------------------------------
+// Log filtering — combined
+// ---------------------------------------------------------------------------
+
+#[test]
+fn log_combined_path_and_match() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.branches().get("main").unwrap();
+    fs.write("a.txt", b"a", fs::WriteOptions {
+        message: Some("feat: add a".into()),
+        ..Default::default()
+    })
+    .unwrap();
+    let fs = store.branches().get("main").unwrap();
+    fs.write("b.txt", b"b", fs::WriteOptions {
+        message: Some("feat: add b".into()),
+        ..Default::default()
+    })
+    .unwrap();
+    let fs = store.branches().get("main").unwrap();
+    fs.write("a.txt", b"a2", fs::WriteOptions {
+        message: Some("fix: update a".into()),
+        ..Default::default()
+    })
+    .unwrap();
+    let fs = store.branches().get("main").unwrap();
+
+    // path=a.txt AND match=feat:* => only the initial write of a.txt
+    let log = fs.log(fs::LogOptions {
+        path: Some("a.txt".into()),
+        match_pattern: Some("feat:*".into()),
+        ..Default::default()
+    })
+    .unwrap();
+    assert_eq!(log.len(), 1);
+    assert_eq!(log[0].message, "feat: add a");
+}

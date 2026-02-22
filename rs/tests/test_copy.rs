@@ -646,3 +646,195 @@ fn copy_in_preserves_executable() {
     let fs = store.branches().get("main").unwrap();
     assert_eq!(fs.file_type("run.sh").unwrap(), FileType::Executable);
 }
+
+// ---------------------------------------------------------------------------
+// copy_in — dry run
+// ---------------------------------------------------------------------------
+
+#[test]
+fn copy_in_dry_run() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("src_files");
+    create_disk_files(&src);
+
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.branches().get("main").unwrap();
+    let hash_before = fs.commit_hash().unwrap();
+
+    let (report, _) = fs.copy_in(&src, "", fs::CopyInOptions {
+        dry_run: true,
+        ..Default::default()
+    })
+    .unwrap();
+
+    // Report shows what would be added
+    assert!(report.total() > 0);
+
+    // But no commit was made
+    let fs = store.branches().get("main").unwrap();
+    assert_eq!(fs.commit_hash().unwrap(), hash_before);
+    assert!(!fs.exists("file1.txt").unwrap());
+}
+
+// ---------------------------------------------------------------------------
+// sync_in — true sync behavior (add + update + delete)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn sync_in_detects_updates() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("src_files");
+    create_disk_files(&src);
+
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.branches().get("main").unwrap();
+
+    // Initial sync
+    fs.sync_in(&src, "", Default::default()).unwrap();
+    let fs = store.branches().get("main").unwrap();
+    assert_eq!(fs.read_text("file1.txt").unwrap(), "one");
+
+    // Modify a file on disk
+    std::fs::write(src.join("file1.txt"), b"updated").unwrap();
+
+    // Second sync should detect the update
+    let (report, _) = fs.sync_in(&src, "", Default::default()).unwrap();
+    assert!(report.update.len() >= 1);
+    assert!(report.update.iter().any(|f| f.path == "file1.txt"));
+
+    let fs = store.branches().get("main").unwrap();
+    assert_eq!(fs.read_text("file1.txt").unwrap(), "updated");
+}
+
+#[test]
+fn sync_in_detects_deletes() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("src_files");
+    create_disk_files(&src);
+
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.branches().get("main").unwrap();
+
+    // Initial sync
+    let (_, _) = fs.sync_in(&src, "", Default::default()).unwrap();
+    let fs = store.branches().get("main").unwrap();
+    assert!(fs.exists("file2.txt").unwrap());
+
+    // Delete a file from disk
+    std::fs::remove_file(src.join("file2.txt")).unwrap();
+
+    // Second sync should detect the deletion
+    let (report, _) = fs.sync_in(&src, "", Default::default()).unwrap();
+    assert!(report.delete.len() >= 1);
+    assert!(report.delete.iter().any(|f| f.path == "file2.txt"));
+
+    let fs = store.branches().get("main").unwrap();
+    assert!(!fs.exists("file2.txt").unwrap());
+}
+
+#[test]
+fn sync_in_detects_adds() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("src_files");
+    create_disk_files(&src);
+
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.branches().get("main").unwrap();
+
+    // Initial sync
+    fs.sync_in(&src, "", Default::default()).unwrap();
+    let fs = store.branches().get("main").unwrap();
+
+    // Add a new file on disk
+    std::fs::write(src.join("new_file.txt"), b"new").unwrap();
+
+    // Second sync should detect the addition
+    let (report, _) = fs.sync_in(&src, "", Default::default()).unwrap();
+    assert!(report.add.len() >= 1);
+    assert!(report.add.iter().any(|f| f.path == "new_file.txt"));
+
+    let fs = store.branches().get("main").unwrap();
+    assert_eq!(fs.read_text("new_file.txt").unwrap(), "new");
+}
+
+#[test]
+fn sync_in_noop_when_unchanged() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("src_files");
+    create_disk_files(&src);
+
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.branches().get("main").unwrap();
+
+    // Initial sync
+    fs.sync_in(&src, "", Default::default()).unwrap();
+    let fs = store.branches().get("main").unwrap();
+    let hash_after_first = fs.commit_hash().unwrap();
+
+    // Second sync with no changes — should be no-op
+    let (report, _) = fs.sync_in(&src, "", Default::default()).unwrap();
+    assert_eq!(report.total(), 0);
+
+    let fs = store.branches().get("main").unwrap();
+    assert_eq!(fs.commit_hash().unwrap(), hash_after_first);
+}
+
+#[test]
+fn sync_in_dry_run() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("src_files");
+    create_disk_files(&src);
+
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.branches().get("main").unwrap();
+
+    // Initial sync
+    fs.sync_in(&src, "", Default::default()).unwrap();
+    let fs = store.branches().get("main").unwrap();
+    let hash_after_first = fs.commit_hash().unwrap();
+
+    // Modify disk
+    std::fs::write(src.join("file1.txt"), b"modified").unwrap();
+    std::fs::remove_file(src.join("file2.txt")).unwrap();
+
+    // Dry run: should report changes but not commit
+    let (report, _) = fs.sync_in(&src, "", fs::SyncOptions {
+        dry_run: true,
+        ..Default::default()
+    })
+    .unwrap();
+    assert!(report.total() > 0);
+
+    let fs = store.branches().get("main").unwrap();
+    assert_eq!(fs.commit_hash().unwrap(), hash_after_first);
+    // Original content unchanged
+    assert_eq!(fs.read_text("file1.txt").unwrap(), "one");
+    assert!(fs.exists("file2.txt").unwrap());
+}
+
+#[test]
+fn sync_in_with_dest_prefix() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("src_files");
+    create_disk_files(&src);
+
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.branches().get("main").unwrap();
+
+    // Initial sync into a prefix
+    fs.sync_in(&src, "data", Default::default()).unwrap();
+    let fs = store.branches().get("main").unwrap();
+    assert_eq!(fs.read_text("data/file1.txt").unwrap(), "one");
+
+    // Add and remove files on disk
+    std::fs::write(src.join("new.txt"), b"new").unwrap();
+    std::fs::remove_file(src.join("file2.txt")).unwrap();
+
+    let (report, _) = fs.sync_in(&src, "data", Default::default()).unwrap();
+    assert!(report.add.iter().any(|f| f.path == "data/new.txt"));
+    assert!(report.delete.iter().any(|f| f.path == "data/file2.txt"));
+
+    let fs = store.branches().get("main").unwrap();
+    assert_eq!(fs.read_text("data/new.txt").unwrap(), "new");
+    assert!(!fs.exists("data/file2.txt").unwrap());
+}

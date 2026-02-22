@@ -509,3 +509,49 @@ fn batch_is_closed_after_commit() {
     batch.commit().unwrap();
     // After commit, batch is consumed — compiler enforces no further use
 }
+
+// ---------------------------------------------------------------------------
+// batch — commit returns Fs
+// ---------------------------------------------------------------------------
+
+#[test]
+fn batch_commit_returns_fs_with_content() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.branches().get("main").unwrap();
+
+    let mut batch = fs.batch(Default::default());
+    batch.write("x.txt", b"data").unwrap();
+    let new_fs = batch.commit().unwrap();
+
+    // The returned Fs should reflect the new content
+    assert_eq!(new_fs.read_text("x.txt").unwrap(), "data");
+    assert_eq!(new_fs.branch(), Some("main"));
+}
+
+#[test]
+fn batch_commit_returns_fs_with_new_hash() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.branches().get("main").unwrap();
+    let hash_before = fs.commit_hash().unwrap();
+
+    let mut batch = fs.batch(Default::default());
+    batch.write("a.txt", b"aaa").unwrap();
+    let new_fs = batch.commit().unwrap();
+
+    assert_ne!(new_fs.commit_hash().unwrap(), hash_before);
+}
+
+#[test]
+fn batch_empty_commit_returns_same_fs() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.branches().get("main").unwrap();
+    let hash_before = fs.commit_hash().unwrap();
+
+    let batch = fs.batch(Default::default());
+    let new_fs = batch.commit().unwrap();
+
+    assert_eq!(new_fs.commit_hash().unwrap(), hash_before);
+}
