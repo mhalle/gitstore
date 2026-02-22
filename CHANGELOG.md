@@ -4,6 +4,22 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.55.0 (2026-02-22)
+
+**New features:**
+
+- Add TypeScript port (`ts/`) using isomorphic-git — full API parity with Python including FS read/write, batch, copy/sync, glob, undo/redo, reflog, mirror, and 483 tests
+- Add Rust port (`rs/`) using gitoxide (gix) — aligned API with Fs metadata accessors, apply with removes, repo-level remove, multi-source move, log filtering, true sync_in with add/update/delete detection, and 398 tests
+- Add cross-language interop test suite (`interop/`) — Python writes fixtures, TypeScript and Rust read and verify
+- Add `Makefile` with `test-all`, `test-py`, `test-ts`, `test-rs`, and `test-interop` targets
+- Add `scripts/test-parity.sh` for API parity checking across implementations
+
+**Python changes:**
+
+- Replace internal dulwich access in tests with public gitstore API (`fs.file_type()`)
+- Guard `_Repository.path` trailing slash with `os.path.isdir`
+- Add `tests/test_move.py` with 13 tests for move/rename operations
+
 ## v0.54.2 (2026-02-16)
 
 **Internal:**
