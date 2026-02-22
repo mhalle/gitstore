@@ -190,12 +190,13 @@ async function checkHistory(store: GitStore, branch: string, spec: Spec, name: s
 async function main() {
   const fixturesPath = process.argv[2];
   const repoDir = process.argv[3];
+  const prefix = process.argv[4] ?? 'py';
 
   const fixtures: Record<string, Spec> = JSON.parse(fs.readFileSync(fixturesPath, 'utf-8'));
   let failures = 0;
 
   for (const [name, spec] of Object.entries(fixtures)) {
-    const repoPath = path.join(repoDir, `py_${name}.git`);
+    const repoPath = path.join(repoDir, `${prefix}_${name}.git`);
     const branch = spec.branch ?? 'main';
 
     if (!fs.existsSync(repoPath)) {

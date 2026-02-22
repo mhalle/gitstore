@@ -141,12 +141,12 @@ def check_history(store, branch, spec, name):
     return failures
 
 
-def main(fixtures_path: str, repo_dir: str) -> None:
+def main(fixtures_path: str, repo_dir: str, prefix: str = "ts") -> None:
     fixtures = json.loads(Path(fixtures_path).read_text())
     failures = 0
 
     for name, spec in fixtures.items():
-        repo_path = Path(repo_dir) / f"ts_{name}.git"
+        repo_path = Path(repo_dir) / f"{prefix}_{name}.git"
         branch = spec.get("branch", "main")
 
         if not repo_path.exists():
@@ -170,4 +170,5 @@ def main(fixtures_path: str, repo_dir: str) -> None:
 
 
 if __name__ == "__main__":
-    main(sys.argv[1], sys.argv[2])
+    prefix = sys.argv[3] if len(sys.argv) > 3 else "ts"
+    main(sys.argv[1], sys.argv[2], prefix)

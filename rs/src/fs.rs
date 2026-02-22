@@ -1,0 +1,871 @@
+use std::path::Path;
+use std::sync::Arc;
+
+use crate::batch::Batch;
+use crate::error::{Error, Result};
+use crate::lock::with_repo_lock;
+use crate::store::GitStoreInner;
+use crate::tree;
+use crate::types::{
+    ChangeReport, CommitInfo, FileType, WalkEntry, WriteEntry, MODE_BLOB, MODE_LINK, MODE_TREE,
+};
+
+// ---------------------------------------------------------------------------
+// TreeWrite — pub(crate) unit of work for tree rebuilding
+// ---------------------------------------------------------------------------
+
+/// A pending write within a tree rebuild.
+#[derive(Debug, Clone)]
+pub struct TreeWrite {
+    pub data: Vec<u8>,
+    pub oid: gix::ObjectId,
+    pub mode: u32,
+}
+
+// ---------------------------------------------------------------------------
+// Option structs
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Default)]
+pub struct WriteOptions {
+    pub message: Option<String>,
+    pub mode: Option<u32>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ApplyOptions {
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct BatchOptions {
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct CopyInOptions {
+    pub include: Option<Vec<String>>,
+    pub exclude: Option<Vec<String>>,
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct CopyOutOptions {
+    pub include: Option<Vec<String>>,
+    pub exclude: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct SyncOptions {
+    pub include: Option<Vec<String>>,
+    pub exclude: Option<Vec<String>>,
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct RemoveOptions {
+    pub include: Option<Vec<String>>,
+    pub exclude: Option<Vec<String>>,
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct LogOptions {
+    pub limit: Option<usize>,
+    pub skip: Option<usize>,
+}
+
+// ---------------------------------------------------------------------------
+// Fs
+// ---------------------------------------------------------------------------
+
+/// A snapshot view of a branch in the store.
+///
+/// Cheap to clone (`Arc` internally). No lifetime parameter — can be stored
+/// in structs, returned from functions, sent across threads.
+#[derive(Clone)]
+pub struct Fs {
+    pub(crate) inner: Arc<GitStoreInner>,
+    pub(crate) commit_oid: Option<gix::ObjectId>,
+    pub(crate) tree_oid: Option<gix::ObjectId>,
+    pub(crate) branch: Option<String>,
+}
+
+impl Fs {
+    /// Helper: lock the repo mutex and call `f` with the repository.
+    pub(crate) fn with_repo<F, T>(&self, f: F) -> Result<T>
+    where
+        F: FnOnce(&gix::Repository) -> Result<T>,
+    {
+        let repo = self
+            .inner
+            .repo
+            .lock()
+            .map_err(|e| Error::git_msg(e.to_string()))?;
+        f(&repo)
+    }
+
+    /// The tree OID, or error if there is none.
+    fn require_tree(&self) -> Result<gix::ObjectId> {
+        self.tree_oid
+            .ok_or_else(|| Error::not_found("no tree in snapshot"))
+    }
+
+    /// The commit hash as hex string.
+    pub fn commit_hash(&self) -> Option<String> {
+        self.commit_oid.map(|oid| format!("{}", oid))
+    }
+
+    // -- Read ---------------------------------------------------------------
+
+    /// Read raw bytes at `path`.
+    pub fn read(&self, path: &str) -> Result<Vec<u8>> {
+        let tree_oid = self.require_tree()?;
+        self.with_repo(|repo| tree::read_blob_at_path(repo, tree_oid, path))
+    }
+
+    /// Read UTF-8 text at `path`.
+    pub fn read_text(&self, path: &str) -> Result<String> {
+        let data = self.read(path)?;
+        String::from_utf8(data).map_err(|e| Error::git_msg(format!("invalid UTF-8: {}", e)))
+    }
+
+    /// List immediate children at `path`.
+    pub fn ls(&self, path: &str) -> Result<Vec<WalkEntry>> {
+        let tree_oid = self.require_tree()?;
+        self.with_repo(|repo| tree::list_tree_at_path(repo, tree_oid, path))
+    }
+
+    /// Recursively walk the tree under `path`.
+    pub fn walk(&self, path: &str) -> Result<Vec<(String, WalkEntry)>> {
+        let tree_oid = self.require_tree()?;
+        let path_norm = crate::paths::normalize_path(path)?;
+
+        self.with_repo(|repo| {
+            if path_norm.is_empty() {
+                tree::walk_tree(repo, tree_oid)
+            } else {
+                // Resolve to subtree first
+                let entry = tree::entry_at_path(repo, tree_oid, &path_norm)?
+                    .ok_or_else(|| Error::not_found(&path_norm))?;
+                if entry.mode != MODE_TREE {
+                    return Err(Error::not_a_directory(&path_norm));
+                }
+                let entries = tree::walk_tree(repo, entry.oid)?;
+                // Prefix paths
+                Ok(entries
+                    .into_iter()
+                    .map(|(p, e)| (format!("{}/{}", path_norm, p), e))
+                    .collect())
+            }
+        })
+    }
+
+    /// Returns `true` if `path` exists.
+    pub fn exists(&self, path: &str) -> Result<bool> {
+        let tree_oid = self.require_tree()?;
+        self.with_repo(|repo| tree::exists_at_path(repo, tree_oid, path))
+    }
+
+    /// Returns `true` if `path` is a directory (tree).
+    pub fn is_dir(&self, path: &str) -> Result<bool> {
+        let tree_oid = self.require_tree()?;
+        self.with_repo(|repo| {
+            match tree::entry_at_path(repo, tree_oid, path)? {
+                Some(entry) => Ok(entry.mode == MODE_TREE),
+                None => Ok(false),
+            }
+        })
+    }
+
+    /// Return the file type at `path`.
+    pub fn file_type(&self, path: &str) -> Result<FileType> {
+        let tree_oid = self.require_tree()?;
+        self.with_repo(|repo| {
+            let entry = tree::entry_at_path(repo, tree_oid, path)?
+                .ok_or_else(|| Error::not_found(path))?;
+            FileType::from_mode(entry.mode)
+                .ok_or_else(|| Error::git_msg(format!("unknown mode: {:#o}", entry.mode)))
+        })
+    }
+
+    /// Return the size of the blob at `path`.
+    pub fn size(&self, path: &str) -> Result<u64> {
+        let tree_oid = self.require_tree()?;
+        self.with_repo(|repo| {
+            let entry = tree::entry_at_path(repo, tree_oid, path)?
+                .ok_or_else(|| Error::not_found(path))?;
+            if entry.mode == MODE_TREE {
+                return Err(Error::is_a_directory(path));
+            }
+            let obj = repo.find_object(entry.oid).map_err(Error::git)?;
+            Ok(obj.data.len() as u64)
+        })
+    }
+
+    /// Return the object hash (hex) at `path`.
+    pub fn object_hash(&self, path: &str) -> Result<String> {
+        let tree_oid = self.require_tree()?;
+        self.with_repo(|repo| {
+            let entry = tree::entry_at_path(repo, tree_oid, path)?
+                .ok_or_else(|| Error::not_found(path))?;
+            Ok(format!("{}", entry.oid))
+        })
+    }
+
+    /// Read the symlink target at `path`.
+    pub fn readlink(&self, path: &str) -> Result<String> {
+        let tree_oid = self.require_tree()?;
+        self.with_repo(|repo| {
+            let entry = tree::entry_at_path(repo, tree_oid, path)?
+                .ok_or_else(|| Error::not_found(path))?;
+            if entry.mode != MODE_LINK {
+                return Err(Error::invalid_path(format!(
+                    "{} is not a symlink",
+                    path
+                )));
+            }
+            let obj = repo.find_object(entry.oid).map_err(Error::git)?;
+            String::from_utf8(obj.data.to_vec())
+                .map_err(|e| Error::git_msg(format!("invalid UTF-8 in symlink: {}", e)))
+        })
+    }
+
+    // -- Glob ---------------------------------------------------------------
+
+    /// Glob the tree, returning sorted matching paths.
+    pub fn glob(&self, pattern: &str) -> Result<Vec<String>> {
+        let mut paths = self.iglob(pattern)?;
+        paths.sort();
+        Ok(paths)
+    }
+
+    /// Glob the tree, returning matching paths.
+    pub fn iglob(&self, pattern: &str) -> Result<Vec<String>> {
+        let tree_oid = self.require_tree()?;
+        let segments: Vec<&str> = pattern.split('/').collect();
+
+        self.with_repo(|repo| {
+            let mut results = Vec::new();
+            iglob_recursive(repo, tree_oid, &segments, "", &mut results)?;
+            Ok(results)
+        })
+    }
+
+    // -- Write --------------------------------------------------------------
+
+    /// Write raw bytes to `path`.
+    pub fn write(
+        &self,
+        path: &str,
+        data: &[u8],
+        opts: WriteOptions,
+    ) -> Result<()> {
+        let path = crate::paths::normalize_path(path)?;
+        let mode = opts.mode.unwrap_or(MODE_BLOB);
+        let message = opts
+            .message
+            .unwrap_or_else(|| crate::paths::format_commit_message("write", Some(&path)));
+
+        let tw = self.with_repo(|repo| {
+            let blob_oid = repo.write_blob(data).map_err(Error::git)?;
+            Ok(TreeWrite {
+                data: data.to_vec(),
+                oid: blob_oid.detach(),
+                mode,
+            })
+        })?;
+
+        let writes = vec![(path, Some(tw))];
+        self.commit_changes(&writes, &message)?;
+        Ok(())
+    }
+
+    /// Write UTF-8 text to `path`.
+    pub fn write_text(
+        &self,
+        path: &str,
+        text: &str,
+        opts: WriteOptions,
+    ) -> Result<()> {
+        self.write(path, text.as_bytes(), opts)
+    }
+
+    /// Write the contents of a file on disk to `path`.
+    pub fn write_from_file(
+        &self,
+        path: &str,
+        src: &Path,
+        opts: WriteOptions,
+    ) -> Result<()> {
+        let data = std::fs::read(src).map_err(|e| Error::io(src, e))?;
+        let mode = opts
+            .mode
+            .unwrap_or_else(|| tree::mode_from_disk(src).unwrap_or(MODE_BLOB));
+        let opts = WriteOptions {
+            mode: Some(mode),
+            ..opts
+        };
+        self.write(path, &data, opts)
+    }
+
+    /// Write a symlink at `path`.
+    pub fn write_symlink(
+        &self,
+        path: &str,
+        target: &str,
+        opts: WriteOptions,
+    ) -> Result<()> {
+        let opts = WriteOptions {
+            mode: Some(MODE_LINK),
+            ..opts
+        };
+        self.write(path, target.as_bytes(), opts)
+    }
+
+    /// Apply a map of path → WriteEntry atomically.
+    pub fn apply(
+        &self,
+        entries: &[(&str, WriteEntry)],
+        opts: ApplyOptions,
+    ) -> Result<()> {
+        let mut writes = Vec::new();
+        for (path, entry) in entries {
+            entry.validate()?;
+            let path = crate::paths::normalize_path(path)?;
+            let (data, mode) = if entry.mode == MODE_LINK {
+                (
+                    entry.target.as_ref().unwrap().as_bytes().to_vec(),
+                    MODE_LINK,
+                )
+            } else {
+                (entry.data.as_ref().unwrap().clone(), entry.mode)
+            };
+            let tw = self.with_repo(|repo| {
+                let blob_oid = repo.write_blob(&data).map_err(Error::git)?;
+                Ok(TreeWrite {
+                    data,
+                    oid: blob_oid.detach(),
+                    mode,
+                })
+            })?;
+            writes.push((path, Some(tw)));
+        }
+
+        let message = opts
+            .message
+            .unwrap_or_else(|| crate::paths::format_commit_message("apply", None));
+        self.commit_changes(&writes, &message)?;
+        Ok(())
+    }
+
+    /// Open a `Batch` for accumulating writes.
+    pub fn batch(&self, opts: BatchOptions) -> Batch {
+        Batch {
+            fs: self.clone(),
+            writes: vec![],
+            removes: vec![],
+            message: opts.message,
+            operation: None,
+            closed: false,
+        }
+    }
+
+    // -- Copy / sync --------------------------------------------------------
+
+    /// Copy files from disk into the store.
+    pub fn copy_in(
+        &self,
+        src: &Path,
+        dest: &str,
+        opts: CopyInOptions,
+    ) -> Result<ChangeReport> {
+        let tree_oid = self.require_tree()?;
+        let (writes, report) = self.with_repo(|repo| {
+            let inc: Option<Vec<&str>> = opts.include.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect());
+            let exc: Option<Vec<&str>> = opts.exclude.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect());
+            crate::copy::copy_in(repo, tree_oid, src, dest, inc.as_deref(), exc.as_deref())
+        })?;
+        if !writes.is_empty() {
+            let tw_writes: Vec<(String, Option<TreeWrite>)> = writes
+                .into_iter()
+                .map(|(p, tw)| (p, Some(tw)))
+                .collect();
+            let msg = opts.message.unwrap_or_else(|| crate::paths::format_commit_message("copy_in", None));
+            self.commit_changes(&tw_writes, &msg)?;
+        }
+        Ok(report)
+    }
+
+    /// Copy files from the store to disk.
+    pub fn copy_out(
+        &self,
+        src: &str,
+        dest: &Path,
+        opts: CopyOutOptions,
+    ) -> Result<ChangeReport> {
+        let tree_oid = self.require_tree()?;
+        self.with_repo(|repo| {
+            let inc: Option<Vec<&str>> = opts.include.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect());
+            let exc: Option<Vec<&str>> = opts.exclude.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect());
+            crate::copy::copy_out(repo, tree_oid, src, dest, inc.as_deref(), exc.as_deref())
+        })
+    }
+
+    /// Sync files from disk into the store.
+    pub fn sync_in(
+        &self,
+        src: &Path,
+        dest: &str,
+        opts: SyncOptions,
+    ) -> Result<ChangeReport> {
+        let tree_oid = self.require_tree()?;
+        let (writes, report) = self.with_repo(|repo| {
+            let inc: Option<Vec<&str>> = opts.include.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect());
+            let exc: Option<Vec<&str>> = opts.exclude.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect());
+            crate::copy::sync_in(repo, tree_oid, src, dest, inc.as_deref(), exc.as_deref())
+        })?;
+        if !writes.is_empty() {
+            let tw_writes: Vec<(String, Option<TreeWrite>)> = writes
+                .into_iter()
+                .map(|(p, tw)| (p, Some(tw)))
+                .collect();
+            let msg = opts.message.unwrap_or_else(|| crate::paths::format_commit_message("sync_in", None));
+            self.commit_changes(&tw_writes, &msg)?;
+        }
+        Ok(report)
+    }
+
+    /// Sync files from the store to disk.
+    pub fn sync_out(
+        &self,
+        src: &str,
+        dest: &Path,
+        opts: SyncOptions,
+    ) -> Result<ChangeReport> {
+        let tree_oid = self.require_tree()?;
+        self.with_repo(|repo| {
+            let inc: Option<Vec<&str>> = opts.include.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect());
+            let exc: Option<Vec<&str>> = opts.exclude.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect());
+            crate::copy::sync_out(repo, tree_oid, src, dest, inc.as_deref(), exc.as_deref())
+        })
+    }
+
+    /// Remove files from disk that match a pattern.
+    pub fn remove(
+        &self,
+        path: &Path,
+        opts: RemoveOptions,
+    ) -> Result<ChangeReport> {
+        let inc: Option<Vec<&str>> = opts.include.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect());
+        let exc: Option<Vec<&str>> = opts.exclude.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect());
+        crate::copy::remove(path, inc.as_deref(), exc.as_deref())
+    }
+
+    /// Rename a path within the store.
+    pub fn rename(
+        &self,
+        src: &str,
+        dest: &str,
+        opts: WriteOptions,
+    ) -> Result<()> {
+        let tree_oid = self.require_tree()?;
+        let writes = self.with_repo(|repo| crate::copy::rename(repo, tree_oid, src, dest))?;
+        if !writes.is_empty() {
+            let tw_writes: Vec<(String, Option<TreeWrite>)> = writes
+                .into_iter()
+                .map(|(p, tw)| (p, Some(tw)))
+                .collect();
+            let msg = opts.message.unwrap_or_else(|| {
+                crate::paths::format_commit_message("rename", Some(&format!("{} -> {}", src, dest)))
+            });
+            self.commit_changes(&tw_writes, &msg)?;
+        }
+        Ok(())
+    }
+
+    /// Export the tree to a directory on disk.
+    pub fn export(&self, dest: &Path) -> Result<ChangeReport> {
+        self.copy_out("", dest, CopyOutOptions::default())
+    }
+
+    // -- History ------------------------------------------------------------
+
+    /// Return the parent `Fs` (previous commit on this branch).
+    pub fn parent(&self) -> Result<Option<Fs>> {
+        let commit_oid = self
+            .commit_oid
+            .ok_or_else(|| Error::not_found("no commit in snapshot"))?;
+
+        self.with_repo(|repo| {
+            let obj = repo.find_object(commit_oid).map_err(Error::git)?;
+            let data = obj.data.to_vec();
+            let commit_ref =
+                gix::objs::CommitRef::from_bytes(&data).map_err(Error::git)?;
+            let parent_oid = commit_ref.parents().next();
+            match parent_oid {
+                Some(pid) => {
+                    let parent_id: gix::ObjectId = pid.into();
+                    // Drop the repo lock before calling from_commit (which re-locks)
+                    Ok(Some(parent_id))
+                }
+                None => Ok(None),
+            }
+        })?
+        .map(|parent_id| {
+            Fs::from_commit(Arc::clone(&self.inner), parent_id, self.branch.clone())
+        })
+        .transpose()
+    }
+
+    /// Go back `n` commits.
+    pub fn back(&self, n: usize) -> Result<Fs> {
+        let mut current = self.clone();
+        for _ in 0..n {
+            match current.parent()? {
+                Some(parent) => current = parent,
+                None => {
+                    return Err(Error::not_found("not enough history"));
+                }
+            }
+        }
+        Ok(current)
+    }
+
+    /// Undo the last commit (soft reset).
+    pub fn undo(&self) -> Result<Fs> {
+        let branch = self
+            .branch
+            .as_ref()
+            .ok_or_else(|| Error::permission("undo requires a branch"))?;
+        let parent = self
+            .parent()?
+            .ok_or_else(|| Error::not_found("no parent commit to undo to"))?;
+
+        let parent_oid = parent
+            .commit_oid
+            .ok_or_else(|| Error::not_found("parent has no commit"))?;
+
+        let refname = format!("refs/heads/{}", branch);
+        let inner = Arc::clone(&self.inner);
+        let repo = inner
+            .repo
+            .lock()
+            .map_err(|e| Error::git_msg(e.to_string()))?;
+
+        use gix::refs::transaction::PreviousValue;
+        with_repo_lock(&inner.path, || {
+            repo.reference(
+                refname.as_str(),
+                parent_oid,
+                PreviousValue::Any,
+                "undo: move back",
+            )
+            .map_err(Error::git)?;
+            Ok(())
+        })?;
+
+        Ok(parent)
+    }
+
+    /// Redo (re-apply an undone commit).
+    pub fn redo(&self) -> Result<Fs> {
+        let branch = self
+            .branch
+            .as_ref()
+            .ok_or_else(|| Error::permission("redo requires a branch"))?;
+        let refname = format!("refs/heads/{}", branch);
+
+        // Read reflog to find the forward commit
+        let reflog_entries = crate::reflog::read_reflog(&self.inner.path, &refname)?;
+        let current_hex = self
+            .commit_oid
+            .map(|oid| format!("{}", oid))
+            .unwrap_or_default();
+
+        // Find entry where new_sha matches current commit — old_sha is the "forward" one
+        let forward_sha = reflog_entries
+            .iter()
+            .rev()
+            .find(|e| e.new_sha == current_hex)
+            .map(|e| e.old_sha.clone())
+            .ok_or_else(|| Error::not_found("no redo target found in reflog"))?;
+
+        let forward_oid =
+            gix::ObjectId::from_hex(forward_sha.as_bytes()).map_err(Error::git)?;
+
+        let inner = Arc::clone(&self.inner);
+        let repo = inner
+            .repo
+            .lock()
+            .map_err(|e| Error::git_msg(e.to_string()))?;
+
+        use gix::refs::transaction::PreviousValue;
+        with_repo_lock(&inner.path, || {
+            repo.reference(
+                refname.as_str(),
+                forward_oid,
+                PreviousValue::Any,
+                "redo: move forward",
+            )
+            .map_err(Error::git)?;
+            Ok(())
+        })?;
+
+        drop(repo);
+        Fs::from_commit(inner, forward_oid, self.branch.clone())
+    }
+
+    /// Return commit log entries.
+    pub fn log(&self, opts: LogOptions) -> Result<Vec<CommitInfo>> {
+        let mut commit_oid = self
+            .commit_oid
+            .ok_or_else(|| Error::not_found("no commit in snapshot"))?;
+
+        let skip = opts.skip.unwrap_or(0);
+        let limit = opts.limit.unwrap_or(usize::MAX);
+
+        let repo = self
+            .inner
+            .repo
+            .lock()
+            .map_err(|e| Error::git_msg(e.to_string()))?;
+
+        let mut results = Vec::new();
+        let mut count = 0usize;
+
+        loop {
+            let obj = repo.find_object(commit_oid).map_err(Error::git)?;
+            let data = obj.data.to_vec();
+            let commit_ref =
+                gix::objs::CommitRef::from_bytes(&data).map_err(Error::git)?;
+
+            if count >= skip {
+                results.push(CommitInfo {
+                    message: commit_ref.message.to_string(),
+                    time: Some(commit_ref.author.time().map(|t| t.seconds as u64).unwrap_or(0)),
+                    author_name: Some(commit_ref.author.name.to_string()),
+                    author_email: Some(commit_ref.author.email.to_string()),
+                });
+            }
+
+            count += 1;
+            if results.len() >= limit {
+                break;
+            }
+
+            let next_parent: Option<gix::ObjectId> =
+                commit_ref.parents().next().map(|p| p.into());
+            match next_parent {
+                Some(parent) => commit_oid = parent,
+                None => break,
+            }
+        }
+
+        Ok(results)
+    }
+
+    // -- Internal -----------------------------------------------------------
+
+    /// Build an `Fs` from a known commit oid.
+    pub(crate) fn from_commit(
+        inner: Arc<GitStoreInner>,
+        commit_oid: gix::ObjectId,
+        branch: Option<String>,
+    ) -> Result<Self> {
+        let tree_oid = {
+            let repo = inner
+                .repo
+                .lock()
+                .map_err(|e| Error::git_msg(e.to_string()))?;
+            let obj = repo.find_object(commit_oid).map_err(Error::git)?;
+            let data = obj.data.to_vec();
+            let commit_ref =
+                gix::objs::CommitRef::from_bytes(&data).map_err(Error::git)?;
+            let tree_oid: gix::ObjectId = commit_ref.tree().into();
+            tree_oid
+        };
+
+        Ok(Fs {
+            inner,
+            commit_oid: Some(commit_oid),
+            tree_oid: Some(tree_oid),
+            branch,
+        })
+    }
+
+    /// Commit accumulated changes.
+    pub(crate) fn commit_changes(
+        &self,
+        writes: &[(String, Option<TreeWrite>)],
+        message: &str,
+    ) -> Result<gix::ObjectId> {
+        let branch = self
+            .branch
+            .as_ref()
+            .ok_or_else(|| Error::permission("cannot commit without a branch"))?;
+        let refname = format!("refs/heads/{}", branch);
+
+        let repo = self
+            .inner
+            .repo
+            .lock()
+            .map_err(|e| Error::git_msg(e.to_string()))?;
+
+        with_repo_lock(&self.inner.path, || {
+            // Stale snapshot check
+            let current_ref = repo
+                .find_reference(refname.as_str())
+                .map_err(|_| Error::not_found(format!("branch '{}' not found", branch)))?;
+            let current_oid = current_ref.id().detach();
+
+            if let Some(our_oid) = self.commit_oid {
+                if current_oid != our_oid {
+                    return Err(Error::stale_snapshot(format!(
+                        "branch '{}' has moved: expected {}, found {}",
+                        branch, our_oid, current_oid
+                    )));
+                }
+            }
+
+            // Rebuild tree
+            let base_tree = self.tree_oid.unwrap_or_else(|| gix::ObjectId::null(gix::hash::Kind::Sha1));
+            let new_tree_oid = tree::rebuild_tree(&repo, base_tree, writes)?;
+
+            // No-op check: if tree didn't change, skip
+            if Some(new_tree_oid) == self.tree_oid {
+                return Ok(current_oid);
+            }
+
+            // Build commit
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default();
+            let time =
+                gix::date::Time::new(now.as_secs() as gix::date::SecondsSinceUnixEpoch, 0);
+            let actor = gix::actor::Signature {
+                name: self.inner.signature.name.clone().into(),
+                email: self.inner.signature.email.clone().into(),
+                time,
+            };
+
+            let parents: Vec<gix::ObjectId> = if let Some(oid) = self.commit_oid {
+                vec![oid]
+            } else {
+                vec![]
+            };
+
+            let commit = gix::objs::Commit {
+                tree: new_tree_oid,
+                parents: parents.into(),
+                author: actor.clone(),
+                committer: actor,
+                encoding: None,
+                message: message.into(),
+                extra_headers: vec![],
+            };
+            let new_commit_oid = repo.write_object(&commit).map_err(Error::git)?;
+
+            // Update ref
+            use gix::refs::transaction::PreviousValue;
+            let msg: String = format!("commit: {}", message);
+            repo.reference(
+                refname.as_str(),
+                new_commit_oid,
+                PreviousValue::Any,
+                msg.as_str(),
+            )
+            .map_err(Error::git)?;
+
+            Ok(new_commit_oid.detach())
+        })
+    }
+}
+
+/// Retry a write operation on stale-snapshot errors.
+pub fn retry_write<F, T>(mut f: F) -> Result<T>
+where
+    F: FnMut() -> Result<T>,
+{
+    let mut attempt = 0u32;
+    loop {
+        match f() {
+            Ok(v) => return Ok(v),
+            Err(Error::StaleSnapshot(_)) if attempt < 5 => {
+                let backoff = std::time::Duration::from_millis(
+                    (10 * 2u64.pow(attempt)).min(200),
+                );
+                std::thread::sleep(backoff);
+                attempt += 1;
+            }
+            Err(e) => return Err(e),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Glob helper (internal)
+// ---------------------------------------------------------------------------
+
+fn iglob_recursive(
+    repo: &gix::Repository,
+    tree_oid: gix::ObjectId,
+    segments: &[&str],
+    prefix: &str,
+    results: &mut Vec<String>,
+) -> Result<()> {
+    if segments.is_empty() {
+        return Ok(());
+    }
+
+    let seg = segments[0];
+    let rest = &segments[1..];
+
+    let tree_data = repo.find_object(tree_oid).map_err(Error::git)?;
+    let data = tree_data.data.to_vec();
+    let tree_ref = gix::objs::TreeRef::from_bytes(&data).map_err(Error::git)?;
+
+    if seg == "**" {
+        // Match zero or more directory levels
+        iglob_recursive(repo, tree_oid, rest, prefix, results)?;
+
+        for entry in &tree_ref.entries {
+            let name = String::from_utf8_lossy(entry.filename).into_owned();
+            if name.starts_with('.') {
+                continue;
+            }
+            let full = if prefix.is_empty() {
+                name.clone()
+            } else {
+                format!("{}/{}", prefix, name)
+            };
+            let entry_mode = tree::mode_to_u32(entry.mode);
+            if entry_mode == MODE_TREE {
+                iglob_recursive(repo, entry.oid.to_owned(), segments, &full, results)?;
+            }
+        }
+    } else {
+        for entry in &tree_ref.entries {
+            let name = String::from_utf8_lossy(entry.filename).into_owned();
+            if !crate::glob::glob_match(seg, &name) {
+                continue;
+            }
+            let full = if prefix.is_empty() {
+                name.clone()
+            } else {
+                format!("{}/{}", prefix, name)
+            };
+            let entry_mode = tree::mode_to_u32(entry.mode);
+
+            if rest.is_empty() {
+                if entry_mode != MODE_TREE {
+                    results.push(full);
+                }
+            } else if entry_mode == MODE_TREE {
+                iglob_recursive(repo, entry.oid.to_owned(), rest, &full, results)?;
+            }
+        }
+    }
+
+    Ok(())
+}
