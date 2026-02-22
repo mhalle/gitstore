@@ -278,3 +278,135 @@ fn batch_remove_then_rewrite() {
     let fs = store.fs(Some("main")).unwrap();
     assert_eq!(fs.read_text("hello.txt").unwrap(), "rewritten");
 }
+
+// ---------------------------------------------------------------------------
+// Custom message
+// ---------------------------------------------------------------------------
+
+#[test]
+fn batch_custom_message() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.fs(Some("main")).unwrap();
+
+    let mut batch = fs.batch(fs::BatchOptions {
+        message: Some("my batch".into()),
+    });
+    batch.write("a.txt", b"a").unwrap();
+    batch.commit().unwrap();
+
+    let fs = store.fs(Some("main")).unwrap();
+    let log = fs.log(fs::LogOptions { limit: Some(1), skip: None }).unwrap();
+    assert_eq!(log[0].message, "my batch");
+}
+
+// ---------------------------------------------------------------------------
+// Nested paths
+// ---------------------------------------------------------------------------
+
+#[test]
+fn batch_creates_nested_paths() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.fs(Some("main")).unwrap();
+
+    let mut batch = fs.batch(Default::default());
+    batch.write("a/b/c/deep.txt", b"deep").unwrap();
+    batch.commit().unwrap();
+
+    let fs = store.fs(Some("main")).unwrap();
+    assert_eq!(fs.read_text("a/b/c/deep.txt").unwrap(), "deep");
+    assert!(fs.is_dir("a").unwrap());
+    assert!(fs.is_dir("a/b").unwrap());
+    assert!(fs.is_dir("a/b/c").unwrap());
+}
+
+// ---------------------------------------------------------------------------
+// Multiple batches sequential
+// ---------------------------------------------------------------------------
+
+#[test]
+fn batch_sequential_commits() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+
+    // First batch
+    let fs = store.fs(Some("main")).unwrap();
+    let mut batch = fs.batch(Default::default());
+    batch.write("a.txt", b"aaa").unwrap();
+    batch.commit().unwrap();
+
+    // Second batch (needs fresh fs)
+    let fs = store.fs(Some("main")).unwrap();
+    let mut batch = fs.batch(Default::default());
+    batch.write("b.txt", b"bbb").unwrap();
+    batch.commit().unwrap();
+
+    let fs = store.fs(Some("main")).unwrap();
+    assert_eq!(fs.read_text("a.txt").unwrap(), "aaa");
+    assert_eq!(fs.read_text("b.txt").unwrap(), "bbb");
+}
+
+// ---------------------------------------------------------------------------
+// Remove all files in a directory
+// ---------------------------------------------------------------------------
+
+#[test]
+fn batch_remove_all_dir_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let (store, fs) = common::store_with_files(dir.path());
+
+    let mut batch = fs.batch(Default::default());
+    batch.remove("dir/a.txt").unwrap();
+    batch.remove("dir/b.txt").unwrap();
+    batch.commit().unwrap();
+
+    let fs = store.fs(Some("main")).unwrap();
+    assert!(!fs.exists("dir/a.txt").unwrap());
+    assert!(!fs.exists("dir/b.txt").unwrap());
+    // hello.txt untouched
+    assert!(fs.exists("hello.txt").unwrap());
+}
+
+// ---------------------------------------------------------------------------
+// Write many files in one batch
+// ---------------------------------------------------------------------------
+
+#[test]
+fn batch_many_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.fs(Some("main")).unwrap();
+
+    let mut batch = fs.batch(Default::default());
+    for i in 0..50 {
+        batch.write(&format!("file_{:03}.txt", i), format!("data {}", i).as_bytes()).unwrap();
+    }
+    batch.commit().unwrap();
+
+    let fs = store.fs(Some("main")).unwrap();
+    assert_eq!(fs.read_text("file_000.txt").unwrap(), "data 0");
+    assert_eq!(fs.read_text("file_049.txt").unwrap(), "data 49");
+    let entries = fs.walk("").unwrap();
+    assert_eq!(entries.len(), 50);
+}
+
+// ---------------------------------------------------------------------------
+// Write overwrites in same batch
+// ---------------------------------------------------------------------------
+
+#[test]
+fn batch_last_write_wins() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.fs(Some("main")).unwrap();
+
+    let mut batch = fs.batch(Default::default());
+    batch.write("x.txt", b"first").unwrap();
+    batch.write("x.txt", b"second").unwrap();
+    batch.write("x.txt", b"third").unwrap();
+    batch.commit().unwrap();
+
+    let fs = store.fs(Some("main")).unwrap();
+    assert_eq!(fs.read_text("x.txt").unwrap(), "third");
+}

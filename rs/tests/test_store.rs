@@ -244,3 +244,150 @@ fn set_default_to_nonexistent() {
     store.branches().set_default("nope").unwrap();
     assert!(store.fs(None).is_err());
 }
+
+// ---------------------------------------------------------------------------
+// RefDict — set_and_get
+// ---------------------------------------------------------------------------
+
+#[test]
+fn branches_set_and_get_returns_old() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let sha = store.branches().get("main").unwrap().unwrap();
+    store.branches().set("dev", &sha).unwrap();
+
+    // Advance dev
+    let fs = store.fs(Some("dev")).unwrap();
+    fs.write("new.txt", b"data", Default::default()).unwrap();
+    let new_sha = store.branches().get("dev").unwrap().unwrap();
+
+    // set_and_get returns old value
+    let old = store.branches().set_and_get("dev", &sha).unwrap();
+    assert_eq!(old, Some(new_sha));
+    // Now dev points back to original
+    assert_eq!(store.branches().get("dev").unwrap().unwrap(), sha);
+}
+
+#[test]
+fn branches_set_and_get_new_ref() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let sha = store.branches().get("main").unwrap().unwrap();
+
+    let old = store.branches().set_and_get("brand_new", &sha).unwrap();
+    assert!(old.is_none());
+    assert_eq!(store.branches().get("brand_new").unwrap().unwrap(), sha);
+}
+
+// ---------------------------------------------------------------------------
+// RefDict — branches iteration
+// ---------------------------------------------------------------------------
+
+#[test]
+fn branches_iter_empty_after_delete() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    store.branches().delete("main").unwrap();
+    let list = store.branches().list().unwrap();
+    assert!(list.is_empty());
+}
+
+#[test]
+fn branches_list_sorted() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let sha = store.branches().get("main").unwrap().unwrap();
+    store.branches().set("zebra", &sha).unwrap();
+    store.branches().set("alpha", &sha).unwrap();
+    store.branches().set("beta", &sha).unwrap();
+
+    let list = store.branches().list().unwrap();
+    assert_eq!(list, vec!["alpha", "beta", "main", "zebra"]);
+}
+
+// ---------------------------------------------------------------------------
+// RefDict — tags iteration
+// ---------------------------------------------------------------------------
+
+#[test]
+fn tags_iter_pairs() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let sha = store.branches().get("main").unwrap().unwrap();
+    store.tags().set("v1", &sha).unwrap();
+    store.tags().set("v2", &sha).unwrap();
+
+    let pairs = store.tags().iter().unwrap();
+    assert_eq!(pairs.len(), 2);
+    assert_eq!(pairs[0].0, "v1");
+    assert_eq!(pairs[1].0, "v2");
+    assert_eq!(pairs[0].1, sha);
+}
+
+#[test]
+fn tags_empty_list() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    assert!(store.tags().list().unwrap().is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// RefDict — branches has after operations
+// ---------------------------------------------------------------------------
+
+#[test]
+fn branches_has_after_delete() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let sha = store.branches().get("main").unwrap().unwrap();
+    store.branches().set("tmp", &sha).unwrap();
+    assert!(store.branches().has("tmp").unwrap());
+    store.branches().delete("tmp").unwrap();
+    assert!(!store.branches().has("tmp").unwrap());
+}
+
+// ---------------------------------------------------------------------------
+// Store clone
+// ---------------------------------------------------------------------------
+
+#[test]
+fn store_clone_shares_state() {
+    let dir = tempfile::tempdir().unwrap();
+    let store1 = common::create_store(dir.path(), "main");
+    let store2 = store1.clone();
+
+    // Write via store1
+    let fs = store1.fs(Some("main")).unwrap();
+    fs.write("shared.txt", b"data", Default::default()).unwrap();
+
+    // Read via store2
+    let fs2 = store2.fs(Some("main")).unwrap();
+    assert_eq!(fs2.read_text("shared.txt").unwrap(), "data");
+}
+
+// ---------------------------------------------------------------------------
+// Multiple branches with different content
+// ---------------------------------------------------------------------------
+
+#[test]
+fn branches_independent_content() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let sha = store.branches().get("main").unwrap().unwrap();
+    store.branches().set("dev", &sha).unwrap();
+
+    // Write different content to each
+    let fs = store.fs(Some("main")).unwrap();
+    fs.write("main_only.txt", b"main", Default::default()).unwrap();
+
+    let fs = store.fs(Some("dev")).unwrap();
+    fs.write("dev_only.txt", b"dev", Default::default()).unwrap();
+
+    // Verify isolation
+    let main_fs = store.fs(Some("main")).unwrap();
+    let dev_fs = store.fs(Some("dev")).unwrap();
+    assert!(main_fs.exists("main_only.txt").unwrap());
+    assert!(!main_fs.exists("dev_only.txt").unwrap());
+    assert!(!dev_fs.exists("main_only.txt").unwrap());
+    assert!(dev_fs.exists("dev_only.txt").unwrap());
+}

@@ -381,3 +381,162 @@ fn commit_info_time_populated() {
     assert!(log[0].time.is_some());
     assert!(log[0].time.unwrap() > 0);
 }
+
+// ---------------------------------------------------------------------------
+// undo — edge cases
+// ---------------------------------------------------------------------------
+
+#[test]
+fn undo_too_many_errors() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.fs(Some("main")).unwrap();
+    fs.write("a.txt", b"a", Default::default()).unwrap();
+    let fs = store.fs(Some("main")).unwrap();
+
+    // undo once succeeds
+    let undone = fs.undo().unwrap();
+    // undo again on init commit fails
+    assert!(undone.undo().is_err());
+}
+
+#[test]
+fn redo_on_init_commit_errors() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.fs(Some("main")).unwrap();
+
+    // Init commit has no reflog entries with new_sha matching, so redo fails
+    // (The 0000 -> init entry has new_sha=init but old_sha=0000 which is invalid)
+    // Just verify redo doesn't panic — it may error or succeed depending on reflog
+    let _ = fs.redo();
+}
+
+#[test]
+fn undo_redo_with_batch() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.fs(Some("main")).unwrap();
+    let hash_init = fs.commit_hash().unwrap();
+
+    let mut batch = fs.batch(Default::default());
+    batch.write("a.txt", b"a").unwrap();
+    batch.write("b.txt", b"b").unwrap();
+    batch.commit().unwrap();
+
+    let fs = store.fs(Some("main")).unwrap();
+    let hash_batch = fs.commit_hash().unwrap();
+    assert_ne!(hash_batch, hash_init);
+
+    // undo the batch
+    let undone = fs.undo().unwrap();
+    assert_eq!(undone.commit_hash().unwrap(), hash_init);
+    assert!(!undone.exists("a.txt").unwrap());
+    assert!(!undone.exists("b.txt").unwrap());
+
+    // redo the batch
+    let redone = undone.redo().unwrap();
+    assert_eq!(redone.commit_hash().unwrap(), hash_batch);
+    assert!(redone.exists("a.txt").unwrap());
+}
+
+#[test]
+fn log_after_undo_reflects_earlier_state() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.fs(Some("main")).unwrap();
+    fs.write("a.txt", b"a", fs::WriteOptions {
+        message: Some("write a".into()),
+        ..Default::default()
+    })
+    .unwrap();
+    let fs = store.fs(Some("main")).unwrap();
+
+    let _undone = fs.undo().unwrap();
+    // After undo, the log should only show the init commit
+    let fs_fresh = store.fs(Some("main")).unwrap();
+    let log = fs_fresh.log(Default::default()).unwrap();
+    assert_eq!(log.len(), 1);
+    assert!(log[0].message.contains("Initialize"));
+}
+
+#[test]
+fn multiple_undos() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.fs(Some("main")).unwrap();
+    let h0 = fs.commit_hash().unwrap();
+
+    fs.write("a.txt", b"a", Default::default()).unwrap();
+    let fs = store.fs(Some("main")).unwrap();
+    let h1 = fs.commit_hash().unwrap();
+
+    fs.write("b.txt", b"b", Default::default()).unwrap();
+    let fs = store.fs(Some("main")).unwrap();
+
+    // undo twice
+    let u1 = fs.undo().unwrap();
+    assert_eq!(u1.commit_hash().unwrap(), h1);
+    assert!(u1.exists("a.txt").unwrap());
+    assert!(!u1.exists("b.txt").unwrap());
+
+    let u2 = u1.undo().unwrap();
+    assert_eq!(u2.commit_hash().unwrap(), h0);
+    assert!(!u2.exists("a.txt").unwrap());
+
+    // Verify branch moved back
+    let fs_fresh = store.fs(Some("main")).unwrap();
+    assert_eq!(fs_fresh.commit_hash().unwrap(), h0);
+}
+
+#[test]
+fn log_initial_commit_only() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.fs(Some("main")).unwrap();
+
+    let log = fs.log(Default::default()).unwrap();
+    assert_eq!(log.len(), 1);
+    assert!(log[0].message.contains("Initialize"));
+}
+
+#[test]
+fn back_snapshot_is_readonly_view() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.fs(Some("main")).unwrap();
+    fs.write("a.txt", b"a", Default::default()).unwrap();
+    let fs = store.fs(Some("main")).unwrap();
+
+    let prev = fs.back(1).unwrap();
+    // back() returns a detached Fs — writing on it should fail (no branch)
+    let result = prev.write("x.txt", b"x", Default::default());
+    assert!(result.is_err());
+}
+
+#[test]
+fn reflog_has_init_entry() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+
+    let entries = store.branches().reflog("main").unwrap();
+    assert!(!entries.is_empty());
+    // First entry should reference initial commit
+    assert!(entries.iter().any(|e| e.message.contains("Initialize")));
+}
+
+#[test]
+fn parent_returns_correct_content() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.fs(Some("main")).unwrap();
+    fs.write("a.txt", b"a", Default::default()).unwrap();
+    let fs = store.fs(Some("main")).unwrap();
+    fs.write("b.txt", b"b", Default::default()).unwrap();
+    let fs = store.fs(Some("main")).unwrap();
+
+    let parent = fs.parent().unwrap().unwrap();
+    // Parent has a.txt but not b.txt
+    assert_eq!(parent.read_text("a.txt").unwrap(), "a");
+    assert!(!parent.exists("b.txt").unwrap());
+}

@@ -394,3 +394,163 @@ fn retry_write_succeeds() {
     let fs = store.fs(Some("main")).unwrap();
     assert_eq!(fs.read_text("retried.txt").unwrap(), "ok");
 }
+
+// ---------------------------------------------------------------------------
+// write — edge cases
+// ---------------------------------------------------------------------------
+
+#[test]
+fn write_empty_data() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.fs(Some("main")).unwrap();
+    fs.write("empty.txt", b"", Default::default()).unwrap();
+    let fs = store.fs(Some("main")).unwrap();
+    assert_eq!(fs.read("empty.txt").unwrap(), b"");
+}
+
+#[test]
+fn write_overwrite_existing() {
+    let dir = tempfile::tempdir().unwrap();
+    let (store, fs) = common::store_with_files(dir.path());
+    fs.write("hello.txt", b"overwritten", Default::default()).unwrap();
+    let fs = store.fs(Some("main")).unwrap();
+    assert_eq!(fs.read_text("hello.txt").unwrap(), "overwritten");
+}
+
+#[test]
+fn write_binary_with_null_bytes() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.fs(Some("main")).unwrap();
+    let data: Vec<u8> = (0u8..=255).collect();
+    fs.write("binary.bin", &data, Default::default()).unwrap();
+    let fs = store.fs(Some("main")).unwrap();
+    assert_eq!(fs.read("binary.bin").unwrap(), data);
+    assert_eq!(fs.size("binary.bin").unwrap(), 256);
+}
+
+#[test]
+fn write_preserves_other_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let (store, fs) = common::store_with_files(dir.path());
+    fs.write("new.txt", b"new", Default::default()).unwrap();
+    let fs = store.fs(Some("main")).unwrap();
+    // Existing files still present
+    assert_eq!(fs.read_text("hello.txt").unwrap(), "hello");
+    assert_eq!(fs.read_text("dir/a.txt").unwrap(), "aaa");
+    assert_eq!(fs.read_text("new.txt").unwrap(), "new");
+}
+
+// ---------------------------------------------------------------------------
+// write_symlink — edge cases
+// ---------------------------------------------------------------------------
+
+#[cfg(unix)]
+#[test]
+fn write_symlink_nested_target() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.fs(Some("main")).unwrap();
+    fs.write_symlink("link", "a/b/c/deep.txt", Default::default()).unwrap();
+    let fs = store.fs(Some("main")).unwrap();
+    assert_eq!(fs.readlink("link").unwrap(), "a/b/c/deep.txt");
+}
+
+#[cfg(unix)]
+#[test]
+fn read_on_symlink_returns_target_bytes() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.fs(Some("main")).unwrap();
+    fs.write_symlink("link", "target.txt", Default::default()).unwrap();
+    let fs = store.fs(Some("main")).unwrap();
+    // read() on symlink returns the target path as bytes
+    assert_eq!(fs.read("link").unwrap(), b"target.txt");
+}
+
+#[cfg(unix)]
+#[test]
+fn write_symlink_custom_message() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.fs(Some("main")).unwrap();
+    fs.write_symlink("link", "target.txt", fs::WriteOptions {
+        message: Some("add symlink".into()),
+        ..Default::default()
+    })
+    .unwrap();
+    let fs = store.fs(Some("main")).unwrap();
+    let log = fs.log(fs::LogOptions { limit: Some(1), skip: None }).unwrap();
+    assert_eq!(log[0].message, "add symlink");
+}
+
+// ---------------------------------------------------------------------------
+// remove via batch
+// ---------------------------------------------------------------------------
+
+#[test]
+fn remove_file_via_batch() {
+    let dir = tempfile::tempdir().unwrap();
+    let (store, fs) = common::store_with_files(dir.path());
+    let mut batch = fs.batch(Default::default());
+    batch.remove("hello.txt").unwrap();
+    batch.commit().unwrap();
+    let fs = store.fs(Some("main")).unwrap();
+    assert!(!fs.exists("hello.txt").unwrap());
+    // Other files still present
+    assert!(fs.exists("dir/a.txt").unwrap());
+}
+
+#[test]
+fn remove_nested_file_via_batch() {
+    let dir = tempfile::tempdir().unwrap();
+    let (store, fs) = common::store_with_files(dir.path());
+    let mut batch = fs.batch(Default::default());
+    batch.remove("dir/a.txt").unwrap();
+    batch.commit().unwrap();
+    let fs = store.fs(Some("main")).unwrap();
+    assert!(!fs.exists("dir/a.txt").unwrap());
+    assert!(fs.exists("dir/b.txt").unwrap());
+}
+
+// ---------------------------------------------------------------------------
+// rename — edge cases
+// ---------------------------------------------------------------------------
+
+#[test]
+fn rename_preserves_other_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let (store, fs) = common::store_with_files(dir.path());
+    fs.rename("hello.txt", "renamed.txt", Default::default()).unwrap();
+    let fs = store.fs(Some("main")).unwrap();
+    // dir/* still present
+    assert_eq!(fs.read_text("dir/a.txt").unwrap(), "aaa");
+    assert_eq!(fs.read_text("dir/b.txt").unwrap(), "bbb");
+}
+
+#[test]
+fn rename_single_commit() {
+    let dir = tempfile::tempdir().unwrap();
+    let (store, fs) = common::store_with_files(dir.path());
+    let log_before = fs.log(Default::default()).unwrap();
+    fs.rename("hello.txt", "renamed.txt", Default::default()).unwrap();
+    let fs = store.fs(Some("main")).unwrap();
+    let log_after = fs.log(Default::default()).unwrap();
+    // Rename adds exactly one commit
+    assert_eq!(log_after.len(), log_before.len() + 1);
+}
+
+#[test]
+fn rename_custom_message() {
+    let dir = tempfile::tempdir().unwrap();
+    let (store, fs) = common::store_with_files(dir.path());
+    fs.rename("hello.txt", "moved.txt", fs::WriteOptions {
+        message: Some("move file".into()),
+        ..Default::default()
+    })
+    .unwrap();
+    let fs = store.fs(Some("main")).unwrap();
+    let log = fs.log(fs::LogOptions { limit: Some(1), skip: None }).unwrap();
+    assert_eq!(log[0].message, "move file");
+}

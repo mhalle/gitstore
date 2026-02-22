@@ -231,3 +231,85 @@ fn glob_doublestar_sorted() {
     sorted.sort();
     assert_eq!(matches, sorted);
 }
+
+// ---------------------------------------------------------------------------
+// iglob (if available — same as glob, just iterator)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn glob_star_rs_extension() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_, fs) = store_with_glob_files(dir.path());
+    let matches = fs.glob("src/*.rs").unwrap();
+    assert_eq!(matches, vec!["src/util.rs"]);
+}
+
+#[test]
+fn glob_doublestar_all_md() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_, fs) = store_with_glob_files(dir.path());
+    let matches = fs.glob("**/*.md").unwrap();
+    assert!(matches.contains(&"docs/api.md".to_string()));
+    assert!(matches.contains(&"docs/guide.md".to_string()));
+    assert_eq!(matches.len(), 2);
+}
+
+#[test]
+fn glob_doublestar_mixed_extensions() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_, fs) = store_with_glob_files(dir.path());
+    let py_matches = fs.glob("**/*.py").unwrap();
+    let rs_matches = fs.glob("**/*.rs").unwrap();
+    assert_eq!(py_matches.len(), 4); // main.py, lib.py, mod.py, core.py
+    assert_eq!(rs_matches.len(), 1); // util.rs
+}
+
+#[test]
+fn glob_star_empty_repo() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.fs(Some("main")).unwrap();
+    let matches = fs.glob("*.txt").unwrap();
+    assert!(matches.is_empty());
+}
+
+#[test]
+fn glob_doublestar_all_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_, fs) = store_with_glob_files(dir.path());
+    let matches = fs.glob("**/*").unwrap();
+    // Should get all non-dotfiles
+    assert!(matches.contains(&"readme.txt".to_string()));
+    assert!(matches.contains(&"src/main.py".to_string()));
+    assert!(matches.contains(&"src/deep/nested/core.py".to_string()));
+    assert!(!matches.contains(&".hidden".to_string()));
+}
+
+#[test]
+fn glob_question_mark_in_subdir() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.fs(Some("main")).unwrap();
+    let mut batch = fs.batch(Default::default());
+    batch.write("dir/ab.txt", b"a").unwrap();
+    batch.write("dir/cd.txt", b"b").unwrap();
+    batch.write("dir/abc.txt", b"c").unwrap();
+    batch.commit().unwrap();
+
+    let fs = store.fs(Some("main")).unwrap();
+    let matches = fs.glob("dir/??.txt").unwrap();
+    assert_eq!(matches, vec!["dir/ab.txt", "dir/cd.txt"]);
+}
+
+#[test]
+fn glob_doublestar_star_at_end() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_, fs) = store_with_glob_files(dir.path());
+    let matches = fs.glob("src/**/*").unwrap();
+    // Should include all files under src/
+    assert!(matches.contains(&"src/main.py".to_string()));
+    assert!(matches.contains(&"src/lib.py".to_string()));
+    assert!(matches.contains(&"src/util.rs".to_string()));
+    assert!(matches.contains(&"src/deep/mod.py".to_string()));
+    assert!(matches.contains(&"src/deep/nested/core.py".to_string()));
+}
