@@ -68,26 +68,23 @@ class WriteEntry:
 class FS:
     """An immutable snapshot of a committed tree.
 
-    Read-only when branch is None (tag snapshot).
-    Writable when branch is set — writes auto-commit and return a new FS.
+    Read-only when ``writable`` is False (tag snapshot).
+    Writable when ``writable`` is True — writes auto-commit and return a new FS.
     """
 
-    def __init__(self, gitstore: GitStore, commit_oid, branch: str | None = None):
+    def __init__(self, gitstore: GitStore, commit_oid, ref_name: str | None = None, *, writable: bool | None = None):
         self._store = gitstore
         self._commit_oid = commit_oid
-        self._branch = branch
+        self._ref_name = ref_name
+        self._writable = writable if writable is not None else (ref_name is not None)
         commit = gitstore._repo[commit_oid]
         self._tree_oid = commit.tree
         self._changes = None
 
-    @property
-    def _writable(self) -> bool:
-        return self._branch is not None
-
     def __repr__(self) -> str:
         short = self._commit_oid.decode()[:7]
-        if self._branch:
-            return f"FS(branch={self._branch!r}, commit={short})"
+        if self._ref_name:
+            return f"FS(ref_name={self._ref_name!r}, commit={short})"
         return f"FS(commit={short})"
 
     @property
@@ -95,8 +92,8 @@ class FS:
         return self._commit_oid.decode()
 
     @property
-    def branch(self) -> str | None:
-        return self._branch
+    def ref_name(self) -> str | None:
+        return self._ref_name
 
     @property
     def message(self) -> str:
@@ -435,12 +432,12 @@ class FS:
         new_tree_oid = rebuild_tree(repo, self._tree_oid, writes, removes)
 
         # Atomic check-and-update under file lock
-        ref_name = f"refs/heads/{self._branch}"
+        ref_name = f"refs/heads/{self._ref_name}"
         with repo_lock(repo.path):
             ref = repo.references[ref_name]
             if ref.resolve().target != self._commit_oid:
                 raise StaleSnapshotError(
-                    f"Branch {self._branch!r} has advanced since this snapshot"
+                    f"Branch {self._ref_name!r} has advanced since this snapshot"
                 )
 
             if new_tree_oid == self._tree_oid:
@@ -458,7 +455,7 @@ class FS:
             # Pass commit message to reflog
             ref.set_target(new_commit_oid, message=f"commit: {final_message}".encode(), committer=sig._identity)
 
-        new_fs = FS(self._store, new_commit_oid, branch=self._branch)
+        new_fs = FS(self._store, new_commit_oid, ref_name=self._ref_name, writable=self._writable)
         new_fs._changes = changes
         return new_fs
 
@@ -838,7 +835,7 @@ class FS:
         commit = self._store._repo[self._commit_oid]
         if not commit.parents:
             return None
-        return FS(self._store, commit.parents[0], branch=self._branch)
+        return FS(self._store, commit.parents[0], ref_name=self._ref_name, writable=self._writable)
 
     def back(self, n: int = 1) -> FS:
         """Return the FS at the *n*-th ancestor commit.
@@ -893,12 +890,12 @@ class FS:
 
         # Atomic stale-check + ref update under a single lock
         repo = self._store._repo
-        ref_name = f"refs/heads/{self._branch}"
+        ref_name = f"refs/heads/{self._ref_name}"
         with repo_lock(repo.path):
             ref = repo.references[ref_name]
             if ref.resolve().target != self._commit_oid:
                 raise StaleSnapshotError(
-                    f"Branch {self._branch!r} has advanced since this snapshot"
+                    f"Branch {self._ref_name!r} has advanced since this snapshot"
                 )
             ref.set_target(current._commit_oid, message=b"undo: move back", committer=self._store._signature._identity)
 
@@ -934,18 +931,18 @@ class FS:
             raise PermissionError("Cannot redo on a read-only snapshot")
 
         # Early stale check (fast-fail; authoritative check under lock below)
-        ref_name = f"refs/heads/{self._branch}"
+        ref_name = f"refs/heads/{self._ref_name}"
         ref = self._store._repo.references[ref_name]
         if ref.resolve().target != self._commit_oid:
             raise StaleSnapshotError(
-                f"Branch {self._branch!r} has advanced since this snapshot"
+                f"Branch {self._ref_name!r} has advanced since this snapshot"
             )
 
         # Read reflog for this branch (safe to do outside the lock — read-only)
-        ref_bytes = f"refs/heads/{self._branch}".encode()
+        ref_bytes = f"refs/heads/{self._ref_name}".encode()
         entries = list(self._store._repo._drepo.read_reflog(ref_bytes))
         if not entries:
-            raise ValueError(f"No reflog found for branch {self._branch!r}")
+            raise ValueError(f"No reflog found for branch {self._ref_name!r}")
 
         # Find current position in reflog (search backwards to get most recent)
         current_sha = self._commit_oid
@@ -981,16 +978,16 @@ class FS:
                 )
             index -= 1
 
-        target_fs = FS(self._store, target_sha, branch=self._branch)
+        target_fs = FS(self._store, target_sha, ref_name=self._ref_name, writable=self._writable)
 
         # Atomic stale-check + ref update under a single lock
         repo = self._store._repo
-        ref_name = f"refs/heads/{self._branch}"
+        ref_name = f"refs/heads/{self._ref_name}"
         with repo_lock(repo.path):
             ref = repo.references[ref_name]
             if ref.resolve().target != self._commit_oid:
                 raise StaleSnapshotError(
-                    f"Branch {self._branch!r} has advanced since this snapshot"
+                    f"Branch {self._ref_name!r} has advanced since this snapshot"
                 )
             ref.set_target(target_sha, message=b"redo: move forward", committer=self._store._signature._identity)
 

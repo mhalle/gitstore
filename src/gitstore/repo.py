@@ -375,9 +375,9 @@ class RefDict(MutableMapping):
                 raise ValueError(f"Tag {name!r} does not point to a commit")
             if obj.type_num != 1:
                 raise ValueError(f"Tag {name!r} does not point to a commit")
-            return FS(self._store, obj.id, branch=None)
+            return FS(self._store, obj.id, ref_name=name, writable=False)
         else:
-            return FS(self._store, oid, branch=name)
+            return FS(self._store, oid, ref_name=name)
 
     def __setitem__(self, name: str, fs: FS):
         from ._lock import repo_lock
@@ -459,27 +459,39 @@ class RefDict(MutableMapping):
 
         Example:
             >>> fs_wow = repo.branches.set('wow', fs_main)
-            >>> fs_wow.branch  # 'wow' (not 'main')
+            >>> fs_wow.ref_name  # 'wow' (not 'main')
         """
         self[name] = fs
         return self[name]
 
     @property
-    def default(self) -> str | None:
-        """The repository's default branch name, or ``None`` if HEAD is dangling.
+    def current_name(self) -> str | None:
+        """The repository's current (HEAD) branch name, or ``None`` if HEAD is dangling.
 
         Only valid for branches; raises ``ValueError`` for tags.
-
-        Setting validates the branch exists; raises ``KeyError`` if not.
+        Cheap — does not construct an FS object.
         """
         if self._is_tags:
-            raise ValueError("Tags do not have a default")
+            raise ValueError("Tags do not have a current branch")
         return self._store._repo.get_head_branch()
 
-    @default.setter
-    def default(self, name: str) -> None:
+    @property
+    def current(self) -> FS | None:
+        """The FS for the repository's current (HEAD) branch, or ``None`` if HEAD is dangling.
+
+        Only valid for branches; raises ``ValueError`` for tags.
+        """
         if self._is_tags:
-            raise ValueError("Tags do not have a default")
+            raise ValueError("Tags do not have a current branch")
+        name = self._store._repo.get_head_branch()
+        if name is None:
+            return None
+        return self[name]
+
+    @current.setter
+    def current(self, name: str) -> None:
+        if self._is_tags:
+            raise ValueError("Tags do not have a current branch")
         if name not in self:
             raise KeyError(f"Branch not found: {name!r}")
         self._store._repo.set_head_branch(name)

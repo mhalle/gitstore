@@ -72,7 +72,7 @@ def branch_set(ctx, name, branch, force, empty, ref, at_path, match_pattern, bef
         source_fs = _resolve_fs(store, branch, ref=ref, at_path=at_path,
                                 match_pattern=match_pattern, before=before, back=back)
         from ..fs import FS
-        new_fs = FS(store, source_fs._commit_oid, branch=name)
+        new_fs = FS(store, source_fs._commit_oid, ref_name=name)
         try:
             store.branches[name] = new_fs
         except ValueError as e:
@@ -159,7 +159,7 @@ def tag_set(ctx, name, branch, force, ref, at_path, match_pattern, before, back)
     source_fs = _resolve_fs(store, branch, ref=ref, at_path=at_path,
                             match_pattern=match_pattern, before=before, back=back)
     from ..fs import FS
-    new_fs = FS(store, source_fs._commit_oid, branch=None)
+    new_fs = FS(store, source_fs._commit_oid, writable=False)
     if name in store.tags:
         del store.tags[name]
     store.tags[name] = new_fs
@@ -218,13 +218,13 @@ def branch_default(ctx, branch):
     """
     store = _open_store(_require_repo(ctx))
     if branch is None:
-        name = store.branches.default
+        name = store.branches.current_name
         if name is None:
             raise click.ClickException("HEAD does not point to an existing branch")
         click.echo(name)
     else:
         try:
-            store.branches.default = branch
+            store.branches.current = branch
         except KeyError:
             raise click.ClickException(f"Branch not found: {branch}")
         _status(ctx, f"Default branch set to {branch}")

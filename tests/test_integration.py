@@ -31,5 +31,6 @@ def test_full_workflow(tmp_path):
 
     # Tag is read-only
     tag_fs = repo.tags["v1"]
-    assert tag_fs.branch is None
+    assert tag_fs.ref_name == "v1"
+    assert not tag_fs._writable
     assert tag_fs.read("README.md") == b"# Project"

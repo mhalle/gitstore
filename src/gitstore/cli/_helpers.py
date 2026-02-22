@@ -155,7 +155,7 @@ def _require_repo(ctx) -> str:
 
 def _default_branch(store: GitStore) -> str:
     """Return the repo's HEAD branch, falling back to 'main'."""
-    return store.branches.default or "main"
+    return store.branches.current_name or "main"
 
 
 def _open_store(repo_path: str) -> GitStore:
@@ -382,7 +382,7 @@ def _resolve_ref(store: GitStore, ref_str: str):
                     f"Object {ref_str} is not a commit"
                 )
             from ..fs import FS
-            return FS(store, obj.id, branch=None)
+            return FS(store, obj.id, writable=False)
     except click.ClickException:
         raise
     except (ValueError, KeyError):
@@ -491,7 +491,7 @@ def _log_entry_dict(entry) -> dict:
         "time": entry.time.isoformat(),
         "author_name": entry.author_name,
         "author_email": entry.author_email,
-        "branch": entry.branch,
+        "branch": entry.ref_name,
     }
 
 

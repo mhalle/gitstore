@@ -608,7 +608,7 @@ class TestBranchesSet:
 
         fs_new = repo.branches.set("feature", fs1)
 
-        assert fs_new.branch == "feature"
+        assert fs_new.ref_name == "feature"
         assert fs_new.commit_hash == fs1.commit_hash
         assert fs_new is not fs1  # New object
         assert fs_new._writable
@@ -633,7 +633,7 @@ class TestBranchesSet:
         fs_updated = repo.branches.set("feature", fs2)
 
         assert fs_updated.commit_hash == fs2.commit_hash
-        assert fs_updated.branch == "feature"
+        assert fs_updated.ref_name == "feature"
 
     def test_set_with_readonly_snapshot(self, repo_fs):
         """branches.set() should accept read-only snapshots."""
@@ -646,7 +646,7 @@ class TestBranchesSet:
         # Should accept read-only tag snapshot
         fs_branch = repo.branches.set("from-tag", tag_fs)
 
-        assert fs_branch.branch == "from-tag"
+        assert fs_branch.ref_name == "from-tag"
         assert fs_branch._writable
         assert fs_branch.commit_hash == tag_fs.commit_hash
 
@@ -659,7 +659,7 @@ class TestBranchesSet:
         fs2 = fs_branch.write("b.txt", b"b")
 
         # Should update the 'feature' branch
-        assert fs2.branch == "feature"
+        assert fs2.ref_name == "feature"
         assert repo.branches["feature"].commit_hash == fs2.commit_hash
 
 

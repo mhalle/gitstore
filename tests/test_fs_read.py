@@ -295,9 +295,9 @@ class TestProperties:
         assert isinstance(fs.commit_hash, str)
         assert len(fs.commit_hash) == 40
 
-    def test_branch(self, repo_with_files):
+    def test_ref_name(self, repo_with_files):
         _, fs = repo_with_files
-        assert fs.branch == "main"
+        assert fs.ref_name == "main"
 
     def test_message(self, repo_with_files):
         _, fs = repo_with_files

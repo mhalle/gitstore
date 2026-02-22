@@ -48,7 +48,7 @@ class TestRefDictBranches:
     def test_get(self, tmp_path):
         repo = GitStore.open(tmp_path / "test.git")
         fs = repo.branches["main"]
-        assert fs.branch == "main"
+        assert fs.ref_name == "main"
 
     def test_get_missing(self, tmp_path):
         repo = GitStore.open(tmp_path / "test.git")
@@ -94,7 +94,8 @@ class TestRefDictTags:
         repo.tags["v1"] = fs
         tag_fs = repo.tags["v1"]
         assert tag_fs.commit_hash == fs.commit_hash
-        assert tag_fs.branch is None  # read-only
+        assert tag_fs.ref_name == "v1"
+        assert not tag_fs._writable  # read-only
 
     def test_tag_missing(self, tmp_path):
         repo = GitStore.open(tmp_path / "test.git")
@@ -195,7 +196,8 @@ class TestRefDictTags:
         )
         tag_fs = repo.tags["v-annotated"]
         assert tag_fs.commit_hash == fs.commit_hash
-        assert tag_fs.branch is None
+        assert tag_fs.ref_name == "v-annotated"
+        assert not tag_fs._writable
 
 
 class TestRefDictMapping:
@@ -203,7 +205,7 @@ class TestRefDictMapping:
         repo = GitStore.open(tmp_path / "test.git")
         fs = repo.branches.get("main")
         assert fs is not None
-        assert fs.branch == "main"
+        assert fs.ref_name == "main"
 
     def test_get_missing_default(self, tmp_path):
         repo = GitStore.open(tmp_path / "test.git")
@@ -218,42 +220,59 @@ class TestRefDictMapping:
         repo = GitStore.open(tmp_path / "test.git")
         vals = list(repo.branches.values())
         assert len(vals) == 1
-        assert vals[0].branch == "main"
+        assert vals[0].ref_name == "main"
 
     def test_items(self, tmp_path):
         repo = GitStore.open(tmp_path / "test.git")
         items = list(repo.branches.items())
         assert len(items) == 1
         assert items[0][0] == "main"
-        assert items[0][1].branch == "main"
+        assert items[0][1].ref_name == "main"
 
 
-class TestRefDictDefault:
-    def test_default_read(self, tmp_path):
+class TestRefDictCurrent:
+    def test_current_name_read(self, tmp_path):
         repo = GitStore.open(tmp_path / "test.git")
-        assert repo.branches.default == "main"
+        assert repo.branches.current_name == "main"
 
-    def test_default_custom(self, tmp_path):
+    def test_current_name_custom(self, tmp_path):
         repo = GitStore.open(tmp_path / "test.git", branch="data")
-        assert repo.branches.default == "data"
+        assert repo.branches.current_name == "data"
 
-    def test_default_set(self, tmp_path):
+    def test_current_set(self, tmp_path):
         repo = GitStore.open(tmp_path / "test.git")
         fs = repo.branches["main"]
         repo.branches["dev"] = fs
-        repo.branches.default = "dev"
-        assert repo.branches.default == "dev"
+        repo.branches.current = "dev"
+        assert repo.branches.current_name == "dev"
 
-    def test_default_set_nonexistent(self, tmp_path):
+    def test_current_set_nonexistent(self, tmp_path):
         repo = GitStore.open(tmp_path / "test.git")
         with pytest.raises(KeyError):
-            repo.branches.default = "nope"
+            repo.branches.current = "nope"
 
-    def test_default_dangling(self, tmp_path):
+    def test_current_name_dangling(self, tmp_path):
         repo = GitStore.open(tmp_path / "test.git", branch=None)
-        assert repo.branches.default is None
+        assert repo.branches.current_name is None
 
-    def test_default_on_tags_raises(self, tmp_path):
+    def test_current_name_on_tags_raises(self, tmp_path):
         repo = GitStore.open(tmp_path / "test.git")
         with pytest.raises(ValueError):
-            repo.tags.default
+            repo.tags.current_name
+
+    def test_current_returns_fs(self, tmp_path):
+        from gitstore.fs import FS
+        repo = GitStore.open(tmp_path / "test.git")
+        fs = repo.branches.current
+        assert isinstance(fs, FS)
+        assert fs.ref_name == "main"
+        assert fs._writable
+
+    def test_current_dangling_returns_none(self, tmp_path):
+        repo = GitStore.open(tmp_path / "test.git", branch=None)
+        assert repo.branches.current is None
+
+    def test_current_on_tags_raises(self, tmp_path):
+        repo = GitStore.open(tmp_path / "test.git")
+        with pytest.raises(ValueError):
+            repo.tags.current
