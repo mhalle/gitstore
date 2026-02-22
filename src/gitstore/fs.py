@@ -731,6 +731,82 @@ class FS:
             recursive=recursive, message=message,
         )
 
+    def copy_ref(
+        self,
+        source: FS,
+        src_path: str = "",
+        dest_path: str | None = None,
+        *,
+        delete: bool = False,
+        dry_run: bool = False,
+        message: str | None = None,
+    ) -> FS:
+        """Copy files from *source* into this branch in a single atomic commit.
+
+        Since both snapshots share the same object store, blobs are referenced
+        by OID — no data is read into memory.
+
+        Args:
+            source: Any FS (branch, tag, detached commit). Read-only; not modified.
+            src_path: Subtree in source to copy from. ``""`` = root (everything).
+            dest_path: Subtree in dest to copy into. Defaults to *src_path* when ``None``.
+            delete: Remove dest files under *dest_path* that aren't in source.
+            dry_run: Compute changes but don't commit. Returned FS has ``.changes`` set.
+            message: Commit message (auto-generated if ``None``).
+
+        Returns:
+            A new :class:`FS` for the dest branch with the commit applied.
+
+        Raises:
+            ValueError: If *source* belongs to a different repo.
+            PermissionError: If this FS is read-only.
+        """
+        from .copy._resolve import _walk_repo
+        from .copy._types import ChangeReport, FileEntry, _finalize_changes
+        from .tree import BlobOid
+
+        # Validate same repo
+        try:
+            same = os.path.samefile(source._store._repo.path, self._store._repo.path)
+        except OSError:
+            same = False
+        if not same:
+            raise ValueError("source must belong to the same repo as self")
+
+        if dest_path is None:
+            dest_path = src_path
+
+        # Walk both subtrees
+        src_files = _walk_repo(source, src_path)
+        dest_files = _walk_repo(self, dest_path)
+
+        # Build writes and removes
+        writes: dict[str, tuple[bytes, int]] = {}
+        removes: set[str] = set()
+
+        for rel, (oid, mode) in src_files.items():
+            full = f"{dest_path}/{rel}" if dest_path else rel
+            dest_entry = dest_files.get(rel)
+            if dest_entry is None:
+                # add
+                writes[full] = (BlobOid(oid), mode)
+            elif dest_entry != (oid, mode):
+                # update
+                writes[full] = (BlobOid(oid), mode)
+
+        if delete:
+            for rel in dest_files:
+                if rel not in src_files:
+                    full = f"{dest_path}/{rel}" if dest_path else rel
+                    removes.add(full)
+
+        if dry_run:
+            changes = self._build_changes(writes, removes)
+            self._changes = _finalize_changes(changes)
+            return self
+
+        return self._commit_changes(writes, removes, message, operation="cp")
+
     def export(self, path: str | os.PathLike[str]) -> None:
         """Write the tree contents to a directory on the filesystem.
 
