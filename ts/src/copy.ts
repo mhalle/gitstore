@@ -104,7 +104,7 @@ async function walkLocalPaths(
   return result;
 }
 
-async function walkRepo(
+export async function walkRepo(
   fs: FS,
   repoPath: string,
 ): Promise<Map<string, { oid: string; mode: string }>> {

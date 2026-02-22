@@ -112,6 +112,13 @@ pub struct MoveOptions {
 }
 
 #[derive(Debug, Clone, Default)]
+pub struct CopyRefOptions {
+    pub delete: bool,
+    pub dry_run: bool,
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
 pub struct LogOptions {
     pub limit: Option<usize>,
     pub skip: Option<usize>,
@@ -754,6 +761,119 @@ impl Fs {
         self.commit_changes(&all_writes, &msg)
     }
 
+    /// Copy files from another branch/tag/commit into this branch in a single
+    /// atomic commit. Both snapshots must belong to the same repository so
+    /// blobs are referenced by OID — no data is read into memory.
+    pub fn copy_ref(
+        &self,
+        source: &Fs,
+        src_path: &str,
+        dest_path: Option<&str>,
+        opts: CopyRefOptions,
+    ) -> Result<Fs> {
+        let _ = self
+            .branch
+            .as_ref()
+            .ok_or_else(|| Error::permission("cannot write to a read-only snapshot"))?;
+
+        // Validate same repo
+        let same = Arc::ptr_eq(&self.inner, &source.inner) || {
+            let self_canon = std::fs::canonicalize(&self.inner.path).ok();
+            let src_canon = std::fs::canonicalize(&source.inner.path).ok();
+            self_canon.is_some() && self_canon == src_canon
+        };
+        if !same {
+            return Err(Error::invalid_path(
+                "source must belong to the same repo as self".to_string(),
+            ));
+        }
+
+        let src_norm = crate::paths::normalize_path(src_path)?;
+        let dest_norm = match dest_path {
+            Some(p) => crate::paths::normalize_path(p)?,
+            None => src_norm.clone(),
+        };
+
+        let src_tree = source.require_tree()?;
+        let dest_tree = self.require_tree()?;
+
+        // Walk both subtrees
+        let (src_files, dest_files) = self.with_repo(|repo| {
+            let src_files = walk_subtree(repo, src_tree, &src_norm)?;
+            let dest_files = walk_subtree(repo, dest_tree, &dest_norm)?;
+            Ok((src_files, dest_files))
+        })?;
+
+        // Build writes and removes
+        let mut writes: Vec<(String, Option<TreeWrite>)> = Vec::new();
+        let mut report = ChangeReport::new();
+
+        for (rel, (src_oid, src_mode)) in &src_files {
+            let full = if dest_norm.is_empty() {
+                rel.clone()
+            } else {
+                format!("{}/{}", dest_norm, rel)
+            };
+            let dest_entry = dest_files.get(rel);
+            match dest_entry {
+                None => {
+                    let ft = FileType::from_mode(*src_mode).unwrap_or(FileType::Blob);
+                    report.add.push(FileEntry::new(&full, ft));
+                    writes.push((
+                        full,
+                        Some(TreeWrite {
+                            data: vec![],
+                            oid: *src_oid,
+                            mode: *src_mode,
+                        }),
+                    ));
+                }
+                Some((d_oid, d_mode)) if d_oid != src_oid || d_mode != src_mode => {
+                    let ft = FileType::from_mode(*src_mode).unwrap_or(FileType::Blob);
+                    report.update.push(FileEntry::new(&full, ft));
+                    writes.push((
+                        full,
+                        Some(TreeWrite {
+                            data: vec![],
+                            oid: *src_oid,
+                            mode: *src_mode,
+                        }),
+                    ));
+                }
+                _ => {} // identical
+            }
+        }
+
+        if opts.delete {
+            for rel in dest_files.keys() {
+                if !src_files.contains_key(rel) {
+                    let full = if dest_norm.is_empty() {
+                        rel.clone()
+                    } else {
+                        format!("{}/{}", dest_norm, rel)
+                    };
+                    let (_, mode) = dest_files[rel];
+                    let ft = FileType::from_mode(mode).unwrap_or(FileType::Blob);
+                    report.delete.push(FileEntry::new(&full, ft));
+                    writes.push((full, None));
+                }
+            }
+        }
+
+        if opts.dry_run || writes.is_empty() {
+            let mut fs = self.clone();
+            fs.changes = Some(report);
+            return Ok(fs);
+        }
+
+        let msg = opts.message.unwrap_or_else(|| {
+            crate::paths::format_commit_message("cp", None)
+        });
+        let mut new_fs = self.commit_changes(&writes, &msg)?;
+        new_fs.changes = Some(report);
+        Ok(new_fs)
+    }
+
     /// Export the tree to a directory on disk.
     pub fn export(&self, dest: &Path) -> Result<ChangeReport> {
         self.copy_out("", dest, CopyOutOptions::default())
@@ -1203,6 +1323,45 @@ where
             Err(e) => return Err(e),
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// walk_subtree helper for copy_ref
+// ---------------------------------------------------------------------------
+
+use std::collections::BTreeMap;
+
+/// Walk a subtree at `path` within a tree, returning `{rel: (oid, mode)}`.
+fn walk_subtree(
+    repo: &gix::Repository,
+    root_tree: gix::ObjectId,
+    path: &str,
+) -> Result<BTreeMap<String, (gix::ObjectId, u32)>> {
+    let mut result = BTreeMap::new();
+
+    if path.is_empty() {
+        // Walk entire tree
+        let entries = tree::walk_tree(repo, root_tree)?;
+        for (rel, we) in entries {
+            result.insert(rel, (we.oid, we.mode));
+        }
+    } else {
+        // Resolve to subtree
+        let entry = tree::entry_at_path(repo, root_tree, path)?;
+        match entry {
+            Some(e) if e.mode == MODE_TREE => {
+                let entries = tree::walk_tree(repo, e.oid)?;
+                for (rel, we) in entries {
+                    result.insert(rel, (we.oid, we.mode));
+                }
+            }
+            _ => {
+                // Path doesn't exist or isn't a directory — return empty
+            }
+        }
+    }
+
+    Ok(result)
 }
 
 // ---------------------------------------------------------------------------

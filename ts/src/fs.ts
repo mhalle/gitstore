@@ -700,6 +700,57 @@ export class FS {
     return move(this, sources, dest, opts);
   }
 
+  async copyRef(
+    source: FS,
+    srcPath?: string,
+    destPath?: string | null,
+    opts?: { delete?: boolean; dryRun?: boolean; message?: string },
+  ): Promise<FS> {
+    if (!this._writable) throw new PermissionError('Cannot write to a read-only snapshot');
+
+    // Validate same repo
+    const selfPath = this._fsModule.realpathSync(this._gitdir);
+    const srcFsPath = this._fsModule.realpathSync(source._gitdir);
+    if (selfPath !== srcFsPath) {
+      throw new Error('source must belong to the same repo as self');
+    }
+
+    const src = srcPath ?? '';
+    const dest = destPath !== undefined && destPath !== null ? destPath : src;
+
+    const { walkRepo } = await import('./copy.js');
+    const srcFiles = await walkRepo(source, src);
+    const destFiles = await walkRepo(this, dest);
+
+    const writes = new Map<string, TreeWrite>();
+    const removes = new Set<string>();
+
+    for (const [rel, srcEntry] of srcFiles) {
+      const full = dest ? `${dest}/${rel}` : rel;
+      const destEntry = destFiles.get(rel);
+      if (!destEntry || destEntry.oid !== srcEntry.oid || destEntry.mode !== srcEntry.mode) {
+        writes.set(full, { oid: srcEntry.oid, mode: srcEntry.mode });
+      }
+    }
+
+    if (opts?.delete) {
+      for (const rel of destFiles.keys()) {
+        if (!srcFiles.has(rel)) {
+          const full = dest ? `${dest}/${rel}` : rel;
+          removes.add(full);
+        }
+      }
+    }
+
+    if (opts?.dryRun) {
+      const changes = await this._buildChanges(writes, removes);
+      this._changes = finalizeChanges(changes);
+      return this;
+    }
+
+    return this._commitChanges(writes, removes, opts?.message, 'cp');
+  }
+
   async export(destPath: string): Promise<void> {
     for await (const [dirpath, , files] of this.walk()) {
       const dirOnDisk = dirpath ? `${destPath}/${dirpath}` : destPath;
