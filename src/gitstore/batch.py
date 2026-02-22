@@ -17,7 +17,7 @@ class Batch:
 
     def __init__(self, fs: FS, message: str | None = None, operation: str | None = None):
         if not fs._writable:
-            raise PermissionError("Cannot batch on a read-only snapshot")
+            raise fs._readonly_error("batch on")
         self._fs = fs
         self._repo = fs._store._repo
         self._message = message

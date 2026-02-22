@@ -95,7 +95,7 @@ class TestRefDictTags:
         tag_fs = repo.tags["v1"]
         assert tag_fs.commit_hash == fs.commit_hash
         assert tag_fs.ref_name == "v1"
-        assert not tag_fs._writable  # read-only
+        assert not tag_fs.writable  # read-only
 
     def test_tag_missing(self, tmp_path):
         repo = GitStore.open(tmp_path / "test.git")
@@ -197,7 +197,7 @@ class TestRefDictTags:
         tag_fs = repo.tags["v-annotated"]
         assert tag_fs.commit_hash == fs.commit_hash
         assert tag_fs.ref_name == "v-annotated"
-        assert not tag_fs._writable
+        assert not tag_fs.writable
 
 
 class TestRefDictMapping:
@@ -266,7 +266,7 @@ class TestRefDictCurrent:
         fs = repo.branches.current
         assert isinstance(fs, FS)
         assert fs.ref_name == "main"
-        assert fs._writable
+        assert fs.writable
 
     def test_current_dangling_returns_none(self, tmp_path):
         repo = GitStore.open(tmp_path / "test.git", branch=None)

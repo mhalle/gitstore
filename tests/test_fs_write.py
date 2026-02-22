@@ -611,7 +611,7 @@ class TestBranchesSet:
         assert fs_new.ref_name == "feature"
         assert fs_new.commit_hash == fs1.commit_hash
         assert fs_new is not fs1  # New object
-        assert fs_new._writable
+        assert fs_new.writable
 
     def test_set_creates_new_branch(self, repo_fs):
         """branches.set() should create branch if it doesn't exist."""
@@ -647,7 +647,7 @@ class TestBranchesSet:
         fs_branch = repo.branches.set("from-tag", tag_fs)
 
         assert fs_branch.ref_name == "from-tag"
-        assert fs_branch._writable
+        assert fs_branch.writable
         assert fs_branch.commit_hash == tag_fs.commit_hash
 
     def test_set_result_is_writable(self, repo_fs):

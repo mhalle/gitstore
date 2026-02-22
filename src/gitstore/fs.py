@@ -81,11 +81,25 @@ class FS:
         self._tree_oid = commit.tree
         self._changes = None
 
+    def _readonly_error(self, verb: str) -> PermissionError:
+        if self._ref_name:
+            return PermissionError(f"Cannot {verb} read-only snapshot (ref {self._ref_name!r})")
+        return PermissionError(f"Cannot {verb} read-only snapshot")
+
     def __repr__(self) -> str:
         short = self._commit_oid.decode()[:7]
+        parts = []
         if self._ref_name:
-            return f"FS(ref_name={self._ref_name!r}, commit={short})"
-        return f"FS(commit={short})"
+            parts.append(f"ref_name={self._ref_name!r}")
+        parts.append(f"commit={short}")
+        if not self._writable:
+            parts.append("readonly")
+        return f"FS({', '.join(parts)})"
+
+    @property
+    def writable(self) -> bool:
+        """Whether this snapshot can be written to."""
+        return self._writable
 
     @property
     def commit_hash(self) -> str:
@@ -353,7 +367,7 @@ class FS:
             return ReadableFile(self.read(path))
         elif mode == "wb":
             if not self._writable:
-                raise PermissionError("Cannot write to a read-only snapshot")
+                raise self._readonly_error("write to")
             from ._fileobj import WritableFile
             return WritableFile(self, path)
         else:
@@ -416,7 +430,7 @@ class FS:
         operation: str | None = None,
     ) -> FS:
         if not self._writable:
-            raise PermissionError("Cannot write to a read-only snapshot")
+            raise self._readonly_error("write to")
 
         from .copy._types import format_commit_message
 
@@ -877,7 +891,7 @@ class FS:
         if steps < 1:
             raise ValueError(f"steps must be >= 1, got {steps}")
         if not self._writable:
-            raise PermissionError("Cannot undo on a read-only snapshot")
+            raise self._readonly_error("undo on")
 
         # Walk back N parents (safe to do outside the lock — read-only)
         current = self
@@ -928,7 +942,7 @@ class FS:
         if steps < 1:
             raise ValueError(f"steps must be >= 1, got {steps}")
         if not self._writable:
-            raise PermissionError("Cannot redo on a read-only snapshot")
+            raise self._readonly_error("redo on")
 
         # Early stale check (fast-fail; authoritative check under lock below)
         ref_name = f"refs/heads/{self._ref_name}"
