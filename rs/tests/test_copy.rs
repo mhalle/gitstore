@@ -506,3 +506,145 @@ fn rename_custom_message() {
     let log = fs.log(fs::LogOptions { limit: Some(1), skip: None }).unwrap();
     assert_eq!(log[0].message, "move hello");
 }
+
+// ---------------------------------------------------------------------------
+// copy_in — overwrites
+// ---------------------------------------------------------------------------
+
+#[test]
+fn copy_in_overwrites_existing() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("src_files");
+    std::fs::create_dir_all(&src).unwrap();
+    std::fs::write(src.join("hello.txt"), b"new content").unwrap();
+
+    let (store, _fs) = common::store_with_files(dir.path());
+    // Store already has hello.txt = "hello"
+    let fs = store.fs(Some("main")).unwrap();
+    assert_eq!(fs.read_text("hello.txt").unwrap(), "hello");
+
+    fs.copy_in(&src, "", Default::default()).unwrap();
+    let fs = store.fs(Some("main")).unwrap();
+    assert_eq!(fs.read_text("hello.txt").unwrap(), "new content");
+}
+
+#[test]
+fn copy_in_unicode_filenames() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("src_files");
+    std::fs::create_dir_all(&src).unwrap();
+    std::fs::write(src.join("café.txt"), b"latte").unwrap();
+    std::fs::write(src.join("日本語.txt"), b"nihongo").unwrap();
+
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.fs(Some("main")).unwrap();
+    fs.copy_in(&src, "", Default::default()).unwrap();
+
+    let fs = store.fs(Some("main")).unwrap();
+    assert_eq!(fs.read_text("café.txt").unwrap(), "latte");
+    assert_eq!(fs.read_text("日本語.txt").unwrap(), "nihongo");
+}
+
+// ---------------------------------------------------------------------------
+// copy_out — empty store
+// ---------------------------------------------------------------------------
+
+#[test]
+fn copy_out_empty_store() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.fs(Some("main")).unwrap();
+    let dest = dir.path().join("out");
+    std::fs::create_dir(&dest).unwrap();
+
+    let report = fs.copy_out("", &dest, Default::default()).unwrap();
+    assert_eq!(report.total(), 0);
+}
+
+// ---------------------------------------------------------------------------
+// sync_out — with include filter
+// ---------------------------------------------------------------------------
+
+#[test]
+fn sync_out_basic_with_filters() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_, fs) = common::store_with_files(dir.path());
+    let dest = dir.path().join("synced");
+    std::fs::create_dir(&dest).unwrap();
+
+    let report = fs.sync_out("", &dest, fs::SyncOptions {
+        include: Some(vec!["hello.txt".into()]),
+        ..Default::default()
+    })
+    .unwrap();
+    assert!(report.total() > 0);
+    assert!(dest.join("hello.txt").exists());
+    // dir/a.txt should not be synced due to include filter
+    assert!(!dest.join("dir/a.txt").exists());
+}
+
+// ---------------------------------------------------------------------------
+// remove — edge cases
+// ---------------------------------------------------------------------------
+
+#[test]
+fn remove_nonexistent_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join("does_not_exist");
+    // Don't create the directory
+
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.fs(Some("main")).unwrap();
+    let result = fs.remove(&target, Default::default());
+    // Either returns empty report or errors — either is acceptable
+    match result {
+        Ok(report) => assert_eq!(report.total(), 0),
+        Err(_) => {} // also fine
+    }
+}
+
+#[test]
+fn remove_with_exclude_filter() {
+    let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join("to_remove");
+    std::fs::create_dir(&target).unwrap();
+    std::fs::write(target.join("delete.txt"), b"bye").unwrap();
+    std::fs::write(target.join("keep.md"), b"keep").unwrap();
+
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.fs(Some("main")).unwrap();
+    fs.remove(&target, fs::RemoveOptions {
+        exclude: Some(vec!["*.md".into()]),
+        ..Default::default()
+    })
+    .unwrap();
+
+    assert!(!target.join("delete.txt").exists());
+    assert!(target.join("keep.md").exists());
+}
+
+// ---------------------------------------------------------------------------
+// copy_in — preserves executable (Unix only)
+// ---------------------------------------------------------------------------
+
+#[cfg(unix)]
+#[test]
+fn copy_in_preserves_executable() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("src_files");
+    std::fs::create_dir_all(&src).unwrap();
+    std::fs::write(src.join("run.sh"), b"#!/bin/sh").unwrap();
+    std::fs::set_permissions(
+        src.join("run.sh"),
+        std::fs::Permissions::from_mode(0o755),
+    )
+    .unwrap();
+
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.fs(Some("main")).unwrap();
+    fs.copy_in(&src, "", Default::default()).unwrap();
+
+    let fs = store.fs(Some("main")).unwrap();
+    assert_eq!(fs.file_type("run.sh").unwrap(), FileType::Executable);
+}

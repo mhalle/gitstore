@@ -486,6 +486,140 @@ fn write_symlink_custom_message() {
 }
 
 // ---------------------------------------------------------------------------
+// retry_write — stale retry
+// ---------------------------------------------------------------------------
+
+#[test]
+fn retry_write_retries_on_stale() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let attempt = AtomicUsize::new(0);
+
+    let result = fs::retry_write(|| {
+        let n = attempt.fetch_add(1, Ordering::SeqCst);
+        let fs = store.fs(Some("main")).unwrap();
+        if n == 0 {
+            // Simulate stale by advancing the branch before writing
+            let fs2 = store.fs(Some("main")).unwrap();
+            fs2.write("advance.txt", b"go", Default::default()).unwrap();
+            // Now fs is stale
+            fs.write("retried.txt", b"ok", Default::default())
+        } else {
+            // Second attempt gets fresh fs, should succeed
+            fs.write("retried.txt", b"ok", Default::default())
+        }
+    });
+    assert!(result.is_ok());
+    assert!(attempt.load(Ordering::SeqCst) >= 2);
+}
+
+// ---------------------------------------------------------------------------
+// write — detached errors
+// ---------------------------------------------------------------------------
+
+#[test]
+fn write_on_detached_errors() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.fs(Some("main")).unwrap();
+    fs.write("a.txt", b"a", Default::default()).unwrap();
+    let fs = store.fs(Some("main")).unwrap();
+
+    let detached = fs.back(1).unwrap();
+    let result = detached.write("x.txt", b"x", Default::default());
+    assert!(result.is_err());
+}
+
+#[test]
+fn batch_on_detached_errors() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.fs(Some("main")).unwrap();
+    fs.write("a.txt", b"a", Default::default()).unwrap();
+    let fs = store.fs(Some("main")).unwrap();
+
+    let detached = fs.back(1).unwrap();
+    let mut batch = detached.batch(Default::default());
+    batch.write("x.txt", b"x").unwrap();
+    let result = batch.commit();
+    assert!(result.is_err());
+}
+
+// ---------------------------------------------------------------------------
+// write — large and unicode edge cases
+// ---------------------------------------------------------------------------
+
+#[test]
+fn write_large_binary() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.fs(Some("main")).unwrap();
+    let data: Vec<u8> = (0..1_000_000).map(|i| (i % 256) as u8).collect();
+    fs.write("large.bin", &data, Default::default()).unwrap();
+    let fs = store.fs(Some("main")).unwrap();
+    assert_eq!(fs.read("large.bin").unwrap(), data);
+    assert_eq!(fs.size("large.bin").unwrap(), 1_000_000);
+}
+
+#[test]
+fn write_unicode_filename() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.fs(Some("main")).unwrap();
+    fs.write("café.txt", b"latte", Default::default()).unwrap();
+    let fs = store.fs(Some("main")).unwrap();
+    assert_eq!(fs.read_text("café.txt").unwrap(), "latte");
+}
+
+#[test]
+fn write_deep_nested_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.fs(Some("main")).unwrap();
+    let deep_path = "a/b/c/d/e/f/g/h/i/j/k/deep.txt";
+    fs.write(deep_path, b"very deep", Default::default()).unwrap();
+    let fs = store.fs(Some("main")).unwrap();
+    assert_eq!(fs.read_text(deep_path).unwrap(), "very deep");
+}
+
+#[test]
+fn noop_write_same_text_no_new_commit() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.fs(Some("main")).unwrap();
+    fs.write_text("a.txt", "hello", Default::default()).unwrap();
+    let fs = store.fs(Some("main")).unwrap();
+    let hash1 = fs.commit_hash().unwrap();
+
+    // Write same text content again
+    fs.write_text("a.txt", "hello", Default::default()).unwrap();
+    let fs = store.fs(Some("main")).unwrap();
+    let hash2 = fs.commit_hash().unwrap();
+
+    assert_eq!(hash1, hash2);
+}
+
+// ---------------------------------------------------------------------------
+// remove via batch — custom message
+// ---------------------------------------------------------------------------
+
+#[test]
+fn remove_file_via_batch_custom_message() {
+    let dir = tempfile::tempdir().unwrap();
+    let (store, fs) = common::store_with_files(dir.path());
+    let mut batch = fs.batch(fs::BatchOptions {
+        message: Some("remove hello".into()),
+    });
+    batch.remove("hello.txt").unwrap();
+    batch.commit().unwrap();
+    let fs = store.fs(Some("main")).unwrap();
+    assert!(!fs.exists("hello.txt").unwrap());
+    let log = fs.log(fs::LogOptions { limit: Some(1), skip: None }).unwrap();
+    assert_eq!(log[0].message, "remove hello");
+}
+
+// ---------------------------------------------------------------------------
 // remove via batch
 // ---------------------------------------------------------------------------
 

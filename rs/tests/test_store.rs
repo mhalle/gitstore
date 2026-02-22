@@ -369,6 +369,92 @@ fn store_clone_shares_state() {
 // Multiple branches with different content
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// branches — delete nonexistent
+// ---------------------------------------------------------------------------
+
+#[test]
+fn branches_delete_nonexistent() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    // Deleting a branch that doesn't exist should not panic
+    let result = store.branches().delete("nonexistent");
+    // May succeed silently or error — either way, no panic
+    let _ = result;
+}
+
+// ---------------------------------------------------------------------------
+// tags — overwrite
+// ---------------------------------------------------------------------------
+
+#[test]
+fn tags_set_overwrite() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let sha1 = store.branches().get("main").unwrap().unwrap();
+    store.tags().set("v1", &sha1).unwrap();
+
+    // Advance branch to get a new SHA
+    let fs = store.fs(Some("main")).unwrap();
+    fs.write("new.txt", b"data", Default::default()).unwrap();
+    let sha2 = store.branches().get("main").unwrap().unwrap();
+    assert_ne!(sha1, sha2);
+
+    // Overwrite tag to point at new SHA
+    store.tags().set("v1", &sha2).unwrap();
+    assert_eq!(store.tags().get("v1").unwrap().unwrap(), sha2);
+}
+
+// ---------------------------------------------------------------------------
+// fs on detached — write should error
+// ---------------------------------------------------------------------------
+
+#[test]
+fn fs_on_back_is_readonly() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.fs(Some("main")).unwrap();
+    fs.write("a.txt", b"a", Default::default()).unwrap();
+    let fs = store.fs(Some("main")).unwrap();
+
+    // back(1) gives a detached (readonly) Fs
+    let detached = fs.back(1).unwrap();
+    let result = detached.write("should_fail.txt", b"fail", Default::default());
+    assert!(result.is_err());
+}
+
+#[test]
+fn fs_on_back_batch_is_readonly() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.fs(Some("main")).unwrap();
+    fs.write("a.txt", b"a", Default::default()).unwrap();
+    let fs = store.fs(Some("main")).unwrap();
+
+    // back(1) gives a detached (readonly) Fs — batch commit should error
+    let detached = fs.back(1).unwrap();
+    let mut batch = detached.batch(Default::default());
+    batch.write("x.txt", b"x").unwrap();
+    let result = batch.commit();
+    assert!(result.is_err());
+}
+
+// ---------------------------------------------------------------------------
+// branches — invalid SHA errors
+// ---------------------------------------------------------------------------
+
+#[test]
+fn branches_set_invalid_sha_errors() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let result = store.branches().set("bad", "not_a_valid_hex_sha");
+    assert!(result.is_err());
+}
+
+// ---------------------------------------------------------------------------
+// Multiple branches with different content
+// ---------------------------------------------------------------------------
+
 #[test]
 fn branches_independent_content() {
     let dir = tempfile::tempdir().unwrap();

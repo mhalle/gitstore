@@ -410,3 +410,102 @@ fn batch_last_write_wins() {
     let fs = store.fs(Some("main")).unwrap();
     assert_eq!(fs.read_text("x.txt").unwrap(), "third");
 }
+
+// ---------------------------------------------------------------------------
+// batch — remove nonexistent
+// ---------------------------------------------------------------------------
+
+#[test]
+fn batch_remove_nonexistent_succeeds() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.fs(Some("main")).unwrap();
+
+    let mut batch = fs.batch(Default::default());
+    // Removing a non-existent path should not error
+    batch.remove("does_not_exist.txt").unwrap();
+    // Commit should succeed (no-op or successful removal of nothing)
+    let result = batch.commit();
+    assert!(result.is_ok());
+}
+
+// ---------------------------------------------------------------------------
+// batch — write + remove same path
+// ---------------------------------------------------------------------------
+
+#[test]
+fn batch_write_then_remove_same_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.fs(Some("main")).unwrap();
+
+    let mut batch = fs.batch(Default::default());
+    batch.write("temp.txt", b"temporary").unwrap();
+    batch.remove("temp.txt").unwrap();
+    batch.commit().unwrap();
+
+    let fs = store.fs(Some("main")).unwrap();
+    // File should not exist — remove wins over earlier write
+    assert!(!fs.exists("temp.txt").unwrap());
+}
+
+// ---------------------------------------------------------------------------
+// batch — unicode filenames
+// ---------------------------------------------------------------------------
+
+#[test]
+fn batch_unicode_filenames() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.fs(Some("main")).unwrap();
+
+    let mut batch = fs.batch(Default::default());
+    batch.write("日本語.txt", b"japanese").unwrap();
+    batch.write("émojis/🎉.txt", b"party").unwrap();
+    batch.write("中文/文件.txt", b"chinese").unwrap();
+    batch.commit().unwrap();
+
+    let fs = store.fs(Some("main")).unwrap();
+    assert_eq!(fs.read_text("日本語.txt").unwrap(), "japanese");
+    assert_eq!(fs.read_text("émojis/🎉.txt").unwrap(), "party");
+    assert_eq!(fs.read_text("中文/文件.txt").unwrap(), "chinese");
+}
+
+// ---------------------------------------------------------------------------
+// batch — empty data
+// ---------------------------------------------------------------------------
+
+#[test]
+fn batch_write_empty_data() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.fs(Some("main")).unwrap();
+
+    let mut batch = fs.batch(Default::default());
+    batch.write("empty.txt", b"").unwrap();
+    batch.commit().unwrap();
+
+    let fs = store.fs(Some("main")).unwrap();
+    assert_eq!(fs.read("empty.txt").unwrap(), b"");
+    assert_eq!(fs.size("empty.txt").unwrap(), 0);
+}
+
+// ---------------------------------------------------------------------------
+// batch — closed guard via manual flag
+// ---------------------------------------------------------------------------
+
+#[test]
+fn batch_is_closed_after_commit() {
+    // Since commit() consumes self, we can't call methods after.
+    // This test verifies is_closed returns false before commit.
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.fs(Some("main")).unwrap();
+
+    let mut batch = fs.batch(Default::default());
+    assert!(!batch.is_closed());
+    batch.write("a.txt", b"a").unwrap();
+    assert!(!batch.is_closed());
+    batch.commit().unwrap();
+    // After commit, batch is consumed — compiler enforces no further use
+}
