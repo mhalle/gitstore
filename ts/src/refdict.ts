@@ -61,10 +61,10 @@ export class RefDict {
       });
       // oid is already the commit oid after resolveRef for lightweight tags.
       // For annotated tags, readCommit may fail — try reading as tag first.
-      return FS._fromCommit(this._store, oid, null);
+      return FS._fromCommit(this._store, oid, name, false);
     }
 
-    return FS._fromCommit(this._store, oid, name);
+    return FS._fromCommit(this._store, oid, name, true);
   }
 
   /**
@@ -181,10 +181,10 @@ export class RefDict {
   }
 
   /**
-   * Get/set the default branch (HEAD). Only valid for branches.
+   * Get the current branch name (HEAD target). Only valid for branches.
    */
-  async getDefault(): Promise<string | null> {
-    if (this._isTags) throw new Error('Tags do not have a default');
+  async getCurrentName(): Promise<string | null> {
+    if (this._isTags) throw new Error('Tags do not have a current branch');
     const branch = await git.currentBranch({
       fs: this._fsModule,
       gitdir: this._gitdir,
@@ -193,8 +193,25 @@ export class RefDict {
     return branch ?? null;
   }
 
-  async setDefault(name: string): Promise<void> {
-    if (this._isTags) throw new Error('Tags do not have a default');
+  /**
+   * Get the current branch as an FS snapshot. Only valid for branches.
+   */
+  async getCurrent(): Promise<FS | null> {
+    if (this._isTags) throw new Error('Tags do not have a current branch');
+    const name = await this.getCurrentName();
+    if (!name) return null;
+    try {
+      return await this.get(name);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Set the current branch (HEAD target). Only valid for branches.
+   */
+  async setCurrent(name: string): Promise<void> {
+    if (this._isTags) throw new Error('Tags do not have a current branch');
     if (!(await this.has(name))) throw new Error(`Branch not found: '${name}'`);
     await git.writeRef({
       fs: this._fsModule,

@@ -666,21 +666,34 @@ fn undo_preserves_content() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn fs_branch_accessor() {
+fn fs_ref_name_accessor() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
     let fs = store.branches().get("main").unwrap();
-    assert_eq!(fs.branch(), Some("main"));
+    assert_eq!(fs.ref_name(), Some("main"));
+    assert!(fs.writable());
 }
 
 #[test]
-fn fs_branch_none_for_detached() {
+fn fs_ref_name_none_for_detached() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
     let fs = store.branches().get("main").unwrap();
     let hash = fs.commit_hash().unwrap();
     let detached = store.fs(&hash).unwrap();
-    assert_eq!(detached.branch(), None);
+    assert_eq!(detached.ref_name(), None);
+    assert!(!detached.writable());
+}
+
+#[test]
+fn fs_tag_has_ref_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.branches().get("main").unwrap();
+    store.tags().set("v1", &fs).unwrap();
+    let tagged = store.tags().get("v1").unwrap();
+    assert_eq!(tagged.ref_name(), Some("v1"));
+    assert!(!tagged.writable());
 }
 
 #[test]

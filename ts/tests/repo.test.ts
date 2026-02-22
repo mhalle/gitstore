@@ -62,9 +62,10 @@ describe('GitStore.open', () => {
 });
 
 describe('RefDict branches', () => {
-  it('get returns FS with correct branch', async () => {
+  it('get returns FS with correct refName', async () => {
     const snap = await store.branches.get('main');
-    expect(snap.branch).toBe('main');
+    expect(snap.refName).toBe('main');
+    expect(snap.writable).toBe(true);
   });
 
   it('get missing throws', async () => {
@@ -94,7 +95,7 @@ describe('RefDict branches', () => {
     const f2 = await snap.write('a.txt', toBytes('aaa'));
     await store.branches.set('exp', f2);
     const exp = await store.branches.get('exp');
-    expect(exp.branch).toBe('exp');
+    expect(exp.refName).toBe('exp');
     expect(await exp.exists('a.txt')).toBe(true);
   });
 
@@ -116,7 +117,8 @@ describe('RefDict tags', () => {
     const f2 = await snap.write('a.txt', toBytes('aaa'));
     await store.tags.set('v1', f2);
     const tagged = await store.tags.get('v1');
-    expect(tagged.branch).toBeNull();
+    expect(tagged.refName).toBe('v1');
+    expect(tagged.writable).toBe(false);
     expect(await tagged.exists('a.txt')).toBe(true);
   });
 
@@ -150,39 +152,53 @@ describe('RefDict tags', () => {
   });
 });
 
-describe('RefDict default (HEAD)', () => {
-  it('default is main', async () => {
-    const def = await store.branches.getDefault();
+describe('RefDict current (HEAD)', () => {
+  it('currentName is main', async () => {
+    const def = await store.branches.getCurrentName();
     expect(def).toBe('main');
   });
 
-  it('custom default', async () => {
+  it('custom currentName', async () => {
     const { store: s2, tmpDir: td } = await freshStore({ branch: 'data' });
-    expect(await s2.branches.getDefault()).toBe('data');
+    expect(await s2.branches.getCurrentName()).toBe('data');
     rmTmpDir(td);
   });
 
-  it('set default', async () => {
+  it('setCurrent works', async () => {
     const snap = await store.branches.get('main');
     await store.branches.set('dev', snap);
-    await store.branches.setDefault('dev');
-    expect(await store.branches.getDefault()).toBe('dev');
+    await store.branches.setCurrent('dev');
+    expect(await store.branches.getCurrentName()).toBe('dev');
   });
 
-  it('set nonexistent raises', async () => {
-    await expect(store.branches.setDefault('nope')).rejects.toThrow(/not found/);
+  it('setCurrent nonexistent raises', async () => {
+    await expect(store.branches.setCurrent('nope')).rejects.toThrow(/not found/);
   });
 
   it('dangling HEAD returns master (isomorphic-git default)', async () => {
     const { store: s2, tmpDir: td } = await freshStore({ branch: null });
     // isomorphic-git init sets HEAD to refs/heads/master by default
-    const def = await s2.branches.getDefault();
+    const def = await s2.branches.getCurrentName();
     expect(def).toBe('master');
     rmTmpDir(td);
   });
 
-  it('tags default raises', async () => {
-    await expect(store.tags.getDefault()).rejects.toThrow(/Tags do not have a default/);
+  it('tags getCurrentName raises', async () => {
+    await expect(store.tags.getCurrentName()).rejects.toThrow(/Tags do not have a current branch/);
+  });
+
+  it('getCurrent returns FS with correct refName', async () => {
+    const current = await store.branches.getCurrent();
+    expect(current).not.toBeNull();
+    expect(current!.refName).toBe('main');
+    expect(current!.writable).toBe(true);
+  });
+
+  it('getCurrent returns null on dangling HEAD', async () => {
+    const { store: s2, tmpDir: td } = await freshStore({ branch: null });
+    const current = await s2.branches.getCurrent();
+    expect(current).toBeNull();
+    rmTmpDir(td);
   });
 });
 

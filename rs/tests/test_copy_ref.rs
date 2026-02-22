@@ -294,11 +294,12 @@ fn copy_from_detached() {
     let dir = tempfile::tempdir().unwrap();
     let store = setup(dir.path());
 
-    // Create a tag snapshot (readonly, branch=None) to use as source
+    // Create a tag snapshot (readonly) to use as source
     let worker = store.branches().get("worker").unwrap();
     store.tags().set("v-detached", &worker).unwrap();
     let detached = store.tags().get("v-detached").unwrap();
-    assert!(detached.branch().is_none()); // confirm it's readonly
+    assert_eq!(detached.ref_name(), Some("v-detached"));
+    assert!(!detached.writable()); // confirm it's readonly
 
     let main = store.branches().get("main").unwrap();
     let main = main.copy_ref(&detached, "results", None, Default::default()).unwrap();

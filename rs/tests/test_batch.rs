@@ -526,7 +526,7 @@ fn batch_commit_returns_fs_with_content() {
 
     // The returned Fs should reflect the new content
     assert_eq!(new_fs.read_text("x.txt").unwrap(), "data");
-    assert_eq!(new_fs.branch(), Some("main"));
+    assert_eq!(new_fs.ref_name(), Some("main"));
 }
 
 #[test]

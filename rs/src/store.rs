@@ -146,7 +146,7 @@ impl GitStore {
     /// Return a detached (readonly) `Fs` for a commit identified by hex SHA.
     pub fn fs(&self, hash: &str) -> Result<Fs> {
         let oid = gix::ObjectId::from_hex(hash.as_bytes()).map_err(Error::git)?;
-        Fs::from_commit(Arc::clone(&self.inner), oid, None)
+        Fs::from_commit(Arc::clone(&self.inner), oid, None, Some(false))
     }
 
     /// Return a `RefDict` for branches.

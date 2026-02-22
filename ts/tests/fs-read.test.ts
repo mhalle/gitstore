@@ -243,8 +243,8 @@ describe('properties', () => {
     expect(snap.commitHash).toMatch(/^[0-9a-f]{40}$/);
   });
 
-  it('branch is main', () => {
-    expect(snap.branch).toBe('main');
+  it('refName is main', () => {
+    expect(snap.refName).toBe('main');
   });
 
   it('message contains last written file', async () => {

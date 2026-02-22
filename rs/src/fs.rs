@@ -143,7 +143,8 @@ pub struct Fs {
     pub(crate) inner: Arc<GitStoreInner>,
     pub(crate) commit_oid: Option<gix::ObjectId>,
     pub(crate) tree_oid: Option<gix::ObjectId>,
-    pub(crate) branch: Option<String>,
+    pub(crate) ref_name: Option<String>,
+    pub(crate) writable: bool,
     pub(crate) changes: Option<ChangeReport>,
 }
 
@@ -172,9 +173,26 @@ impl Fs {
         self.commit_oid.map(|oid| format!("{}", oid))
     }
 
-    /// The branch name, if this Fs is attached to a branch.
-    pub fn branch(&self) -> Option<&str> {
-        self.branch.as_deref()
+    /// The ref name (branch or tag name), if this Fs is attached to a ref.
+    pub fn ref_name(&self) -> Option<&str> {
+        self.ref_name.as_deref()
+    }
+
+    /// Whether this Fs is writable (true for branches, false for tags/detached).
+    pub fn writable(&self) -> bool {
+        self.writable
+    }
+
+    /// Check that this Fs is writable and return the ref name.
+    fn require_writable(&self, verb: &str) -> Result<&str> {
+        if !self.writable {
+            return Err(match &self.ref_name {
+                Some(name) => Error::permission(format!("cannot {} read-only snapshot (ref {:?})", verb, name)),
+                None => Error::permission(format!("cannot {} read-only snapshot", verb)),
+            });
+        }
+        self.ref_name.as_deref()
+            .ok_or_else(|| Error::permission(format!("cannot {} without a branch", verb)))
     }
 
     /// The commit message (trailing newline stripped).
@@ -771,10 +789,7 @@ impl Fs {
         dest_path: Option<&str>,
         opts: CopyRefOptions,
     ) -> Result<Fs> {
-        let _ = self
-            .branch
-            .as_ref()
-            .ok_or_else(|| Error::permission("cannot write to a read-only snapshot"))?;
+        self.require_writable("write to")?;
 
         // Validate same repo
         let same = Arc::ptr_eq(&self.inner, &source.inner) || {
@@ -903,7 +918,7 @@ impl Fs {
             }
         })?
         .map(|parent_id| {
-            Fs::from_commit(Arc::clone(&self.inner), parent_id, self.branch.clone())
+            Fs::from_commit(Arc::clone(&self.inner), parent_id, self.ref_name.clone(), Some(self.writable))
         })
         .transpose()
     }
@@ -924,10 +939,7 @@ impl Fs {
 
     /// Undo the last `n` commits (soft reset).
     pub fn undo(&self, n: usize) -> Result<Fs> {
-        let branch = self
-            .branch
-            .as_ref()
-            .ok_or_else(|| Error::permission("undo requires a branch"))?;
+        let branch = self.require_writable("undo")?;
 
         // Walk back n parents
         let mut target = self.clone();
@@ -988,10 +1000,7 @@ impl Fs {
 
     /// Redo `n` undone commits by scanning the reflog forward.
     pub fn redo(&self, n: usize) -> Result<Fs> {
-        let branch = self
-            .branch
-            .as_ref()
-            .ok_or_else(|| Error::permission("redo requires a branch"))?;
+        let branch = self.require_writable("redo")?;
         let refname = format!("refs/heads/{}", branch);
 
         let current_hex = self
@@ -1055,7 +1064,7 @@ impl Fs {
         );
 
         drop(repo);
-        Fs::from_commit(inner, forward_oid, self.branch.clone())
+        Fs::from_commit(inner, forward_oid, self.ref_name.clone(), Some(self.writable))
     }
 
     /// Return commit log entries, with optional filtering.
@@ -1168,8 +1177,10 @@ impl Fs {
     pub(crate) fn from_commit(
         inner: Arc<GitStoreInner>,
         commit_oid: gix::ObjectId,
-        branch: Option<String>,
+        ref_name: Option<String>,
+        writable: Option<bool>,
     ) -> Result<Self> {
+        let writable = writable.unwrap_or(ref_name.is_some());
         let tree_oid = {
             let repo = inner
                 .repo
@@ -1187,7 +1198,8 @@ impl Fs {
             inner,
             commit_oid: Some(commit_oid),
             tree_oid: Some(tree_oid),
-            branch,
+            ref_name,
+            writable,
             changes: None,
         })
     }
@@ -1198,10 +1210,7 @@ impl Fs {
         writes: &[(String, Option<TreeWrite>)],
         message: &str,
     ) -> Result<Fs> {
-        let branch = self
-            .branch
-            .as_ref()
-            .ok_or_else(|| Error::permission("cannot commit without a branch"))?;
+        let branch = self.require_writable("commit")?;
         let refname = format!("refs/heads/{}", branch);
 
         let repo = self
@@ -1298,9 +1307,26 @@ impl Fs {
             inner: Arc::clone(&self.inner),
             commit_oid: Some(new_commit_oid),
             tree_oid: Some(new_tree_oid),
-            branch: self.branch.clone(),
+            ref_name: self.ref_name.clone(),
+            writable: self.writable,
             changes: None,
         })
+    }
+}
+
+impl std::fmt::Display for Fs {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let short = self.commit_oid.map(|o| format!("{}", o)).unwrap_or_default();
+        let short = &short[..short.len().min(7)];
+        let mut parts = Vec::new();
+        if let Some(ref name) = self.ref_name {
+            parts.push(format!("ref_name={:?}", name));
+        }
+        parts.push(format!("commit={}", short));
+        if !self.writable {
+            parts.push("readonly".into());
+        }
+        write!(f, "Fs({})", parts.join(", "))
     }
 }
 

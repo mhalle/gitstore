@@ -25,7 +25,7 @@ fn create_no_branch() {
     .unwrap();
     // No branch created — HEAD points to a ref that doesn't exist,
     // so get() on the default branch name should fail
-    let default_name = store.branches().get_default().unwrap();
+    let default_name = store.branches().get_current_name().unwrap();
     if let Some(name) = default_name {
         assert!(store.branches().get(&name).is_err());
     }
@@ -202,23 +202,23 @@ fn tags_delete() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn get_default() {
+fn get_current_name() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let default = store.branches().get_default().unwrap();
+    let default = store.branches().get_current_name().unwrap();
     assert_eq!(default, Some("main".to_string()));
 }
 
 #[test]
-fn set_default() {
+fn set_current() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
     let main_fs = store.branches().get("main").unwrap();
     store.branches().set("dev", &main_fs).unwrap();
 
-    store.branches().set_default("dev").unwrap();
+    store.branches().set_current("dev").unwrap();
     assert_eq!(
-        store.branches().get_default().unwrap(),
+        store.branches().get_current_name().unwrap(),
         Some("dev".to_string())
     );
 }
@@ -228,7 +228,7 @@ fn custom_initial_branch() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "develop");
     assert_eq!(
-        store.branches().get_default().unwrap(),
+        store.branches().get_current_name().unwrap(),
         Some("develop".to_string())
     );
     assert!(store.branches().has("develop").unwrap());
@@ -238,19 +238,19 @@ fn custom_initial_branch() {
 fn fs_default_branch_via_get() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let name = store.branches().get_default().unwrap().unwrap();
+    let name = store.branches().get_current_name().unwrap().unwrap();
     let fs = store.branches().get(&name).unwrap();
     assert!(fs.commit_hash().is_some());
 }
 
 #[test]
-fn set_default_to_nonexistent() {
+fn set_current_to_nonexistent() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    // set_default to a ref that doesn't exist — this sets HEAD symbolic but
+    // set_current to a ref that doesn't exist — this sets HEAD symbolic but
     // get() will fail because the ref doesn't exist
-    store.branches().set_default("nope").unwrap();
-    let name = store.branches().get_default().unwrap().unwrap();
+    store.branches().set_current("nope").unwrap();
+    let name = store.branches().get_current_name().unwrap().unwrap();
     assert!(store.branches().get(&name).is_err());
 }
 
@@ -518,7 +518,7 @@ fn branches_set_to_returns_writable_fs() {
     let new_fs = store.branches().set_to("dev", &main_fs).unwrap();
 
     // The returned Fs should be writable (has branch "dev")
-    assert_eq!(new_fs.branch(), Some("dev"));
+    assert_eq!(new_fs.ref_name(), Some("dev"));
     assert_eq!(new_fs.read_text("a.txt").unwrap(), "hello");
 
     // Should be writable

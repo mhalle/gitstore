@@ -431,7 +431,7 @@ describe('branches.set', () => {
   it('returns writable FS via setAndGet', async () => {
     const f1 = await snap.write('a.txt', toBytes('aaa'));
     const f2 = await store.branches.setAndGet('exp', f1);
-    expect(f2.branch).toBe('exp');
+    expect(f2.refName).toBe('exp');
   });
 
   it('creates new branch', async () => {

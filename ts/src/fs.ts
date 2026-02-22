@@ -1,8 +1,8 @@
 /**
  * FS: immutable snapshot of a committed tree state.
  *
- * Read-only when branch is null (tag snapshot).
- * Writable when branch is set — writes auto-commit and return a new FS.
+ * Read-only when writable is false (tag/detached snapshot).
+ * Writable when writable is true — writes auto-commit and return a new FS.
  */
 
 import git from 'isomorphic-git';
@@ -53,16 +53,13 @@ export class FS {
   /** @internal */
   _commitOid: string;
   /** @internal */
-  _branch: string | null;
+  _refName: string | null;
+  /** @internal */
+  _writable: boolean;
   /** @internal */
   _treeOid: string;
   /** @internal */
   _changes: ChangeReport | null = null;
-
-  /** @internal */
-  get _writable(): boolean {
-    return this._branch !== null;
-  }
 
   /** @internal */
   get _fsModule(): FsModule {
@@ -74,10 +71,11 @@ export class FS {
     return this._store._gitdir;
   }
 
-  constructor(store: GitStore, commitOid: string, treeOid: string, branch: string | null) {
+  constructor(store: GitStore, commitOid: string, treeOid: string, refName: string | null, writable?: boolean) {
     this._store = store;
     this._commitOid = commitOid;
-    this._branch = branch;
+    this._refName = refName;
+    this._writable = writable ?? (refName !== null);
     this._treeOid = treeOid;
   }
 
@@ -87,20 +85,32 @@ export class FS {
   static async _fromCommit(
     store: GitStore,
     commitOid: string,
-    branch: string | null,
+    refName: string | null,
+    writable?: boolean,
   ): Promise<FS> {
     const { commit } = await git.readCommit({
       fs: store._fsModule,
       gitdir: store._gitdir,
       oid: commitOid,
     });
-    return new FS(store, commitOid, commit.tree, branch);
+    return new FS(store, commitOid, commit.tree, refName, writable);
   }
 
   toString(): string {
     const short = this._commitOid.slice(0, 7);
-    if (this._branch) return `FS(branch='${this._branch}', commit=${short})`;
-    return `FS(commit=${short})`;
+    const parts: string[] = [];
+    if (this._refName) parts.push(`refName='${this._refName}'`);
+    parts.push(`commit=${short}`);
+    if (!this._writable) parts.push('readonly');
+    return `FS(${parts.join(', ')})`;
+  }
+
+  /** @internal */
+  private _readonlyError(verb: string): PermissionError {
+    if (this._refName) {
+      return new PermissionError(`Cannot ${verb} read-only snapshot (ref '${this._refName}')`);
+    }
+    return new PermissionError(`Cannot ${verb} read-only snapshot`);
   }
 
   // ---------------------------------------------------------------------------
@@ -111,8 +121,12 @@ export class FS {
     return this._commitOid;
   }
 
-  get branch(): string | null {
-    return this._branch;
+  get refName(): string | null {
+    return this._refName;
+  }
+
+  get writable(): boolean {
+    return this._writable;
   }
 
   async getCommitInfo(): Promise<CommitInfo> {
@@ -422,7 +436,7 @@ export class FS {
     message?: string | null,
     operation?: string | null,
   ): Promise<FS> {
-    if (!this._writable) throw new PermissionError('Cannot write to a read-only snapshot');
+    if (!this._writable) throw this._readonlyError('write to');
 
     const changes = await this._buildChanges(writes, removes);
     const finalMessage = formatCommitMessage(changes, message, operation);
@@ -436,7 +450,7 @@ export class FS {
     );
 
     // Atomic check-and-update under lock
-    const refName = `refs/heads/${this._branch}`;
+    const refName = `refs/heads/${this._refName}`;
     const sig = this._store._signature;
     const committerStr = `${sig.name} <${sig.email}>`;
     const commitOid = this._commitOid;
@@ -451,7 +465,7 @@ export class FS {
       });
       if (currentOid !== commitOid) {
         throw new StaleSnapshotError(
-          `Branch '${this._branch}' has advanced since this snapshot`,
+          `Branch '${this._refName}' has advanced since this snapshot`,
         );
       }
 
@@ -498,7 +512,7 @@ export class FS {
 
     if (newCommitOid === null) return this; // nothing changed
 
-    const newFs = new FS(store, newCommitOid, newTreeOid, this._branch);
+    const newFs = new FS(store, newCommitOid, newTreeOid, this._refName, this._writable);
     newFs._changes = changes;
     return newFs;
   }
@@ -706,7 +720,7 @@ export class FS {
     destPath?: string | null,
     opts?: { delete?: boolean; dryRun?: boolean; message?: string },
   ): Promise<FS> {
-    if (!this._writable) throw new PermissionError('Cannot write to a read-only snapshot');
+    if (!this._writable) throw this._readonlyError('write to');
 
     // Validate same repo
     const selfPath = this._fsModule.realpathSync(this._gitdir);
@@ -790,7 +804,7 @@ export class FS {
       oid: this._commitOid,
     });
     if (!commit.parent || commit.parent.length === 0) return null;
-    return FS._fromCommit(this._store, commit.parent[0], this._branch);
+    return FS._fromCommit(this._store, commit.parent[0], this._refName, this._writable);
   }
 
   async back(n = 1): Promise<FS> {
@@ -806,7 +820,7 @@ export class FS {
 
   async undo(steps = 1): Promise<FS> {
     if (steps < 1) throw new Error(`steps must be >= 1, got ${steps}`);
-    if (!this._writable) throw new PermissionError('Cannot undo on a read-only snapshot');
+    if (!this._writable) throw this._readonlyError('undo');
 
     let current: FS = this;
     for (let i = 0; i < steps; i++) {
@@ -817,7 +831,7 @@ export class FS {
       current = parent;
     }
 
-    const refName = `refs/heads/${this._branch}`;
+    const refName = `refs/heads/${this._refName}`;
     const sig = this._store._signature;
     const committerStr = `${sig.name} <${sig.email}>`;
     const myOid = this._commitOid;
@@ -830,7 +844,7 @@ export class FS {
       });
       if (currentOid !== myOid) {
         throw new StaleSnapshotError(
-          `Branch '${this._branch}' has advanced since this snapshot`,
+          `Branch '${this._refName}' has advanced since this snapshot`,
         );
       }
       await git.writeRef({
@@ -856,12 +870,12 @@ export class FS {
 
   async redo(steps = 1): Promise<FS> {
     if (steps < 1) throw new Error(`steps must be >= 1, got ${steps}`);
-    if (!this._writable) throw new PermissionError('Cannot redo on a read-only snapshot');
+    if (!this._writable) throw this._readonlyError('redo');
 
-    const refName = `refs/heads/${this._branch}`;
+    const refName = `refs/heads/${this._refName}`;
 
     // Read reflog
-    const entries = await readReflog(this._fsModule, this._gitdir, this._branch!);
+    const entries = await readReflog(this._fsModule, this._gitdir, this._refName!);
     if (entries.length === 0) throw new Error('Reflog is empty');
 
     // Find current position in reflog
@@ -892,7 +906,7 @@ export class FS {
       index--;
     }
 
-    const targetFs = await FS._fromCommit(this._store, targetSha, this._branch);
+    const targetFs = await FS._fromCommit(this._store, targetSha, this._refName, this._writable);
     const sig = this._store._signature;
     const committerStr = `${sig.name} <${sig.email}>`;
     const myOid = this._commitOid;
@@ -905,7 +919,7 @@ export class FS {
       });
       if (currentOid !== myOid) {
         throw new StaleSnapshotError(
-          `Branch '${this._branch}' has advanced since this snapshot`,
+          `Branch '${this._refName}' has advanced since this snapshot`,
         );
       }
       await git.writeRef({

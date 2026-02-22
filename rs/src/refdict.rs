@@ -28,12 +28,8 @@ impl<'a> RefDict<'a> {
 
     /// Build an `Fs` from a resolved commit OID and ref name.
     fn fs_for_ref(&self, commit_oid: gix::ObjectId, name: &str) -> Result<Fs> {
-        let branch = if self.is_branch_prefix() {
-            Some(name.to_string())
-        } else {
-            None
-        };
-        Fs::from_commit(Arc::clone(&self.store.inner), commit_oid, branch)
+        let writable = self.is_branch_prefix();
+        Fs::from_commit(Arc::clone(&self.store.inner), commit_oid, Some(name.to_string()), Some(writable))
     }
 
     /// Get the `Fs` for the named ref.
@@ -182,8 +178,8 @@ impl<'a> RefDict<'a> {
         Ok(result)
     }
 
-    /// Get the default ref (HEAD symbolic target within this prefix).
-    pub fn get_default(&self) -> Result<Option<String>> {
+    /// Get the current branch name (HEAD symbolic target within this prefix).
+    pub fn get_current_name(&self) -> Result<Option<String>> {
         let repo = self
             .store
             .inner
@@ -203,8 +199,19 @@ impl<'a> RefDict<'a> {
         }
     }
 
-    /// Set the default ref (HEAD symbolic target).
-    pub fn set_default(&self, name: &str) -> Result<()> {
+    /// Get the current branch as an Fs. Returns None if HEAD is dangling.
+    pub fn get_current(&self) -> Result<Option<Fs>> {
+        match self.get_current_name()? {
+            Some(name) => match self.get(&name) {
+                Ok(fs) => Ok(Some(fs)),
+                Err(_) => Ok(None),
+            },
+            None => Ok(None),
+        }
+    }
+
+    /// Set the current branch (HEAD symbolic target).
+    pub fn set_current(&self, name: &str) -> Result<()> {
         let repo = self
             .store
             .inner
@@ -222,7 +229,7 @@ impl<'a> RefDict<'a> {
                 log: LogChange {
                     mode: RefLog::AndReference,
                     force_create_reflog: false,
-                    message: format!("set default: {}", name).into(),
+                    message: format!("set current: {}", name).into(),
                 },
                 expected: PreviousValue::Any,
                 new: Target::Symbolic(
