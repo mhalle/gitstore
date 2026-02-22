@@ -472,14 +472,10 @@ impl Fs {
         let tree_oid = self.require_tree()?;
         let writes = self.with_repo(|repo| crate::copy::rename(repo, tree_oid, src, dest))?;
         if !writes.is_empty() {
-            let tw_writes: Vec<(String, Option<TreeWrite>)> = writes
-                .into_iter()
-                .map(|(p, tw)| (p, Some(tw)))
-                .collect();
             let msg = opts.message.unwrap_or_else(|| {
                 crate::paths::format_commit_message("rename", Some(&format!("{} -> {}", src, dest)))
             });
-            self.commit_changes(&tw_writes, &msg)?;
+            self.commit_changes(&writes, &msg)?;
         }
         Ok(())
     }
@@ -553,6 +549,10 @@ impl Fs {
             .lock()
             .map_err(|e| Error::git_msg(e.to_string()))?;
 
+        let current_oid = self
+            .commit_oid
+            .ok_or_else(|| Error::not_found("no commit in snapshot"))?;
+
         use gix::refs::transaction::PreviousValue;
         with_repo_lock(&inner.path, || {
             repo.reference(
@@ -564,6 +564,25 @@ impl Fs {
             .map_err(Error::git)?;
             Ok(())
         })?;
+
+        // Write reflog entry for undo
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default();
+        let _ = crate::reflog::write_reflog_entry(
+            &inner.path,
+            &refname,
+            &crate::types::ReflogEntry {
+                old_sha: format!("{}", current_oid),
+                new_sha: format!("{}", parent_oid),
+                committer: format!(
+                    "{} <{}>",
+                    inner.signature.name, inner.signature.email
+                ),
+                timestamp: now.as_secs(),
+                message: "undo: move back".to_string(),
+            },
+        );
 
         Ok(parent)
     }
@@ -611,6 +630,25 @@ impl Fs {
             .map_err(Error::git)?;
             Ok(())
         })?;
+
+        // Write reflog entry for redo
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default();
+        let _ = crate::reflog::write_reflog_entry(
+            &inner.path,
+            &refname,
+            &crate::types::ReflogEntry {
+                old_sha: current_hex,
+                new_sha: forward_sha,
+                committer: format!(
+                    "{} <{}>",
+                    inner.signature.name, inner.signature.email
+                ),
+                timestamp: now.as_secs(),
+                message: "redo: move forward".to_string(),
+            },
+        );
 
         drop(repo);
         Fs::from_commit(inner, forward_oid, self.branch.clone())
@@ -776,6 +814,22 @@ impl Fs {
                 msg.as_str(),
             )
             .map_err(Error::git)?;
+
+            // Write reflog entry manually (gix doesn't write reflogs for bare repos)
+            let _ = crate::reflog::write_reflog_entry(
+                &self.inner.path,
+                &refname,
+                &crate::types::ReflogEntry {
+                    old_sha: format!("{}", current_oid),
+                    new_sha: format!("{}", new_commit_oid),
+                    committer: format!(
+                        "{} <{}>",
+                        self.inner.signature.name, self.inner.signature.email
+                    ),
+                    timestamp: now.as_secs(),
+                    message: msg,
+                },
+            );
 
             Ok(new_commit_oid.detach())
         })

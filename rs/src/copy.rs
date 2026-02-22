@@ -169,7 +169,7 @@ pub fn rename(
     base_tree: gix::ObjectId,
     src: &str,
     dest: &str,
-) -> Result<Vec<(String, TreeWrite)>> {
+) -> Result<Vec<(String, Option<TreeWrite>)>> {
     let src_norm = crate::paths::normalize_path(src)?;
     let dest_norm = crate::paths::normalize_path(dest)?;
 
@@ -179,30 +179,35 @@ pub fn rename(
     let mut writes = Vec::new();
 
     if entry.mode == MODE_TREE {
-        // Rename directory: move all entries
+        // Rename directory: move all entries and delete originals
         let sub_entries = tree::walk_tree(repo, entry.oid)?;
         for (rel_path, we) in &sub_entries {
+            let old_path = format!("{}/{}", src_norm, rel_path);
             let new_path = format!("{}/{}", dest_norm, rel_path);
             let obj = repo.find_object(we.oid).map_err(Error::git)?;
+            // Delete old path
+            writes.push((old_path, None));
+            // Write new path
             writes.push((
                 new_path,
-                TreeWrite {
+                Some(TreeWrite {
                     data: obj.data.to_vec(),
                     oid: we.oid,
                     mode: we.mode,
-                },
+                }),
             ));
         }
     } else {
-        // Rename single file
+        // Rename single file: delete old, write new
         let obj = repo.find_object(entry.oid).map_err(Error::git)?;
+        writes.push((src_norm, None));
         writes.push((
             dest_norm,
-            TreeWrite {
+            Some(TreeWrite {
                 data: obj.data.to_vec(),
                 oid: entry.oid,
                 mode: entry.mode,
-            },
+            }),
         ));
     }
 

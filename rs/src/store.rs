@@ -38,7 +38,7 @@ impl GitStore {
             let repo = gix::init_bare(&path).map_err(Error::git)?;
 
             if let Some(ref branch) = options.branch {
-                Self::init_branch(&repo, branch, &sig)?;
+                Self::init_branch(&repo, &path, branch, &sig)?;
             }
 
             repo
@@ -59,7 +59,7 @@ impl GitStore {
     }
 
     /// Create the initial commit on `branch` with an empty tree.
-    fn init_branch(repo: &gix::Repository, branch: &str, sig: &Signature) -> Result<()> {
+    fn init_branch(repo: &gix::Repository, path: &std::path::Path, branch: &str, sig: &Signature) -> Result<()> {
         // Write empty tree
         let empty_tree = gix::objs::Tree { entries: vec![] };
         let tree_oid = repo.write_object(&empty_tree).map_err(Error::git)?;
@@ -97,6 +97,19 @@ impl GitStore {
             log_msg.as_str(),
         )
         .map_err(Error::git)?;
+
+        // Write reflog entry for the initial commit
+        let _ = crate::reflog::write_reflog_entry(
+            path,
+            &refname,
+            &crate::types::ReflogEntry {
+                old_sha: crate::reflog::ZERO_SHA.to_string(),
+                new_sha: format!("{}", commit_oid),
+                committer: format!("{} <{}>", sig.name, sig.email),
+                timestamp: now.as_secs(),
+                message: log_msg,
+            },
+        );
 
         // Set HEAD as symbolic ref to the branch
         use gix::refs::transaction::{Change, LogChange, RefEdit, RefLog};
