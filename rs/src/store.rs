@@ -134,48 +134,10 @@ impl GitStore {
         Ok(())
     }
 
-    /// Return the `Fs` view for the given branch (or the default branch).
-    pub fn fs(&self, branch: Option<&str>) -> Result<Fs> {
-        let repo = self.inner.repo.lock().map_err(|e| Error::git_msg(e.to_string()))?;
-
-        let branch_name = match branch {
-            Some(name) => name.to_string(),
-            None => {
-                // Resolve HEAD to find the default branch
-                let head = repo.find_reference("HEAD").map_err(Error::git)?;
-                match head.target().try_name() {
-                    Some(name) => {
-                        let name_str = name.as_bstr().to_string();
-                        name_str
-                            .strip_prefix("refs/heads/")
-                            .unwrap_or(&name_str)
-                            .to_string()
-                    }
-                    None => {
-                        return Err(Error::not_found("HEAD is not a symbolic reference"));
-                    }
-                }
-            }
-        };
-
-        let refname = format!("refs/heads/{}", branch_name);
-        let reference = repo
-            .find_reference(refname.as_str())
-            .map_err(|_| Error::not_found(format!("branch '{}' not found", branch_name)))?;
-        let commit_oid = reference.id().detach();
-
-        // Read commit to get tree oid
-        let commit_obj = repo.find_object(commit_oid).map_err(Error::git)?;
-        let commit_ref =
-            gix::objs::CommitRef::from_bytes(&commit_obj.data).map_err(Error::git)?;
-        let tree_oid = commit_ref.tree();
-
-        Ok(Fs {
-            inner: Arc::clone(&self.inner),
-            commit_oid: Some(commit_oid),
-            tree_oid: Some(tree_oid.into()),
-            branch: Some(branch_name),
-        })
+    /// Return a detached (readonly) `Fs` for a commit identified by hex SHA.
+    pub fn fs(&self, hash: &str) -> Result<Fs> {
+        let oid = gix::ObjectId::from_hex(hash.as_bytes()).map_err(Error::git)?;
+        Fs::from_commit(Arc::clone(&self.inner), oid, None)
     }
 
     /// Return a `RefDict` for branches.

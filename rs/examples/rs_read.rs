@@ -193,7 +193,7 @@ fn check_history(
     let mut failures = 0u32;
     let commits = spec.commits.as_ref().unwrap();
 
-    let fs = store.fs(Some(branch)).unwrap();
+    let fs = store.branches().get(branch).unwrap();
 
     // Final state: last commit
     let last = &commits[commits.len() - 1];
@@ -341,7 +341,7 @@ fn main() {
         if spec.commits.is_some() {
             failures += check_history(&store, branch, spec, name);
         } else {
-            let fs = store.fs(Some(branch)).unwrap();
+            let fs = store.branches().get(branch).unwrap();
             failures += check_basic(&fs, spec, name);
         }
     }

@@ -114,13 +114,13 @@ fn write_entry_validate_unsupported_mode() {
 fn apply_single_bytes() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     fs.apply(
         &[("data.bin", WriteEntry::from_bytes(b"\x00\x01\x02".to_vec()))],
         Default::default(),
     )
     .unwrap();
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     assert_eq!(fs.read("data.bin").unwrap(), b"\x00\x01\x02");
 }
 
@@ -128,13 +128,13 @@ fn apply_single_bytes() {
 fn apply_single_text() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     fs.apply(
         &[("hello.txt", WriteEntry::from_text("hello world"))],
         Default::default(),
     )
     .unwrap();
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     assert_eq!(fs.read_text("hello.txt").unwrap(), "hello world");
 }
 
@@ -143,13 +143,13 @@ fn apply_single_text() {
 fn apply_symlink_entry() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     fs.apply(
         &[("link", WriteEntry::symlink("target.txt"))],
         Default::default(),
     )
     .unwrap();
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     assert_eq!(fs.file_type("link").unwrap(), FileType::Link);
     assert_eq!(fs.readlink("link").unwrap(), "target.txt");
 }
@@ -159,14 +159,14 @@ fn apply_symlink_entry() {
 fn apply_executable_entry() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     let entry = WriteEntry {
         data: Some(b"#!/bin/sh".to_vec()),
         target: None,
         mode: MODE_BLOB_EXEC,
     };
     fs.apply(&[("run.sh", entry)], Default::default()).unwrap();
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     assert_eq!(fs.file_type("run.sh").unwrap(), FileType::Executable);
     assert_eq!(fs.read("run.sh").unwrap(), b"#!/bin/sh");
 }
@@ -179,7 +179,7 @@ fn apply_executable_entry() {
 fn apply_multiple_entries_single_commit() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     let hash_before = fs.commit_hash().unwrap();
 
     fs.apply(
@@ -192,7 +192,7 @@ fn apply_multiple_entries_single_commit() {
     )
     .unwrap();
 
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     assert_ne!(fs.commit_hash().unwrap(), hash_before);
     assert_eq!(fs.read_text("a.txt").unwrap(), "aaa");
     assert_eq!(fs.read_text("b.txt").unwrap(), "bbb");
@@ -208,7 +208,7 @@ fn apply_multiple_entries_single_commit() {
 fn apply_mixed_types() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
 
     let exec_entry = WriteEntry {
         data: Some(b"#!/bin/sh".to_vec()),
@@ -225,7 +225,7 @@ fn apply_mixed_types() {
     )
     .unwrap();
 
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     assert_eq!(fs.file_type("file.txt").unwrap(), FileType::Blob);
     assert_eq!(fs.file_type("link").unwrap(), FileType::Link);
     assert_eq!(fs.file_type("script.sh").unwrap(), FileType::Executable);
@@ -239,7 +239,7 @@ fn apply_mixed_types() {
 fn apply_nested_paths() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
 
     fs.apply(
         &[
@@ -250,7 +250,7 @@ fn apply_nested_paths() {
     )
     .unwrap();
 
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     assert_eq!(fs.read_text("a/b/c/deep.txt").unwrap(), "deep");
     assert_eq!(fs.read_text("a/b/sibling.txt").unwrap(), "sibling");
     assert!(fs.is_dir("a").unwrap());
@@ -265,7 +265,7 @@ fn apply_nested_paths() {
 fn apply_custom_message() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
 
     fs.apply(
         &[("x.txt", WriteEntry::from_text("x"))],
@@ -275,7 +275,7 @@ fn apply_custom_message() {
     )
     .unwrap();
 
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     let log = fs.log(fs::LogOptions { limit: Some(1), skip: None }).unwrap();
     assert_eq!(log[0].message, "custom apply msg");
 }
@@ -288,14 +288,14 @@ fn apply_custom_message() {
 fn apply_noop_identical_content() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
 
     fs.apply(
         &[("a.txt", WriteEntry::from_text("aaa"))],
         Default::default(),
     )
     .unwrap();
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     let hash1 = fs.commit_hash().unwrap();
 
     // Same content again
@@ -304,7 +304,7 @@ fn apply_noop_identical_content() {
         Default::default(),
     )
     .unwrap();
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     let hash2 = fs.commit_hash().unwrap();
 
     assert_eq!(hash1, hash2);
@@ -318,10 +318,10 @@ fn apply_noop_identical_content() {
 fn apply_stale_snapshot_errors() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs_old = store.fs(Some("main")).unwrap();
+    let fs_old = store.branches().get("main").unwrap();
 
     // Advance
-    let fs_new = store.fs(Some("main")).unwrap();
+    let fs_new = store.branches().get("main").unwrap();
     fs_new.write("advance.txt", b"go", Default::default()).unwrap();
 
     let result = fs_old.apply(
@@ -339,12 +339,12 @@ fn apply_stale_snapshot_errors() {
 fn apply_empty_is_noop() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     let hash_before = fs.commit_hash().unwrap();
 
     fs.apply(&[], Default::default()).unwrap();
 
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     assert_eq!(fs.commit_hash().unwrap(), hash_before);
 }
 
@@ -363,7 +363,7 @@ fn apply_overwrites_existing() {
     )
     .unwrap();
 
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     assert_eq!(fs.read_text("hello.txt").unwrap(), "overwritten");
     // Other files preserved
     assert_eq!(fs.read_text("dir/a.txt").unwrap(), "aaa");
@@ -377,7 +377,7 @@ fn apply_overwrites_existing() {
 fn apply_invalid_entry_errors() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
 
     let bad = WriteEntry {
         data: None,
@@ -395,7 +395,7 @@ fn apply_invalid_entry_errors() {
 fn apply_empty_file() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
 
     fs.apply(
         &[("empty.txt", WriteEntry::from_bytes(vec![]))],
@@ -403,7 +403,7 @@ fn apply_empty_file() {
     )
     .unwrap();
 
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     assert_eq!(fs.read("empty.txt").unwrap(), b"");
     assert_eq!(fs.size("empty.txt").unwrap(), 0);
 }
@@ -416,7 +416,7 @@ fn apply_empty_file() {
 fn apply_binary_data() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
 
     let data: Vec<u8> = (0u8..=255).collect();
     fs.apply(
@@ -425,7 +425,7 @@ fn apply_binary_data() {
     )
     .unwrap();
 
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     assert_eq!(fs.read("binary.bin").unwrap(), data);
 }
 
@@ -444,7 +444,7 @@ fn apply_preserves_existing_files() {
     )
     .unwrap();
 
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     assert_eq!(fs.read_text("hello.txt").unwrap(), "hello");
     assert_eq!(fs.read_text("dir/a.txt").unwrap(), "aaa");
     assert_eq!(fs.read_text("dir/b.txt").unwrap(), "bbb");

@@ -196,12 +196,12 @@ fn store_open_and_fs() {
     .unwrap();
 
     // fs() should work
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     assert!(fs.commit_hash().is_some());
 
     // Write and read back
     fs.write("hello.txt", b"world", Default::default()).unwrap();
-    let fs2 = store.fs(Some("main")).unwrap();
+    let fs2 = store.branches().get("main").unwrap();
     assert_eq!(fs2.read_text("hello.txt").unwrap(), "world");
     assert!(fs2.exists("hello.txt").unwrap());
     assert!(!fs2.exists("nope.txt").unwrap());
@@ -217,7 +217,7 @@ fn store_open_and_fs() {
         ..Default::default()
     })
     .unwrap();
-    let fs3 = store2.fs(Some("main")).unwrap();
+    let fs3 = store2.branches().get("main").unwrap();
     assert_eq!(fs3.read_text("hello.txt").unwrap(), "world");
 
     // Open missing without create → error

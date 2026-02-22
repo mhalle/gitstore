@@ -10,7 +10,7 @@ use gitstore::*;
 fn batch_multiple_writes_single_commit() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     let hash_before = fs.commit_hash().unwrap();
 
     let mut batch = fs.batch(Default::default());
@@ -19,7 +19,7 @@ fn batch_multiple_writes_single_commit() {
     batch.write("c.txt", b"ccc").unwrap();
     batch.commit().unwrap();
 
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     assert_ne!(fs.commit_hash().unwrap(), hash_before);
     assert_eq!(fs.read_text("a.txt").unwrap(), "aaa");
     assert_eq!(fs.read_text("b.txt").unwrap(), "bbb");
@@ -41,7 +41,7 @@ fn batch_write_and_remove() {
     batch.remove("hello.txt").unwrap();
     batch.commit().unwrap();
 
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     assert!(fs.exists("new.txt").unwrap());
     assert!(!fs.exists("hello.txt").unwrap());
 }
@@ -50,13 +50,13 @@ fn batch_write_and_remove() {
 fn batch_empty_no_commit() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     let hash_before = fs.commit_hash().unwrap();
 
     let batch = fs.batch(Default::default());
     batch.commit().unwrap();
 
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     assert_eq!(fs.commit_hash().unwrap(), hash_before);
 }
 
@@ -68,14 +68,14 @@ fn batch_empty_no_commit() {
 fn batch_last_op_wins_remove() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
 
     let mut batch = fs.batch(Default::default());
     batch.write("file.txt", b"data").unwrap();
     batch.remove("file.txt").unwrap();
     batch.commit().unwrap();
 
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     assert!(!fs.exists("file.txt").unwrap());
 }
 
@@ -89,7 +89,7 @@ fn batch_remove_then_write() {
     batch.write("hello.txt", b"replaced").unwrap();
     batch.commit().unwrap();
 
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     assert_eq!(fs.read_text("hello.txt").unwrap(), "replaced");
 }
 
@@ -101,7 +101,7 @@ fn batch_remove_then_write() {
 fn batch_write_after_commit_errors() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
 
     // We can't call methods after commit() since it consumes self.
     // But we can test is_closed and the internal guard via a non-consuming check.
@@ -120,10 +120,10 @@ fn batch_write_after_commit_errors() {
 fn batch_stale_errors() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs_old = store.fs(Some("main")).unwrap();
+    let fs_old = store.branches().get("main").unwrap();
 
     // Advance branch
-    let fs_new = store.fs(Some("main")).unwrap();
+    let fs_new = store.branches().get("main").unwrap();
     fs_new.write("advance.txt", b"go", Default::default()).unwrap();
 
     let mut batch = fs_old.batch(Default::default());
@@ -142,12 +142,12 @@ fn batch_write_from_file() {
     std::fs::write(&src_file, b"from disk").unwrap();
 
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     let mut batch = fs.batch(Default::default());
     batch.write_from_file("imported.txt", &src_file).unwrap();
     batch.commit().unwrap();
 
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     assert_eq!(fs.read_text("imported.txt").unwrap(), "from disk");
 }
 
@@ -161,12 +161,12 @@ fn batch_write_from_file_preserves_exec() {
     std::fs::set_permissions(&src_file, std::fs::Permissions::from_mode(0o755)).unwrap();
 
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     let mut batch = fs.batch(Default::default());
     batch.write_from_file("run.sh", &src_file).unwrap();
     batch.commit().unwrap();
 
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     assert_eq!(fs.file_type("run.sh").unwrap(), FileType::Executable);
 }
 
@@ -179,13 +179,13 @@ fn batch_write_from_file_preserves_exec() {
 fn batch_write_with_mode() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
 
     let mut batch = fs.batch(Default::default());
     batch.write_with_mode("exec.sh", b"#!/bin/sh", MODE_BLOB_EXEC).unwrap();
     batch.commit().unwrap();
 
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     assert_eq!(fs.file_type("exec.sh").unwrap(), FileType::Executable);
 }
 
@@ -198,14 +198,14 @@ fn batch_write_with_mode() {
 fn batch_write_symlink() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
 
     let mut batch = fs.batch(Default::default());
     batch.write("target.txt", b"data").unwrap();
     batch.write_symlink("link", "target.txt").unwrap();
     batch.commit().unwrap();
 
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     assert_eq!(fs.file_type("link").unwrap(), FileType::Link);
     assert_eq!(fs.readlink("link").unwrap(), "target.txt");
 }
@@ -215,7 +215,7 @@ fn batch_write_symlink() {
 fn batch_mixed_ops() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
 
     let mut batch = fs.batch(Default::default());
     batch.write("file.txt", b"data").unwrap();
@@ -223,7 +223,7 @@ fn batch_mixed_ops() {
     batch.write_symlink("link", "file.txt").unwrap();
     batch.commit().unwrap();
 
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     assert_eq!(fs.file_type("file.txt").unwrap(), FileType::Blob);
     assert_eq!(fs.file_type("exec.sh").unwrap(), FileType::Executable);
     assert_eq!(fs.file_type("link").unwrap(), FileType::Link);
@@ -243,7 +243,7 @@ fn batch_noop_identical_writes() {
     batch.write("hello.txt", b"hello").unwrap();
     batch.commit().unwrap();
 
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     assert_eq!(fs.commit_hash().unwrap(), hash_before);
 }
 
@@ -261,7 +261,7 @@ fn batch_overwrite_then_remove() {
     batch.remove("hello.txt").unwrap();
     batch.commit().unwrap();
 
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     assert!(!fs.exists("hello.txt").unwrap());
 }
 
@@ -275,7 +275,7 @@ fn batch_remove_then_rewrite() {
     batch.write("hello.txt", b"rewritten").unwrap();
     batch.commit().unwrap();
 
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     assert_eq!(fs.read_text("hello.txt").unwrap(), "rewritten");
 }
 
@@ -287,7 +287,7 @@ fn batch_remove_then_rewrite() {
 fn batch_custom_message() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
 
     let mut batch = fs.batch(fs::BatchOptions {
         message: Some("my batch".into()),
@@ -295,7 +295,7 @@ fn batch_custom_message() {
     batch.write("a.txt", b"a").unwrap();
     batch.commit().unwrap();
 
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     let log = fs.log(fs::LogOptions { limit: Some(1), skip: None }).unwrap();
     assert_eq!(log[0].message, "my batch");
 }
@@ -308,13 +308,13 @@ fn batch_custom_message() {
 fn batch_creates_nested_paths() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
 
     let mut batch = fs.batch(Default::default());
     batch.write("a/b/c/deep.txt", b"deep").unwrap();
     batch.commit().unwrap();
 
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     assert_eq!(fs.read_text("a/b/c/deep.txt").unwrap(), "deep");
     assert!(fs.is_dir("a").unwrap());
     assert!(fs.is_dir("a/b").unwrap());
@@ -331,18 +331,18 @@ fn batch_sequential_commits() {
     let store = common::create_store(dir.path(), "main");
 
     // First batch
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     let mut batch = fs.batch(Default::default());
     batch.write("a.txt", b"aaa").unwrap();
     batch.commit().unwrap();
 
     // Second batch (needs fresh fs)
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     let mut batch = fs.batch(Default::default());
     batch.write("b.txt", b"bbb").unwrap();
     batch.commit().unwrap();
 
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     assert_eq!(fs.read_text("a.txt").unwrap(), "aaa");
     assert_eq!(fs.read_text("b.txt").unwrap(), "bbb");
 }
@@ -361,7 +361,7 @@ fn batch_remove_all_dir_files() {
     batch.remove("dir/b.txt").unwrap();
     batch.commit().unwrap();
 
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     assert!(!fs.exists("dir/a.txt").unwrap());
     assert!(!fs.exists("dir/b.txt").unwrap());
     // hello.txt untouched
@@ -376,7 +376,7 @@ fn batch_remove_all_dir_files() {
 fn batch_many_files() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
 
     let mut batch = fs.batch(Default::default());
     for i in 0..50 {
@@ -384,7 +384,7 @@ fn batch_many_files() {
     }
     batch.commit().unwrap();
 
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     assert_eq!(fs.read_text("file_000.txt").unwrap(), "data 0");
     assert_eq!(fs.read_text("file_049.txt").unwrap(), "data 49");
     let entries = fs.walk("").unwrap();
@@ -399,7 +399,7 @@ fn batch_many_files() {
 fn batch_last_write_wins() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
 
     let mut batch = fs.batch(Default::default());
     batch.write("x.txt", b"first").unwrap();
@@ -407,7 +407,7 @@ fn batch_last_write_wins() {
     batch.write("x.txt", b"third").unwrap();
     batch.commit().unwrap();
 
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     assert_eq!(fs.read_text("x.txt").unwrap(), "third");
 }
 
@@ -419,7 +419,7 @@ fn batch_last_write_wins() {
 fn batch_remove_nonexistent_succeeds() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
 
     let mut batch = fs.batch(Default::default());
     // Removing a non-existent path should not error
@@ -437,14 +437,14 @@ fn batch_remove_nonexistent_succeeds() {
 fn batch_write_then_remove_same_path() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
 
     let mut batch = fs.batch(Default::default());
     batch.write("temp.txt", b"temporary").unwrap();
     batch.remove("temp.txt").unwrap();
     batch.commit().unwrap();
 
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     // File should not exist — remove wins over earlier write
     assert!(!fs.exists("temp.txt").unwrap());
 }
@@ -457,7 +457,7 @@ fn batch_write_then_remove_same_path() {
 fn batch_unicode_filenames() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
 
     let mut batch = fs.batch(Default::default());
     batch.write("日本語.txt", b"japanese").unwrap();
@@ -465,7 +465,7 @@ fn batch_unicode_filenames() {
     batch.write("中文/文件.txt", b"chinese").unwrap();
     batch.commit().unwrap();
 
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     assert_eq!(fs.read_text("日本語.txt").unwrap(), "japanese");
     assert_eq!(fs.read_text("émojis/🎉.txt").unwrap(), "party");
     assert_eq!(fs.read_text("中文/文件.txt").unwrap(), "chinese");
@@ -479,13 +479,13 @@ fn batch_unicode_filenames() {
 fn batch_write_empty_data() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
 
     let mut batch = fs.batch(Default::default());
     batch.write("empty.txt", b"").unwrap();
     batch.commit().unwrap();
 
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     assert_eq!(fs.read("empty.txt").unwrap(), b"");
     assert_eq!(fs.size("empty.txt").unwrap(), 0);
 }
@@ -500,7 +500,7 @@ fn batch_is_closed_after_commit() {
     // This test verifies is_closed returns false before commit.
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
 
     let mut batch = fs.batch(Default::default());
     assert!(!batch.is_closed());

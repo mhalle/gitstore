@@ -10,7 +10,7 @@ use gitstore::*;
 fn parent_root_is_none() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     // Initial commit has no parent
     assert!(fs.parent().unwrap().is_none());
 }
@@ -19,11 +19,11 @@ fn parent_root_is_none() {
 fn parent_chain() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     fs.write("a.txt", b"a", Default::default()).unwrap();
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     fs.write("b.txt", b"b", Default::default()).unwrap();
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
 
     // Current -> parent -> grandparent (init)
     let parent = fs.parent().unwrap().unwrap();
@@ -53,10 +53,10 @@ fn back_zero_is_self() {
 fn back_one() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     let h0 = fs.commit_hash().unwrap();
     fs.write("a.txt", b"a", Default::default()).unwrap();
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
 
     let prev = fs.back(1).unwrap();
     assert_eq!(prev.commit_hash().unwrap(), h0);
@@ -66,13 +66,13 @@ fn back_one() {
 fn back_n() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     let h0 = fs.commit_hash().unwrap();
 
     fs.write("a.txt", b"a", Default::default()).unwrap();
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     fs.write("b.txt", b"b", Default::default()).unwrap();
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
 
     let back2 = fs.back(2).unwrap();
     assert_eq!(back2.commit_hash().unwrap(), h0);
@@ -82,7 +82,7 @@ fn back_n() {
 fn back_too_far_errors() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     // Only 1 commit, going back 2 should fail
     assert!(fs.back(2).is_err());
 }
@@ -95,11 +95,11 @@ fn back_too_far_errors() {
 fn log_length() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     fs.write("a.txt", b"a", Default::default()).unwrap();
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     fs.write("b.txt", b"b", Default::default()).unwrap();
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
 
     let log = fs.log(Default::default()).unwrap();
     // init + 2 writes = 3
@@ -110,19 +110,19 @@ fn log_length() {
 fn log_order_recent_first() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     fs.write("a.txt", b"a", fs::WriteOptions {
         message: Some("write a".into()),
         ..Default::default()
     })
     .unwrap();
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     fs.write("b.txt", b"b", fs::WriteOptions {
         message: Some("write b".into()),
         ..Default::default()
     })
     .unwrap();
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
 
     let log = fs.log(Default::default()).unwrap();
     assert_eq!(log[0].message, "write b");
@@ -139,7 +139,7 @@ fn log_metadata_fields() {
         email: Some("alice@example.com".into()),
     })
     .unwrap();
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
 
     let log = fs.log(Default::default()).unwrap();
     assert_eq!(log.len(), 1);
@@ -153,11 +153,11 @@ fn log_metadata_fields() {
 fn log_limit() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     fs.write("a.txt", b"a", Default::default()).unwrap();
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     fs.write("b.txt", b"b", Default::default()).unwrap();
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
 
     let log = fs.log(fs::LogOptions {
         limit: Some(2),
@@ -171,19 +171,19 @@ fn log_limit() {
 fn log_skip() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     fs.write("a.txt", b"a", fs::WriteOptions {
         message: Some("write a".into()),
         ..Default::default()
     })
     .unwrap();
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     fs.write("b.txt", b"b", fs::WriteOptions {
         message: Some("write b".into()),
         ..Default::default()
     })
     .unwrap();
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
 
     let log = fs.log(fs::LogOptions {
         limit: None,
@@ -198,13 +198,13 @@ fn log_skip() {
 fn log_skip_and_limit() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     fs.write("a.txt", b"a", Default::default()).unwrap();
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     fs.write("b.txt", b"b", Default::default()).unwrap();
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     fs.write("c.txt", b"c", Default::default()).unwrap();
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
 
     let log = fs.log(fs::LogOptions {
         limit: Some(1),
@@ -222,9 +222,9 @@ fn log_skip_and_limit() {
 fn undo_single_step() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     fs.write("a.txt", b"a", Default::default()).unwrap();
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     let hash_before_undo = fs.commit_hash().unwrap();
 
     let undone = fs.undo().unwrap();
@@ -236,13 +236,13 @@ fn undo_single_step() {
 fn undo_updates_branch() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     fs.write("a.txt", b"a", Default::default()).unwrap();
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
 
     let undone = fs.undo().unwrap();
     // Re-fetch from store — branch should have moved back
-    let fs_fresh = store.fs(Some("main")).unwrap();
+    let fs_fresh = store.branches().get("main").unwrap();
     assert_eq!(fs_fresh.commit_hash(), undone.commit_hash());
 }
 
@@ -250,7 +250,7 @@ fn undo_updates_branch() {
 fn undo_no_parent_errors() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     // Only init commit, no parent to undo to
     assert!(fs.undo().is_err());
 }
@@ -263,9 +263,9 @@ fn undo_no_parent_errors() {
 fn redo_after_undo() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     fs.write("a.txt", b"a", Default::default()).unwrap();
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     let hash_with_a = fs.commit_hash().unwrap();
 
     let undone = fs.undo().unwrap();
@@ -280,14 +280,14 @@ fn redo_after_undo() {
 fn redo_updates_branch() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     fs.write("a.txt", b"a", Default::default()).unwrap();
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
 
     let undone = fs.undo().unwrap();
     let redone = undone.redo().unwrap();
 
-    let fs_fresh = store.fs(Some("main")).unwrap();
+    let fs_fresh = store.branches().get("main").unwrap();
     assert_eq!(fs_fresh.commit_hash(), redone.commit_hash());
 }
 
@@ -299,11 +299,11 @@ fn redo_updates_branch() {
 fn undo_redo_undo_sequence() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     let hash_init = fs.commit_hash().unwrap();
 
     fs.write("a.txt", b"a", Default::default()).unwrap();
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     let hash_with_a = fs.commit_hash().unwrap();
 
     // undo -> init
@@ -327,7 +327,7 @@ fn undo_redo_undo_sequence() {
 fn reflog_has_entries() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     fs.write("a.txt", b"a", Default::default()).unwrap();
 
     let entries = store.branches().reflog("main").unwrap();
@@ -338,9 +338,9 @@ fn reflog_has_entries() {
 fn reflog_includes_undo() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     fs.write("a.txt", b"a", Default::default()).unwrap();
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     fs.undo().unwrap();
 
     let entries = store.branches().reflog("main").unwrap();
@@ -362,9 +362,9 @@ fn commit_info_author() {
         email: Some("bob@example.com".into()),
     })
     .unwrap();
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     fs.write("a.txt", b"a", Default::default()).unwrap();
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
 
     let log = fs.log(fs::LogOptions { limit: Some(1), skip: None }).unwrap();
     assert_eq!(log[0].author_name.as_deref(), Some("Bob"));
@@ -375,7 +375,7 @@ fn commit_info_author() {
 fn commit_info_time_populated() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
 
     let log = fs.log(Default::default()).unwrap();
     assert!(log[0].time.is_some());
@@ -390,9 +390,9 @@ fn commit_info_time_populated() {
 fn undo_too_many_errors() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     fs.write("a.txt", b"a", Default::default()).unwrap();
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
 
     // undo once succeeds
     let undone = fs.undo().unwrap();
@@ -404,7 +404,7 @@ fn undo_too_many_errors() {
 fn redo_on_init_commit_errors() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
 
     // Init commit has no reflog entries with new_sha matching, so redo fails
     // (The 0000 -> init entry has new_sha=init but old_sha=0000 which is invalid)
@@ -416,7 +416,7 @@ fn redo_on_init_commit_errors() {
 fn undo_redo_with_batch() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     let hash_init = fs.commit_hash().unwrap();
 
     let mut batch = fs.batch(Default::default());
@@ -424,7 +424,7 @@ fn undo_redo_with_batch() {
     batch.write("b.txt", b"b").unwrap();
     batch.commit().unwrap();
 
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     let hash_batch = fs.commit_hash().unwrap();
     assert_ne!(hash_batch, hash_init);
 
@@ -444,17 +444,17 @@ fn undo_redo_with_batch() {
 fn log_after_undo_reflects_earlier_state() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     fs.write("a.txt", b"a", fs::WriteOptions {
         message: Some("write a".into()),
         ..Default::default()
     })
     .unwrap();
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
 
     let _undone = fs.undo().unwrap();
     // After undo, the log should only show the init commit
-    let fs_fresh = store.fs(Some("main")).unwrap();
+    let fs_fresh = store.branches().get("main").unwrap();
     let log = fs_fresh.log(Default::default()).unwrap();
     assert_eq!(log.len(), 1);
     assert!(log[0].message.contains("Initialize"));
@@ -464,15 +464,15 @@ fn log_after_undo_reflects_earlier_state() {
 fn multiple_undos() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     let h0 = fs.commit_hash().unwrap();
 
     fs.write("a.txt", b"a", Default::default()).unwrap();
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     let h1 = fs.commit_hash().unwrap();
 
     fs.write("b.txt", b"b", Default::default()).unwrap();
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
 
     // undo twice
     let u1 = fs.undo().unwrap();
@@ -485,7 +485,7 @@ fn multiple_undos() {
     assert!(!u2.exists("a.txt").unwrap());
 
     // Verify branch moved back
-    let fs_fresh = store.fs(Some("main")).unwrap();
+    let fs_fresh = store.branches().get("main").unwrap();
     assert_eq!(fs_fresh.commit_hash().unwrap(), h0);
 }
 
@@ -493,7 +493,7 @@ fn multiple_undos() {
 fn log_initial_commit_only() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
 
     let log = fs.log(Default::default()).unwrap();
     assert_eq!(log.len(), 1);
@@ -504,9 +504,9 @@ fn log_initial_commit_only() {
 fn back_snapshot_is_readonly_view() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     fs.write("a.txt", b"a", Default::default()).unwrap();
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
 
     let prev = fs.back(1).unwrap();
     // back() returns a detached Fs — writing on it should fail (no branch)
@@ -529,11 +529,11 @@ fn reflog_has_init_entry() {
 fn parent_returns_correct_content() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     fs.write("a.txt", b"a", Default::default()).unwrap();
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     fs.write("b.txt", b"b", Default::default()).unwrap();
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
 
     let parent = fs.parent().unwrap().unwrap();
     // Parent has a.txt but not b.txt
@@ -549,9 +549,9 @@ fn parent_returns_correct_content() {
 fn undo_on_detached_errors() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     fs.write("a.txt", b"a", Default::default()).unwrap();
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
 
     // back(1) returns a detached Fs (no branch)
     let detached = fs.back(1).unwrap();
@@ -563,9 +563,9 @@ fn undo_on_detached_errors() {
 fn redo_on_detached_errors() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     fs.write("a.txt", b"a", Default::default()).unwrap();
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
 
     // back(1) returns a detached Fs (no branch)
     let detached = fs.back(1).unwrap();
@@ -581,9 +581,9 @@ fn redo_on_detached_errors() {
 fn reflog_chronological_order() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     fs.write("a.txt", b"a", Default::default()).unwrap();
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     fs.write("b.txt", b"b", Default::default()).unwrap();
 
     let entries = store.branches().reflog("main").unwrap();
@@ -611,9 +611,9 @@ fn reflog_nonexistent_branch_errors() {
 fn double_redo_after_undo_errors() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     fs.write("a.txt", b"a", Default::default()).unwrap();
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
 
     // Undo once, then redo once — second redo should not succeed further
     let undone = fs.undo().unwrap();
@@ -632,13 +632,13 @@ fn double_redo_after_undo_errors() {
 fn redo_stale_snapshot_still_works() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     fs.write("a.txt", b"a", Default::default()).unwrap();
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
 
     let undone = fs.undo().unwrap();
     // Get a stale snapshot of the undone state
-    let stale = store.fs(Some("main")).unwrap();
+    let stale = store.branches().get("main").unwrap();
     // Redo should still work because it uses reflog
     let redone = stale.redo().unwrap();
     assert!(redone.exists("a.txt").unwrap());
@@ -648,11 +648,11 @@ fn redo_stale_snapshot_still_works() {
 fn undo_preserves_content() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     fs.write("a.txt", b"original content", Default::default()).unwrap();
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     fs.write("b.txt", b"second file", Default::default()).unwrap();
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
 
     // Undo removes b.txt but preserves a.txt with original content
     let undone = fs.undo().unwrap();

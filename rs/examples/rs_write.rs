@@ -34,7 +34,7 @@ struct CommitStep {
 }
 
 fn write_scenario(store: &GitStore, branch: &str, spec: &Fixture) {
-    let fs = store.fs(Some(branch)).unwrap();
+    let fs = store.branches().get(branch).unwrap();
     let mut batch = fs.batch(Default::default());
 
     for (filepath, content) in &spec.files {
@@ -60,7 +60,7 @@ fn write_scenario(store: &GitStore, branch: &str, spec: &Fixture) {
 
 fn write_history(store: &GitStore, branch: &str, commits: &[CommitStep]) {
     for step in commits {
-        let fs = store.fs(Some(branch)).unwrap();
+        let fs = store.branches().get(branch).unwrap();
         let mut batch = fs.batch(BatchOptions {
             message: Some(step.message.clone()),
         });

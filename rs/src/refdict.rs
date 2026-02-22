@@ -1,4 +1,7 @@
+use std::sync::Arc;
+
 use crate::error::{Error, Result};
+use crate::fs::Fs;
 use crate::store::GitStore;
 use crate::types::ReflogEntry;
 
@@ -18,26 +21,26 @@ impl<'a> RefDict<'a> {
         format!("{}{}", self.prefix, name)
     }
 
-    /// Get the target of the named ref (hex SHA).
-    pub fn get(&self, name: &str) -> Result<Option<String>> {
-        let repo = self
-            .store
-            .inner
-            .repo
-            .lock()
-            .map_err(|e| Error::git_msg(e.to_string()))?;
-        let refname = self.full_name(name);
-        match repo.find_reference(refname.as_str()) {
-            Ok(reference) => {
-                let oid = reference.id().detach();
-                Ok(Some(format!("{}", oid)))
-            }
-            Err(_) => Ok(None),
-        }
+    /// Whether this RefDict is for branches (writable Fs) or tags (readonly).
+    fn is_branch_prefix(&self) -> bool {
+        self.prefix == "refs/heads/"
     }
 
-    /// Point the named ref at `target` (hex SHA).
-    pub fn set(&self, name: &str, target: &str) -> Result<()> {
+    /// Build an `Fs` from a resolved commit OID and ref name.
+    fn fs_for_ref(&self, commit_oid: gix::ObjectId, name: &str) -> Result<Fs> {
+        let branch = if self.is_branch_prefix() {
+            Some(name.to_string())
+        } else {
+            None
+        };
+        Fs::from_commit(Arc::clone(&self.store.inner), commit_oid, branch)
+    }
+
+    /// Get the `Fs` for the named ref.
+    ///
+    /// Branches return a writable `Fs`; tags return a readonly (detached) `Fs`.
+    /// Errors if the ref does not exist.
+    pub fn get(&self, name: &str) -> Result<Fs> {
         let repo = self
             .store
             .inner
@@ -45,18 +48,37 @@ impl<'a> RefDict<'a> {
             .lock()
             .map_err(|e| Error::git_msg(e.to_string()))?;
         let refname = self.full_name(name);
-        let oid = gix::ObjectId::from_hex(target.as_bytes()).map_err(Error::git)?;
+        let reference = repo
+            .find_reference(refname.as_str())
+            .map_err(|_| Error::not_found(format!("ref '{}' not found", name)))?;
+        let commit_oid = reference.id().detach();
+        drop(repo);
+        self.fs_for_ref(commit_oid, name)
+    }
+
+    /// Point the named ref at the commit of `fs`.
+    pub fn set(&self, name: &str, fs: &Fs) -> Result<()> {
+        let commit_oid = fs
+            .commit_oid
+            .ok_or_else(|| Error::git_msg("Fs has no commit".to_string()))?;
+        let repo = self
+            .store
+            .inner
+            .repo
+            .lock()
+            .map_err(|e| Error::git_msg(e.to_string()))?;
+        let refname = self.full_name(name);
 
         use gix::refs::transaction::PreviousValue;
-        repo.reference(refname.as_str(), oid, PreviousValue::Any, "refdict: set")
+        repo.reference(refname.as_str(), commit_oid, PreviousValue::Any, "refdict: set")
             .map_err(Error::git)?;
         Ok(())
     }
 
-    /// Point the named ref at `target` and return the previous value.
-    pub fn set_and_get(&self, name: &str, target: &str) -> Result<Option<String>> {
-        let old = self.get(name)?;
-        self.set(name, target)?;
+    /// Point the named ref at the commit of `fs` and return the previous `Fs`.
+    pub fn set_and_get(&self, name: &str, fs: &Fs) -> Result<Option<Fs>> {
+        let old = self.try_get(name)?;
+        self.set(name, fs)?;
         Ok(old)
     }
 
@@ -87,7 +109,14 @@ impl<'a> RefDict<'a> {
 
     /// Returns `true` if the named ref exists.
     pub fn has(&self, name: &str) -> Result<bool> {
-        Ok(self.get(name)?.is_some())
+        let repo = self
+            .store
+            .inner
+            .repo
+            .lock()
+            .map_err(|e| Error::git_msg(e.to_string()))?;
+        let refname = self.full_name(name);
+        Ok(repo.find_reference(refname.as_str()).is_ok())
     }
 
     /// List all ref names under this prefix.
@@ -113,28 +142,37 @@ impl<'a> RefDict<'a> {
         Ok(names)
     }
 
-    /// Iterate over `(name, target)` pairs.
-    pub fn iter(&self) -> Result<Vec<(String, String)>> {
-        let repo = self
-            .store
-            .inner
-            .repo
-            .lock()
-            .map_err(|e| Error::git_msg(e.to_string()))?;
+    /// Iterate over `(name, Fs)` pairs.
+    pub fn iter(&self) -> Result<Vec<(String, Fs)>> {
+        let pairs = {
+            let repo = self
+                .store
+                .inner
+                .repo
+                .lock()
+                .map_err(|e| Error::git_msg(e.to_string()))?;
 
-        let refs_platform = repo.references().map_err(Error::git)?;
-        let mut pairs = Vec::new();
-        for r in refs_platform.prefixed(self.prefix).map_err(Error::git)? {
-            if let Ok(reference) = r {
-                let full_name = reference.name().as_bstr().to_string();
-                if let Some(short) = full_name.strip_prefix(self.prefix) {
-                    let oid = reference.id().detach();
-                    pairs.push((short.to_string(), format!("{}", oid)));
+            let refs_platform = repo.references().map_err(Error::git)?;
+            let mut raw_pairs = Vec::new();
+            for r in refs_platform.prefixed(self.prefix).map_err(Error::git)? {
+                if let Ok(reference) = r {
+                    let full_name = reference.name().as_bstr().to_string();
+                    if let Some(short) = full_name.strip_prefix(self.prefix) {
+                        let oid = reference.id().detach();
+                        raw_pairs.push((short.to_string(), oid));
+                    }
                 }
             }
+            raw_pairs.sort_by(|a, b| a.0.cmp(&b.0));
+            raw_pairs
+        };
+
+        let mut result = Vec::with_capacity(pairs.len());
+        for (name, oid) in pairs {
+            let fs = self.fs_for_ref(oid, &name)?;
+            result.push((name, fs));
         }
-        pairs.sort_by(|a, b| a.0.cmp(&b.0));
-        Ok(pairs)
+        Ok(result)
     }
 
     /// Get the default ref (HEAD symbolic target within this prefix).
@@ -195,5 +233,24 @@ impl<'a> RefDict<'a> {
     pub fn reflog(&self, name: &str) -> Result<Vec<ReflogEntry>> {
         let refname = self.full_name(name);
         crate::reflog::read_reflog(&self.store.inner.path, &refname)
+    }
+
+    /// Internal: get ref as Option (for set_and_get).
+    fn try_get(&self, name: &str) -> Result<Option<Fs>> {
+        let repo = self
+            .store
+            .inner
+            .repo
+            .lock()
+            .map_err(|e| Error::git_msg(e.to_string()))?;
+        let refname = self.full_name(name);
+        match repo.find_reference(refname.as_str()) {
+            Ok(reference) => {
+                let commit_oid = reference.id().detach();
+                drop(repo);
+                Ok(Some(self.fs_for_ref(commit_oid, name)?))
+            }
+            Err(_) => Ok(None),
+        }
     }
 }

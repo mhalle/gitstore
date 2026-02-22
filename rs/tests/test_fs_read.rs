@@ -35,9 +35,9 @@ fn read_missing_errors() {
 fn read_text_roundtrip() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     fs.write_text("msg.txt", "hello world", Default::default()).unwrap();
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     assert_eq!(fs.read_text("msg.txt").unwrap(), "hello world");
 }
 
@@ -174,13 +174,13 @@ fn file_type_tree() {
 fn file_type_executable() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     fs.write("run.sh", b"#!/bin/sh", fs::WriteOptions {
         mode: Some(MODE_BLOB_EXEC),
         ..Default::default()
     })
     .unwrap();
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     assert_eq!(fs.file_type("run.sh").unwrap(), FileType::Executable);
 }
 
@@ -189,9 +189,9 @@ fn file_type_executable() {
 fn file_type_link() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     fs.write_symlink("link", "hello.txt", Default::default()).unwrap();
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     assert_eq!(fs.file_type("link").unwrap(), FileType::Link);
 }
 
@@ -245,12 +245,12 @@ fn object_hash_hex() {
 fn object_hash_same_content() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     let mut batch = fs.batch(Default::default());
     batch.write("a.txt", b"same").unwrap();
     batch.write("b.txt", b"same").unwrap();
     batch.commit().unwrap();
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     assert_eq!(
         fs.object_hash("a.txt").unwrap(),
         fs.object_hash("b.txt").unwrap()
@@ -283,9 +283,9 @@ fn object_hash_missing_errors() {
 fn readlink_valid() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     fs.write_symlink("link", "hello.txt", Default::default()).unwrap();
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     assert_eq!(fs.readlink("link").unwrap(), "hello.txt");
 }
 
@@ -327,13 +327,13 @@ fn export_preserves_executable() {
     use std::os::unix::fs::PermissionsExt;
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     fs.write("run.sh", b"#!/bin/sh", fs::WriteOptions {
         mode: Some(MODE_BLOB_EXEC),
         ..Default::default()
     })
     .unwrap();
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
 
     let dest = dir.path().join("out");
     std::fs::create_dir(&dest).unwrap();
@@ -348,12 +348,12 @@ fn export_preserves_executable() {
 fn export_preserves_symlinks() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     let mut batch = fs.batch(Default::default());
     batch.write("target.txt", b"data").unwrap();
     batch.write_symlink("link", "target.txt").unwrap();
     batch.commit().unwrap();
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
 
     let dest = dir.path().join("out");
     std::fs::create_dir(&dest).unwrap();
@@ -371,9 +371,9 @@ fn export_preserves_symlinks() {
 fn read_empty_file() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     fs.write("empty.txt", b"", Default::default()).unwrap();
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     assert_eq!(fs.read("empty.txt").unwrap(), b"");
     assert_eq!(fs.size("empty.txt").unwrap(), 0);
 }
@@ -382,10 +382,10 @@ fn read_empty_file() {
 fn read_binary_data() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     let data: Vec<u8> = (0u8..=255).collect();
     fs.write("all_bytes.bin", &data, Default::default()).unwrap();
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     assert_eq!(fs.read("all_bytes.bin").unwrap(), data);
 }
 
@@ -411,7 +411,7 @@ fn ls_missing_errors() {
 fn ls_empty_root() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     let entries = fs.ls("").unwrap();
     assert!(entries.is_empty());
 }

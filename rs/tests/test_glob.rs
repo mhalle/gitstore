@@ -4,7 +4,7 @@ use gitstore::*;
 
 fn store_with_glob_files(dir: &std::path::Path) -> (GitStore, Fs) {
     let store = common::create_store(dir, "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
 
     let mut batch = fs.batch(Default::default());
     batch.write("readme.txt", b"readme").unwrap();
@@ -20,7 +20,7 @@ fn store_with_glob_files(dir: &std::path::Path) -> (GitStore, Fs) {
     batch.write("docs/api.md", b"api").unwrap();
     batch.commit().unwrap();
 
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     (store, fs)
 }
 
@@ -79,14 +79,14 @@ fn glob_extension_filter() {
 fn glob_question_mark() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     let mut batch = fs.batch(Default::default());
     batch.write("abc.md", b"a").unwrap();
     batch.write("xyz.md", b"b").unwrap();
     batch.write("ab.md", b"c").unwrap();
     batch.commit().unwrap();
 
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     let matches = fs.glob("???.md").unwrap();
     assert_eq!(matches, vec!["abc.md", "xyz.md"]);
 }
@@ -189,13 +189,13 @@ fn glob_doublestar_deep() {
 fn glob_doublestar_no_dotfiles() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     let mut batch = fs.batch(Default::default());
     batch.write(".dotdir/file.txt", b"a").unwrap();
     batch.write("normal/file.txt", b"b").unwrap();
     batch.commit().unwrap();
 
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     let matches = fs.glob("**/*.txt").unwrap();
     // .dotdir should be skipped
     assert!(!matches.iter().any(|m| m.contains(".dotdir")));
@@ -217,7 +217,7 @@ fn glob_doublestar_no_duplicates() {
 fn glob_doublestar_empty_repo() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     let matches = fs.glob("**/*.txt").unwrap();
     assert!(matches.is_empty());
 }
@@ -268,7 +268,7 @@ fn glob_doublestar_mixed_extensions() {
 fn glob_star_empty_repo() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     let matches = fs.glob("*.txt").unwrap();
     assert!(matches.is_empty());
 }
@@ -289,14 +289,14 @@ fn glob_doublestar_all_files() {
 fn glob_question_mark_in_subdir() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     let mut batch = fs.batch(Default::default());
     batch.write("dir/ab.txt", b"a").unwrap();
     batch.write("dir/cd.txt", b"b").unwrap();
     batch.write("dir/abc.txt", b"c").unwrap();
     batch.commit().unwrap();
 
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     let matches = fs.glob("dir/??.txt").unwrap();
     assert_eq!(matches, vec!["dir/ab.txt", "dir/cd.txt"]);
 }

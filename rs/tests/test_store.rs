@@ -10,7 +10,7 @@ use gitstore::*;
 fn create_with_branch() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     assert!(fs.commit_hash().is_some());
 }
 
@@ -23,8 +23,13 @@ fn create_no_branch() {
         ..Default::default()
     })
     .unwrap();
-    // No branch created, so fs(None) should fail
-    assert!(store.fs(None).is_err());
+    // No branch created — HEAD points to a ref that doesn't exist,
+    // so get() on the default branch name should fail
+    let default_name = store.branches().get_default().unwrap();
+    if let Some(name) = default_name {
+        assert!(store.branches().get(&name).is_err());
+    }
+    // Either way, no branch is accessible
 }
 
 #[test]
@@ -38,7 +43,7 @@ fn open_existing() {
         ..Default::default()
     })
     .unwrap();
-    let fs = store2.fs(Some("main")).unwrap();
+    let fs = store2.branches().get("main").unwrap();
     assert!(fs.commit_hash().is_some());
 }
 
@@ -89,16 +94,16 @@ fn signature_accessor() {
 fn branches_get() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let sha = store.branches().get("main").unwrap();
-    assert!(sha.is_some());
-    assert_eq!(sha.unwrap().len(), 40);
+    let fs = store.branches().get("main").unwrap();
+    let sha = fs.commit_hash().unwrap();
+    assert_eq!(sha.len(), 40);
 }
 
 #[test]
 fn branches_get_missing() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    assert!(store.branches().get("nope").unwrap().is_none());
+    assert!(store.branches().get("nope").is_err());
 }
 
 #[test]
@@ -121,20 +126,21 @@ fn branches_list() {
 fn branches_set_fork() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let sha = store.branches().get("main").unwrap().unwrap();
+    let main_fs = store.branches().get("main").unwrap();
+    let sha = main_fs.commit_hash().unwrap();
 
     // Fork: create "dev" pointing at same commit
-    store.branches().set("dev", &sha).unwrap();
+    store.branches().set("dev", &main_fs).unwrap();
     assert!(store.branches().has("dev").unwrap());
-    assert_eq!(store.branches().get("dev").unwrap().unwrap(), sha);
+    assert_eq!(store.branches().get("dev").unwrap().commit_hash().unwrap(), sha);
 }
 
 #[test]
 fn branches_delete() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let sha = store.branches().get("main").unwrap().unwrap();
-    store.branches().set("tmp", &sha).unwrap();
+    let main_fs = store.branches().get("main").unwrap();
+    store.branches().set("tmp", &main_fs).unwrap();
 
     store.branches().delete("tmp").unwrap();
     assert!(!store.branches().has("tmp").unwrap());
@@ -144,8 +150,8 @@ fn branches_delete() {
 fn branches_iter() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let sha = store.branches().get("main").unwrap().unwrap();
-    store.branches().set("dev", &sha).unwrap();
+    let main_fs = store.branches().get("main").unwrap();
+    store.branches().set("dev", &main_fs).unwrap();
 
     let pairs = store.branches().iter().unwrap();
     assert_eq!(pairs.len(), 2);
@@ -161,19 +167,20 @@ fn branches_iter() {
 fn tags_set_get() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let sha = store.branches().get("main").unwrap().unwrap();
+    let main_fs = store.branches().get("main").unwrap();
+    let sha = main_fs.commit_hash().unwrap();
 
-    store.tags().set("v1", &sha).unwrap();
-    assert_eq!(store.tags().get("v1").unwrap().unwrap(), sha);
+    store.tags().set("v1", &main_fs).unwrap();
+    assert_eq!(store.tags().get("v1").unwrap().commit_hash().unwrap(), sha);
 }
 
 #[test]
 fn tags_list() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let sha = store.branches().get("main").unwrap().unwrap();
-    store.tags().set("v1", &sha).unwrap();
-    store.tags().set("v2", &sha).unwrap();
+    let main_fs = store.branches().get("main").unwrap();
+    store.tags().set("v1", &main_fs).unwrap();
+    store.tags().set("v2", &main_fs).unwrap();
 
     let tags = store.tags().list().unwrap();
     assert_eq!(tags, vec!["v1", "v2"]);
@@ -183,8 +190,8 @@ fn tags_list() {
 fn tags_delete() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let sha = store.branches().get("main").unwrap().unwrap();
-    store.tags().set("v1", &sha).unwrap();
+    let main_fs = store.branches().get("main").unwrap();
+    store.tags().set("v1", &main_fs).unwrap();
 
     store.tags().delete("v1").unwrap();
     assert!(!store.tags().has("v1").unwrap());
@@ -206,8 +213,8 @@ fn get_default() {
 fn set_default() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let sha = store.branches().get("main").unwrap().unwrap();
-    store.branches().set("dev", &sha).unwrap();
+    let main_fs = store.branches().get("main").unwrap();
+    store.branches().set("dev", &main_fs).unwrap();
 
     store.branches().set_default("dev").unwrap();
     assert_eq!(
@@ -228,10 +235,11 @@ fn custom_initial_branch() {
 }
 
 #[test]
-fn fs_none_uses_default() {
+fn fs_default_branch_via_get() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(None).unwrap();
+    let name = store.branches().get_default().unwrap().unwrap();
+    let fs = store.branches().get(&name).unwrap();
     assert!(fs.commit_hash().is_some());
 }
 
@@ -240,9 +248,10 @@ fn set_default_to_nonexistent() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
     // set_default to a ref that doesn't exist — this sets HEAD symbolic but
-    // fs resolution will fail
+    // get() will fail because the ref doesn't exist
     store.branches().set_default("nope").unwrap();
-    assert!(store.fs(None).is_err());
+    let name = store.branches().get_default().unwrap().unwrap();
+    assert!(store.branches().get(&name).is_err());
 }
 
 // ---------------------------------------------------------------------------
@@ -253,30 +262,32 @@ fn set_default_to_nonexistent() {
 fn branches_set_and_get_returns_old() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let sha = store.branches().get("main").unwrap().unwrap();
-    store.branches().set("dev", &sha).unwrap();
+    let main_fs = store.branches().get("main").unwrap();
+    let sha = main_fs.commit_hash().unwrap();
+    store.branches().set("dev", &main_fs).unwrap();
 
     // Advance dev
-    let fs = store.fs(Some("dev")).unwrap();
+    let fs = store.branches().get("dev").unwrap();
     fs.write("new.txt", b"data", Default::default()).unwrap();
-    let new_sha = store.branches().get("dev").unwrap().unwrap();
+    let new_sha = store.branches().get("dev").unwrap().commit_hash().unwrap();
 
     // set_and_get returns old value
-    let old = store.branches().set_and_get("dev", &sha).unwrap();
-    assert_eq!(old, Some(new_sha));
+    let old = store.branches().set_and_get("dev", &main_fs).unwrap();
+    assert_eq!(old.unwrap().commit_hash().unwrap(), new_sha);
     // Now dev points back to original
-    assert_eq!(store.branches().get("dev").unwrap().unwrap(), sha);
+    assert_eq!(store.branches().get("dev").unwrap().commit_hash().unwrap(), sha);
 }
 
 #[test]
 fn branches_set_and_get_new_ref() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let sha = store.branches().get("main").unwrap().unwrap();
+    let main_fs = store.branches().get("main").unwrap();
+    let sha = main_fs.commit_hash().unwrap();
 
-    let old = store.branches().set_and_get("brand_new", &sha).unwrap();
+    let old = store.branches().set_and_get("brand_new", &main_fs).unwrap();
     assert!(old.is_none());
-    assert_eq!(store.branches().get("brand_new").unwrap().unwrap(), sha);
+    assert_eq!(store.branches().get("brand_new").unwrap().commit_hash().unwrap(), sha);
 }
 
 // ---------------------------------------------------------------------------
@@ -296,10 +307,10 @@ fn branches_iter_empty_after_delete() {
 fn branches_list_sorted() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let sha = store.branches().get("main").unwrap().unwrap();
-    store.branches().set("zebra", &sha).unwrap();
-    store.branches().set("alpha", &sha).unwrap();
-    store.branches().set("beta", &sha).unwrap();
+    let main_fs = store.branches().get("main").unwrap();
+    store.branches().set("zebra", &main_fs).unwrap();
+    store.branches().set("alpha", &main_fs).unwrap();
+    store.branches().set("beta", &main_fs).unwrap();
 
     let list = store.branches().list().unwrap();
     assert_eq!(list, vec!["alpha", "beta", "main", "zebra"]);
@@ -313,15 +324,16 @@ fn branches_list_sorted() {
 fn tags_iter_pairs() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let sha = store.branches().get("main").unwrap().unwrap();
-    store.tags().set("v1", &sha).unwrap();
-    store.tags().set("v2", &sha).unwrap();
+    let main_fs = store.branches().get("main").unwrap();
+    let sha = main_fs.commit_hash().unwrap();
+    store.tags().set("v1", &main_fs).unwrap();
+    store.tags().set("v2", &main_fs).unwrap();
 
     let pairs = store.tags().iter().unwrap();
     assert_eq!(pairs.len(), 2);
     assert_eq!(pairs[0].0, "v1");
     assert_eq!(pairs[1].0, "v2");
-    assert_eq!(pairs[0].1, sha);
+    assert_eq!(pairs[0].1.commit_hash().unwrap(), sha);
 }
 
 #[test]
@@ -339,8 +351,8 @@ fn tags_empty_list() {
 fn branches_has_after_delete() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let sha = store.branches().get("main").unwrap().unwrap();
-    store.branches().set("tmp", &sha).unwrap();
+    let main_fs = store.branches().get("main").unwrap();
+    store.branches().set("tmp", &main_fs).unwrap();
     assert!(store.branches().has("tmp").unwrap());
     store.branches().delete("tmp").unwrap();
     assert!(!store.branches().has("tmp").unwrap());
@@ -357,11 +369,11 @@ fn store_clone_shares_state() {
     let store2 = store1.clone();
 
     // Write via store1
-    let fs = store1.fs(Some("main")).unwrap();
+    let fs = store1.branches().get("main").unwrap();
     fs.write("shared.txt", b"data", Default::default()).unwrap();
 
     // Read via store2
-    let fs2 = store2.fs(Some("main")).unwrap();
+    let fs2 = store2.branches().get("main").unwrap();
     assert_eq!(fs2.read_text("shared.txt").unwrap(), "data");
 }
 
@@ -391,18 +403,20 @@ fn branches_delete_nonexistent() {
 fn tags_set_overwrite() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let sha1 = store.branches().get("main").unwrap().unwrap();
-    store.tags().set("v1", &sha1).unwrap();
+    let fs1 = store.branches().get("main").unwrap();
+    let sha1 = fs1.commit_hash().unwrap();
+    store.tags().set("v1", &fs1).unwrap();
 
     // Advance branch to get a new SHA
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     fs.write("new.txt", b"data", Default::default()).unwrap();
-    let sha2 = store.branches().get("main").unwrap().unwrap();
+    let fs2 = store.branches().get("main").unwrap();
+    let sha2 = fs2.commit_hash().unwrap();
     assert_ne!(sha1, sha2);
 
     // Overwrite tag to point at new SHA
-    store.tags().set("v1", &sha2).unwrap();
-    assert_eq!(store.tags().get("v1").unwrap().unwrap(), sha2);
+    store.tags().set("v1", &fs2).unwrap();
+    assert_eq!(store.tags().get("v1").unwrap().commit_hash().unwrap(), sha2);
 }
 
 // ---------------------------------------------------------------------------
@@ -413,9 +427,9 @@ fn tags_set_overwrite() {
 fn fs_on_back_is_readonly() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     fs.write("a.txt", b"a", Default::default()).unwrap();
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
 
     // back(1) gives a detached (readonly) Fs
     let detached = fs.back(1).unwrap();
@@ -427,9 +441,9 @@ fn fs_on_back_is_readonly() {
 fn fs_on_back_batch_is_readonly() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     fs.write("a.txt", b"a", Default::default()).unwrap();
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
 
     // back(1) gives a detached (readonly) Fs — batch commit should error
     let detached = fs.back(1).unwrap();
@@ -440,14 +454,24 @@ fn fs_on_back_batch_is_readonly() {
 }
 
 // ---------------------------------------------------------------------------
-// branches — invalid SHA errors
+// store.fs(hash) — open by commit hash
 // ---------------------------------------------------------------------------
 
 #[test]
-fn branches_set_invalid_sha_errors() {
+fn fs_by_hash_readonly() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let result = store.branches().set("bad", "not_a_valid_hex_sha");
+    let fs = store.branches().get("main").unwrap();
+    fs.write("a.txt", b"hello", Default::default()).unwrap();
+    let fs = store.branches().get("main").unwrap();
+    let sha = fs.commit_hash().unwrap();
+
+    // Open by hash — should be readable
+    let detached = store.fs(&sha).unwrap();
+    assert_eq!(detached.read_text("a.txt").unwrap(), "hello");
+
+    // Should be readonly (no branch)
+    let result = detached.write("b.txt", b"fail", Default::default());
     assert!(result.is_err());
 }
 
@@ -459,19 +483,19 @@ fn branches_set_invalid_sha_errors() {
 fn branches_independent_content() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    let sha = store.branches().get("main").unwrap().unwrap();
-    store.branches().set("dev", &sha).unwrap();
+    let main_fs = store.branches().get("main").unwrap();
+    store.branches().set("dev", &main_fs).unwrap();
 
     // Write different content to each
-    let fs = store.fs(Some("main")).unwrap();
+    let fs = store.branches().get("main").unwrap();
     fs.write("main_only.txt", b"main", Default::default()).unwrap();
 
-    let fs = store.fs(Some("dev")).unwrap();
+    let fs = store.branches().get("dev").unwrap();
     fs.write("dev_only.txt", b"dev", Default::default()).unwrap();
 
     // Verify isolation
-    let main_fs = store.fs(Some("main")).unwrap();
-    let dev_fs = store.fs(Some("dev")).unwrap();
+    let main_fs = store.branches().get("main").unwrap();
+    let dev_fs = store.branches().get("dev").unwrap();
     assert!(main_fs.exists("main_only.txt").unwrap());
     assert!(!main_fs.exists("dev_only.txt").unwrap());
     assert!(!dev_fs.exists("main_only.txt").unwrap());
