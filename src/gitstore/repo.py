@@ -16,6 +16,7 @@ from dulwich.objects import Tree as _DTree
 from dulwich.repo import Repo as _DRepo
 
 from .mirror import RefChange, MirrorDiff
+from .notes import NoteDict
 from .tree import BlobOid, GitError, TreeBuilder
 
 if TYPE_CHECKING:
@@ -266,6 +267,7 @@ class GitStore:
         self._signature = Signature(author, email)
         self.branches = RefDict(self, "refs/heads/")
         self.tags = RefDict(self, "refs/tags/")
+        self.notes = NoteDict(self)
 
     def __repr__(self) -> str:
         return f"GitStore({self._repo.path!r})"
