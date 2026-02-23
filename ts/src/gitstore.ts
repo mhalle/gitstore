@@ -5,6 +5,7 @@
 import git from 'isomorphic-git';
 import type { FsModule, Signature, MirrorDiff, HttpClient } from './types.js';
 import { RefDict } from './refdict.js';
+import { NoteDict } from './notes.js';
 
 export class GitStore {
   /** @internal */ _fsModule: FsModule;
@@ -13,6 +14,7 @@ export class GitStore {
 
   branches: RefDict;
   tags: RefDict;
+  notes: NoteDict;
 
   constructor(fsModule: FsModule, gitdir: string, author: string, email: string) {
     this._fsModule = fsModule;
@@ -20,6 +22,7 @@ export class GitStore {
     this._signature = { name: author, email };
     this.branches = new RefDict(this, 'refs/heads/');
     this.tags = new RefDict(this, 'refs/tags/');
+    this.notes = new NoteDict(this);
   }
 
   toString(): string {

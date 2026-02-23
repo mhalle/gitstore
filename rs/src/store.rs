@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::error::{Error, Result};
 use crate::fs::Fs;
+use crate::notes::NoteDict;
 use crate::refdict::RefDict;
 use crate::types::{MirrorDiff, OpenOptions, Signature};
 
@@ -157,6 +158,11 @@ impl GitStore {
     /// Return a `RefDict` for tags.
     pub fn tags(&self) -> RefDict<'_> {
         RefDict::new(self, "refs/tags/")
+    }
+
+    /// Return a `NoteDict` for git notes namespaces.
+    pub fn notes(&self) -> NoteDict<'_> {
+        NoteDict::new(self)
     }
 
     /// Path to the bare repository on disk.

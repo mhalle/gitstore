@@ -30,6 +30,7 @@ export { GitStore } from './gitstore.js';
 export { FS, retryWrite } from './fs.js';
 export { Batch } from './batch.js';
 export { RefDict } from './refdict.js';
+export { NoteDict, NoteNamespace, NotesBatch } from './notes.js';
 
 // Types and data structures
 export {

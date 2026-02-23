@@ -27,6 +27,9 @@ pub enum Error {
     #[error("invalid path: {0}")]
     InvalidPath(String),
 
+    #[error("invalid hash: {0}")]
+    InvalidHash(String),
+
     #[error("invalid ref name: {0}")]
     InvalidRefName(String),
 
@@ -77,6 +80,10 @@ impl Error {
 
     pub fn invalid_path(path: impl Into<String>) -> Self {
         Self::InvalidPath(path.into())
+    }
+
+    pub fn invalid_hash(hash: impl Into<String>) -> Self {
+        Self::InvalidHash(hash.into())
     }
 
     pub fn invalid_ref_name(name: impl Into<String>) -> Self {
