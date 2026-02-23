@@ -18,6 +18,7 @@ interface Spec {
     files?: Record<string, string>;
     removes?: string[];
   }>;
+  notes?: Record<string, string>;
 }
 
 function b64ToBytes(b64: string): Uint8Array {
@@ -212,6 +213,34 @@ async function main() {
     } else {
       const snapshot = await store.branches.get(branch);
       failures += await checkBasic(snapshot, spec, name);
+    }
+  }
+
+  // Check notes
+  for (const [name, spec] of Object.entries(fixtures)) {
+    if (!spec.notes) continue;
+
+    const repoPath = path.join(repoDir, `${prefix}_${name}.git`);
+    if (!fs.existsSync(repoPath)) continue;
+
+    const store = await GitStore.open(repoPath, { fs, create: false });
+    const branch = spec.branch ?? 'main';
+    const snapshot = await store.branches.get(branch);
+    const commitHash = snapshot.commitHash;
+
+    for (const [namespace, expectedText] of Object.entries(spec.notes)) {
+      try {
+        const actual = await store.notes.namespace(namespace).get(commitHash);
+        if (actual !== expectedText) {
+          console.log(`  FAIL ${name}: notes[${namespace}] expected ${JSON.stringify(expectedText)}, got ${JSON.stringify(actual)}`);
+          failures++;
+        } else {
+          console.log(`  OK   ${name}: notes[${namespace}]`);
+        }
+      } catch {
+        console.log(`  FAIL ${name}: notes[${namespace}] not found for ${commitHash}`);
+        failures++;
+      }
     }
   }
 

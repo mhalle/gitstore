@@ -21,6 +21,8 @@ struct Fixture {
     #[serde(default)]
     executable_files: HashMap<String, String>,
     commits: Option<Vec<CommitStep>>,
+    #[serde(default)]
+    notes: HashMap<String, String>,
 }
 
 #[derive(Deserialize)]
@@ -343,6 +345,32 @@ fn main() {
         } else {
             let fs = store.branches().get(branch).unwrap();
             failures += check_basic(&fs, spec, name);
+        }
+
+        if !spec.notes.is_empty() {
+            let fs = store.branches().get(branch).unwrap();
+            let commit_hash = fs.commit_hash().unwrap();
+            for (namespace, expected_text) in &spec.notes {
+                match store.notes().namespace(namespace).get(&commit_hash) {
+                    Ok(ref actual) if actual == expected_text => {
+                        println!("  OK   {}: notes[{}]", name, namespace);
+                    }
+                    Ok(ref actual) => {
+                        println!(
+                            "  FAIL {}: notes[{}] expected {:?}, got {:?}",
+                            name, namespace, expected_text, actual
+                        );
+                        failures += 1;
+                    }
+                    Err(_) => {
+                        println!(
+                            "  FAIL {}: notes[{}] not found for {}",
+                            name, namespace, commit_hash
+                        );
+                        failures += 1;
+                    }
+                }
+            }
         }
     }
 

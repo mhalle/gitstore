@@ -22,6 +22,8 @@ struct Fixture {
     #[serde(default)]
     executable_files: HashMap<String, String>,
     commits: Option<Vec<CommitStep>>,
+    #[serde(default)]
+    notes: HashMap<String, String>,
 }
 
 #[derive(Deserialize)]
@@ -105,6 +107,18 @@ fn main() {
             write_history(&store, branch, commits);
         } else {
             write_scenario(&store, branch, spec);
+        }
+
+        if !spec.notes.is_empty() {
+            let fs = store.branches().get(branch).unwrap();
+            let commit_hash = fs.commit_hash().unwrap();
+            for (namespace, text) in &spec.notes {
+                store
+                    .notes()
+                    .namespace(namespace)
+                    .set(&commit_hash, text)
+                    .unwrap();
+            }
         }
 
         println!("  rs_write: {} -> {}", name, repo_path.display());

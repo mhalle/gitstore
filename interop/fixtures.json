@@ -54,5 +54,16 @@
       }
     ],
     "branch": "main"
+  },
+  "notes": {
+    "files": {
+      "readme.txt": "file for notes test"
+    },
+    "notes": {
+      "commits": "default namespace note",
+      "reviews": "LGTM \u2705",
+      "metadata": "line1\nline2\nline3"
+    },
+    "branch": "main"
   }
 }

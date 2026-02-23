@@ -141,6 +141,27 @@ def check_history(store, branch, spec, name):
     return failures
 
 
+def check_notes(store, branch, spec, name):
+    """Check that notes on HEAD match expected values."""
+    failures = 0
+    fs = store.branches[branch]
+    commit_hash = fs.commit_hash
+
+    for namespace, expected_text in spec["notes"].items():
+        try:
+            actual = store.notes[namespace][commit_hash]
+            if actual != expected_text:
+                print(f"  FAIL {name}: notes[{namespace}] expected {expected_text!r}, got {actual!r}")
+                failures += 1
+            else:
+                print(f"  OK   {name}: notes[{namespace}]")
+        except KeyError:
+            print(f"  FAIL {name}: notes[{namespace}] not found for {commit_hash}")
+            failures += 1
+
+    return failures
+
+
 def main(fixtures_path: str, repo_dir: str, prefix: str = "ts") -> None:
     fixtures = json.loads(Path(fixtures_path).read_text())
     failures = 0
@@ -161,6 +182,9 @@ def main(fixtures_path: str, repo_dir: str, prefix: str = "ts") -> None:
         else:
             fs = store.branches[branch]
             failures += check_basic(fs, spec, name)
+
+        if "notes" in spec:
+            failures += check_notes(store, branch, spec, name)
 
     if failures:
         print(f"\n{failures} failure(s)")

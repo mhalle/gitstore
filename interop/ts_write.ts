@@ -20,6 +20,7 @@ interface Spec {
     files?: Record<string, string>;
     removes?: string[];
   }>;
+  notes?: Record<string, string>;
 }
 
 async function writeScenario(store: GitStore, branch: string, spec: Spec) {
@@ -73,6 +74,14 @@ async function main() {
       await writeHistory(store, branch, spec);
     } else {
       await writeScenario(store, branch, spec);
+    }
+
+    if (spec.notes) {
+      const snapshot = await store.branches.get(branch);
+      const commitHash = snapshot.commitHash;
+      for (const [namespace, text] of Object.entries(spec.notes)) {
+        await store.notes.namespace(namespace).set(commitHash, text);
+      }
     }
 
     console.log(`  ts_write: ${name} -> ${repoPath}`);

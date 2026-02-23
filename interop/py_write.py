@@ -34,6 +34,14 @@ def write_history(store, branch, spec):
         fs = batch.fs
 
 
+def write_notes(store, branch, spec):
+    """Write notes on the HEAD commit for each namespace."""
+    fs = store.branches[branch]
+    commit_hash = fs.commit_hash
+    for namespace, text in spec["notes"].items():
+        store.notes[namespace][commit_hash] = text
+
+
 def main(fixtures_path: str, output_dir: str) -> None:
     fixtures = json.loads(Path(fixtures_path).read_text())
 
@@ -46,6 +54,9 @@ def main(fixtures_path: str, output_dir: str) -> None:
             write_history(store, branch, spec)
         else:
             write_scenario(store, branch, spec)
+
+        if "notes" in spec:
+            write_notes(store, branch, spec)
 
         print(f"  py_write: {name} -> {repo_path}")
 
