@@ -213,11 +213,11 @@ fn empty_note_text() {
 }
 
 // ---------------------------------------------------------------------------
-// get_current_ref
+// get_for_current_branch
 // ---------------------------------------------------------------------------
 
 #[test]
-fn current_ref_read() {
+fn for_current_branch_read() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
     let fs = store.branches().get("main").unwrap();
@@ -225,13 +225,13 @@ fn current_ref_read() {
 
     store.notes().commits().set(&hash, "my note").unwrap();
     assert_eq!(
-        store.notes().commits().get_current_ref(&store).unwrap(),
+        store.notes().commits().get_for_current_branch(&store).unwrap(),
         "my note"
     );
 }
 
 #[test]
-fn current_ref_write() {
+fn for_current_branch_write() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
     let fs = store.branches().get("main").unwrap();
@@ -240,7 +240,7 @@ fn current_ref_write() {
     store
         .notes()
         .commits()
-        .set_current_ref(&store, "written via method")
+        .set_for_current_branch(&store, "written via method")
         .unwrap();
     assert_eq!(
         store.notes().commits().get(&hash).unwrap(),
@@ -249,15 +249,15 @@ fn current_ref_write() {
 }
 
 #[test]
-fn current_ref_no_note_raises() {
+fn for_current_branch_no_note_raises() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
 
-    assert!(store.notes().commits().get_current_ref(&store).is_err());
+    assert!(store.notes().commits().get_for_current_branch(&store).is_err());
 }
 
 #[test]
-fn current_ref_after_new_commit() {
+fn for_current_branch_after_new_commit() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
     let fs = store.branches().get("main").unwrap();
@@ -266,8 +266,8 @@ fn current_ref_after_new_commit() {
     store.notes().commits().set(&hash, "note on old").unwrap();
     // Create a new commit
     fs.write("file.txt", b"data", Default::default()).unwrap();
-    // current_ref should now point to the new commit (which has no note)
-    assert!(store.notes().commits().get_current_ref(&store).is_err());
+    // for_current_branch should now point to the new commit (which has no note)
+    assert!(store.notes().commits().get_for_current_branch(&store).is_err());
 }
 
 // ---------------------------------------------------------------------------

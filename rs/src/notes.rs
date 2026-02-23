@@ -430,7 +430,7 @@ impl NoteNamespace {
     }
 
     /// Get the note for the current HEAD commit.
-    pub fn get_current_ref(&self, store: &GitStore) -> Result<String> {
+    pub fn get_for_current_branch(&self, store: &GitStore) -> Result<String> {
         let current = store
             .branches()
             .get_current()?
@@ -442,7 +442,7 @@ impl NoteNamespace {
     }
 
     /// Set a note on the current HEAD commit.
-    pub fn set_current_ref(&self, store: &GitStore, text: &str) -> Result<()> {
+    pub fn set_for_current_branch(&self, store: &GitStore, text: &str) -> Result<()> {
         let current = store
             .branches()
             .get_current()?

@@ -271,19 +271,19 @@ class NoteNamespace(MutableMapping):
         return sum(1 for _ in self._iter_notes(tree_oid))
 
     # ------------------------------------------------------------------
-    # current_ref property
+    # for_current_branch property
     # ------------------------------------------------------------------
 
     @property
-    def current_ref(self) -> str:
+    def for_current_branch(self) -> str:
         """Note for the current HEAD commit."""
         current_fs = self._store.branches.current
         if current_fs is None:
             raise RuntimeError("HEAD is dangling — no current branch")
         return self[current_fs.commit_hash]
 
-    @current_ref.setter
-    def current_ref(self, text: str) -> None:
+    @for_current_branch.setter
+    def for_current_branch(self, text: str) -> None:
         current_fs = self._store.branches.current
         if current_fs is None:
             raise RuntimeError("HEAD is dangling — no current branch")

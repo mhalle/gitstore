@@ -386,7 +386,7 @@ export class NoteNamespace {
     return notes.length;
   }
 
-  async getCurrentRef(): Promise<string> {
+  async getForCurrentBranch(): Promise<string> {
     const current = await this._store.branches.getCurrent();
     if (current === null) {
       throw new GitStoreError('HEAD is dangling — no current branch');
@@ -394,7 +394,7 @@ export class NoteNamespace {
     return this.get(current.commitHash);
   }
 
-  async setCurrentRef(text: string): Promise<void> {
+  async setForCurrentBranch(text: string): Promise<void> {
     const current = await this._store.branches.getCurrent();
     if (current === null) {
       throw new GitStoreError('HEAD is dangling — no current branch');

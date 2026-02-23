@@ -120,30 +120,30 @@ class TestBasicCRUD:
 
 
 # ---------------------------------------------------------------------------
-# current_ref
+# for_current_branch
 # ---------------------------------------------------------------------------
 
-class TestCurrentRef:
-    def test_current_ref_read(self, store, commit_hash):
+class TestForCurrentBranch:
+    def test_for_current_branch_read(self, store, commit_hash):
         store.notes.commits[commit_hash] = "my note"
-        assert store.notes.commits.current_ref == "my note"
+        assert store.notes.commits.for_current_branch == "my note"
 
-    def test_current_ref_write(self, store, commit_hash):
-        store.notes.commits.current_ref = "written via property"
+    def test_for_current_branch_write(self, store, commit_hash):
+        store.notes.commits.for_current_branch = "written via property"
         assert store.notes.commits[commit_hash] == "written via property"
 
-    def test_current_ref_when_no_note_raises(self, store):
+    def test_for_current_branch_when_no_note_raises(self, store):
         with pytest.raises(KeyError):
-            store.notes.commits.current_ref
+            store.notes.commits.for_current_branch
 
-    def test_current_ref_after_new_commit(self, store):
+    def test_for_current_branch_after_new_commit(self, store):
         fs = store.branches["main"]
         store.notes.commits[fs.commit_hash] = "note on old"
         # Create a new commit
         fs2 = fs.write("file.txt", b"data")
-        # current_ref should now point to the new commit (which has no note)
+        # for_current_branch should now point to the new commit (which has no note)
         with pytest.raises(KeyError):
-            store.notes.commits.current_ref
+            store.notes.commits.for_current_branch
 
 
 # ---------------------------------------------------------------------------

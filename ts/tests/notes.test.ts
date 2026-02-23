@@ -140,22 +140,22 @@ describe('basic CRUD', () => {
 });
 
 // ---------------------------------------------------------------------------
-// getCurrentRef
+// getForCurrentBranch
 // ---------------------------------------------------------------------------
 
-describe('getCurrentRef', () => {
-  it('read current ref', async () => {
+describe('getForCurrentBranch', () => {
+  it('read for current branch', async () => {
     await store.notes.commits.set(commitHash, 'my note');
-    expect(await store.notes.commits.getCurrentRef()).toBe('my note');
+    expect(await store.notes.commits.getForCurrentBranch()).toBe('my note');
   });
 
-  it('write current ref', async () => {
-    await store.notes.commits.setCurrentRef('written via method');
+  it('write for current branch', async () => {
+    await store.notes.commits.setForCurrentBranch('written via method');
     expect(await store.notes.commits.get(commitHash)).toBe('written via method');
   });
 
   it('no note raises', async () => {
-    await expect(store.notes.commits.getCurrentRef()).rejects.toThrow(GitStoreError);
+    await expect(store.notes.commits.getForCurrentBranch()).rejects.toThrow(GitStoreError);
   });
 
   it('after new commit', async () => {
@@ -163,8 +163,8 @@ describe('getCurrentRef', () => {
     await store.notes.commits.set(snap.commitHash, 'note on old');
     // Create a new commit
     await snap.write('file.txt', toBytes('data'));
-    // current_ref should now point to the new commit (which has no note)
-    await expect(store.notes.commits.getCurrentRef()).rejects.toThrow(GitStoreError);
+    // for_current_branch should now point to the new commit (which has no note)
+    await expect(store.notes.commits.getForCurrentBranch()).rejects.toThrow(GitStoreError);
   });
 });
 
