@@ -30,7 +30,7 @@ Issues = "https://github.com/mhalle/gitstore/issues"
 Changelog = "https://github.com/mhalle/gitstore/blob/master/CHANGELOG.md"
 
 dependencies = [
-    "dulwich>=0.22.0",
+    "dulwich>=1.0.0",
 ]
 
 [project.optional-dependencies]
