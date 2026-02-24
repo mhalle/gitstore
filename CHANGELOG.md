@@ -4,6 +4,12 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.58.2 / TS v0.3.2 / Rust v0.3.2 (2026-02-24)
+
+**TypeScript & Rust:**
+
+- Add comprehensive inline API documentation (JSDoc / rustdoc) to all public types, structs, enums, functions, and methods — matching the Python docstrings added in v0.58.1
+
 ## v0.58.1 / TS v0.3.1 / Rust v0.3.1 (2026-02-24)
 
 **Rust bug fixes:**
