@@ -30,7 +30,12 @@ if TYPE_CHECKING:
 
 @dataclass
 class Signature:
-    """Author/committer identity."""
+    """Author/committer identity used for commits.
+
+    Attributes:
+        name: Author name (e.g. ``"gitstore"``).
+        email: Author email (e.g. ``"gitstore@localhost"``).
+    """
 
     name: str
     email: str
@@ -260,7 +265,15 @@ def init_repository(path: str, bare: bool = True) -> _Repository:
 
 @dataclass
 class ReflogEntry:
-    """A single reflog entry."""
+    """A single reflog entry recording a branch movement.
+
+    Attributes:
+        old_sha: Previous 40-char hex commit SHA.
+        new_sha: New 40-char hex commit SHA.
+        committer: Identity string of the committer.
+        timestamp: POSIX epoch seconds of the entry.
+        message: Reflog message (e.g. ``"commit: + file.txt"``).
+    """
     old_sha: str
     new_sha: str
     committer: str
@@ -281,7 +294,11 @@ def _validate_ref_name(name: str) -> None:
 
 
 class GitStore:
-    """A versioned filesystem backed by a bare git repository."""
+    """A versioned filesystem backed by a bare git repository.
+
+    Open or create a store with :meth:`open`.  Access snapshots via
+    :attr:`branches`, :attr:`tags`, and :attr:`notes`.
+    """
 
     def __init__(self, repo: _Repository, author: str, email: str):
         self._repo = repo
@@ -344,7 +361,15 @@ class GitStore:
     def backup(self, url: str, *, dry_run: bool = False, progress: Callable | None = None) -> MirrorDiff:
         """Push all refs to *url*, creating an exact mirror.
 
-        Returns a `MirrorDiff` describing what changed (or would change).
+        Remote-only refs are deleted.
+
+        Args:
+            url: Remote repository URL (HTTPS, SSH, or local path).
+            dry_run: Compute diff without pushing.
+            progress: Optional progress callback.
+
+        Returns:
+            A :class:`MirrorDiff` describing what changed (or would change).
         """
         from .mirror import backup
         return backup(self, url, dry_run=dry_run, progress=progress)
@@ -352,14 +377,26 @@ class GitStore:
     def restore(self, url: str, *, dry_run: bool = False, progress: Callable | None = None) -> MirrorDiff:
         """Fetch all refs from *url*, overwriting local state.
 
-        Returns a `MirrorDiff` describing what changed (or would change).
+        Local-only refs are deleted.
+
+        Args:
+            url: Remote repository URL (HTTPS, SSH, or local path).
+            dry_run: Compute diff without fetching.
+            progress: Optional progress callback.
+
+        Returns:
+            A :class:`MirrorDiff` describing what changed (or would change).
         """
         from .mirror import restore
         return restore(self, url, dry_run=dry_run, progress=progress)
 
 
 class RefDict(MutableMapping):
-    """Dict-like access to branches or tags."""
+    """Dict-like access to branches or tags.
+
+    ``store.branches`` and ``store.tags`` are both ``RefDict`` instances.
+    Supports ``[]``, ``del``, ``in``, ``len``, and iteration.
+    """
 
     def __init__(self, store: GitStore, prefix: str):
         self._store = store

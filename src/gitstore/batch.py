@@ -13,7 +13,15 @@ if TYPE_CHECKING:
 
 
 class Batch:
-    """Accumulates writes and removes, commits once on exit."""
+    """Accumulates writes and removes, committing them in a single atomic commit.
+
+    Use as a context manager or call :meth:`commit` explicitly.  Nothing is
+    committed if an exception occurs inside the ``with`` block.
+
+    Attributes:
+        fs: The resulting :class:`~gitstore.FS` after commit, or ``None``
+            if uncommitted or aborted.
+    """
 
     def __init__(self, fs: FS, message: str | None = None, operation: str | None = None):
         if not fs._writable:
@@ -32,6 +40,13 @@ class Batch:
             raise RuntimeError("Batch is closed")
 
     def write(self, path: str | os.PathLike[str], data: bytes, *, mode: FileType | int | None = None) -> None:
+        """Stage a file write.
+
+        Args:
+            path: Destination path in the repo.
+            data: Raw bytes to write.
+            mode: File mode override (e.g. ``FileType.EXECUTABLE``).
+        """
         from .copy._types import FileType
         if isinstance(mode, FileType):
             mode = mode.filemode
@@ -42,6 +57,15 @@ class Batch:
         self._writes[path] = (blob_oid, mode) if mode is not None else blob_oid
 
     def write_from_file(self, path: str | os.PathLike[str], local_path: str | os.PathLike[str], *, mode: FileType | int | None = None) -> None:
+        """Stage a write from a local file.
+
+        Executable permission is auto-detected from disk unless *mode* is set.
+
+        Args:
+            path: Destination path in the repo.
+            local_path: Path to the local file.
+            mode: File mode override (e.g. ``FileType.EXECUTABLE``).
+        """
         from .copy._types import FileType
         if isinstance(mode, FileType):
             mode = mode.filemode
@@ -56,9 +80,23 @@ class Batch:
         self._writes[path] = (blob_oid, mode) if mode != GIT_FILEMODE_BLOB else blob_oid
 
     def write_text(self, path: str | os.PathLike[str], text: str, *, encoding: str = "utf-8", mode: FileType | int | None = None) -> None:
+        """Stage a text write (convenience wrapper around :meth:`write`).
+
+        Args:
+            path: Destination path in the repo.
+            text: String content (encoded with *encoding*).
+            encoding: Text encoding (default ``"utf-8"``).
+            mode: File mode override (e.g. ``FileType.EXECUTABLE``).
+        """
         self.write(path, text.encode(encoding), mode=mode)
 
     def write_symlink(self, path: str | os.PathLike[str], target: str) -> None:
+        """Stage a symbolic link entry.
+
+        Args:
+            path: Symlink path in the repo.
+            target: The symlink target string.
+        """
         self._check_open()
         path = _normalize_path(path)
         self._removes.discard(path)
@@ -66,6 +104,16 @@ class Batch:
         self._writes[path] = (blob_oid, GIT_FILEMODE_LINK)
 
     def remove(self, path: str | os.PathLike[str]) -> None:
+        """Stage a file removal.
+
+        Args:
+            path: Path to remove from the repo.
+
+        Raises:
+            FileNotFoundError: If *path* does not exist in the repo
+                or pending writes.
+            IsADirectoryError: If *path* is a directory.
+        """
         self._check_open()
         path = _normalize_path(path)
         pending_write = path in self._writes
@@ -84,6 +132,12 @@ class Batch:
             self._removes.add(path)
 
     def open(self, path: str | os.PathLike[str], mode: str = "wb"):
+        """Open a writable file-like that stages on close.
+
+        Args:
+            path: Destination path in the repo.
+            mode: Only ``"wb"`` is supported.
+        """
         self._check_open()
         if mode != "wb":
             raise ValueError(f"Batch open only supports 'wb' mode, got {mode!r}")

@@ -17,7 +17,16 @@ from dulwich.ignore import IgnoreFilter, IgnoreFilterStack
 
 
 class ExcludeFilter:
-    """Combines --exclude patterns, --exclude-from, and .gitignore files."""
+    """Gitignore-style exclude filter for disk-to-repo operations.
+
+    Combines ``--exclude`` patterns, ``--exclude-from`` file, and automatic
+    ``.gitignore`` loading into a single predicate.
+
+    Args:
+        patterns: Gitignore-style patterns to exclude.
+        exclude_from: Path to a file containing exclude patterns.
+        gitignore: Load ``.gitignore`` files from walked directories.
+    """
 
     def __init__(
         self,

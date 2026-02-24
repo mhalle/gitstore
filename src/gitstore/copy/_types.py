@@ -14,7 +14,10 @@ from ..tree import (
 
 
 class FileType(str, Enum):
-    """File type stored in a :class:`FileEntry`."""
+    """Git file type enum.
+
+    Members: ``BLOB``, ``EXECUTABLE``, ``LINK``, ``TREE``.
+    """
     BLOB = "blob"
     EXECUTABLE = "executable"
     LINK = "link"
@@ -45,10 +48,16 @@ _TYPE_TO_MODE = {v: k for k, v in _MODE_TO_TYPE.items()}
 
 @dataclass
 class FileEntry:
-    """A file with type information."""
+    """A file path with type information, used in :class:`ChangeReport` lists.
+
+    Attributes:
+        path: Relative path (repo-style forward slashes).
+        type: :class:`FileType` of the entry.
+        src: Source path (local file, repo path, or ``None`` for direct data).
+    """
     path: str
     type: FileType
-    src: str | None = None  # source path (local file path, repo path, or None for direct data)
+    src: str | None = None
 
     @classmethod
     def from_mode(cls, path: str, mode: int, src: str | None = None) -> FileEntry:
@@ -57,7 +66,7 @@ class FileEntry:
 
 
 class ChangeActionKind(str, Enum):
-    """Kind of change action."""
+    """Kind of change action: ``ADD``, ``UPDATE``, or ``DELETE``."""
     ADD = "add"
     UPDATE = "update"
     DELETE = "delete"
@@ -68,21 +77,42 @@ class ChangeActionKind(str, Enum):
 
 @dataclass
 class ChangeAction:
-    """A single add/update/delete action."""
-    path: str                    # relative path (repo-style forward slashes)
-    action: ChangeActionKind     # add, update, or delete
+    """A single add/update/delete action in a :class:`ChangeReport`.
+
+    Attributes:
+        path: Relative path (repo-style forward slashes).
+        action: :class:`ChangeActionKind` value.
+    """
+    path: str
+    action: ChangeActionKind
 
 
 @dataclass
 class ChangeError:
-    """A file that failed during an operation."""
+    """A file that failed during an operation.
+
+    Attributes:
+        path: The path that caused the error.
+        error: Human-readable error message.
+    """
     path: str
     error: str
 
 
 @dataclass
 class ChangeReport:
-    """Result of a copy/sync/move/remove operation (dry-run or real)."""
+    """Result of a copy, sync, move, or remove operation.
+
+    Available on the :attr:`~gitstore.FS.changes` property of the
+    resulting snapshot (both dry-run and real).
+
+    Attributes:
+        add: Files added.
+        update: Files updated.
+        delete: Files deleted.
+        errors: Per-file errors (populated when ``ignore_errors=True``).
+        warnings: Non-fatal warnings.
+    """
     add: list[FileEntry] = field(default_factory=list)
     update: list[FileEntry] = field(default_factory=list)
     delete: list[FileEntry] = field(default_factory=list)
@@ -91,14 +121,16 @@ class ChangeReport:
 
     @property
     def in_sync(self) -> bool:
+        """``True`` if there are no add, update, or delete actions."""
         return not self.add and not self.update and not self.delete
 
     @property
     def total(self) -> int:
+        """Total number of add + update + delete actions."""
         return len(self.add) + len(self.update) + len(self.delete)
 
     def actions(self) -> list[ChangeAction]:
-        """All actions sorted by path."""
+        """Return all actions as a flat list sorted by path."""
         result: list[ChangeAction] = []
         for e in self.add:
             result.append(ChangeAction(path=e.path, action=ChangeActionKind.ADD))

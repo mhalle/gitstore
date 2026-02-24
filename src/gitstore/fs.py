@@ -44,14 +44,23 @@ __all__ = ["FS", "StatResult", "WriteEntry", "retry_write"]
 
 @dataclass(frozen=True, slots=True)
 class StatResult:
-    """POSIX-like stat result for a gitstore path."""
+    """POSIX-like stat result for a gitstore path.
 
-    mode: int  # raw git filemode (0o100644, 0o100755, 0o120000, 0o040000)
-    file_type: FileType  # FileType enum
-    size: int  # blob bytes (symlinks: target length; dirs: 0)
-    hash: str  # 40-char hex SHA (inode proxy)
-    nlink: int  # 1 for files/symlinks, 2+subdirs for directories
-    mtime: float  # commit timestamp as POSIX epoch seconds
+    Attributes:
+        mode: Raw git filemode (e.g. ``0o100644``, ``0o040000``).
+        file_type: :class:`FileType` enum value.
+        size: Object size in bytes (0 for directories).
+        hash: 40-char hex SHA of the object (inode proxy).
+        nlink: 1 for files/symlinks, ``2 + subdirs`` for directories.
+        mtime: Commit timestamp as POSIX epoch seconds.
+    """
+
+    mode: int
+    file_type: FileType
+    size: int
+    hash: str
+    nlink: int
+    mtime: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,30 +129,36 @@ class FS:
 
     @property
     def commit_hash(self) -> str:
+        """The 40-character hex SHA of this snapshot's commit."""
         return self._commit_oid.decode()
 
     @property
     def ref_name(self) -> str | None:
+        """The branch or tag name, or ``None`` for detached snapshots."""
         return self._ref_name
 
     @property
     def message(self) -> str:
+        """The commit message (trailing newline stripped)."""
         return self._store._repo[self._commit_oid].message.decode().rstrip("\n")
 
     @property
     def time(self) -> datetime:
+        """Timezone-aware commit timestamp."""
         commit = self._store._repo[self._commit_oid]
         tz = timezone(timedelta(minutes=commit.commit_timezone // 60))
         return datetime.fromtimestamp(commit.commit_time, tz=tz)
 
     @property
     def author_name(self) -> str:
+        """The commit author's name."""
         ident = self._store._repo[self._commit_oid].author.decode()
         name, _, _ = ident.partition(" <")
         return name
 
     @property
     def author_email(self) -> str:
+        """The commit author's email address."""
         ident = self._store._repo[self._commit_oid].author.decode()
         _, _, email_part = ident.partition(" <")
         return email_part.rstrip(">")
@@ -175,6 +190,17 @@ class FS:
     # --- Read operations ---
 
     def read(self, path: str | os.PathLike[str], *, offset: int = 0, size: int | None = None) -> bytes:
+        """Read file contents as bytes.
+
+        Args:
+            path: File path in the repo.
+            offset: Byte offset to start reading from.
+            size: Maximum number of bytes to return (``None`` for all).
+
+        Raises:
+            FileNotFoundError: If *path* does not exist.
+            IsADirectoryError: If *path* is a directory.
+        """
         data = read_blob_at_path(self._store._repo, self._tree_oid, path)
         if offset or size is not None:
             end = (offset + size) if size is not None else None
@@ -182,12 +208,37 @@ class FS:
         return data
 
     def read_text(self, path: str | os.PathLike[str], encoding: str = "utf-8") -> str:
+        """Read file contents as a string.
+
+        Args:
+            path: File path in the repo.
+            encoding: Text encoding (default ``"utf-8"``).
+        """
         return self.read(path).decode(encoding)
 
     def ls(self, path: str | os.PathLike[str] | None = None) -> list[str]:
+        """List entry names at *path* (or root if ``None``).
+
+        Args:
+            path: Directory path, or ``None`` for the repo root.
+
+        Raises:
+            NotADirectoryError: If *path* is a file.
+        """
         return list_tree_at_path(self._store._repo, self._tree_oid, path)
 
     def walk(self, path: str | os.PathLike[str] | None = None) -> Iterator[tuple[str, list[str], list[WalkEntry]]]:
+        """Walk the repo tree recursively, like :func:`os.walk`.
+
+        Yields ``(dirpath, dirnames, file_entries)`` tuples.  Each file
+        entry is a :class:`WalkEntry` with ``name``, ``oid``, and ``mode``.
+
+        Args:
+            path: Subtree to walk, or ``None`` for root.
+
+        Raises:
+            NotADirectoryError: If *path* is a file.
+        """
         if path is None or _is_root_path(path):
             yield from walk_tree(self._store._repo, self._tree_oid)
         else:
@@ -198,6 +249,7 @@ class FS:
             yield from walk_tree(self._store._repo, obj.id, path)
 
     def exists(self, path: str | os.PathLike[str]) -> bool:
+        """Return ``True`` if *path* exists (file or directory)."""
         return exists_at_path(self._store._repo, self._tree_oid, path)
 
     def is_dir(self, path: str | os.PathLike[str]) -> bool:
@@ -469,6 +521,18 @@ class FS:
         return self._store._repo[_oid].data.decode()
 
     def open(self, path: str | os.PathLike[str], mode: str = "rb"):
+        """Open a file-like object for reading or writing.
+
+        ``"rb"`` returns a readable, seekable file.  ``"wb"`` returns a
+        writable file that commits on close (new FS available via ``f.fs``).
+
+        Args:
+            path: File path in the repo.
+            mode: ``"rb"`` (default) or ``"wb"``.
+
+        Raises:
+            PermissionError: If *mode* is ``"wb"`` and the snapshot is read-only.
+        """
         if mode == "rb":
             from ._fileobj import ReadableFile
             return ReadableFile(self.read(path))
@@ -607,6 +671,18 @@ class FS:
         message: str | None = None,
         mode: FileType | int | None = None,
     ) -> FS:
+        """Write *data* to *path* and commit, returning a new :class:`FS`.
+
+        Args:
+            path: Destination path in the repo.
+            data: Raw bytes to write.
+            message: Commit message (auto-generated if ``None``).
+            mode: File mode override (e.g. ``FileType.EXECUTABLE``).
+
+        Raises:
+            PermissionError: If this snapshot is read-only.
+            StaleSnapshotError: If the branch has advanced since this snapshot.
+        """
         from .copy._types import FileType
         if isinstance(mode, FileType):
             mode = mode.filemode
@@ -623,6 +699,19 @@ class FS:
         message: str | None = None,
         mode: FileType | int | None = None,
     ) -> FS:
+        """Write *text* to *path* and commit, returning a new :class:`FS`.
+
+        Args:
+            path: Destination path in the repo.
+            text: String content (encoded with *encoding*).
+            encoding: Text encoding (default ``"utf-8"``).
+            message: Commit message (auto-generated if ``None``).
+            mode: File mode override (e.g. ``FileType.EXECUTABLE``).
+
+        Raises:
+            PermissionError: If this snapshot is read-only.
+            StaleSnapshotError: If the branch has advanced since this snapshot.
+        """
         return self.write(path, text.encode(encoding), message=message, mode=mode)
 
     def write_from_file(
@@ -633,6 +722,20 @@ class FS:
         message: str | None = None,
         mode: FileType | int | None = None,
     ) -> FS:
+        """Write a local file into the repo and commit, returning a new :class:`FS`.
+
+        Executable permission is auto-detected from disk unless *mode* is set.
+
+        Args:
+            path: Destination path in the repo.
+            local_path: Path to the local file.
+            message: Commit message (auto-generated if ``None``).
+            mode: File mode override (e.g. ``FileType.EXECUTABLE``).
+
+        Raises:
+            PermissionError: If this snapshot is read-only.
+            StaleSnapshotError: If the branch has advanced since this snapshot.
+        """
         from .copy._types import FileType
         if isinstance(mode, FileType):
             mode = mode.filemode
@@ -653,6 +756,17 @@ class FS:
         *,
         message: str | None = None,
     ) -> FS:
+        """Create a symbolic link entry and commit, returning a new :class:`FS`.
+
+        Args:
+            path: Symlink path in the repo.
+            target: The symlink target string.
+            message: Commit message (auto-generated if ``None``).
+
+        Raises:
+            PermissionError: If this snapshot is read-only.
+            StaleSnapshotError: If the branch has advanced since this snapshot.
+        """
         path = _normalize_path(path)
         data = target.encode()
         return self._commit_changes(
@@ -738,6 +852,15 @@ class FS:
         return self._commit_changes(internal_writes, remove_set, message, operation)
 
     def batch(self, message: str | None = None, operation: str | None = None):
+        """Return a :class:`Batch` context manager for multiple writes in one commit.
+
+        Args:
+            message: Commit message (auto-generated if ``None``).
+            operation: Operation name for auto-generated messages.
+
+        Raises:
+            PermissionError: If this snapshot is read-only.
+        """
         from .batch import Batch
         return Batch(self, message=message, operation=operation)
 
@@ -758,10 +881,30 @@ class FS:
         checksum: bool = True,
         exclude: ExcludeFilter | None = None,
     ) -> FS:
-        """Copy local files into the repo. Returns ``FS``.
+        """Copy local files into the repo.
 
         Sources must be literal paths; use :func:`~gitstore.disk_glob` to
         expand patterns before calling.
+
+        Args:
+            sources: Local path(s). Trailing ``/`` copies contents; ``/./``
+                is a pivot marker.
+            dest: Destination path in the repo.
+            dry_run: Preview only; returned FS has ``.changes`` set.
+            follow_symlinks: Dereference symlinks on disk.
+            message: Commit message (auto-generated if ``None``).
+            mode: Override file mode for all files.
+            ignore_existing: Skip files that already exist at dest.
+            delete: Remove repo files under *dest* not in source.
+            ignore_errors: Collect errors instead of aborting.
+            checksum: Compare by content hash (default ``True``).
+            exclude: Gitignore-style exclude filter.
+
+        Returns:
+            A new :class:`FS` with ``.changes`` set.
+
+        Raises:
+            PermissionError: If this snapshot is read-only.
         """
         from .copy._ops import _copy_in
         return _copy_in(
@@ -782,10 +925,23 @@ class FS:
         ignore_errors: bool = False,
         checksum: bool = True,
     ) -> FS:
-        """Copy repo files to local disk. Returns ``FS``.
+        """Copy repo files to local disk.
 
-        Sources must be literal paths; use :meth:`glob` to expand patterns
-        before calling.
+        Sources must be literal repo paths; use :meth:`glob` to expand
+        patterns before calling.
+
+        Args:
+            sources: Repo path(s). Trailing ``/`` copies contents; ``/./``
+                is a pivot marker.
+            dest: Local destination directory.
+            dry_run: Preview only; returned FS has ``.changes`` set.
+            ignore_existing: Skip files that already exist at dest.
+            delete: Remove local files under *dest* not in source.
+            ignore_errors: Collect errors instead of aborting.
+            checksum: Compare by content hash (default ``True``).
+
+        Returns:
+            This :class:`FS` with ``.changes`` set.
         """
         from .copy._ops import _copy_out
         return _copy_out(
@@ -805,7 +961,23 @@ class FS:
         checksum: bool = True,
         exclude: ExcludeFilter | None = None,
     ) -> FS:
-        """Make *repo_path* identical to *local_path*. Returns ``FS``."""
+        """Make *repo_path* identical to *local_path* (including deletes).
+
+        Args:
+            local_path: Local directory to sync from.
+            repo_path: Repo directory to sync to.
+            dry_run: Preview only; returned FS has ``.changes`` set.
+            message: Commit message (auto-generated if ``None``).
+            ignore_errors: Collect errors instead of aborting.
+            checksum: Compare by content hash (default ``True``).
+            exclude: Gitignore-style exclude filter.
+
+        Returns:
+            A new :class:`FS` with ``.changes`` set.
+
+        Raises:
+            PermissionError: If this snapshot is read-only.
+        """
         from .copy._ops import _sync_in
         return _sync_in(
             self, local_path, repo_path, dry_run=dry_run,
@@ -822,7 +994,18 @@ class FS:
         ignore_errors: bool = False,
         checksum: bool = True,
     ) -> FS:
-        """Make *local_path* identical to *repo_path*. Returns ``FS``."""
+        """Make *local_path* identical to *repo_path* (including deletes).
+
+        Args:
+            repo_path: Repo directory to sync from.
+            local_path: Local directory to sync to.
+            dry_run: Preview only; returned FS has ``.changes`` set.
+            ignore_errors: Collect errors instead of aborting.
+            checksum: Compare by content hash (default ``True``).
+
+        Returns:
+            This :class:`FS` with ``.changes`` set.
+        """
         from .copy._ops import _sync_out
         return _sync_out(
             self, repo_path, local_path, dry_run=dry_run,
@@ -837,10 +1020,23 @@ class FS:
         dry_run: bool = False,
         message: str | None = None,
     ) -> FS:
-        """Remove files from the repo. Returns ``FS``.
+        """Remove files from the repo.
 
         Sources must be literal paths; use :meth:`glob` to expand patterns
         before calling.
+
+        Args:
+            sources: Repo path(s) to remove.
+            recursive: Allow removing directories.
+            dry_run: Preview only; returned FS has ``.changes`` set.
+            message: Commit message (auto-generated if ``None``).
+
+        Returns:
+            A new :class:`FS` with ``.changes`` set.
+
+        Raises:
+            PermissionError: If this snapshot is read-only.
+            FileNotFoundError: If no source paths match.
         """
         from .copy._ops import _remove
         return _remove(
@@ -857,10 +1053,23 @@ class FS:
         dry_run: bool = False,
         message: str | None = None,
     ) -> FS:
-        """Move/rename files within the repo. Returns ``FS``.
+        """Move or rename files within the repo.
 
         Sources must be literal paths; use :meth:`glob` to expand patterns
         before calling.
+
+        Args:
+            sources: Repo path(s) to move.
+            dest: Destination path in the repo.
+            recursive: Allow moving directories.
+            dry_run: Preview only; returned FS has ``.changes`` set.
+            message: Commit message (auto-generated if ``None``).
+
+        Returns:
+            A new :class:`FS` with ``.changes`` set.
+
+        Raises:
+            PermissionError: If this snapshot is read-only.
         """
         from .copy._ops import _move
         return _move(
@@ -952,6 +1161,7 @@ class FS:
 
     @property
     def parent(self) -> FS | None:
+        """The parent snapshot, or ``None`` for the initial commit."""
         commit = self._store._repo[self._commit_oid]
         if not commit.parents:
             return None
@@ -1120,6 +1330,15 @@ class FS:
         match: str | None = None,
         before: datetime | None = None,
     ) -> Iterator[FS]:
+        """Walk the commit history, yielding ancestor :class:`FS` snapshots.
+
+        All filters are optional and combine with AND.
+
+        Args:
+            path: Only yield commits that changed this file.
+            match: Message pattern (``*``/``?`` wildcards via :func:`fnmatch`).
+            before: Only yield commits on or before this time.
+        """
         if before is not None and before.tzinfo is None:
             before = before.replace(tzinfo=timezone.utc)
         filter_path = path

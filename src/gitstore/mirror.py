@@ -26,23 +26,39 @@ if TYPE_CHECKING:
 
 @dataclass
 class RefChange:
+    """A single ref change in a :class:`MirrorDiff`.
+
+    Attributes:
+        ref: Full ref name (e.g. ``"refs/heads/main"``).
+        old_target: Previous 40-char hex SHA, or ``None`` for creates.
+        new_target: New 40-char hex SHA, or ``None`` for deletes.
+    """
     ref: str
-    old_target: str | None = None   # None for creates
-    new_target: str | None = None   # None for deletes
+    old_target: str | None = None
+    new_target: str | None = None
 
 
 @dataclass
 class MirrorDiff:
+    """Result of a :meth:`~gitstore.GitStore.backup` or :meth:`~gitstore.GitStore.restore` operation.
+
+    Attributes:
+        add: Refs to create.
+        update: Refs to update.
+        delete: Refs to delete.
+    """
     add: list[RefChange] = field(default_factory=list)
     update: list[RefChange] = field(default_factory=list)
     delete: list[RefChange] = field(default_factory=list)
 
     @property
     def in_sync(self) -> bool:
+        """``True`` if there are no changes."""
         return not self.add and not self.update and not self.delete
 
     @property
     def total(self) -> int:
+        """Total number of ref changes."""
         return len(self.add) + len(self.update) + len(self.delete)
 
 

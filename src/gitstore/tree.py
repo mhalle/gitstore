@@ -18,12 +18,17 @@ if TYPE_CHECKING:
 
 
 class BlobOid(bytes):
-    """Marker: a blob SHA (vs raw data bytes) in write dicts."""
+    """A blob SHA used as a marker in write dicts to avoid re-hashing.
+
+    Subclass of :class:`bytes`.  When a value in a write dict is a
+    ``BlobOid``, the tree builder uses it directly instead of calling
+    ``create_blob``.
+    """
     __slots__ = ()
 
 
 class GitError(Exception):
-    """Git operation error."""
+    """Raised when a low-level git tree operation fails."""
 
 
 class TreeBuilder:
@@ -54,7 +59,13 @@ class TreeBuilder:
 
 
 class WalkEntry(NamedTuple):
-    """A file entry yielded by :func:`walk_tree`."""
+    """A file entry yielded by :meth:`~gitstore.FS.walk` and :meth:`~gitstore.FS.listdir`.
+
+    Attributes:
+        name: Entry name (file or directory basename).
+        oid: Raw object ID (bytes).
+        mode: Git filemode integer (e.g. ``0o100644``).
+    """
 
     name: str
     oid: bytes

@@ -27,6 +27,7 @@ class NoteNamespace(MutableMapping):
     """One git notes namespace, backed by ``refs/notes/<name>``.
 
     Maps 40-char hex commit hashes to UTF-8 note text.
+    Supports ``[]``, ``del``, ``in``, ``len``, and iteration.
     """
 
     def __init__(self, store: GitStore, namespace: str):
