@@ -22,6 +22,13 @@ classifiers = [
     "Topic :: Software Development :: Version Control :: Git",
     "Typing :: Typed",
 ]
+
+[project.urls]
+Homepage = "https://github.com/mhalle/gitstore"
+Repository = "https://github.com/mhalle/gitstore"
+Issues = "https://github.com/mhalle/gitstore/issues"
+Changelog = "https://github.com/mhalle/gitstore/blob/master/CHANGELOG.md"
+
 dependencies = [
     "dulwich>=0.22.0",
 ]

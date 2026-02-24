@@ -411,6 +411,7 @@ for commit_hash, text in ns.items():
 - [Python API Reference](https://github.com/mhalle/gitstore/blob/master/docs/api.md) -- classes, methods, and data types
 - [CLI Reference](https://github.com/mhalle/gitstore/blob/master/docs/cli.md) -- the `gitstore` command-line tool
 - [Path Syntax](https://github.com/mhalle/gitstore/blob/master/docs/paths.md) -- how `ref:path` works across commands
+- [GitHub Repository](https://github.com/mhalle/gitstore) -- source code, issues, and releases
 
 ## Development
 
