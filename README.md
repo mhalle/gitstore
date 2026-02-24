@@ -50,9 +50,9 @@ Snapshots obtained from **branches** are writable (`fs.writable == True`). Snaps
 ### Opening a repository
 
 ```python
-repo = GitStore.open("data.git")                         # create or open
+repo = GitStore.open("data.git")                         # create or open (default branch: "main")
 repo = GitStore.open("data.git", create=False)            # open only
-repo = GitStore.open("data.git", branch="dev")            # custom initial branch
+repo = GitStore.open("data.git", branch="dev")            # custom default branch
 repo = GitStore.open("data.git", branch=None)             # branchless
 repo = GitStore.open("data.git", author="alice",          # custom author
                      email="alice@example.com")
@@ -69,6 +69,7 @@ repo.tags["v1.0"] = fs            # create a tag
 snapshot = repo.tags["v1.0"]       # read-only FS
 
 repo.branches.current_name           # "main"
+fs = repo.branches.current           # FS for the current branch
 repo.branches.current = "dev"        # set current branch
 
 for name in repo.branches:
