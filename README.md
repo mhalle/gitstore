@@ -7,11 +7,20 @@ Built on [dulwich](https://www.dulwich.io/), gitstore gives you Git's content-ad
 ## Installation
 
 ```
-pip install gitstore          # core library (dulwich only)
-pip install gitstore[cli]     # adds the gitstore command-line tool
+pip install gitstore            # core library (dulwich only)
+pip install "gitstore[cli]"    # adds the gitstore command-line tool
+```
+
+Or run the CLI without installing:
+
+```
+uvx "gitstore[cli]" ls myrepo.git :   # run via uvx
+uv tool install "gitstore[cli]"       # or install as a persistent tool
 ```
 
 Requires Python 3.10+.
+
+> **Note:** The `gc` and `backup`/`restore` CLI commands shell out to an installed `git` executable. All other commands and the entire Python API are self-contained (pure dulwich).
 
 ## Quick start
 
@@ -290,7 +299,7 @@ fs = retry_write(repo, "main", "file.txt", data)
 
 ## CLI
 
-gitstore includes a command-line interface. Install with `pip install gitstore[cli]`.
+gitstore includes a command-line interface. Install with `pip install "gitstore[cli]"` or `uv tool install "gitstore[cli]"`.
 
 ```bash
 export GITSTORE_REPO=/path/to/repo.git    # or pass --repo/-r per command
