@@ -4,6 +4,23 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.58.1 / Rust v0.3.1 (2026-02-24)
+
+**Rust bug fixes:**
+
+- Fix `sync_out` to delete extra local files and prune empty directories (was only copying, not syncing)
+- Fix `undo()`/`redo()` to reject stale snapshots via branch tip check before ref update
+- Fix notes writes to use CAS (`ExistingMustMatch`/`MustNotExist`) instead of unconditional overwrite
+- Fix `RefDict::set()` to validate ref names, reject cross-repo Fs, prevent tag overwrites, and write reflog entries
+- Fix `log(path=...)` filter to compare both OID and mode (catches mode-only changes)
+- Fix `tags().set_current()`/`reflog()` to return errors and `get_current()` to return `None`
+- Fix `copy_in` checksum parameter to skip unchanged files via blob OID comparison
+
+**Python:**
+
+- Add comprehensive docstrings with Args/Attributes/Returns/Raises to all public API classes and methods
+- Add `mfusepy` as optional FUSE dependency
+
 ## v0.58.0 / TS v0.3.0 / Rust v0.3.0 (2026-02-24)
 
 **API changes:**
