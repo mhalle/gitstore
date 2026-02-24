@@ -18,6 +18,7 @@ from .tree import (
     GIT_FILEMODE_TREE,
     GIT_OBJECT_TREE,
     WalkEntry,
+    _count_subdirs,
     _entry_at_path,
     _is_root_path,
     _mode_from_disk,
@@ -31,12 +32,26 @@ from .tree import (
     rebuild_tree,
 )
 
+from .copy._types import FileType
+
 if TYPE_CHECKING:
     from ._exclude import ExcludeFilter
-    from .copy._types import ChangeReport, FileType
+    from .copy._types import ChangeReport
     from .repo import GitStore
 
-__all__ = ["FS", "WriteEntry", "retry_write"]
+__all__ = ["FS", "StatResult", "WriteEntry", "retry_write"]
+
+
+@dataclass(frozen=True, slots=True)
+class StatResult:
+    """POSIX-like stat result for a gitstore path."""
+
+    mode: int  # raw git filemode (0o100644, 0o100755, 0o120000, 0o040000)
+    file_type: FileType  # FileType enum
+    size: int  # blob bytes (symlinks: target length; dirs: 0)
+    hash: str  # 40-char hex SHA (inode proxy)
+    nlink: int  # 1 for files/symlinks, 2+subdirs for directories
+    mtime: float  # commit timestamp as POSIX epoch seconds
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,6 +95,8 @@ class FS:
         commit = gitstore._repo[commit_oid]
         self._tree_oid = commit.tree
         self._changes = None
+        self.__sizer = None
+        self.__commit_time = None
 
     def _readonly_error(self, verb: str) -> PermissionError:
         if self._ref_name:
@@ -136,10 +153,33 @@ class FS:
         """Report of the operation that created this snapshot."""
         return self._changes
 
+    @property
+    def _sizer(self):
+        if self.__sizer is None:
+            from ._objsize import ObjectSizer
+            self.__sizer = ObjectSizer(self._store._repo.object_store)
+        return self.__sizer
+
+    def _get_commit_time(self) -> float:
+        if self.__commit_time is None:
+            commit = self._store._repo[self._commit_oid]
+            self.__commit_time = float(commit.commit_time)
+        return self.__commit_time
+
+    def close(self) -> None:
+        """Release cached resources (ObjectSizer file descriptors)."""
+        if self.__sizer is not None:
+            self.__sizer.close()
+            self.__sizer = None
+
     # --- Read operations ---
 
-    def read(self, path: str | os.PathLike[str]) -> bytes:
-        return read_blob_at_path(self._store._repo, self._tree_oid, path)
+    def read(self, path: str | os.PathLike[str], *, offset: int = 0, size: int | None = None) -> bytes:
+        data = read_blob_at_path(self._store._repo, self._tree_oid, path)
+        if offset or size is not None:
+            end = (offset + size) if size is not None else None
+            return data[offset:end]
+        return data
 
     def read_text(self, path: str | os.PathLike[str], encoding: str = "utf-8") -> str:
         return self.read(path).decode(encoding)
@@ -176,7 +216,6 @@ class FS:
 
         Raises :exc:`FileNotFoundError` if the path does not exist.
         """
-        from .copy._types import FileType
         path = _normalize_path(path)
         entry = _entry_at_path(self._store._repo, self._tree_oid, path)
         if entry is None:
@@ -195,9 +234,7 @@ class FS:
         if entry is None:
             raise FileNotFoundError(path)
         oid, _filemode = entry
-        from ._objsize import ObjectSizer
-        with ObjectSizer(self._store._repo.object_store) as sizer:
-            return sizer.size(oid)
+        return self._sizer.size(oid)
 
     def object_hash(self, path: str | os.PathLike[str]) -> str:
         """Return the 40-character hex SHA of the object at *path*.
@@ -211,6 +248,76 @@ class FS:
         if entry is None:
             raise FileNotFoundError(path)
         return entry[0].decode()
+
+    def stat(self, path: str | os.PathLike[str] | None = None) -> StatResult:
+        """Return a :class:`StatResult` for *path* (or root if ``None``).
+
+        Combines file_type, size, oid, nlink, and mtime in a single call —
+        the hot path for FUSE ``getattr``.
+        """
+        repo = self._store._repo
+        mtime = self._get_commit_time()
+
+        if path is None or _is_root_path(path):
+            oid = self._tree_oid
+            nlink = 2 + _count_subdirs(repo, oid)
+            return StatResult(
+                mode=GIT_FILEMODE_TREE,
+                file_type=FileType.TREE,
+                size=0,
+                hash=oid.decode(),
+                nlink=nlink,
+                mtime=mtime,
+            )
+
+        path = _normalize_path(path)
+        entry = _entry_at_path(repo, self._tree_oid, path)
+        if entry is None:
+            raise FileNotFoundError(path)
+        oid, filemode = entry
+
+        ft = FileType.from_filemode(filemode)
+        if filemode == GIT_FILEMODE_TREE:
+            nlink = 2 + _count_subdirs(repo, oid)
+            size = 0
+        else:
+            nlink = 1
+            size = self._sizer.size(oid)
+
+        return StatResult(
+            mode=filemode,
+            file_type=ft,
+            size=size,
+            hash=oid.decode(),
+            nlink=nlink,
+            mtime=mtime,
+        )
+
+    def listdir(self, path: str | os.PathLike[str] | None = None) -> list[WalkEntry]:
+        """List directory entries with name, oid, and mode.
+
+        Like :meth:`ls` but returns :class:`WalkEntry` objects so callers
+        get entry types (useful for FUSE ``readdir`` ``d_type``).
+        """
+        return list_entries_at_path(self._store._repo, self._tree_oid, path)
+
+    @property
+    def tree_hash(self) -> str:
+        """The 40-char hex SHA of the root tree."""
+        return self._tree_oid.decode()
+
+    def read_by_hash(self, hash: str | bytes, *, offset: int = 0, size: int | None = None) -> bytes:
+        """Read raw blob data by hash, bypassing tree lookup.
+
+        FUSE pattern: ``stat()`` → cache hash → ``read_by_hash(hash)``.
+        """
+        if isinstance(hash, str):
+            hash = hash.encode()
+        data = self._store._repo[hash].data
+        if offset or size is not None:
+            end = (offset + size) if size is not None else None
+            return data[offset:end]
+        return data
 
     def iglob(self, pattern: str) -> Iterator[str]:
         """Expand a glob pattern against the repo tree, yielding unique matches.

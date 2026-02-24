@@ -324,6 +324,12 @@ def walk_tree(
         yield from walk_tree(repo, oid, child_prefix)
 
 
+def _count_subdirs(repo, tree_oid: bytes) -> int:
+    """Count immediate subdirectory entries in a tree (no recursion)."""
+    tree = repo[tree_oid]
+    return sum(1 for e in tree.iteritems() if e.mode == GIT_FILEMODE_TREE)
+
+
 def exists_at_path(
     repo: _Repository, tree_oid: bytes, path: str | os.PathLike[str]
 ) -> bool:
