@@ -99,44 +99,45 @@ class TestExists:
         assert not fs.exists("nope.txt")
 
 
-class TestExport:
-    def test_export_creates_files(self, repo_with_files, tmp_path):
+class TestCopyOutRoot:
+    def test_copy_out_creates_files(self, repo_with_files, tmp_path):
         _, fs = repo_with_files
         out = tmp_path / "out"
-        fs.export(out)
+        fs.copy_out("/", str(out))
         assert (out / "hello.txt").read_bytes() == b"Hello!"
         assert (out / "src" / "main.py").read_bytes() == b"print('hi')"
         assert (out / "src" / "lib" / "util.py").read_bytes() == b"# util"
 
-    def test_export_empty_tree(self, tmp_path):
+    def test_copy_out_empty_repo(self, tmp_path):
         repo = GitStore.open(tmp_path / "test.git")
         fs = repo.branches["main"]
         out = tmp_path / "out"
-        fs.export(out)
+        out.mkdir()
+        fs.copy_out("/", str(out))
         assert out.is_dir()
         assert list(out.iterdir()) == []
 
-    def test_export_overwrites_existing(self, repo_with_files, tmp_path):
+    def test_copy_out_overwrites_existing_files(self, repo_with_files, tmp_path):
         _, fs = repo_with_files
         out = tmp_path / "out"
         out.mkdir()
         (out / "hello.txt").write_bytes(b"old")
-        fs.export(out)
+        fs.copy_out("/", str(out))
         assert (out / "hello.txt").read_bytes() == b"Hello!"
 
-    def test_export_symlinks(self, tmp_path):
+    def test_copy_out_symlinks(self, tmp_path):
         import os
         repo = GitStore.open(tmp_path / "test.git")
         fs = repo.branches["main"]
         fs = fs.write("target.txt", b"content")
         fs = fs.write_symlink("link.txt", "target.txt")
         out = tmp_path / "out"
-        fs.export(out)
+        fs.copy_out("/", str(out))
         assert (out / "target.txt").read_bytes() == b"content"
         assert (out / "link.txt").is_symlink()
         assert os.readlink(out / "link.txt") == "target.txt"
 
-    def test_export_symlink_overwrites_existing_file(self, tmp_path):
+    def test_copy_out_symlinks_overwrite_regular_files(self, tmp_path):
         import os
         repo = GitStore.open(tmp_path / "test.git")
         fs = repo.branches["main"]
@@ -144,7 +145,7 @@ class TestExport:
         out = tmp_path / "out"
         out.mkdir()
         (out / "link.txt").write_bytes(b"old regular file")
-        fs.export(out)
+        fs.copy_out("/", str(out))
         assert (out / "link.txt").is_symlink()
         assert os.readlink(out / "link.txt") == "target.txt"
 

@@ -1,4 +1,4 @@
-"""Archive commands: zip, unzip, tar, untar, archive, unarchive."""
+"""Archive commands: zip, unzip, tar, untar, archive_out, archive_in."""
 
 from __future__ import annotations
 
@@ -324,7 +324,7 @@ def untar_cmd(ctx, filename, branch, message, no_create, tag, force_tag):
 # archive / unarchive
 # ---------------------------------------------------------------------------
 
-@main.command("archive")
+@main.command("archive_out")
 @_repo_option
 @click.argument("filename", type=click.Path())
 @_archive_format_option
@@ -348,7 +348,7 @@ def archive_cmd(ctx, filename, fmt, branch, ref, at_path, match_pattern, before,
     _do_export(ctx, fs, filename, fmt)
 
 
-@main.command("unarchive")
+@main.command("archive_in")
 @_repo_option
 @click.argument("filename", type=click.Path(), default=None, required=False)
 @_archive_format_option

@@ -115,46 +115,47 @@ describe('exists', () => {
   });
 });
 
-describe('export', () => {
-  it('exports files to disk', async () => {
+describe('copyOut root', () => {
+  it('copyOut creates files on disk', async () => {
     const outDir = path.join(tmpDir, 'export');
-    await snap.export(outDir);
+    await snap.copyOut('/', outDir);
     expect(fs.readFileSync(path.join(outDir, 'hello.txt'), 'utf-8')).toBe('Hello!');
     expect(fs.readFileSync(path.join(outDir, 'src/main.py'), 'utf-8')).toBe("print('hi')");
     expect(fs.readFileSync(path.join(outDir, 'src/lib/util.py'), 'utf-8')).toBe('# util');
   });
 
-  it('exports empty tree', async () => {
+  it('copyOut empty repository', async () => {
     const { store: s2, tmpDir: td2 } = await freshStore();
     const emptyFs = await s2.branches.get('main');
     const outDir = path.join(td2, 'export');
-    await emptyFs.export(outDir);
+    fs.mkdirSync(outDir, { recursive: true });
+    await emptyFs.copyOut('/', outDir);
     expect(fs.existsSync(outDir)).toBe(true);
     rmTmpDir(td2);
   });
 
-  it('overwrites existing files', async () => {
+  it('copyOut into existing directory', async () => {
     const outDir = path.join(tmpDir, 'export');
     fs.mkdirSync(outDir, { recursive: true });
     fs.writeFileSync(path.join(outDir, 'hello.txt'), 'old');
-    await snap.export(outDir);
+    await snap.copyOut('/', outDir);
     expect(fs.readFileSync(path.join(outDir, 'hello.txt'), 'utf-8')).toBe('Hello!');
   });
 
-  it('exports symlinks', async () => {
+  it('copyOut symlinks', async () => {
     const f2 = await snap.writeSymlink('link.txt', 'hello.txt');
     const outDir = path.join(tmpDir, 'export-sym');
-    await f2.export(outDir);
+    await f2.copyOut('/', outDir);
     const target = fs.readlinkSync(path.join(outDir, 'link.txt'));
     expect(target).toBe('hello.txt');
   });
 
-  it('symlink overwrites existing file on export', async () => {
+  it('copyOut symlinks overwriting regular files', async () => {
     const f2 = await snap.writeSymlink('hello.txt', 'src/main.py');
     const outDir = path.join(tmpDir, 'export-overwrite');
     fs.mkdirSync(outDir, { recursive: true });
     fs.writeFileSync(path.join(outDir, 'hello.txt'), 'old');
-    await f2.export(outDir);
+    await f2.copyOut('/', outDir);
     const target = fs.readlinkSync(path.join(outDir, 'hello.txt'));
     expect(target).toBe('src/main.py');
   });

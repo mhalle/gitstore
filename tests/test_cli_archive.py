@@ -686,10 +686,10 @@ class TestUntar:
         assert result3.exit_code != 0
 
 
-class TestArchive:
+class TestArchiveOut:
     def test_archive_zip(self, runner, repo_with_files, tmp_path):
         out = str(tmp_path / "archive.zip")
-        result = runner.invoke(main, ["archive", "--repo", repo_with_files, out])
+        result = runner.invoke(main, ["archive_out", "--repo", repo_with_files, out])
         assert result.exit_code == 0, result.output
         with zipfile.ZipFile(out, "r") as zf:
             names = zf.namelist()
@@ -700,7 +700,7 @@ class TestArchive:
     def test_archive_tar_gz(self, runner, repo_with_files, tmp_path):
         import tarfile
         out = str(tmp_path / "archive.tar.gz")
-        result = runner.invoke(main, ["archive", "--repo", repo_with_files, out])
+        result = runner.invoke(main, ["archive_out", "--repo", repo_with_files, out])
         assert result.exit_code == 0, result.output
         with tarfile.open(out, "r:gz") as tf:
             names = tf.getnames()
@@ -710,26 +710,26 @@ class TestArchive:
     def test_archive_format_override(self, runner, repo_with_files, tmp_path):
         out = str(tmp_path / "archive.dat")
         result = runner.invoke(main, [
-            "archive", "--repo", repo_with_files, out, "--format", "zip"
+            "archive_out", "--repo", repo_with_files, out, "--format", "zip"
         ])
         assert result.exit_code == 0, result.output
         with zipfile.ZipFile(out, "r") as zf:
             assert "hello.txt" in zf.namelist()
 
     def test_archive_stdout_requires_format(self, runner, repo_with_files):
-        result = runner.invoke(main, ["archive", "--repo", repo_with_files, "-"])
+        result = runner.invoke(main, ["archive_out", "--repo", repo_with_files, "-"])
         assert result.exit_code != 0
         assert "--format" in result.output
 
     def test_archive_unknown_extension(self, runner, repo_with_files, tmp_path):
         out = str(tmp_path / "archive.xyz")
-        result = runner.invoke(main, ["archive", "--repo", repo_with_files, out])
+        result = runner.invoke(main, ["archive_out", "--repo", repo_with_files, out])
         assert result.exit_code != 0
         assert "Cannot detect" in result.output
 
     def test_archive_stdout_with_format(self, runner, repo_with_files):
         result = runner.invoke(main, [
-            "archive", "--repo", repo_with_files, "-", "--format", "zip"
+            "archive_out", "--repo", repo_with_files, "-", "--format", "zip"
         ])
         assert result.exit_code == 0
         zf = zipfile.ZipFile(io.BytesIO(result.output_bytes))
@@ -738,19 +738,19 @@ class TestArchive:
     def test_archive_tar(self, runner, repo_with_files, tmp_path):
         import tarfile
         out = str(tmp_path / "archive.tar")
-        result = runner.invoke(main, ["archive", "--repo", repo_with_files, out])
+        result = runner.invoke(main, ["archive_out", "--repo", repo_with_files, out])
         assert result.exit_code == 0, result.output
         with tarfile.open(out, "r") as tf:
             names = tf.getnames()
             assert "hello.txt" in names
 
 
-class TestUnarchive:
+class TestArchiveIn:
     def test_unarchive_zip(self, runner, initialized_repo, tmp_path):
         zpath = str(tmp_path / "data.zip")
         with zipfile.ZipFile(zpath, "w") as zf:
             zf.writestr("file1.txt", "hello")
-        result = runner.invoke(main, ["unarchive", "--repo", initialized_repo, zpath])
+        result = runner.invoke(main, ["archive_in", "--repo", initialized_repo, zpath])
         assert result.exit_code == 0, result.output
         result = runner.invoke(main, ["cat", "--repo", initialized_repo, ":file1.txt"])
         assert result.exit_code == 0
@@ -764,19 +764,19 @@ class TestUnarchive:
             info = tarfile.TarInfo(name="file2.txt")
             info.size = len(data)
             tf.addfile(info, io.BytesIO(data))
-        result = runner.invoke(main, ["unarchive", "--repo", initialized_repo, tpath])
+        result = runner.invoke(main, ["archive_in", "--repo", initialized_repo, tpath])
         assert result.exit_code == 0, result.output
         result = runner.invoke(main, ["cat", "--repo", initialized_repo, ":file2.txt"])
         assert result.exit_code == 0
         assert "world" in result.output
 
     def test_unarchive_stdin_requires_format(self, runner, initialized_repo):
-        result = runner.invoke(main, ["unarchive", "--repo", initialized_repo])
+        result = runner.invoke(main, ["archive_in", "--repo", initialized_repo])
         assert result.exit_code != 0
         assert "--format" in result.output
 
     def test_unarchive_stdin_dash_requires_format(self, runner, initialized_repo):
-        result = runner.invoke(main, ["unarchive", "--repo", initialized_repo, "-"])
+        result = runner.invoke(main, ["archive_in", "--repo", initialized_repo, "-"])
         assert result.exit_code != 0
         assert "--format" in result.output
 
@@ -789,7 +789,7 @@ class TestUnarchive:
             info.size = len(data)
             tf.addfile(info, io.BytesIO(data))
         result = runner.invoke(main, [
-            "unarchive", "--repo", initialized_repo, tpath, "--format", "tar"
+            "archive_in", "--repo", initialized_repo, tpath, "--format", "tar"
         ])
         assert result.exit_code == 0, result.output
         result = runner.invoke(main, ["cat", "--repo", initialized_repo, ":fromtar.txt"])
@@ -800,7 +800,7 @@ class TestUnarchive:
         p = tmp_path / "data.xyz"
         p.write_bytes(b"not an archive")
         result = runner.invoke(main, [
-            "unarchive", "--repo", initialized_repo, str(p)
+            "archive_in", "--repo", initialized_repo, str(p)
         ])
         assert result.exit_code != 0
         assert "Cannot detect" in result.output
@@ -814,7 +814,7 @@ class TestUnarchive:
 
         result = runner.invoke(
             main,
-            ["unarchive", "--repo", initialized_repo, "--format", "zip", "-"],
+            ["archive_in", "--repo", initialized_repo, "--format", "zip", "-"],
             input=zip_bytes,
         )
         assert result.exit_code == 0, result.output
@@ -827,7 +827,7 @@ class TestUnarchive:
         with zipfile.ZipFile(zpath, "w") as zf:
             zf.writestr("msg.txt", "data")
         result = runner.invoke(main, [
-            "unarchive", "--repo", initialized_repo, zpath, "-m", "bulk import"
+            "archive_in", "--repo", initialized_repo, zpath, "-m", "bulk import"
         ])
         assert result.exit_code == 0
         result = runner.invoke(main, ["log", "--repo", initialized_repo])

@@ -205,13 +205,13 @@ fn copy_out_exclude_filter() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn export_roundtrip() {
+fn copy_out_root_roundtrip() {
     let dir = tempfile::tempdir().unwrap();
     let (_, fs) = common::store_with_files(dir.path());
     let dest = dir.path().join("exported");
     std::fs::create_dir(&dest).unwrap();
 
-    fs.export(&dest).unwrap();
+    fs.copy_out("", &dest, fs::CopyOutOptions::default()).unwrap();
     assert_eq!(std::fs::read_to_string(dest.join("hello.txt")).unwrap(), "hello");
     assert_eq!(std::fs::read_to_string(dest.join("dir/a.txt")).unwrap(), "aaa");
     assert_eq!(std::fs::read_to_string(dest.join("dir/b.txt")).unwrap(), "bbb");
@@ -454,14 +454,14 @@ fn sync_in_idempotent() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn export_empty_repo() {
+fn copy_out_root_empty_repo() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
     let fs = store.branches().get("main").unwrap();
     let dest = dir.path().join("exported");
     std::fs::create_dir(&dest).unwrap();
 
-    let report = fs.export(&dest).unwrap();
+    let report = fs.copy_out("", &dest, fs::CopyOutOptions::default()).unwrap();
     assert_eq!(report.total(), 0);
 }
 

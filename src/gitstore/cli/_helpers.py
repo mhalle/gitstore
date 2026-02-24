@@ -570,8 +570,8 @@ def main(ctx, verbose):
       log / reflog    View commit history or branch pointer history
       branch / tag    Manage branches and tags
       undo / redo     Step through branch history
-      archive / zip / tar          Export to archive
-      unarchive / unzip / untar    Import from archive
+      archive_out / zip / tar      Export to archive
+      archive_in / unzip / untar   Import from archive
       backup / restore             Mirror to/from a remote URL
 
     \b

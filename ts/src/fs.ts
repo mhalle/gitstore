@@ -848,34 +848,6 @@ export class FS {
     return this._commitChanges(writes, removes, opts?.message, 'cp');
   }
 
-  async export(destPath: string): Promise<void> {
-    for await (const [dirpath, , files] of this.walk()) {
-      const dirOnDisk = dirpath ? `${destPath}/${dirpath}` : destPath;
-      await this._fsModule.promises.mkdir(dirOnDisk, { recursive: true });
-      for (const fe of files) {
-        const filePath = `${dirOnDisk}/${fe.name}`;
-        if (fe.mode === MODE_LINK) {
-          const repoPath = dirpath ? `${dirpath}/${fe.name}` : fe.name;
-          const target = await this.readlink(repoPath);
-          try {
-            await this._fsModule.promises.unlink(filePath);
-          } catch { /* ignore */ }
-          await this._fsModule.promises.symlink(target, filePath);
-        } else {
-          const { blob } = await git.readBlob({
-            fs: this._fsModule,
-            gitdir: this._gitdir,
-            oid: fe.oid,
-          });
-          await this._fsModule.promises.writeFile(filePath, blob);
-          if (fe.mode === '100755') {
-            await this._fsModule.promises.chmod(filePath, 0o755);
-          }
-        }
-      }
-    }
-  }
-
   // ---------------------------------------------------------------------------
   // History
   // ---------------------------------------------------------------------------

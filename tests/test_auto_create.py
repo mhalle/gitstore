@@ -141,25 +141,25 @@ def test_untar_no_create_prevents_auto_create(runner, new_repo, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# unarchive auto-creates
+# archive_in auto-creates
 # ---------------------------------------------------------------------------
 
-def test_unarchive_auto_creates_repo(runner, new_repo, tmp_path):
+def test_archive_in_auto_creates_repo(runner, new_repo, tmp_path):
     zpath = tmp_path / "data.zip"
     with zipfile.ZipFile(str(zpath), "w") as zf:
         zf.writestr("arc.txt", "archive content")
-    r = runner.invoke(main, ["unarchive", "-r", new_repo, str(zpath)])
+    r = runner.invoke(main, ["archive_in", "-r", new_repo, str(zpath)])
     assert r.exit_code == 0, r.output
     r = runner.invoke(main, ["cat", "-r", new_repo, ":arc.txt"])
     assert r.exit_code == 0
     assert r.output == "archive content"
 
 
-def test_unarchive_no_create_prevents_auto_create(runner, new_repo, tmp_path):
+def test_archive_in_no_create_prevents_auto_create(runner, new_repo, tmp_path):
     zpath = tmp_path / "data.zip"
     with zipfile.ZipFile(str(zpath), "w") as zf:
         zf.writestr("arc.txt", "archive content")
-    r = runner.invoke(main, ["unarchive", "-r", new_repo, "--no-create", str(zpath)])
+    r = runner.invoke(main, ["archive_in", "-r", new_repo, "--no-create", str(zpath)])
     assert r.exit_code != 0
     assert not os.path.exists(new_repo)
 

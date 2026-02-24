@@ -458,14 +458,14 @@ Deno.test('copyIn from disk and copyOut to disk', async () => {
 });
 
 // ---------------------------------------------------------------------------
-// Export
+// copyOut
 // ---------------------------------------------------------------------------
 
-Deno.test('export writes tree to disk', async () => {
+Deno.test('copyOut tree to disk', async () => {
   const { snap, tmpDir } = await storeWithFiles();
   try {
     const outDir = path.join(tmpDir, 'export');
-    await snap.export(outDir);
+    await snap.copyOut('/', outDir);
     assertEquals(fs.readFileSync(path.join(outDir, 'a.txt'), 'utf8'), 'aaa');
     assertEquals(fs.readFileSync(path.join(outDir, 'dir', 'c.txt'), 'utf8'), 'ccc');
   } finally {

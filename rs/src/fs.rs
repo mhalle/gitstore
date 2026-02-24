@@ -983,11 +983,6 @@ impl Fs {
         Ok(new_fs)
     }
 
-    /// Export the tree to a directory on disk.
-    pub fn export(&self, dest: &Path) -> Result<ChangeReport> {
-        self.copy_out("", dest, CopyOutOptions::default())
-    }
-
     // -- History ------------------------------------------------------------
 
     /// Return the parent `Fs` (previous commit on this branch).

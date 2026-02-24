@@ -305,14 +305,6 @@ Undo creates one reflog entry. To redo `undo(N)`, use `redo(1)`.
 
 ---
 
-## Export
-
-### fs.export(path) -> None
-
-Write the entire tree to a directory on disk. Symlinks are recreated, executables get `0o755` permissions.
-
----
-
 ## Copy, Sync, and Move
 
 Copy files between local disk and a gitstore repo, sync directories, and move/rename within the repo. Supports files, directories, trailing-slash contents mode, glob patterns, and `/./` pivot markers.

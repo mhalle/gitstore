@@ -948,30 +948,6 @@ class FS:
 
         return self._commit_changes(writes, removes, message, operation="cp")
 
-    def export(self, path: str | os.PathLike[str]) -> None:
-        """Write the tree contents to a directory on the filesystem.
-
-        The destination directory should be empty or non-existent.
-        Collisions with existing files or directories are not handled.
-        """
-        from .copy._types import FileType
-        path = Path(path)
-        repo = self._store._repo
-        for dirpath, dirnames, files in self.walk():
-            dir_on_disk = path / dirpath if dirpath else path
-            dir_on_disk.mkdir(parents=True, exist_ok=True)
-            for fe in files:
-                if fe.file_type == FileType.LINK:
-                    target = repo[fe.oid].data.decode()
-                    dest = dir_on_disk / fe.name
-                    if dest.exists() or dest.is_symlink():
-                        dest.unlink()
-                    os.symlink(target, dest)
-                else:
-                    (dir_on_disk / fe.name).write_bytes(repo[fe.oid].data)
-                    if fe.file_type == FileType.EXECUTABLE:
-                        os.chmod(dir_on_disk / fe.name, 0o755)
-
     # --- History ---
 
     @property

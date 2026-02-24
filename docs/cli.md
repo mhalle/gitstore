@@ -518,20 +518,20 @@ Exits with code 0 if the tag exists, 1 if it does not. No output.
 
 ## Archives
 
-### archive / unarchive
+### archive_out / archive_in
 
 Format auto-detected from extension (`.zip`, `.tar`, `.tar.gz`, `.tar.bz2`, `.tar.xz`).
 
 ```bash
-gitstore archive out.zip
-gitstore archive out.tar.gz
-gitstore archive - --format tar | gzip > a.tar.gz   # stdout
-gitstore unarchive data.zip
-gitstore unarchive data.tar.gz
-gitstore unarchive --format tar < archive.tar        # stdin
+gitstore archive_out out.zip
+gitstore archive_out out.tar.gz
+gitstore archive_out - --format tar | gzip > a.tar.gz   # stdout
+gitstore archive_in data.zip
+gitstore archive_in data.tar.gz
+gitstore archive_in --format tar < archive.tar           # stdin
 ```
 
-#### archive options
+#### archive_out options
 
 | Option | Description |
 |--------|-------------|
@@ -539,7 +539,7 @@ gitstore unarchive --format tar < archive.tar        # stdin
 | `-b`, `--branch` | Branch (default: `main`). |
 | `--ref`, `--path`, `--match`, `--before`, `--back` | Snapshot filters. |
 
-#### unarchive options
+#### archive_in options
 
 | Option | Description |
 |--------|-------------|
@@ -552,13 +552,13 @@ gitstore unarchive --format tar < archive.tar        # stdin
 
 ### zip / unzip / tar / untar
 
-Aliases with a fixed format. Same options as archive/unarchive (including `--tag` / `--force-tag` for import commands).
+Aliases with a fixed format. Same options as archive_out/archive_in (including `--tag` / `--force-tag` for import commands).
 
 ```bash
-gitstore zip out.zip                          # = archive --format zip
-gitstore unzip data.zip                       # = unarchive --format zip
-gitstore tar out.tar.gz                       # = archive --format tar
-gitstore untar data.tar.gz                    # = unarchive --format tar
+gitstore zip out.zip                          # = archive_out --format zip
+gitstore unzip data.zip                       # = archive_in --format zip
+gitstore tar out.tar.gz                       # = archive_out --format tar
+gitstore untar data.tar.gz                    # = archive_in --format tar
 ```
 
 ---
@@ -678,7 +678,7 @@ Several commands accept filters to select a specific commit:
 | `--before DATE` | Latest commit on or before this date (ISO 8601). |
 | `--back N` | Walk back N commits from tip. |
 
-Filters combine with AND. Available on `cp`, `sync`, `ls`, `cat`, `log`, `diff`, `cmp`, `branch set`, `branch hash`, `tag set`, `archive`, `zip`, `tar`.
+Filters combine with AND. Available on `cp`, `sync`, `ls`, `cat`, `log`, `diff`, `cmp`, `branch set`, `branch hash`, `tag set`, `archive_out`, `zip`, `tar`.
 
 ### Dry-run output format
 

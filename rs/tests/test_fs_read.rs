@@ -1,6 +1,7 @@
 mod common;
 
 use gitstore::*;
+use gitstore::fs::CopyOutOptions;
 
 // ---------------------------------------------------------------------------
 // read
@@ -306,16 +307,16 @@ fn readlink_missing_errors() {
 }
 
 // ---------------------------------------------------------------------------
-// export
+// copy_out (root)
 // ---------------------------------------------------------------------------
 
 #[test]
-fn export_basic() {
+fn copy_out_root_basic() {
     let dir = tempfile::tempdir().unwrap();
     let (_, fs) = common::store_with_files(dir.path());
     let dest = dir.path().join("out");
     std::fs::create_dir(&dest).unwrap();
-    let report = fs.export(&dest).unwrap();
+    let report = fs.copy_out("", &dest, CopyOutOptions::default()).unwrap();
     assert!(report.total() > 0);
     assert_eq!(std::fs::read_to_string(dest.join("hello.txt")).unwrap(), "hello");
     assert_eq!(std::fs::read_to_string(dest.join("dir/a.txt")).unwrap(), "aaa");
@@ -323,7 +324,7 @@ fn export_basic() {
 
 #[cfg(unix)]
 #[test]
-fn export_preserves_executable() {
+fn copy_out_root_preserves_executable() {
     use std::os::unix::fs::PermissionsExt;
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
@@ -337,7 +338,7 @@ fn export_preserves_executable() {
 
     let dest = dir.path().join("out");
     std::fs::create_dir(&dest).unwrap();
-    fs.export(&dest).unwrap();
+    fs.copy_out("", &dest, CopyOutOptions::default()).unwrap();
 
     let meta = std::fs::metadata(dest.join("run.sh")).unwrap();
     assert!(meta.permissions().mode() & 0o111 != 0);
@@ -345,7 +346,7 @@ fn export_preserves_executable() {
 
 #[cfg(unix)]
 #[test]
-fn export_preserves_symlinks() {
+fn copy_out_root_preserves_symlinks() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
     let fs = store.branches().get("main").unwrap();
@@ -357,7 +358,7 @@ fn export_preserves_symlinks() {
 
     let dest = dir.path().join("out");
     std::fs::create_dir(&dest).unwrap();
-    fs.export(&dest).unwrap();
+    fs.copy_out("", &dest, CopyOutOptions::default()).unwrap();
 
     let link_target = std::fs::read_link(dest.join("link")).unwrap();
     assert_eq!(link_target.to_string_lossy(), "target.txt");

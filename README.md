@@ -161,13 +161,6 @@ fs = fs.undo()                                   # move branch back 1 commit
 fs = fs.redo()                                   # move branch forward 1 reflog step
 ```
 
-### Export
-
-```python
-fs.export("/tmp/export")
-# Creates /tmp/export/hello.txt, /tmp/export/src/main.py, etc.
-```
-
 ### Copy and sync
 
 ```python
@@ -323,8 +316,8 @@ gitstore tag set v1.0
 gitstore tag delete v1.0
 
 # Archives
-gitstore archive out.zip
-gitstore unarchive data.tar.gz
+gitstore archive_out out.zip
+gitstore archive_in data.tar.gz
 
 # Mirror (backup/restore all refs)
 gitstore backup https://github.com/user/repo.git
