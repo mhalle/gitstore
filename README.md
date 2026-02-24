@@ -25,10 +25,10 @@ repo = GitStore.open("data.git")
 fs = repo.branches["main"]
 
 # Write a file -- returns a new immutable snapshot
-fs = fs.write("hello.txt", b"Hello, world!")
+fs = fs.write_text("hello.txt", "Hello, world!")
 
 # Read it back
-print(fs.read("hello.txt"))     # b'Hello, world!'
+print(fs.read_text("hello.txt"))  # 'Hello, world!'
 
 # Every write is a commit
 print(fs.commit_hash)           # full 40-char SHA
@@ -112,12 +112,14 @@ with fs.open("data.bin", "rb") as f:
 Every write auto-commits and returns a new snapshot:
 
 ```python
-fs = fs.write("config.json", b'{"key": "value"}')
-fs = fs.write_text("notes.txt", "Hello")                  # str convenience
-fs = fs.write("script.sh", b"#!/bin/sh\n", mode=0o100755) # executable
-fs = fs.write("config.json", b"{}", message="Reset")      # custom message
-fs = fs.write_from_file("big.bin", "/data/big.bin")        # from disk
-fs = fs.write_symlink("link", "target")                    # symlink
+from gitstore import FileType
+
+fs = fs.write_text("config.json", '{"key": "value"}')
+fs = fs.write_text("script.sh", "#!/bin/sh\n", mode=FileType.EXECUTABLE)
+fs = fs.write_text("config.json", "{}", message="Reset")   # custom commit message
+fs = fs.write("image.png", raw_bytes)                       # binary data
+fs = fs.write_from_file("big.bin", "/data/big.bin")         # from disk
+fs = fs.write_symlink("link", "target")                     # symlink
 fs = fs.remove("old-file.txt")
 ```
 
@@ -363,7 +365,7 @@ gitstore backup -n https://github.com/user/repo.git  # dry run
 gitstore serve                                        # single branch
 gitstore serve --all --cors                           # all refs with CORS
 
-# Serve repo over git protocol (read-only)
+# Serve repo over Git protocol (read-only)
 gitstore gitserve
 ```
 

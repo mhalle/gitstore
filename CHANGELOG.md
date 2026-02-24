@@ -4,6 +4,12 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.58.5 (2026-02-24)
+
+**Python:**
+
+- README: prefer `write_text`/`read_text` in examples, use `FileType.EXECUTABLE` instead of raw octal, fix "Git" capitalization
+
 ## v0.58.4 (2026-02-24)
 
 **Python:**
