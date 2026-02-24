@@ -4,6 +4,23 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.56.0 (2026-02-24)
+
+**New features:**
+
+- Add git notes support with `NoteDict`, `NoteNamespace`, and `NotesBatch` — per-namespace mapping of commit hashes to UTF-8 text, with batch mode for single-commit bulk operations
+- Port git notes to TypeScript and Rust with full API parity (93 new TS tests, 46 new Rust tests)
+- Add cross-language interop tests for git notes (py↔ts↔rs) covering unicode and multiline text
+
+**API changes:**
+
+- Add `FS.ref_name` property (replaces `.branch`) — returns ref name for branches and tags
+- Add `FS.writable` property — `True` for branches, `False` for tags/detached commits
+- Add `RefDict.current` / `current_name` (replaces `.default`) — access HEAD branch
+- Port `FS.ref_name`, `.writable`, and `RefDict.current` API to TypeScript and Rust
+- Add `FS.copy_ref()` for branch-to-branch atomic copy; port to TypeScript and Rust (42 new tests each)
+- Rename notes `current_ref` → `for_current_branch` across all bindings for clarity
+
 ## v0.55.0 (2026-02-22)
 
 **New features:**
