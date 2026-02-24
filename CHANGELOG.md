@@ -4,6 +4,18 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.59.0 (2026-02-24)
+
+**Breaking:**
+
+- Rename `copy_ref` → `copy_from_ref` across Python, TypeScript, and Rust (including `CopyRefOptions` → `CopyFromRefOptions` in Rust)
+
+**Python:**
+
+- Add project URLs to pyproject.toml (Homepage, Repository, Issues, Changelog visible on PyPI)
+- Add GitHub repository link to README Documentation section
+- Bump dulwich minimum to `>=1.0.0`
+
 ## v0.58.5 (2026-02-24)
 
 **Python:**
