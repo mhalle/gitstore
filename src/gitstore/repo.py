@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import time as _time
 from collections.abc import Callable, Iterator, MutableMapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -27,13 +27,16 @@ if TYPE_CHECKING:
 # Signature
 # ---------------------------------------------------------------------------
 
+@dataclass
 class Signature:
     """Author/committer identity."""
 
-    def __init__(self, name: str, email: str):
-        self.name = name
-        self.email = email
-        self._identity = f"{name} <{email}>".encode()
+    name: str
+    email: str
+    _identity: bytes = field(init=False, repr=False, compare=False)
+
+    def __post_init__(self):
+        self._identity = f"{self.name} <{self.email}>".encode()
 
 
 # ---------------------------------------------------------------------------

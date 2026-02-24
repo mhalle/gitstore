@@ -11,6 +11,7 @@ from ..tree import GIT_FILEMODE_BLOB_EXECUTABLE, GIT_FILEMODE_LINK, _entry_at_pa
 from ._types import ChangeError
 
 if TYPE_CHECKING:
+    from ._types import FileType
     from ..fs import FS
 
 
@@ -62,7 +63,7 @@ def _local_file_oid_abs(full: Path, *, follow_symlinks: bool = False) -> bytes:
 # File writing
 # ---------------------------------------------------------------------------
 
-def _write_files_to_repo(batch, pairs, *, follow_symlinks=False, mode=None,
+def _write_files_to_repo(batch, pairs, *, follow_symlinks=False, mode: FileType | int | None = None,
                          ignore_errors=False, errors=None):
     """Write ``(local_path, repo_path)`` pairs into a batch."""
     for local_path, repo_path in pairs:

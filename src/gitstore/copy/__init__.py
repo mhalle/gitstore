@@ -18,6 +18,7 @@ Use ``disk_glob()`` for local filesystem glob expansion and
 from .._exclude import ExcludeFilter
 from ._types import (
     ChangeAction,
+    ChangeActionKind,
     ChangeError,
     ChangeReport,
     FileEntry,
@@ -48,7 +49,7 @@ from ._io import (
 
 __all__ = [
     # Public types
-    "ChangeAction", "ChangeError", "ChangeReport", "ExcludeFilter",
+    "ChangeAction", "ChangeActionKind", "ChangeError", "ChangeReport", "ExcludeFilter",
     "FileEntry", "FileType",
     # Glob expansion
     "disk_glob",

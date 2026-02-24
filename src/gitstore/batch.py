@@ -55,6 +55,9 @@ class Batch:
         blob_oid = self._repo.create_blob_fromdisk(local_path)
         self._writes[path] = (blob_oid, mode) if mode != GIT_FILEMODE_BLOB else blob_oid
 
+    def write_text(self, path: str | os.PathLike[str], text: str, *, encoding: str = "utf-8", mode: FileType | int | None = None) -> None:
+        self.write(path, text.encode(encoding), mode=mode)
+
     def write_symlink(self, path: str | os.PathLike[str], target: str) -> None:
         self._check_open()
         path = _normalize_path(path)
@@ -87,21 +90,22 @@ class Batch:
         from ._fileobj import BatchWritableFile
         return BatchWritableFile(self, path)
 
-    def commit(self) -> None:
+    def commit(self) -> FS:
         """Explicitly commit the batch, like ``__exit__`` with no exception.
 
         After calling this the batch is closed and no further writes are
-        allowed.  The resulting FS is available as ``self.fs``.
+        allowed.  Returns the resulting ``FS``.
         """
         self._check_open()
 
         if not self._writes and not self._removes:
             self.fs = self._fs
             self._closed = True
-            return
+            return self.fs
 
         self.fs = self._fs._commit_changes(self._writes, self._removes, self._message, self._operation)
         self._closed = True
+        return self.fs
 
     def __enter__(self):
         return self

@@ -48,7 +48,7 @@ class TestBackupAPI:
     def test_backup_returns_sync_diff(self, store, remote):
         diff = store.backup(remote)
         assert isinstance(diff, MirrorDiff)
-        assert len(diff.create) > 0
+        assert len(diff.add) > 0
         assert diff.total > 0
 
     def test_dry_run_does_not_modify_remote(self, store, remote):
@@ -123,16 +123,16 @@ class TestMirrorDiffStructure:
         assert diff.total == 0
 
     def test_ref_change_fields(self):
-        c = RefChange(ref="refs/heads/main", src_sha="abc1234", dest_sha=None)
+        c = RefChange(ref="refs/heads/main", old_target="abc1234", new_target=None)
         assert c.ref == "refs/heads/main"
-        assert c.src_sha == "abc1234"
-        assert c.dest_sha is None
+        assert c.old_target == "abc1234"
+        assert c.new_target is None
 
     def test_total_counts_all_categories(self):
         diff = MirrorDiff(
-            create=[RefChange(ref="a", src_sha="1")],
-            update=[RefChange(ref="b", src_sha="2", dest_sha="3")],
-            delete=[RefChange(ref="c", dest_sha="4"), RefChange(ref="d", dest_sha="5")],
+            add=[RefChange(ref="a", new_target="1")],
+            update=[RefChange(ref="b", old_target="3", new_target="2")],
+            delete=[RefChange(ref="c", old_target="4"), RefChange(ref="d", old_target="5")],
         )
         assert diff.total == 4
         assert not diff.in_sync

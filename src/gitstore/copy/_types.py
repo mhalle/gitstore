@@ -56,11 +56,21 @@ class FileEntry:
         return cls(path, FileType.from_filemode(mode), src)
 
 
+class ChangeActionKind(str, Enum):
+    """Kind of change action."""
+    ADD = "add"
+    UPDATE = "update"
+    DELETE = "delete"
+
+    def __str__(self) -> str:          # noqa: D105
+        return self.value
+
+
 @dataclass
 class ChangeAction:
     """A single add/update/delete action."""
-    path: str       # relative path (repo-style forward slashes)
-    action: str     # "add", "update", "delete"
+    path: str                    # relative path (repo-style forward slashes)
+    action: ChangeActionKind     # add, update, or delete
 
 
 @dataclass
@@ -91,11 +101,11 @@ class ChangeReport:
         """All actions sorted by path."""
         result: list[ChangeAction] = []
         for e in self.add:
-            result.append(ChangeAction(path=e.path, action="add"))
+            result.append(ChangeAction(path=e.path, action=ChangeActionKind.ADD))
         for e in self.update:
-            result.append(ChangeAction(path=e.path, action="update"))
+            result.append(ChangeAction(path=e.path, action=ChangeActionKind.UPDATE))
         for e in self.delete:
-            result.append(ChangeAction(path=e.path, action="delete"))
+            result.append(ChangeAction(path=e.path, action=ChangeActionKind.DELETE))
         result.sort(key=lambda a: a.path)
         return result
 

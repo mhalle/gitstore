@@ -105,7 +105,7 @@ def _apply_plan(
     message: str | None = None,
     operation: str | None = None,
     follow_symlinks: bool = False,
-    mode: int | None = None,
+    mode: FileType | int | None = None,
     ignore_errors: bool = False,
 ) -> FS:
     """Execute a batch of writes and deletes, attach *changes* to the result.
@@ -151,7 +151,7 @@ def _copy_in(
     dry_run: bool = False,
     follow_symlinks: bool = False,
     message: str | None = None,
-    mode: int | None = None,
+    mode: FileType | int | None = None,
     ignore_existing: bool = False,
     delete: bool = False,
     ignore_errors: bool = False,

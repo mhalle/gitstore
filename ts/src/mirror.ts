@@ -195,22 +195,22 @@ async function diffRefs(
   const [src, dest] =
     direction === 'push' ? [localRefs, remoteRefs] : [remoteRefs, localRefs];
 
-  const create: RefChange[] = [];
+  const add: RefChange[] = [];
   const update: RefChange[] = [];
   const del: RefChange[] = [];
 
   for (const [ref, sha] of src) {
     if (!dest.has(ref)) {
-      create.push({ ref, srcSha: sha });
+      add.push({ ref, newTarget: sha });
     } else if (dest.get(ref) !== sha) {
-      update.push({ ref, srcSha: sha, destSha: dest.get(ref) });
+      update.push({ ref, oldTarget: dest.get(ref), newTarget: sha });
     }
   }
   for (const [ref] of dest) {
     if (!src.has(ref)) {
-      del.push({ ref, destSha: dest.get(ref) });
+      del.push({ ref, oldTarget: dest.get(ref) });
     }
   }
 
-  return { create, update, delete: del };
+  return { add, update, delete: del };
 }

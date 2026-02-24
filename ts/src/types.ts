@@ -265,22 +265,22 @@ function autoMessage(changes: ChangeReport, operation: string | null): string {
 
 export interface RefChange {
   ref: string;
-  srcSha?: string;
-  destSha?: string;
+  oldTarget?: string;
+  newTarget?: string;
 }
 
 export interface MirrorDiff {
-  create: RefChange[];
+  add: RefChange[];
   update: RefChange[];
   delete: RefChange[];
 }
 
 export function mirrorDiffInSync(md: MirrorDiff): boolean {
-  return md.create.length === 0 && md.update.length === 0 && md.delete.length === 0;
+  return md.add.length === 0 && md.update.length === 0 && md.delete.length === 0;
 }
 
 export function mirrorDiffTotal(md: MirrorDiff): number {
-  return md.create.length + md.update.length + md.delete.length;
+  return md.add.length + md.update.length + md.delete.length;
 }
 
 // ---------------------------------------------------------------------------

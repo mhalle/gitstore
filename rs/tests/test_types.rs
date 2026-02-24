@@ -169,17 +169,17 @@ fn mirror_diff_default_in_sync() {
 #[test]
 fn mirror_diff_total() {
     let d = MirrorDiff {
-        refs_added: vec![RefChange {
-            name: "refs/heads/main".into(),
+        add: vec![RefChange {
+            ref_name: "refs/heads/main".into(),
             old_target: None,
             new_target: Some("abc".into()),
         }],
-        refs_updated: vec![RefChange {
-            name: "refs/heads/dev".into(),
+        update: vec![RefChange {
+            ref_name: "refs/heads/dev".into(),
             old_target: Some("old".into()),
             new_target: Some("new".into()),
         }],
-        refs_deleted: vec![],
+        delete: vec![],
     };
     assert_eq!(d.total(), 2);
     assert!(!d.in_sync());
@@ -188,24 +188,24 @@ fn mirror_diff_total() {
 #[test]
 fn mirror_diff_all_categories() {
     let d = MirrorDiff {
-        refs_added: vec![RefChange {
-            name: "a".into(),
+        add: vec![RefChange {
+            ref_name: "a".into(),
             old_target: None,
             new_target: Some("1".into()),
         }],
-        refs_updated: vec![RefChange {
-            name: "b".into(),
+        update: vec![RefChange {
+            ref_name: "b".into(),
             old_target: Some("2".into()),
             new_target: Some("3".into()),
         }],
-        refs_deleted: vec![
+        delete: vec![
             RefChange {
-                name: "c".into(),
+                ref_name: "c".into(),
                 old_target: Some("4".into()),
                 new_target: None,
             },
             RefChange {
-                name: "d".into(),
+                ref_name: "d".into(),
                 old_target: Some("5".into()),
                 new_target: None,
             },
@@ -222,11 +222,11 @@ fn mirror_diff_all_categories() {
 #[test]
 fn ref_change_fields() {
     let c = RefChange {
-        name: "refs/heads/main".into(),
+        ref_name: "refs/heads/main".into(),
         old_target: Some("abc1234".into()),
         new_target: None,
     };
-    assert_eq!(c.name, "refs/heads/main");
+    assert_eq!(c.ref_name, "refs/heads/main");
     assert_eq!(c.old_target.as_deref(), Some("abc1234"));
     assert!(c.new_target.is_none());
 }

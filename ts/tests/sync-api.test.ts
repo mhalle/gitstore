@@ -8,21 +8,21 @@ import {
 
 describe('MirrorDiff structure', () => {
   it('empty diff is in_sync', () => {
-    const diff: MirrorDiff = { create: [], update: [], delete: [] };
+    const diff: MirrorDiff = { add: [], update: [], delete: [] };
     expect(mirrorDiffInSync(diff)).toBe(true);
     expect(mirrorDiffTotal(diff)).toBe(0);
   });
 
   it('RefChange fields', () => {
-    const rc: RefChange = { ref: 'refs/heads/main', srcSha: 'abc', destSha: 'def' };
+    const rc: RefChange = { ref: 'refs/heads/main', oldTarget: 'abc', newTarget: 'def' };
     expect(rc.ref).toBe('refs/heads/main');
-    expect(rc.srcSha).toBe('abc');
-    expect(rc.destSha).toBe('def');
+    expect(rc.oldTarget).toBe('abc');
+    expect(rc.newTarget).toBe('def');
   });
 
   it('total counts all categories', () => {
     const diff: MirrorDiff = {
-      create: [{ ref: 'a' }],
+      add: [{ ref: 'a' }],
       update: [{ ref: 'b' }, { ref: 'c' }],
       delete: [{ ref: 'd' }],
     };

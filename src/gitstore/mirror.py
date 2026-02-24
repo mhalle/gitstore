@@ -27,23 +27,23 @@ if TYPE_CHECKING:
 @dataclass
 class RefChange:
     ref: str
-    src_sha: str | None = None   # None for deletes
-    dest_sha: str | None = None  # None for creates
+    old_target: str | None = None   # None for creates
+    new_target: str | None = None   # None for deletes
 
 
 @dataclass
 class MirrorDiff:
-    create: list[RefChange] = field(default_factory=list)
+    add: list[RefChange] = field(default_factory=list)
     update: list[RefChange] = field(default_factory=list)
     delete: list[RefChange] = field(default_factory=list)
 
     @property
     def in_sync(self) -> bool:
-        return not self.create and not self.update and not self.delete
+        return not self.add and not self.update and not self.delete
 
     @property
     def total(self) -> int:
-        return len(self.create) + len(self.update) + len(self.delete)
+        return len(self.add) + len(self.update) + len(self.delete)
 
 
 # ---------------------------------------------------------------------------
@@ -180,19 +180,19 @@ def _raw_diff_to_sync_diff(raw: dict) -> MirrorDiff:
     def _sha(b):
         return b.decode() if isinstance(b, bytes) else str(b)
 
-    create = [
-        RefChange(ref=ref.decode(), src_sha=_sha(src[ref]))
+    add = [
+        RefChange(ref=ref.decode(), new_target=_sha(src[ref]))
         for ref in raw["create"]
     ]
     update = [
-        RefChange(ref=ref.decode(), src_sha=_sha(src[ref]), dest_sha=_sha(dest[ref]))
+        RefChange(ref=ref.decode(), old_target=_sha(dest[ref]), new_target=_sha(src[ref]))
         for ref in raw["update"]
     ]
     delete = [
-        RefChange(ref=ref.decode(), dest_sha=_sha(dest[ref]))
+        RefChange(ref=ref.decode(), old_target=_sha(dest[ref]))
         for ref in raw["delete"]
     ]
-    return MirrorDiff(create=create, update=update, delete=delete)
+    return MirrorDiff(add=add, update=update, delete=delete)
 
 
 def backup(store: GitStore, url: str, *, dry_run: bool = False, progress=None) -> MirrorDiff:

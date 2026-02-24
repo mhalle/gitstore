@@ -625,7 +625,7 @@ class FS:
         dry_run: bool = False,
         follow_symlinks: bool = False,
         message: str | None = None,
-        mode: int | None = None,
+        mode: FileType | int | None = None,
         ignore_existing: bool = False,
         delete: bool = False,
         ignore_errors: bool = False,

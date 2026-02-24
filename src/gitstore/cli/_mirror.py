@@ -26,12 +26,12 @@ def _print_diff(diff, direction: str) -> None:
     if diff.in_sync:
         click.echo(f"Nothing to {verb} — already in sync.")
         return
-    for c in sorted(diff.create, key=lambda c: c.ref):
-        click.echo(f"  create  {c.ref}  {c.src_sha[:7]}")
+    for c in sorted(diff.add, key=lambda c: c.ref):
+        click.echo(f"  create  {c.ref}  {c.new_target[:7]}")
     for c in sorted(diff.update, key=lambda c: c.ref):
-        click.echo(f"  update  {c.ref}  {c.dest_sha[:7]} -> {c.src_sha[:7]}")
+        click.echo(f"  update  {c.ref}  {c.old_target[:7]} -> {c.new_target[:7]}")
     for c in sorted(diff.delete, key=lambda c: c.ref):
-        click.echo(f"  delete  {c.ref}  {c.dest_sha[:7]}")
+        click.echo(f"  delete  {c.ref}  {c.old_target[:7]}")
     click.echo(f"{diff.total} ref(s) would be changed.")
 
 

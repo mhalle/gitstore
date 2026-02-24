@@ -361,7 +361,7 @@ pub struct ReflogEntry {
 /// Describes a reference change during backup/restore.
 #[derive(Debug, Clone)]
 pub struct RefChange {
-    pub name: String,
+    pub ref_name: String,
     pub old_target: Option<String>,
     pub new_target: Option<String>,
 }
@@ -369,9 +369,9 @@ pub struct RefChange {
 /// Summary of differences between two repositories (for mirror ops).
 #[derive(Debug, Clone, Default)]
 pub struct MirrorDiff {
-    pub refs_added: Vec<RefChange>,
-    pub refs_updated: Vec<RefChange>,
-    pub refs_deleted: Vec<RefChange>,
+    pub add: Vec<RefChange>,
+    pub update: Vec<RefChange>,
+    pub delete: Vec<RefChange>,
 }
 
 impl MirrorDiff {
@@ -380,13 +380,13 @@ impl MirrorDiff {
     }
 
     pub fn in_sync(&self) -> bool {
-        self.refs_added.is_empty()
-            && self.refs_updated.is_empty()
-            && self.refs_deleted.is_empty()
+        self.add.is_empty()
+            && self.update.is_empty()
+            && self.delete.is_empty()
     }
 
     pub fn total(&self) -> usize {
-        self.refs_added.len() + self.refs_updated.len() + self.refs_deleted.len()
+        self.add.len() + self.update.len() + self.delete.len()
     }
 }
 
