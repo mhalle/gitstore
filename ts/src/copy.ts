@@ -469,7 +469,7 @@ async function writeFilesToDisk(
       try {
         const st = await fsModule.promises.lstat(localPath);
         if (st.isDirectory() && !st.isSymbolicLink()) {
-          await fsModule.promises.rm(localPath, { recursive: true, force: true });
+          await fsModule.promises.rm!(localPath, { recursive: true, force: true });
         } else {
           await fsModule.promises.unlink(localPath);
         }

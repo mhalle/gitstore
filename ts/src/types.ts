@@ -323,6 +323,9 @@ export interface FsModule {
     rm?(path: string, options?: { recursive?: boolean; force?: boolean }): Promise<void>;
   };
 
+  // Sync methods
+  realpathSync(path: string): string;
+
   // Callback-based methods required by isomorphic-git
   readFile: Function;
   writeFile: Function;
