@@ -4,6 +4,23 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.57.0 (2026-02-24)
+
+**API changes:**
+
+- Rename `WalkEntry.filemode` → `.mode` for cross-language consistency (TS/Rust already use `mode`) **[breaking]**
+- Add `Batch.commit()` method for explicit commit without context manager (matches TS/Rust API)
+- Export `Batch`, `Signature`, `RefDict`, `BlobOid`, `GitError` from top-level `gitstore` package
+
+**CLI changes:**
+
+- Rename `branch default` → `branch current` to match `store.branches.current` API **[breaking]**
+- Add `note` command group: `get`, `set`, `delete`, `list`, `get-current`, `set-current`
+
+**Internal:**
+
+- Rename `_default_branch()` → `_current_branch()` CLI helper
+
 ## v0.56.0 (2026-02-24)
 
 **New features:**

@@ -26,7 +26,7 @@ from ._helpers import (
     _status,
     _open_store,
     _open_or_create_store,
-    _default_branch,
+    _current_branch,
     _resolve_fs,
     _snapshot_options,
     _tag_option,
@@ -153,7 +153,7 @@ def sync(ctx, args, branch, ref, at_path, match_pattern, before, back, message, 
     if direction == "repo_to_repo":
         # ---- Repo → repo sync ----
         store = _open_store(repo_path)
-        branch = branch or _default_branch(store)
+        branch = branch or _current_branch(store)
 
         # Resolve source
         if src_rp.ref or src_rp.back:
@@ -176,10 +176,10 @@ def sync(ctx, args, branch, ref, at_path, match_pattern, before, back, message, 
 
     if direction == "to_repo" and not dry_run and not no_create:
         store = _open_or_create_store(repo_path, branch or "main")
-        branch = branch or _default_branch(store)
+        branch = branch or _current_branch(store)
     else:
         store = _open_store(repo_path)
-        branch = branch or _default_branch(store)
+        branch = branch or _current_branch(store)
 
     if watch:
         from ._watch import watch_and_sync

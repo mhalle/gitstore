@@ -32,7 +32,7 @@ from ._helpers import (
     _normalize_repo_path,
     _open_store,
     _open_or_create_store,
-    _default_branch,
+    _current_branch,
     _resolve_fs,
     _snapshot_options,
     _tag_option,
@@ -175,10 +175,10 @@ def cp(ctx, args, branch, ref, at_path, match_pattern, before, back, message, fi
         # ---- Disk → repo ----
         if not dry_run and not no_create:
             store = _open_or_create_store(repo_path, branch or "main")
-            branch = branch or _default_branch(store)
+            branch = branch or _current_branch(store)
         else:
             store = _open_store(repo_path)
-            branch = branch or _default_branch(store)
+            branch = branch or _current_branch(store)
 
         # Resolve dest ref
         if parsed_dest.ref:
@@ -291,7 +291,7 @@ def cp(ctx, args, branch, ref, at_path, match_pattern, before, back, message, fi
     elif direction == "repo_to_disk":
         # ---- Repo → disk ----
         store = _open_store(repo_path)
-        branch = branch or _default_branch(store)
+        branch = branch or _current_branch(store)
         default_fs = _resolve_fs(store, branch, ref, at_path=at_path,
                                  match_pattern=match_pattern, before=before, back=back)
 
@@ -345,7 +345,7 @@ def cp(ctx, args, branch, ref, at_path, match_pattern, before, back, message, fi
     elif direction == "repo_to_repo":
         # ---- Repo → repo ----
         store = _open_store(repo_path)
-        branch = branch or _default_branch(store)
+        branch = branch or _current_branch(store)
 
         # Resolve dest
         dest_fs, dest_branch = _require_writable_ref(store, parsed_dest, branch)

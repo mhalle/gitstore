@@ -58,45 +58,45 @@ class TestGetSetHeadBranch:
 
 
 # ---------------------------------------------------------------------------
-# CLI: branch default
+# CLI: branch current
 # ---------------------------------------------------------------------------
 
-class TestBranchDefault:
-    def test_read_default(self, runner, tmp_path):
+class TestBranchCurrent:
+    def test_read_current(self, runner, tmp_path):
         p = str(tmp_path / "test.git")
         GitStore.open(p, branch="main")
-        result = runner.invoke(main, ["branch", "default", "-r", p])
+        result = runner.invoke(main, ["branch", "current", "-r", p])
         assert result.exit_code == 0
         assert result.output.strip() == "main"
 
-    def test_read_custom_default(self, runner, tmp_path):
+    def test_read_custom_current(self, runner, tmp_path):
         p = str(tmp_path / "test.git")
         GitStore.open(p, branch="data")
-        result = runner.invoke(main, ["branch", "default", "-r", p])
+        result = runner.invoke(main, ["branch", "current", "-r", p])
         assert result.exit_code == 0
         assert result.output.strip() == "data"
 
-    def test_set_default(self, runner, tmp_path):
+    def test_set_current(self, runner, tmp_path):
         p = str(tmp_path / "test.git")
         store = GitStore.open(p, branch="main")
         store.branches["dev"] = store.branches["main"]
-        result = runner.invoke(main, ["branch", "default", "-r", p, "-b", "dev"])
+        result = runner.invoke(main, ["branch", "current", "-r", p, "-b", "dev"])
         assert result.exit_code == 0
         # Verify it was set
-        result = runner.invoke(main, ["branch", "default", "-r", p])
+        result = runner.invoke(main, ["branch", "current", "-r", p])
         assert result.output.strip() == "dev"
 
     def test_set_nonexistent(self, runner, tmp_path):
         p = str(tmp_path / "test.git")
         GitStore.open(p, branch="main")
-        result = runner.invoke(main, ["branch", "default", "-r", p, "-b", "nope"])
+        result = runner.invoke(main, ["branch", "current", "-r", p, "-b", "nope"])
         assert result.exit_code != 0
         assert "Branch not found" in result.output
 
     def test_read_dangling(self, runner, tmp_path):
         p = str(tmp_path / "test.git")
         store = GitStore.open(p, branch=None)
-        result = runner.invoke(main, ["branch", "default", "-r", p])
+        result = runner.invoke(main, ["branch", "current", "-r", p])
         assert result.exit_code != 0
         assert "HEAD does not point" in result.output
 

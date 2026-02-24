@@ -153,7 +153,7 @@ def _require_repo(ctx) -> str:
     return repo
 
 
-def _default_branch(store: GitStore) -> str:
+def _current_branch(store: GitStore) -> str:
     """Return the repo's HEAD branch, falling back to 'main'."""
     return store.branches.current_name or "main"
 

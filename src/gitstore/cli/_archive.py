@@ -22,7 +22,7 @@ from ._helpers import (
     _clean_archive_path,
     _open_store,
     _open_or_create_store,
-    _default_branch,
+    _current_branch,
     _get_branch_fs,
     _resolve_fs,
     _snapshot_options,
@@ -59,7 +59,7 @@ def _do_export(ctx, fs, filename: str, fmt: str):
                             )
                         zf.writestr(info, raw)
                     else:
-                        info.external_attr = fe.filemode << 16
+                        info.external_attr = fe.mode << 16
                         zf.writestr(info, fs.read(repo_path))
                     count += 1
         if to_stdout:
@@ -100,7 +100,7 @@ def _do_export(ctx, fs, filename: str, fmt: str):
                         data = fs.read(repo_path)
                         info = tarfile.TarInfo(name=repo_path)
                         info.size = len(data)
-                        info.mode = fe.filemode & 0o7777
+                        info.mode = fe.mode & 0o7777
                         tf.addfile(info, io.BytesIO(data))
                     count += 1
         if to_stdout:
@@ -234,7 +234,7 @@ def zip_cmd(ctx, filename, branch, ref, at_path, match_pattern, before, back):
     FILENAME is the output zip path on disk.  Use '-' to write to stdout.
     """
     store = _open_store(_require_repo(ctx))
-    branch = branch or _default_branch(store)
+    branch = branch or _current_branch(store)
     fs = _resolve_fs(store, branch, ref, at_path=at_path,
                      match_pattern=match_pattern, before=before, back=back)
     _do_export(ctx, fs, filename, "zip")
@@ -262,7 +262,7 @@ def unzip_cmd(ctx, filename, branch, message, no_create, tag, force_tag):
         store = _open_store(repo_path)
     else:
         store = _open_or_create_store(repo_path, branch or "main")
-    branch = branch or _default_branch(store)
+    branch = branch or _current_branch(store)
     new_fs = _do_import(ctx, store, branch, filename, message, "zip")
     if tag:
         _apply_tag(store, new_fs, tag, force_tag)
@@ -285,7 +285,7 @@ def tar_cmd(ctx, filename, branch, ref, at_path, match_pattern, before, back):
     Compression is auto-detected from the filename extension (.tar.gz, .tar.bz2, .tar.xz).
     """
     store = _open_store(_require_repo(ctx))
-    branch = branch or _default_branch(store)
+    branch = branch or _current_branch(store)
     fs = _resolve_fs(store, branch, ref, at_path=at_path,
                      match_pattern=match_pattern, before=before, back=back)
     _do_export(ctx, fs, filename, "tar")
@@ -314,7 +314,7 @@ def untar_cmd(ctx, filename, branch, message, no_create, tag, force_tag):
         store = _open_store(repo_path)
     else:
         store = _open_or_create_store(repo_path, branch or "main")
-    branch = branch or _default_branch(store)
+    branch = branch or _current_branch(store)
     new_fs = _do_import(ctx, store, branch, filename, message, "tar")
     if tag:
         _apply_tag(store, new_fs, tag, force_tag)
@@ -342,7 +342,7 @@ def archive_cmd(ctx, filename, fmt, branch, ref, at_path, match_pattern, before,
             raise click.ClickException("Use --format with stdout (-)")
         fmt = _detect_archive_format(filename)
     store = _open_store(_require_repo(ctx))
-    branch = branch or _default_branch(store)
+    branch = branch or _current_branch(store)
     fs = _resolve_fs(store, branch, ref, at_path=at_path,
                      match_pattern=match_pattern, before=before, back=back)
     _do_export(ctx, fs, filename, fmt)
@@ -376,7 +376,7 @@ def unarchive_cmd(ctx, filename, fmt, branch, message, no_create, tag, force_tag
         store = _open_store(repo_path)
     else:
         store = _open_or_create_store(repo_path, branch or "main")
-    branch = branch or _default_branch(store)
+    branch = branch or _current_branch(store)
     new_fs = _do_import(ctx, store, branch, filename, message, fmt)
     if tag:
         _apply_tag(store, new_fs, tag, force_tag)

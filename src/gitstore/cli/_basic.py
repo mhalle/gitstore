@@ -40,7 +40,7 @@ from ._helpers import (
     _normalize_repo_path,
     _open_store,
     _open_or_create_store,
-    _default_branch,
+    _current_branch,
     _get_branch_fs,
     _get_fs,
     _normalize_at_path,
@@ -277,7 +277,7 @@ def ls(ctx, paths, branch, recursive, long_, full_hash, fmt, no_glob, ref, at_pa
     else:
         parsed = []
 
-    branch = branch or _default_branch(store)
+    branch = branch or _current_branch(store)
     default_fs = _resolve_fs(store, branch, ref, at_path=at_path,
                              match_pattern=match_pattern, before=before, back=back)
 
@@ -409,7 +409,7 @@ def cat(ctx, paths, branch, ref, at_path, match_pattern, before, back):
     _check_ref_conflicts(parsed, ref=ref, branch=branch, back=back,
                          before=before, at_path=at_path, match_pattern=match_pattern)
 
-    branch = branch or _default_branch(store)
+    branch = branch or _current_branch(store)
     default_fs = _resolve_fs(store, branch, ref, at_path=at_path,
                              match_pattern=match_pattern, before=before, back=back)
 
@@ -461,7 +461,7 @@ def rm(ctx, paths, recursive, dry_run, no_glob, branch, message, tag, force_tag)
         gitstore rm :a.txt :b.txt        # multiple
     """
     store = _open_store(_require_repo(ctx))
-    branch = branch or _default_branch(store)
+    branch = branch or _current_branch(store)
 
     parsed = [_parse_ref_path(p) for p in paths]
     branch = _resolve_same_branch(store, parsed, branch, operation="remove")
@@ -543,7 +543,7 @@ def mv(ctx, args, recursive, dry_run, no_glob, branch, message, tag, force_tag):
             )
 
     store = _open_store(_require_repo(ctx))
-    branch = branch or _default_branch(store)
+    branch = branch or _current_branch(store)
     branch = _resolve_same_branch(store, parsed, branch, operation="move")
     fs = _get_branch_fs(store, branch)
 
@@ -628,10 +628,10 @@ def write(ctx, path, branch, message, no_create, tag, force_tag, passthrough):
     repo_path = _require_repo(ctx)
     if no_create:
         store = _open_store(repo_path)
-        branch = branch or _default_branch(store)
+        branch = branch or _current_branch(store)
     else:
         store = _open_or_create_store(repo_path, branch=branch or "main")
-        branch = branch or _default_branch(store)
+        branch = branch or _current_branch(store)
 
     repo_path_norm = _normalize_repo_path(rp.path if rp.is_repo else _strip_colon(path))
 
@@ -714,7 +714,7 @@ def log(ctx, target, at_path, deprecated_at, match_pattern, before, branch, ref,
             at_path = target
 
     store = _open_store(_require_repo(ctx))
-    branch = branch or _default_branch(store)
+    branch = branch or _current_branch(store)
     fs = _get_fs(store, branch, ref)
     if back:
         try:
@@ -775,7 +775,7 @@ def diff(ctx, baseline, branch, ref, at_path, match_pattern, before, back, rever
                 at_path = rp.path
 
     store = _open_store(_require_repo(ctx))
-    branch = branch or _default_branch(store)
+    branch = branch or _current_branch(store)
     head_fs = _get_fs(store, branch, None)
     other_fs = _resolve_fs(store, branch, ref, at_path=at_path,
                            match_pattern=match_pattern, before=before, back=back)
@@ -858,7 +858,7 @@ def cmp(ctx, file1, file2, branch, ref, at_path, match_pattern, before, back):
     default_fs = None
     if repo_rps:
         store = _open_store(_require_repo(ctx))
-        branch = branch or _default_branch(store)
+        branch = branch or _current_branch(store)
         default_fs = _resolve_fs(store, branch, ref, at_path=at_path,
                                  match_pattern=match_pattern, before=before, back=back)
 
@@ -909,7 +909,7 @@ def undo(ctx, branch, steps):
     repo = _open_store(repo_path)
 
     try:
-        branch = branch or _default_branch(repo)
+        branch = branch or _current_branch(repo)
         fs = repo.branches[branch]
 
         # Perform undo
@@ -952,7 +952,7 @@ def redo(ctx, branch, steps):
     repo = _open_store(repo_path)
 
     try:
-        branch = branch or _default_branch(repo)
+        branch = branch or _current_branch(repo)
         fs = repo.branches[branch]
 
         # Perform redo
@@ -1013,7 +1013,7 @@ def reflog(ctx, branch, limit, fmt):
     repo = _open_store(repo_path)
 
     try:
-        branch = branch or _default_branch(repo)
+        branch = branch or _current_branch(repo)
         entries = repo.branches.reflog(branch)
 
         # Apply limit if specified

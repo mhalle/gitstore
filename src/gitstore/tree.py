@@ -58,13 +58,13 @@ class WalkEntry(NamedTuple):
 
     name: str
     oid: bytes
-    filemode: int
+    mode: int
 
     @property
     def file_type(self):
         """Return the :class:`~gitstore.copy._types.FileType` for this entry."""
         from .copy._types import FileType
-        return FileType.from_filemode(self.filemode)
+        return FileType.from_filemode(self.mode)
 
 
 GIT_FILEMODE_TREE = 0o040000
@@ -281,8 +281,8 @@ def list_entries_at_path(
 ) -> list[WalkEntry]:
     """List entries at the given path (or root if path is None).
 
-    Returns :class:`WalkEntry` objects with *name*, *oid*, and *filemode*.
-    Directories have ``filemode == GIT_FILEMODE_TREE``.
+    Returns :class:`WalkEntry` objects with *name*, *oid*, and *mode*.
+    Directories have ``mode == GIT_FILEMODE_TREE``.
     """
     if path is None or _is_root_path(path):
         tree = repo[tree_oid]

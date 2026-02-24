@@ -87,12 +87,32 @@ class Batch:
         from ._fileobj import BatchWritableFile
         return BatchWritableFile(self, path)
 
+    def commit(self) -> None:
+        """Explicitly commit the batch, like ``__exit__`` with no exception.
+
+        After calling this the batch is closed and no further writes are
+        allowed.  The resulting FS is available as ``self.fs``.
+        """
+        self._check_open()
+
+        if not self._writes and not self._removes:
+            self.fs = self._fs
+            self._closed = True
+            return
+
+        self.fs = self._fs._commit_changes(self._writes, self._removes, self._message, self._operation)
+        self._closed = True
+
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         if exc_type is not None:
             self._closed = True
+            return False
+
+        if self._closed:
+            # Already committed via commit()
             return False
 
         if not self._writes and not self._removes:

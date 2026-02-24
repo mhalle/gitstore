@@ -12,7 +12,7 @@ from ._helpers import (
     _require_repo,
     _status,
     _open_store,
-    _default_branch,
+    _current_branch,
     _apply_snapshot_filters,
     _resolve_fs,
     _resolve_ref,
@@ -68,7 +68,7 @@ def branch_set(ctx, name, branch, force, empty, ref, at_path, match_pattern, bef
             f"Initialize {name}", tree_oid, [],
         )
     else:
-        branch = branch or _default_branch(store)
+        branch = branch or _current_branch(store)
         source_fs = _resolve_fs(store, branch, ref=ref, at_path=at_path,
                                 match_pattern=match_pattern, before=before, back=back)
         from ..fs import FS
@@ -155,7 +155,7 @@ def tag_set(ctx, name, branch, force, ref, at_path, match_pattern, before, back)
     if name in store.tags and not force:
         raise click.ClickException(f"Tag already exists: {name}")
 
-    branch = branch or _default_branch(store)
+    branch = branch or _current_branch(store)
     source_fs = _resolve_fs(store, branch, ref=ref, at_path=at_path,
                             match_pattern=match_pattern, before=before, back=back)
     from ..fs import FS
@@ -205,16 +205,16 @@ def tag_hash(ctx, name):
     click.echo(fs.commit_hash)
 
 
-@branch.command("default")
+@branch.command("current")
 @_repo_option
 @click.option("--branch", "-b", default=None,
-              help="Set the default branch to this name.")
+              help="Set the current branch to this name.")
 @click.pass_context
-def branch_default(ctx, branch):
-    """Show or set the repository's default branch.
+def branch_current(ctx, branch):
+    """Show or set the repository's current branch.
 
-    Without -b, prints the current default branch.
-    With -b NAME, sets the default branch to NAME (must exist).
+    Without -b, prints the current branch (HEAD).
+    With -b NAME, sets the current branch to NAME (must exist).
     """
     store = _open_store(_require_repo(ctx))
     if branch is None:
@@ -227,7 +227,7 @@ def branch_default(ctx, branch):
             store.branches.current = branch
         except KeyError:
             raise click.ClickException(f"Branch not found: {branch}")
-        _status(ctx, f"Default branch set to {branch}")
+        _status(ctx, f"Current branch set to {branch}")
 
 
 # Wire up the default subcommand references in _helpers

@@ -16,7 +16,7 @@ from ._helpers import (
     _snapshot_options,
     _require_repo,
     _open_store,
-    _default_branch,
+    _current_branch,
     _resolve_fs,
 )
 
@@ -371,7 +371,7 @@ def serve(ctx, host, port, branch, ref, at_path, match_pattern, before, back,
         app = _make_app(store, cors=cors, no_cache=no_cache, base_path=base_path)
         mode = "multi-ref"
     else:
-        branch = branch or _default_branch(store)
+        branch = branch or _current_branch(store)
         ref_label = ref or branch
 
         def _resolve():
