@@ -16,6 +16,9 @@ cli = [
     "click>=8.0",
     "watchfiles>=1.0.0",
 ]
+fuse = [
+    "mfusepy>=3.0",
+]
 dev = [
     "gitstore[cli]",
     "pytest>=8.0",
