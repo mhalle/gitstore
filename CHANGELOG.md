@@ -4,6 +4,14 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.59.3 (2026-02-24)
+
+**Python:**
+
+- README: add `uvx` / `uv tool install` examples for CLI
+- README: note that `gc` and `backup`/`restore` shell out to `git`; all other commands are self-contained
+- README: use `branches.current` in quick start example
+
 ## v0.59.2 (2026-02-24)
 
 **Python:**
