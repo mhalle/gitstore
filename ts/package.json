@@ -7,16 +7,38 @@
   "types": "dist/index.d.ts",
   "exports": {
     ".": {
-      "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
     }
   },
+  "files": [
+    "dist",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsc",
     "check": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "prepack": "cp ../LICENSE . && npm run build",
+    "postpack": "rm -f LICENSE"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mhalle/gitstore.git",
+    "directory": "ts"
+  },
+  "homepage": "https://github.com/mhalle/gitstore/tree/master/ts",
+  "bugs": {
+    "url": "https://github.com/mhalle/gitstore/issues"
+  },
+  "keywords": [
+    "git",
+    "filesystem",
+    "versioned",
+    "storage",
+    "isomorphic-git"
+  ],
   "dependencies": {
     "isomorphic-git": "^1.27.0"
   },
@@ -27,6 +49,9 @@
   },
   "engines": {
     "node": ">=18.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "license": "Apache-2.0"
 }

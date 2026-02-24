@@ -64,8 +64,8 @@ export class NoteNamespace {
     }
   }
 
-  /** Read the tree OID from the tip commit, or null. */
-  private async _treeOid(): Promise<string | null> {
+  /** @internal Read the tree OID from the tip commit, or null. */
+  async _treeOid(): Promise<string | null> {
     const tip = await this._tipOid();
     if (tip === null) return null;
     const { commit } = await git.readCommit({
@@ -147,8 +147,8 @@ export class NoteNamespace {
     return result;
   }
 
-  /** Build a new note tree from a base tree + writes + deletes. */
-  private async _buildNoteTree(
+  /** @internal Build a new note tree from a base tree + writes + deletes. */
+  async _buildNoteTree(
     baseTreeOid: string | null,
     writes: Map<string, string>,  // hash → text
     deletes: Set<string>,
@@ -280,8 +280,8 @@ export class NoteNamespace {
     });
   }
 
-  /** Commit a new tree to the notes ref under repo lock. */
-  private async _commitNoteTree(
+  /** @internal Commit a new tree to the notes ref under repo lock. */
+  async _commitNoteTree(
     newTreeOid: string,
     message: string,
   ): Promise<void> {
