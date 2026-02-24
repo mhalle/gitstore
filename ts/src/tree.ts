@@ -219,6 +219,19 @@ export async function existsAtPath(
 }
 
 // ---------------------------------------------------------------------------
+// Count subdirectories (for stat nlink)
+// ---------------------------------------------------------------------------
+
+export async function countSubdirs(
+  fsModule: FsModule,
+  gitdir: string,
+  treeOid: string,
+): Promise<number> {
+  const { tree } = await git.readTree({ fs: fsModule, gitdir, oid: treeOid });
+  return tree.filter(e => e.mode === MODE_TREE).length;
+}
+
+// ---------------------------------------------------------------------------
 // Recursive tree rebuild
 // ---------------------------------------------------------------------------
 

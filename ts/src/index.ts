@@ -54,6 +54,7 @@ export {
   // Data structures
   type WalkEntry,
   type WriteEntry,
+  type StatResult,
   type FileEntry,
   type ChangeAction,
   type ChangeError,

@@ -10,6 +10,7 @@ import {
   MODE_TREE,
   MODE_BLOB,
   MODE_LINK,
+  modeToInt,
   FileNotFoundError,
   IsADirectoryError,
   NotADirectoryError,
@@ -27,6 +28,7 @@ import {
   type WriteEntry,
   type ChangeReport,
   type CommitInfo,
+  type StatResult,
 } from './types.js';
 import { normalizePath, isRootPath } from './paths.js';
 import {
@@ -38,6 +40,7 @@ import {
   walkTree,
   existsAtPath,
   rebuildTree,
+  countSubdirs,
   type TreeWrite,
 } from './tree.js';
 import { globMatch } from './glob.js';
@@ -60,6 +63,8 @@ export class FS {
   _treeOid: string;
   /** @internal */
   _changes: ChangeReport | null = null;
+  /** @internal */
+  _commitTime: number | null = null;
 
   /** @internal */
   get _fsModule(): FsModule {
@@ -164,12 +169,34 @@ export class FS {
     return this._changes;
   }
 
+  get treeHash(): string {
+    return this._treeOid;
+  }
+
+  /** @internal */
+  async _getCommitTime(): Promise<number> {
+    if (this._commitTime !== null) return this._commitTime;
+    const { commit } = await git.readCommit({
+      fs: this._fsModule,
+      gitdir: this._gitdir,
+      oid: this._commitOid,
+    });
+    this._commitTime = commit.committer.timestamp;
+    return this._commitTime;
+  }
+
   // ---------------------------------------------------------------------------
   // Read operations
   // ---------------------------------------------------------------------------
 
-  async read(path: string): Promise<Uint8Array> {
-    return readBlobAtPath(this._fsModule, this._gitdir, this._treeOid, path);
+  async read(path: string, opts?: { offset?: number; size?: number }): Promise<Uint8Array> {
+    const blob = await readBlobAtPath(this._fsModule, this._gitdir, this._treeOid, path);
+    if (opts && (opts.offset !== undefined || opts.size !== undefined)) {
+      const offset = opts.offset ?? 0;
+      const end = opts.size !== undefined ? offset + opts.size : blob.length;
+      return blob.subarray(offset, end);
+    }
+    return blob;
   }
 
   async readText(path: string, encoding: string = 'utf-8'): Promise<string> {
@@ -234,6 +261,62 @@ export class FS {
     if (entry.mode !== MODE_LINK) throw new Error(`Not a symlink: ${normalized}`);
     const { blob } = await git.readBlob({ fs: this._fsModule, gitdir: this._gitdir, oid: entry.oid });
     return new TextDecoder().decode(blob);
+  }
+
+  async readByHash(hash: string, opts?: { offset?: number; size?: number }): Promise<Uint8Array> {
+    const { blob } = await git.readBlob({ fs: this._fsModule, gitdir: this._gitdir, oid: hash });
+    if (opts && (opts.offset !== undefined || opts.size !== undefined)) {
+      const offset = opts.offset ?? 0;
+      const end = opts.size !== undefined ? offset + opts.size : blob.length;
+      return blob.subarray(offset, end);
+    }
+    return blob;
+  }
+
+  async stat(path?: string | null): Promise<StatResult> {
+    const mtime = await this._getCommitTime();
+
+    if (path == null || isRootPath(path)) {
+      const nlink = 2 + await countSubdirs(this._fsModule, this._gitdir, this._treeOid);
+      return {
+        mode: modeToInt(MODE_TREE),
+        fileType: fileTypeFromMode(MODE_TREE),
+        size: 0,
+        hash: this._treeOid,
+        nlink,
+        mtime,
+      };
+    }
+
+    const normalized = normalizePath(path);
+    const entry = await entryAtPath(this._fsModule, this._gitdir, this._treeOid, normalized);
+    if (entry === null) throw new FileNotFoundError(normalized);
+
+    if (entry.mode === MODE_TREE) {
+      const nlink = 2 + await countSubdirs(this._fsModule, this._gitdir, entry.oid);
+      return {
+        mode: modeToInt(entry.mode),
+        fileType: fileTypeFromMode(entry.mode),
+        size: 0,
+        hash: entry.oid,
+        nlink,
+        mtime,
+      };
+    }
+
+    const { blob } = await git.readBlob({ fs: this._fsModule, gitdir: this._gitdir, oid: entry.oid });
+    return {
+      mode: modeToInt(entry.mode),
+      fileType: fileTypeFromMode(entry.mode),
+      size: blob.length,
+      hash: entry.oid,
+      nlink: 1,
+      mtime,
+    };
+  }
+
+  async listdir(path?: string | null): Promise<WalkEntry[]> {
+    return listEntriesAtPath(this._fsModule, this._gitdir, this._treeOid, path);
   }
 
   // ---------------------------------------------------------------------------

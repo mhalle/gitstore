@@ -122,6 +122,15 @@ export interface WalkEntry {
   mode: string;
 }
 
+export interface StatResult {
+  mode: number;        // raw git filemode as integer (0o100644, etc.)
+  fileType: FileType;  // 'blob' | 'executable' | 'link' | 'tree'
+  size: number;        // blob bytes (symlinks: target length; dirs: 0)
+  hash: string;        // 40-char hex SHA
+  nlink: number;       // 1 for files/symlinks, 2+subdirs for directories
+  mtime: number;       // commit timestamp as POSIX epoch seconds
+}
+
 export function walkEntryFileType(entry: WalkEntry): FileType {
   return fileTypeFromMode(entry.mode);
 }
