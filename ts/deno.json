@@ -1,0 +1,9 @@
+{
+  "tasks": {
+    "test:deno": "deno test tests/deno_compat_test.ts --allow-read --allow-write --allow-env"
+  },
+  "nodeModulesDir": "auto",
+  "compilerOptions": {
+    "lib": ["deno.ns", "deno.unstable"]
+  }
+}
