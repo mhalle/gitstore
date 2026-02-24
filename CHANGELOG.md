@@ -4,6 +4,12 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.59.2 (2026-02-24)
+
+**Python:**
+
+- README: show `branches.current` usage, note default branch name is "main"
+
 ## v0.59.1 (2026-02-24)
 
 **Python:**
