@@ -8,7 +8,7 @@ Set the repository once per shell session:
 export GITSTORE_REPO=/path/to/repo.git
 ```
 
-Or pass `--repo`/`-r` per command. Use `--branch`/`-b` to target a branch (default: `main`).
+Or pass `--repo`/`-r` per command. Use `--branch`/`-b` to target a branch (default: repo's current branch).
 
 Pass `-v` before any command for status messages on stderr.
 
@@ -131,14 +131,14 @@ gitstore cp --ref v1.0 :data ./local          # from tag/branch/hash
 
 | Option | Description |
 |--------|-------------|
-| `-b`, `--branch` | Branch (default: `main`). |
+| `-b`, `--branch` | Branch (default: current branch). |
 | `--ref` | Branch, tag, or commit hash to read from. |
 | `--path` | Latest commit that changed this path. |
 | `--match` | Latest commit matching message pattern (`*`, `?`). |
 | `--before` | Latest commit on or before this date (ISO 8601). |
 | `--back N` | Walk back N commits from tip. |
 | `-m`, `--message` | Commit message (supports [placeholders](#message-placeholders)). |
-| `--mode` | `644` (default) or `755`. |
+| `--type` | `blob` (default) or `executable`. |
 | `--follow-symlinks` | Dereference symlinks (disk→repo only). |
 | `-n`, `--dry-run` | Preview without writing. |
 | `--ignore-existing` | Skip existing destination files. |
@@ -185,7 +185,7 @@ gitstore sync :data ./local --ref v1.0        # from tag
 
 | Option | Description |
 |--------|-------------|
-| `-b`, `--branch` | Branch (default: `main`). |
+| `-b`, `--branch` | Branch (default: current branch). |
 | `--ref` | Branch, tag, or commit hash. |
 | `--path` | Latest commit that changed this path. |
 | `--match` | Latest commit matching message pattern. |
@@ -238,7 +238,11 @@ gitstore ls -R 'src/*'                        # glob + recursive expansion
 | Option | Description |
 |--------|-------------|
 | `-R`, `--recursive` | List all files recursively with full paths. |
-| `-b`, `--branch` | Branch (default: `main`). |
+| `-l`, `--long` | Show file sizes, types, and hashes. |
+| `--full-hash` | Show full 40-character hashes (default: 7-char; requires `-l`). |
+| `--format` | Output format: `text` (default), `json`, `jsonl`. |
+| `--no-glob` | Disable glob expansion — treat `*` and `?` as literal characters. |
+| `-b`, `--branch` | Branch (default: current branch). |
 | `--ref`, `--path`, `--match`, `--before`, `--back` | Snapshot filters. |
 
 ### cat
@@ -252,7 +256,7 @@ gitstore cat file.txt --ref v1.0
 
 | Option | Description |
 |--------|-------------|
-| `-b`, `--branch` | Branch (default: `main`). |
+| `-b`, `--branch` | Branch (default: current branch). |
 | `--ref`, `--path`, `--match`, `--before`, `--back` | Snapshot filters. |
 
 ### rm
@@ -272,7 +276,7 @@ gitstore rm :a.txt :b.txt               # multiple
 |--------|-------------|
 | `-R`, `--recursive` | Remove directories recursively. |
 | `-n`, `--dry-run` | Show what would change without writing. |
-| `-b`, `--branch` | Branch (default: `main`). |
+| `-b`, `--branch` | Branch (default: current branch). |
 | `-m`, `--message` | Commit message. |
 | `--tag` | Create a tag at the resulting commit. |
 | `--force-tag` | Overwrite tag if it already exists. |
@@ -294,7 +298,7 @@ gitstore mv dev:old.txt dev:new.txt         # explicit branch
 |--------|-------------|
 | `-R`, `--recursive` | Move directories recursively. |
 | `-n`, `--dry-run` | Show what would change without writing. |
-| `-b`, `--branch` | Branch (default: `main`). |
+| `-b`, `--branch` | Branch (default: current branch). |
 | `-m`, `--message` | Commit message. |
 | `--tag` | Create a tag at the resulting commit. |
 | `--force-tag` | Overwrite tag if it already exists. |
@@ -318,7 +322,7 @@ tail -f /var/log/app.log | gitstore write log.txt --passthrough
 | Option | Description |
 |--------|-------------|
 | `-p`, `--passthrough` | Echo stdin to stdout (tee mode for pipelines). |
-| `-b`, `--branch` | Branch (default: `main`). |
+| `-b`, `--branch` | Branch (default: current branch). |
 | `-m`, `--message` | Commit message. |
 | `--no-create` | Don't auto-create the repo. |
 | `--tag` | Create a tag at the resulting commit. |
@@ -342,7 +346,7 @@ gitstore log --format json                    # or jsonl
 
 | Option | Description |
 |--------|-------------|
-| `-b`, `--branch` | Branch (default: `main`). |
+| `-b`, `--branch` | Branch (default: current branch). |
 | `--ref` | Start from branch, tag, or hash. |
 | `--path` | Commits that changed this path. |
 | `--match` | Commits matching message pattern. |
@@ -372,7 +376,7 @@ gitstore diff --back 3 --reverse          # swap direction (new → old)
 
 | Option | Description |
 |--------|-------------|
-| `-b`, `--branch` | Branch (default: `main`). |
+| `-b`, `--branch` | Branch (default: current branch). |
 | `--ref`, `--path`, `--match`, `--before`, `--back` | Snapshot filters (select baseline). |
 | `--reverse` | Swap comparison direction (A↔D flipped, M stays M). |
 
@@ -391,7 +395,7 @@ gitstore -v cmp :old.txt :new.txt             # verbose — show hashes on stder
 
 | Option | Description |
 |--------|-------------|
-| `-b`, `--branch` | Branch (default: `main`). |
+| `-b`, `--branch` | Branch (default: current branch). |
 | `--ref`, `--path`, `--match`, `--before`, `--back` | Snapshot filters. |
 
 **Exit codes:**
@@ -417,7 +421,7 @@ gitstore undo -b dev                          # undo on 'dev' branch
 
 | Option | Description |
 |--------|-------------|
-| `-b`, `--branch` | Branch (default: `main`). |
+| `-b`, `--branch` | Branch (default: current branch). |
 
 ### redo
 
@@ -429,7 +433,7 @@ gitstore redo -b dev                          # redo on 'dev' branch
 
 | Option | Description |
 |--------|-------------|
-| `-b`, `--branch` | Branch (default: `main`). |
+| `-b`, `--branch` | Branch (default: current branch). |
 
 ### reflog
 
@@ -442,7 +446,7 @@ gitstore reflog --format json
 
 | Option | Description |
 |--------|-------------|
-| `-b`, `--branch` | Branch (default: `main`). |
+| `-b`, `--branch` | Branch (default: current branch). |
 | `-n`, `--limit` | Limit number of entries shown. |
 | `--format` | `text` (default), `json`, `jsonl`. |
 
@@ -461,8 +465,8 @@ gitstore branch set dev --ref main --path config.json
 gitstore branch set dev -f                    # overwrite existing
 gitstore branch set dev --empty               # empty orphan branch
 gitstore branch exists dev                    # exit 0 if exists, 1 if not
-gitstore branch default                       # show default branch
-gitstore branch default -b dev                # set default branch
+gitstore branch current                       # show current branch
+gitstore branch current -b dev                # set current branch
 gitstore branch delete dev
 gitstore branch hash main                     # tip commit SHA
 gitstore branch hash main --back 3            # 3 commits before tip
@@ -473,7 +477,7 @@ gitstore branch hash main --path config.json  # last commit that changed file
 
 | Option | Description |
 |--------|-------------|
-| `-b`, `--branch` | Source branch (default: repo default). |
+| `-b`, `--branch` | Source branch (default: current branch). |
 | `-f`, `--force` | Overwrite if branch already exists. |
 | `--empty` | Create an empty root branch (no parent commit). Cannot combine with other options. |
 | `--ref`, `--path`, `--match`, `--before`, `--back` | Snapshot filters. |
@@ -506,13 +510,50 @@ gitstore tag delete v1.0
 
 | Option | Description |
 |--------|-------------|
-| `-b`, `--branch` | Source branch (default: repo default). |
+| `-b`, `--branch` | Source branch (default: current branch). |
 | `-f`, `--force` | Overwrite if tag already exists. |
 | `--ref`, `--path`, `--match`, `--before`, `--back` | Snapshot filters. |
 
 #### tag exists
 
 Exits with code 0 if the tag exists, 1 if it does not. No output.
+
+### note
+
+Manage git notes on commits. Notes are stored in namespaces (default: `commits`).
+
+```bash
+gitstore note get HASH                        # get note for a commit
+gitstore note set HASH "text"                 # set note for a commit
+gitstore note delete HASH                     # delete note for a commit
+gitstore note list                            # list commits that have notes
+gitstore note get-current                     # get note for HEAD commit
+gitstore note set-current "text"              # set note for HEAD commit
+```
+
+#### note get / set / delete
+
+Operate on a specific commit hash.
+
+| Option | Description |
+|--------|-------------|
+| `-N`, `--namespace` | Notes namespace (default: `commits`). |
+
+#### note list
+
+List all commit hashes that have notes in the given namespace.
+
+| Option | Description |
+|--------|-------------|
+| `-N`, `--namespace` | Notes namespace (default: `commits`). |
+
+#### note get-current / set-current
+
+Shorthand for operating on the current branch's HEAD commit.
+
+| Option | Description |
+|--------|-------------|
+| `-N`, `--namespace` | Notes namespace (default: `commits`). |
 
 ---
 
@@ -536,7 +577,7 @@ gitstore archive_in --format tar < archive.tar           # stdin
 | Option | Description |
 |--------|-------------|
 | `--format` | `zip` or `tar` (overrides auto-detect; required for stdout). |
-| `-b`, `--branch` | Branch (default: `main`). |
+| `-b`, `--branch` | Branch (default: current branch). |
 | `--ref`, `--path`, `--match`, `--before`, `--back` | Snapshot filters. |
 
 #### archive_in options
@@ -544,7 +585,7 @@ gitstore archive_in --format tar < archive.tar           # stdin
 | Option | Description |
 |--------|-------------|
 | `--format` | `zip` or `tar` (overrides auto-detect; required for stdin). |
-| `-b`, `--branch` | Branch (default: `main`). |
+| `-b`, `--branch` | Branch (default: current branch). |
 | `-m`, `--message` | Commit message. |
 | `--no-create` | Don't auto-create the repo. |
 | `--tag` | Create a tag at the resulting commit. |
@@ -613,7 +654,7 @@ gitstore serve -q                                # suppress per-request log outp
 |--------|-------------|
 | `--host` | Bind address (default: `127.0.0.1`). |
 | `-p`, `--port` | Port to listen on (default: `8000`, use `0` for OS-assigned). |
-| `-b`, `--branch` | Branch (default: `main`). |
+| `-b`, `--branch` | Branch (default: current branch). |
 | `--ref`, `--path`, `--match`, `--before`, `--back` | Snapshot filters. |
 | `--all` | Multi-ref mode: expose all branches and tags via `/<ref>/<path>`. |
 | `--cors` | Add `Access-Control-Allow-Origin: *` and related CORS headers. |
@@ -658,6 +699,27 @@ git clone http://127.0.0.1:8000/                 # clone from another terminal
 | `--host` | Bind address (default: `127.0.0.1`). |
 | `-p`, `--port` | Port to listen on (default: `8000`, use `0` for OS-assigned). |
 
+### mount
+
+Mount a branch or tag as a read-only FUSE filesystem. Requires `pip install gitstore[fuse]`.
+
+```bash
+gitstore mount /tmp/mnt                          # mount current branch
+gitstore mount /tmp/mnt -b dev                   # mount a different branch
+gitstore mount /tmp/mnt --ref v1.0               # mount a tag
+gitstore mount /tmp/mnt --back 2                 # mount 2 commits before tip
+gitstore mount /tmp/mnt -f                       # run in foreground
+```
+
+| Option | Description |
+|--------|-------------|
+| `-b`, `--branch` | Branch (default: current branch). |
+| `--ref`, `--path`, `--match`, `--before`, `--back` | Snapshot filters. |
+| `-f`, `--foreground` | Run in foreground (default: daemonize). |
+| `--debug` | Enable FUSE debug output. |
+| `--nothreads` | Single-threaded mode. |
+| `--allow-other` | Allow other users to access the mount. |
+
 ---
 
 ## Appendix
@@ -678,7 +740,7 @@ Several commands accept filters to select a specific commit:
 | `--before DATE` | Latest commit on or before this date (ISO 8601). |
 | `--back N` | Walk back N commits from tip. |
 
-Filters combine with AND. Available on `cp`, `sync`, `ls`, `cat`, `log`, `diff`, `cmp`, `branch set`, `branch hash`, `tag set`, `archive_out`, `zip`, `tar`.
+Filters combine with AND. Available on `cp`, `sync`, `ls`, `cat`, `log`, `diff`, `cmp`, `branch set`, `branch hash`, `tag set`, `archive_out`, `zip`, `tar`, `mount`.
 
 ### Dry-run output format
 
