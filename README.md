@@ -176,15 +176,20 @@ for entry in repo.branches.reflog("main"):
 ### Copy and sync
 
 ```python
-# Disk to repo
+# Disk to repo (current branch)
 fs = fs.copy_in(["./data/"], "backup")
 print(fs.changes.add)                            # [FileEntry(...), ...]
 
 # Repo to disk
 fs.copy_out(["docs"], "./local-docs")
 
+# Work with a non-default branch
+dev = repo.branches["dev"]
+dev = dev.copy_in(["./features/"], "src")
+
 # Copy between branches (atomic, no disk I/O)
-fs = fs.copy_ref(source_fs, "src/lib", "vendor/lib")
+main = repo.branches["main"]
+dev = dev.copy_ref(main, "config", "config")     # copy config/ from main into dev
 
 # Sync (make identical, including deletes)
 fs = fs.sync_in("./local", "data")
@@ -385,6 +390,10 @@ del ns[fs.commit_hash]
 # Custom namespaces
 reviews = repo.notes["reviews"]
 reviews[fs.commit_hash] = "LGTM"
+
+# Shortcut: note for the current HEAD commit
+ns.for_current_branch = "deployed to staging"
+print(ns.for_current_branch)
 
 # Batch writes (single commit)
 with repo.notes.commits.batch() as b:
