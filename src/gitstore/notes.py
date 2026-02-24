@@ -7,6 +7,7 @@ from collections.abc import Iterator, MutableMapping
 from typing import TYPE_CHECKING
 
 from ._lock import repo_lock
+from .exceptions import StaleSnapshotError
 from .tree import GIT_FILEMODE_BLOB, GIT_FILEMODE_TREE, TreeBuilder
 
 if TYPE_CHECKING:
@@ -131,11 +132,15 @@ class NoteNamespace(MutableMapping):
             # Atomic ref update
             refs = repo._drepo.refs
             old = parents[0] if parents else None
-            refs.set_if_equals(
+            ok = refs.set_if_equals(
                 ref_bytes, old, commit_oid,
                 committer=sig._identity,
                 message=message.encode(),
             )
+            if not ok:
+                raise StaleSnapshotError(
+                    f"Notes ref {ref_bytes!r} changed during update"
+                )
 
     # ------------------------------------------------------------------
     # MutableMapping interface

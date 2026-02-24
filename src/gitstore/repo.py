@@ -15,6 +15,7 @@ from dulwich.objects import Tag as _DTag
 from dulwich.objects import Tree as _DTree
 from dulwich.repo import Repo as _DRepo
 
+from .exceptions import StaleSnapshotError
 from .mirror import RefChange, MirrorDiff
 from .notes import NoteDict
 from .tree import BlobOid, GitError, TreeBuilder
@@ -66,10 +67,12 @@ class _Reference:
             message = b"update ref"
         if committer is None:
             committer = b"gitstore <gitstore@localhost>"
-        self._refs.set_if_equals(
+        ok = self._refs.set_if_equals(
             self._name, old_sha, oid,
             committer=committer, message=message,
         )
+        if not ok:
+            raise StaleSnapshotError(f"CAS failed updating {self._name!r}")
 
 
 class _References:
@@ -99,10 +102,12 @@ class _References:
             message = b"create ref"
         if committer is None:
             committer = b"gitstore <gitstore@localhost>"
-        self._refs.set_if_equals(
+        ok = self._refs.set_if_equals(
             ref_bytes, None, oid,
             committer=committer, message=message,
         )
+        if not ok:
+            raise StaleSnapshotError(f"CAS failed creating {ref_bytes!r}")
 
     def delete(self, name: str):
         ref_bytes = name.encode() if isinstance(name, str) else name
@@ -142,9 +147,17 @@ class _Repository:
                 return self[ref_bytes]
             except KeyError:
                 return None
+        matches: list[bytes] = []
         for sha in self._drepo.object_store:
             if sha.startswith(ref_bytes):
-                return self[sha]
+                matches.append(sha)
+                if len(matches) > 1:
+                    raise ValueError(
+                        f"Ambiguous short hash {ref_str!r}: matches "
+                        f"{matches[0].decode()[:12]} and {matches[1].decode()[:12]}"
+                    )
+        if matches:
+            return self[matches[0]]
         return None
 
     def create_blob(self, data: bytes) -> BlobOid:
@@ -256,10 +269,15 @@ class ReflogEntry:
 
 
 def _validate_ref_name(name: str) -> None:
-    """Reject ref names containing ':', space, tab, or newline."""
-    for ch, label in ((":", "colon"), (" ", "space"), ("\t", "tab"), ("\n", "newline")):
-        if ch in name:
-            raise ValueError(f"Invalid ref name {name!r}: contains {label}")
+    """Reject ref names that don't conform to Git's rules."""
+    from dulwich.refs import check_ref_format
+
+    # Colon check (gitstore-specific: colons conflict with ref:path syntax)
+    if ":" in name:
+        raise ValueError(f"Invalid ref name {name!r}: contains colon")
+    ref_bytes = f"refs/heads/{name}".encode()
+    if not check_ref_format(ref_bytes):
+        raise ValueError(f"Invalid ref name: {name!r}")
 
 
 class GitStore:

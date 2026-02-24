@@ -120,19 +120,39 @@ class TestValidateRefName:
             _validate_ref_name("my:branch")
 
     def test_space_rejected(self):
-        with pytest.raises(ValueError, match="space"):
+        with pytest.raises(ValueError, match="Invalid ref name"):
             _validate_ref_name("my branch")
 
     def test_tab_rejected(self):
-        with pytest.raises(ValueError, match="tab"):
+        with pytest.raises(ValueError, match="Invalid ref name"):
             _validate_ref_name("my\tbranch")
 
     def test_newline_rejected(self):
-        with pytest.raises(ValueError, match="newline"):
+        with pytest.raises(ValueError, match="Invalid ref name"):
             _validate_ref_name("my\nbranch")
 
     def test_valid_with_dots_and_slashes(self):
         _validate_ref_name("feature/my-thing.v2")  # no error
+
+    def test_dotdot_rejected(self):
+        with pytest.raises(ValueError, match="Invalid ref name"):
+            _validate_ref_name("..foo")
+
+    def test_lock_suffix_rejected(self):
+        with pytest.raises(ValueError, match="Invalid ref name"):
+            _validate_ref_name("foo.lock")
+
+    def test_at_brace_rejected(self):
+        with pytest.raises(ValueError, match="Invalid ref name"):
+            _validate_ref_name("foo@{bar}")
+
+    def test_tilde_rejected(self):
+        with pytest.raises(ValueError, match="Invalid ref name"):
+            _validate_ref_name("foo~1")
+
+    def test_caret_rejected(self):
+        with pytest.raises(ValueError, match="Invalid ref name"):
+            _validate_ref_name("foo^2")
 
 
 # ---------------------------------------------------------------------------

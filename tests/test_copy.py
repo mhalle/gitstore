@@ -1457,3 +1457,48 @@ class TestDanglingSymlinkIgnoreExisting:
         ).changes
         # Should have no updates (filtered by ignore_existing)
         assert plan is None or len(plan.update) == 0
+
+
+# ---------------------------------------------------------------------------
+# Fix 4: ignore_errors in dry-run paths
+# ---------------------------------------------------------------------------
+
+class TestIgnoreErrorsDryRun:
+    """dry_run=True + ignore_errors=True should collect errors, not raise."""
+
+    def test_copy_in_dry_run_ignore_errors(self, store_and_fs):
+        _, fs, tmp_path = store_and_fs
+        good = tmp_path / "good.txt"
+        good.write_text("good")
+        bad = str(tmp_path / "nonexistent.txt")
+        result = fs.copy_in(
+            [str(good), bad], "dest",
+            dry_run=True, ignore_errors=True,
+        )
+        changes = result.changes
+        assert changes is not None
+        assert len(changes.errors) == 1
+        assert "nonexistent" in changes.errors[0].path
+
+    def test_copy_in_dry_run_ignore_errors_all_fail(self, store_and_fs):
+        _, fs, tmp_path = store_and_fs
+        result = fs.copy_in(
+            [str(tmp_path / "nope1"), str(tmp_path / "nope2")],
+            "dest", dry_run=True, ignore_errors=True,
+        )
+        changes = result.changes
+        assert changes is not None
+        assert len(changes.errors) == 2
+
+    def test_copy_out_dry_run_ignore_errors(self, store_and_fs):
+        _, fs, tmp_path = store_and_fs
+        out = tmp_path / "out"
+        out.mkdir()
+        result = fs.copy_out(
+            ["existing.txt", "nonexistent"],
+            str(out), dry_run=True, ignore_errors=True,
+        )
+        changes = result.changes
+        assert changes is not None
+        assert len(changes.errors) == 1
+        assert "nonexistent" in changes.errors[0].path

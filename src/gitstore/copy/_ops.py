@@ -175,7 +175,8 @@ def _copy_in(
         return _copy_in_dry(fs, sources, dest,
                             follow_symlinks=follow_symlinks,
                             ignore_existing=ignore_existing, delete=delete,
-                            checksum=checksum, exclude=exclude)
+                            checksum=checksum, exclude=exclude,
+                            ignore_errors=ignore_errors)
 
     changes = ChangeReport()
 
@@ -327,14 +328,29 @@ def _copy_in_dry(
     delete: bool = False,
     checksum: bool = True,
     exclude: ExcludeFilter | None = None,
+    ignore_errors: bool = False,
 ) -> FS:
     """Dry-run for _copy_in. Returns input *fs* with ``.changes`` set."""
-    resolved = _resolve_disk_sources(sources)
+    changes = ChangeReport()
+    if ignore_errors:
+        resolved: list[tuple[str, str, str]] = []
+        for src in sources:
+            try:
+                resolved.extend(_resolve_disk_sources([src]))
+            except (FileNotFoundError, NotADirectoryError) as exc:
+                changes.errors.append(ChangeError(path=src, error=str(exc)))
+        if not resolved:
+            fs._changes = _finalize_changes(changes)
+            return fs
+    else:
+        resolved = _resolve_disk_sources(sources)
     pairs = _enum_disk_to_repo(resolved, dest, follow_symlinks=follow_symlinks,
                                exclude=exclude)
 
     if delete:
+        prior_errors = changes.errors[:]
         changes = ChangeReport()
+        changes.errors = prior_errors
         pair_map: dict[str, str] = {}
         for local_path, repo_path in pairs:
             if dest and repo_path.startswith(dest + "/"):
@@ -410,7 +426,9 @@ def _copy_in_dry(
         # Convert to FileEntry lists
         add_entries = _make_entries_from_disk(sorted(add), pair_map, follow_symlinks)
         update_entries = _make_entries_from_disk(sorted(update), pair_map, follow_symlinks)
-        fs._changes = _finalize_changes(ChangeReport(add=add_entries, update=update_entries))
+        result = ChangeReport(add=add_entries, update=update_entries)
+        result.errors = changes.errors
+        fs._changes = _finalize_changes(result)
         return fs
 
 
@@ -442,7 +460,7 @@ def _copy_out(
     if dry_run:
         return _copy_out_dry(fs, sources, dest,
                              ignore_existing=ignore_existing, delete=delete,
-                             checksum=checksum)
+                             checksum=checksum, ignore_errors=ignore_errors)
 
     import shutil
 
@@ -637,14 +655,30 @@ def _copy_out_dry(
     ignore_existing: bool = False,
     delete: bool = False,
     checksum: bool = True,
+    ignore_errors: bool = False,
 ) -> FS:
     """Dry-run for _copy_out. Returns input *fs* with ``.changes`` set."""
-    resolved = _resolve_repo_sources(fs, sources)
+    prior_errors: list[ChangeError] = []
+    if ignore_errors:
+        resolved: list[tuple[str, str, str]] = []
+        for src in sources:
+            try:
+                resolved.extend(_resolve_repo_sources(fs, [src]))
+            except (FileNotFoundError, NotADirectoryError) as exc:
+                prior_errors.append(ChangeError(path=src, error=str(exc)))
+        if not resolved:
+            changes = ChangeReport()
+            changes.errors = prior_errors
+            fs._changes = _finalize_changes(changes)
+            return fs
+    else:
+        resolved = _resolve_repo_sources(fs, sources)
     pairs = _enum_repo_to_disk(fs, resolved, dest)
 
     if delete:
         base = Path(dest)
         changes = ChangeReport()
+        changes.errors = prior_errors
 
         pair_map: dict[str, str] = {}
         for repo_path, local_path in pairs:
@@ -723,7 +757,9 @@ def _copy_out_dry(
         # Convert to FileEntry lists
         add_entries = _make_entries_from_repo_dict(fs, sorted(add), repo_rel_to_path)
         update_entries = _make_entries_from_repo_dict(fs, sorted(update), repo_rel_to_path)
-        fs._changes = _finalize_changes(ChangeReport(add=add_entries, update=update_entries))
+        result = ChangeReport(add=add_entries, update=update_entries)
+        result.errors = prior_errors
+        fs._changes = _finalize_changes(result)
         return fs
 
 
@@ -822,6 +858,7 @@ def _sync_in(
                 fs, [_ensure_trailing_slash(local_path)], repo_path,
                 dry_run=True, delete=True,
                 checksum=checksum, exclude=exclude,
+                ignore_errors=ignore_errors,
             )
         except (FileNotFoundError, NotADirectoryError):
             # Nonexistent local path → everything in repo is a delete
@@ -897,7 +934,8 @@ def _sync_out(
         try:
             sources = [_ensure_trailing_slash(repo_path)] if repo_path else [""]
             return _copy_out(fs, sources, local_path, dry_run=True,
-                             delete=True, checksum=checksum)
+                             delete=True, checksum=checksum,
+                             ignore_errors=ignore_errors)
         except (FileNotFoundError, NotADirectoryError):
             # Nonexistent repo path → everything local is a delete
             local_paths = sorted(_walk_local_paths(local_path))

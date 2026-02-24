@@ -541,8 +541,27 @@ class FS:
 
         from .copy._types import format_commit_message
 
+        from .tree import BlobOid
+
         repo = self._store._repo
         sig = self._store._signature
+
+        # Pre-hash raw bytes into BlobOid so both _build_changes and
+        # rebuild_tree see BlobOid values and skip duplicate create_blob.
+        pre_writes: dict[str, bytes | tuple[bytes, int]] = {}
+        for path, value in writes.items():
+            if isinstance(value, tuple):
+                data_or_oid, mode = value
+                if not isinstance(data_or_oid, BlobOid):
+                    pre_writes[path] = (BlobOid(repo.create_blob(data_or_oid)), mode)
+                else:
+                    pre_writes[path] = value
+            else:
+                if not isinstance(value, BlobOid):
+                    pre_writes[path] = BlobOid(repo.create_blob(value))
+                else:
+                    pre_writes[path] = value
+        writes = pre_writes
 
         # Build changes
         changes = self._build_changes(writes, removes)
@@ -891,8 +910,12 @@ class FS:
         if not same:
             raise ValueError("source must belong to the same repo as self")
 
+        if src_path:
+            src_path = _normalize_path(src_path)
         if dest_path is None:
             dest_path = src_path
+        if dest_path:
+            dest_path = _normalize_path(dest_path)
 
         # Walk both subtrees
         src_files = _walk_repo(source, src_path)
@@ -1121,6 +1144,8 @@ class FS:
         match: str | None = None,
         before: datetime | None = None,
     ) -> Iterator[FS]:
+        if before is not None and before.tzinfo is None:
+            before = before.replace(tzinfo=timezone.utc)
         filter_path = path
         if filter_path is not None:
             filter_path = _normalize_path(filter_path)

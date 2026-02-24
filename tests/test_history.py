@@ -156,6 +156,36 @@ class TestLog:
         assert len(commits_none) == 0
 
 
+class TestLogNaiveDatetime:
+    """Fix 2: log(before=...) accepts naive datetimes without TypeError."""
+
+    def test_naive_datetime_before(self, tmp_path):
+        repo = GitStore.open(tmp_path / "test.git")
+        fs = repo.branches["main"]
+        fs = fs.write("a.txt", b"a")
+        # Naive datetime (no tzinfo) — should work, not raise TypeError
+        future = datetime(2099, 1, 1)
+        commits = list(fs.log(before=future))
+        assert len(commits) == 2  # init + write
+
+    def test_naive_datetime_past(self, tmp_path):
+        repo = GitStore.open(tmp_path / "test.git")
+        fs = repo.branches["main"]
+        fs = fs.write("a.txt", b"a")
+        # Naive datetime in the past — should filter out all commits
+        past = datetime(2000, 1, 1)
+        commits = list(fs.log(before=past))
+        assert len(commits) == 0
+
+    def test_aware_datetime_still_works(self, tmp_path):
+        repo = GitStore.open(tmp_path / "test.git")
+        fs = repo.branches["main"]
+        fs = fs.write("a.txt", b"a")
+        future = datetime(2099, 1, 1, tzinfo=timezone.utc)
+        commits = list(fs.log(before=future))
+        assert len(commits) == 2
+
+
 class TestCommitMetadata:
     def test_time_is_datetime(self, tmp_path):
         repo = GitStore.open(tmp_path / "test.git")

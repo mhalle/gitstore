@@ -276,3 +276,25 @@ class TestRefDictCurrent:
         repo = GitStore.open(tmp_path / "test.git")
         with pytest.raises(ValueError):
             repo.tags.current
+
+
+class TestRepositoryGet:
+    """Fix 5: short SHA lookup with ambiguity detection."""
+
+    def test_full_sha_found(self, tmp_path):
+        repo = GitStore.open(tmp_path / "test.git")
+        fs = repo.branches["main"]
+        obj = repo._repo.get(fs.commit_hash)
+        assert obj is not None
+
+    def test_full_sha_not_found(self, tmp_path):
+        repo = GitStore.open(tmp_path / "test.git")
+        obj = repo._repo.get("a" * 40)
+        assert obj is None
+
+    def test_short_sha_found(self, tmp_path):
+        repo = GitStore.open(tmp_path / "test.git")
+        fs = repo.branches["main"]
+        short = fs.commit_hash[:8]
+        obj = repo._repo.get(short)
+        assert obj is not None

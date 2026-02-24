@@ -249,6 +249,41 @@ class TestCopyRefMessage:
         assert main.message
 
 
+class TestCopyRefPathNormalization:
+    """Fix 1: copy_ref normalizes leading/trailing slashes."""
+
+    def test_leading_slash_src_path(self, store):
+        main = store.branches["main"]
+        worker = store.branches["worker"]
+        main = main.copy_ref(worker, "/results")
+        assert main.read("results/a.json") == b'{"a":1}'
+
+    def test_trailing_slash_src_path(self, store):
+        main = store.branches["main"]
+        worker = store.branches["worker"]
+        main = main.copy_ref(worker, "results/")
+        assert main.read("results/a.json") == b'{"a":1}'
+
+    def test_leading_and_trailing_slashes(self, store):
+        main = store.branches["main"]
+        worker = store.branches["worker"]
+        main = main.copy_ref(worker, "/results/", "/backup/results/")
+        assert main.read("backup/results/a.json") == b'{"a":1}'
+
+    def test_dest_path_trailing_slash(self, store):
+        main = store.branches["main"]
+        worker = store.branches["worker"]
+        main = main.copy_ref(worker, "results", "backup/")
+        assert main.read("backup/a.json") == b'{"a":1}'
+
+    def test_dry_run_with_slashes(self, store):
+        main = store.branches["main"]
+        worker = store.branches["worker"]
+        result = main.copy_ref(worker, "/results/", dry_run=True)
+        assert result.changes is not None
+        assert len(result.changes.add) == 2
+
+
 class TestCopyRefStale:
     def test_stale_snapshot_propagates(self, store):
         from gitstore.exceptions import StaleSnapshotError
