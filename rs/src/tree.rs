@@ -252,6 +252,18 @@ pub fn exists_at_path(
     Ok(entry_at_path(repo, tree_oid, path)?.is_some())
 }
 
+/// Count the number of immediate subdirectories in a tree.
+pub fn count_subdirs(repo: &gix::Repository, tree_oid: gix::ObjectId) -> Result<u32> {
+    let tree_data = repo.find_object(tree_oid).map_err(Error::git)?;
+    let tree_ref = gix::objs::TreeRef::from_bytes(&tree_data.data).map_err(Error::git)?;
+    let count = tree_ref
+        .entries
+        .iter()
+        .filter(|e| mode_to_u32(e.mode) == MODE_TREE)
+        .count();
+    Ok(count as u32)
+}
+
 /// Rebuild a tree by applying a set of writes (add/update/delete).
 /// `None` in the value position means delete.
 pub fn rebuild_tree(

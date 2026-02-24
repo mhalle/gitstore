@@ -7,8 +7,8 @@ use crate::lock::with_repo_lock;
 use crate::store::GitStoreInner;
 use crate::tree;
 use crate::types::{
-    ChangeReport, CommitInfo, FileEntry, FileType, WalkEntry, WriteEntry, MODE_BLOB, MODE_LINK,
-    MODE_TREE,
+    ChangeReport, CommitInfo, FileEntry, FileType, StatResult, WalkEntry, WriteEntry, MODE_BLOB,
+    MODE_LINK, MODE_TREE,
 };
 
 // ---------------------------------------------------------------------------
@@ -171,6 +171,11 @@ impl Fs {
     /// The commit hash as hex string.
     pub fn commit_hash(&self) -> Option<String> {
         self.commit_oid.map(|oid| format!("{}", oid))
+    }
+
+    /// The root tree hash as hex string.
+    pub fn tree_hash(&self) -> Option<String> {
+        self.tree_oid.map(|oid| format!("{}", oid))
     }
 
     /// The ref name (branch or tag name), if this Fs is attached to a ref.
@@ -369,6 +374,95 @@ impl Fs {
             let obj = repo.find_object(entry.oid).map_err(Error::git)?;
             String::from_utf8(obj.data.to_vec())
                 .map_err(|e| Error::git_msg(format!("invalid UTF-8 in symlink: {}", e)))
+        })
+    }
+
+    // -- FUSE-readiness API -------------------------------------------------
+
+    /// Single-call getattr — returns all stat fields in one call.
+    pub fn stat(&self, path: &str) -> Result<StatResult> {
+        let tree_oid = self.require_tree()?;
+        let mtime = self.time()?;
+
+        self.with_repo(|repo| {
+            let path_norm = crate::paths::normalize_path(path)?;
+
+            if path_norm.is_empty() {
+                // Root directory
+                let nlink = 2 + tree::count_subdirs(repo, tree_oid)?;
+                return Ok(StatResult {
+                    mode: MODE_TREE,
+                    file_type: FileType::Tree,
+                    size: 0,
+                    hash: format!("{}", tree_oid),
+                    nlink,
+                    mtime,
+                });
+            }
+
+            let entry = tree::entry_at_path(repo, tree_oid, &path_norm)?
+                .ok_or_else(|| Error::not_found(&path_norm))?;
+            let ft = FileType::from_mode(entry.mode)
+                .ok_or_else(|| Error::git_msg(format!("unknown mode: {:#o}", entry.mode)))?;
+
+            if entry.mode == MODE_TREE {
+                let nlink = 2 + tree::count_subdirs(repo, entry.oid)?;
+                Ok(StatResult {
+                    mode: entry.mode,
+                    file_type: ft,
+                    size: 0,
+                    hash: format!("{}", entry.oid),
+                    nlink,
+                    mtime,
+                })
+            } else {
+                let obj = repo.find_object(entry.oid).map_err(Error::git)?;
+                Ok(StatResult {
+                    mode: entry.mode,
+                    file_type: ft,
+                    size: obj.data.len() as u64,
+                    hash: format!("{}", entry.oid),
+                    nlink: 1,
+                    mtime,
+                })
+            }
+        })
+    }
+
+    /// List immediate children at `path` with entry types (alias for `ls()`).
+    pub fn listdir(&self, path: &str) -> Result<Vec<WalkEntry>> {
+        self.ls(path)
+    }
+
+    /// Read raw bytes at `path` with optional offset and size.
+    pub fn read_range(&self, path: &str, offset: usize, size: Option<usize>) -> Result<Vec<u8>> {
+        let data = self.read(path)?;
+        let start = offset.min(data.len());
+        let end = match size {
+            Some(s) => (start + s).min(data.len()),
+            None => data.len(),
+        };
+        Ok(data[start..end].to_vec())
+    }
+
+    /// Read a blob by its hex hash, bypassing tree walk.
+    pub fn read_by_hash(
+        &self,
+        hash: &str,
+        offset: usize,
+        size: Option<usize>,
+    ) -> Result<Vec<u8>> {
+        let oid = gix::ObjectId::from_hex(hash.as_bytes())
+            .map_err(|e| Error::git_msg(format!("invalid hash: {}", e)))?;
+        self.with_repo(|repo| {
+            let obj = repo.find_object(oid).map_err(Error::git)?;
+            let data = obj.data.to_vec();
+            let start = offset.min(data.len());
+            let end = match size {
+                Some(s) => (start + s).min(data.len()),
+                None => data.len(),
+            };
+            Ok(data[start..end].to_vec())
         })
     }
 

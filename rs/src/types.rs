@@ -79,6 +79,21 @@ impl WalkEntry {
 }
 
 // ---------------------------------------------------------------------------
+// StatResult
+// ---------------------------------------------------------------------------
+
+/// Result of a stat() call — single-call getattr for FUSE.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StatResult {
+    pub mode: u32,
+    pub file_type: FileType,
+    pub size: u64,
+    pub hash: String,
+    pub nlink: u32,
+    pub mtime: u64,
+}
+
+// ---------------------------------------------------------------------------
 // WriteEntry
 // ---------------------------------------------------------------------------
 
