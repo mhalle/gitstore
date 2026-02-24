@@ -4,6 +4,13 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.59.1 (2026-02-24)
+
+**Python:**
+
+- Fix `[project.urls]` table ordering in pyproject.toml
+- Add GitHub Actions workflow for PyPI trusted publishing (automatic on tag push)
+
 ## v0.59.0 (2026-02-24)
 
 **Breaking:**
