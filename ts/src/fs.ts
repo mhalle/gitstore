@@ -812,8 +812,10 @@ export class FS {
       throw new Error('source must belong to the same repo as self');
     }
 
-    const src = srcPath ?? '';
-    const dest = destPath !== undefined && destPath !== null ? destPath : src;
+    const src = srcPath && !isRootPath(srcPath) ? normalizePath(srcPath) : '';
+    const dest = destPath !== undefined && destPath !== null
+      ? (destPath && !isRootPath(destPath) ? normalizePath(destPath) : '')
+      : src;
 
     const { walkRepo } = await import('./copy.js');
     const srcFiles = await walkRepo(source, src);

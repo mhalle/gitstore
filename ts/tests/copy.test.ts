@@ -543,6 +543,61 @@ describe('delete mode extended', () => {
 });
 
 // ---------------------------------------------------------------------------
+// checksum mtime fast path
+// ---------------------------------------------------------------------------
+
+describe('checksum false mtime fast path', () => {
+  it('copyIn skips hash for old-mtime files in delete mode', async () => {
+    // Seed repo with content
+    const dir = path.join(tmpDir, 'mtime');
+    fs.mkdirSync(dir);
+    fs.writeFileSync(path.join(dir, 'a.txt'), 'aaa');
+    fs.writeFileSync(path.join(dir, 'b.txt'), 'bbb');
+    const f2 = await snap.copyIn(dir + '/', 'data', { delete: true });
+
+    // Set local file mtime to far past (well before commit time)
+    const oldTime = new Date('2000-01-01T00:00:00Z');
+    fs.utimesSync(path.join(dir, 'a.txt'), oldTime, oldTime);
+
+    // Change b.txt content and set mtime to far future (well after commit)
+    fs.writeFileSync(path.join(dir, 'b.txt'), 'bbb-changed');
+    const futureTime = new Date(Date.now() + 86400_000);
+    fs.utimesSync(path.join(dir, 'b.txt'), futureTime, futureTime);
+
+    const f3 = await f2.copyIn(dir + '/', 'data', { delete: true, checksum: false });
+    // a.txt should be skipped (old mtime, content actually same) — no update
+    // b.txt should be detected as changed (new mtime triggers hash)
+    expect(fromBytes(await f3.read('data/b.txt'))).toBe('bbb-changed');
+    // a.txt should still be readable (not deleted or corrupted)
+    expect(fromBytes(await f3.read('data/a.txt'))).toBe('aaa');
+  });
+
+  it('copyOut skips hash for old-mtime files in delete mode', async () => {
+    const outDir = path.join(tmpDir, 'mtime-out');
+    // First export existing repo content
+    await snap.copyOut('dir/', outDir, { delete: true });
+    // a.txt, b.txt, .dotfile exist locally now
+
+    // Set local file mtime to far past
+    const oldTime = new Date('2000-01-01T00:00:00Z');
+    fs.utimesSync(path.join(outDir, 'a.txt'), oldTime, oldTime);
+
+    // Change b.txt on disk and set mtime to far future
+    fs.writeFileSync(path.join(outDir, 'b.txt'), 'changed-locally');
+    const futureTime = new Date(Date.now() + 86400_000);
+    fs.utimesSync(path.join(outDir, 'b.txt'), futureTime, futureTime);
+
+    // Re-export with checksum: false — should detect b.txt as different (new mtime)
+    // a.txt should be skipped (old mtime)
+    const f2 = await snap.copyOut('dir/', outDir, { delete: true, checksum: false });
+    // b.txt should be overwritten back to repo content
+    expect(fs.readFileSync(path.join(outDir, 'b.txt'), 'utf-8')).toBe('bbb');
+    // a.txt still intact
+    expect(fs.readFileSync(path.join(outDir, 'a.txt'), 'utf-8')).toBe('aaa');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // ignoreErrors extended (ported from Python TestIgnoreErrors)
 // ---------------------------------------------------------------------------
 
@@ -580,6 +635,34 @@ describe('ignoreErrors extended', () => {
     ).rejects.toThrow();
     // Local file untouched
     expect(fs.readFileSync(path.join(outDir, 'precious.txt'), 'utf-8')).toBe('precious');
+  });
+});
+
+describe('ignoreErrors source resolution', () => {
+  it('copyIn collects errors for nonexistent sources', async () => {
+    const goodPath = path.join(tmpDir, 'good.txt');
+    fs.writeFileSync(goodPath, 'good');
+
+    const f2 = await snap.copyIn(['/nonexistent/path', goodPath], 'dest', {
+      ignoreErrors: true,
+    });
+    expect(await f2.exists('dest/good.txt')).toBe(true);
+    expect(f2.changes).not.toBeNull();
+    expect(f2.changes!.errors.length).toBeGreaterThan(0);
+    expect(f2.changes!.errors[0].path).toBe('/nonexistent/path');
+  });
+
+  it('copyOut collects errors for nonexistent repo sources', async () => {
+    const outDir = path.join(tmpDir, 'out');
+    fs.mkdirSync(outDir, { recursive: true });
+
+    const f2 = await snap.copyOut(['nonexistent', 'existing.txt'], outDir, {
+      ignoreErrors: true,
+    });
+    expect(fs.existsSync(path.join(outDir, 'existing.txt'))).toBe(true);
+    expect(f2.changes).not.toBeNull();
+    expect(f2.changes!.errors.length).toBeGreaterThan(0);
+    expect(f2.changes!.errors[0].path).toBe('nonexistent');
   });
 });
 

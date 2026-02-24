@@ -78,6 +78,13 @@ describe('syncIn (disk → repo)', () => {
     expect(await f2.getMessage()).toBe('sync import');
   });
 
+  it('auto commit message says sync not cp', async () => {
+    const f2 = await snap.syncIn(localDir, 'data');
+    const msg = await f2.getMessage();
+    expect(msg).toContain('sync');
+    expect(msg).not.toContain(' cp ');
+  });
+
   it('nested directories', async () => {
     const nested = path.join(localDir, 'sub', 'deep');
     fs.mkdirSync(nested, { recursive: true });

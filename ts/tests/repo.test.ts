@@ -111,6 +111,29 @@ describe('RefDict branches', () => {
   });
 });
 
+describe('RefDict.set reflog oldSha', () => {
+  it('records correct oldSha when overwriting existing branch', async () => {
+    // Create a separate branch 'exp' from main
+    const snap = await store.branches.get('main');
+    const f1 = await snap.write('a.txt', toBytes('aaa'));
+    await store.branches.set('exp', f1);
+    const firstCommit = f1.commitHash;
+
+    // Make a new commit (on main) to get a different SHA
+    const f2 = await f1.write('b.txt', toBytes('bbb'));
+
+    // Overwrite 'exp' with the new commit
+    await store.branches.set('exp', f2);
+
+    const entries = await store.branches.reflog('exp');
+    // Most recent entry should have oldSha == firstCommit (before overwrite)
+    const last = entries[entries.length - 1];
+    expect(last.newSha).toBe(f2.commitHash);
+    expect(last.oldSha).toBe(firstCommit);
+    expect(last.oldSha).not.toBe(last.newSha);
+  });
+});
+
 describe('RefDict tags', () => {
   it('tag and get', async () => {
     const snap = await store.branches.get('main');

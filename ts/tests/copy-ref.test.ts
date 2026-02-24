@@ -269,6 +269,31 @@ describe('copyRef message', () => {
   });
 });
 
+describe('copyRef path normalization', () => {
+  it('normalizes slashed src and dest paths', async () => {
+    let main = await store.branches.get('main');
+    const worker = await store.branches.get('worker');
+
+    // Use slashed paths — should not produce invalid tree entries
+    main = await main.copyRef(worker, '/results/', '/imported/');
+    const entries = await main.ls('imported');
+    expect(entries).toContain('a.json');
+    expect(entries).toContain('b.json');
+    expect(fromBytes(await main.read('imported/a.json'))).toBe('{"a":1}');
+    expect(fromBytes(await main.read('imported/b.json'))).toBe('{"b":2}');
+  });
+
+  it('root slash src copies root', async () => {
+    let main = await store.branches.get('main');
+    const worker = await store.branches.get('worker');
+
+    main = await main.copyRef(worker, '/');
+    // Worker files present
+    expect(fromBytes(await main.read('results/a.json'))).toBe('{"a":1}');
+    expect(fromBytes(await main.read('data/x.txt'))).toBe('x-worker');
+  });
+});
+
 describe('copyRef stale', () => {
   it('propagates stale snapshot error', async () => {
     const main = await store.branches.get('main');

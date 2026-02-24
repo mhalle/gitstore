@@ -619,13 +619,33 @@ export async function copyIn(
     delete?: boolean;
     ignoreErrors?: boolean;
     checksum?: boolean;
+    operation?: string;
   } = {},
 ): Promise<FS> {
   const srcList = typeof sources === 'string' ? [sources] : sources;
   const fsModule = fs._store._fsModule;
   const changes = emptyChangeReport();
 
-  const resolved = await resolveDiskSources(fsModule, srcList);
+  let resolved: ResolvedSource[];
+  if (opts.ignoreErrors) {
+    resolved = [];
+    for (const src of srcList) {
+      try {
+        resolved.push(...await resolveDiskSources(fsModule, [src]));
+      } catch (err: any) {
+        changes.errors.push({ path: src, error: String(err.message ?? err) });
+      }
+    }
+    if (resolved.length === 0) {
+      if (changes.errors.length > 0) {
+        throw new Error(`All files failed to copy: ${changes.errors.map((e) => e.error).join(', ')}`);
+      }
+      fs._changes = finalizeChanges(changes);
+      return fs;
+    }
+  } else {
+    resolved = await resolveDiskSources(fsModule, srcList);
+  }
   let pairs = await enumDiskToRepo(fsModule, resolved, dest, opts.followSymlinks);
 
   if (opts.delete) {
@@ -646,11 +666,22 @@ export async function copyIn(
     const deleteRels = [...repoRels].filter((r) => !localRels.has(r)).sort();
     const both = [...localRels].filter((r) => repoRels.has(r)).sort();
 
+    const commitTs = opts.checksum === false ? await fs._getCommitTime() : 0;
+
     const updateRels: string[] = [];
     for (const rel of both) {
       try {
         const repoInfo = repoFiles.get(rel)!;
         const localPath = pairMap.get(rel)!;
+
+        // mtime fast path: if file is older than commit, assume unchanged
+        if (opts.checksum === false) {
+          try {
+            const st = await fsModule.promises.stat(localPath);
+            if (Math.floor(st.mtimeMs / 1000) <= commitTs) continue;
+          } catch { /* fall through to hash */ }
+        }
+
         const localOid = await localFileOid(fsModule, localPath, opts.followSymlinks);
         if (localOid !== repoInfo.oid) {
           updateRels.push(rel);
@@ -688,7 +719,7 @@ export async function copyIn(
       return fs;
     }
 
-    const batch = fs.batch({ message: opts.message, operation: 'cp' });
+    const batch = fs.batch({ message: opts.message, operation: opts.operation ?? 'cp' });
     await writeFilesToRepo(batch, fsModule, writePairs, {
       followSymlinks: opts.followSymlinks,
       mode: opts.mode,
@@ -745,7 +776,7 @@ export async function copyIn(
   changes.add = makeEntriesFromDisk(fsModule, addRels, pairMap);
   changes.update = makeEntriesFromDisk(fsModule, updateRels, pairMap);
 
-  const batch = fs.batch({ message: opts.message, operation: 'cp' });
+  const batch = fs.batch({ message: opts.message, operation: opts.operation ?? 'cp' });
   await writeFilesToRepo(batch, fsModule, pairs, {
     followSymlinks: opts.followSymlinks,
     mode: opts.mode,
@@ -771,13 +802,33 @@ export async function copyOut(
     delete?: boolean;
     ignoreErrors?: boolean;
     checksum?: boolean;
+    operation?: string;
   } = {},
 ): Promise<FS> {
   const srcList = typeof sources === 'string' ? [sources] : sources;
   const fsModule = fs._store._fsModule;
   const changes = emptyChangeReport();
 
-  const resolved = await resolveRepoSources(fs, srcList);
+  let resolved: ResolvedRepoSource[];
+  if (opts.ignoreErrors) {
+    resolved = [];
+    for (const src of srcList) {
+      try {
+        resolved.push(...await resolveRepoSources(fs, [src]));
+      } catch (err: any) {
+        changes.errors.push({ path: src, error: String(err.message ?? err) });
+      }
+    }
+    if (resolved.length === 0) {
+      if (changes.errors.length > 0) {
+        throw new Error(`All files failed to copy: ${changes.errors.map((e) => e.error).join(', ')}`);
+      }
+      fs._changes = finalizeChanges(changes);
+      return fs;
+    }
+  } else {
+    resolved = await resolveRepoSources(fs, srcList);
+  }
   let pairs = await enumRepoToDisk(fs, resolved, dest);
 
   if (opts.delete) {
@@ -802,16 +853,28 @@ export async function copyOut(
     const deleteRels = [...localPaths].filter((r) => !sourceRels.has(r)).sort();
     const both = [...sourceRels].filter((r) => localPaths.has(r)).sort();
 
+    const commitTs = opts.checksum === false ? await fs._getCommitTime() : 0;
+
     const updateRels: string[] = [];
     for (const rel of both) {
       const repoInfo = repoFiles.get(rel);
       if (!repoInfo) continue;
       try {
-        const oid = await localFileOid(fsModule, join(dest, rel));
+        const localPath = join(dest, rel);
+
+        // mtime fast path: if file is older than commit, assume unchanged
+        if (opts.checksum === false) {
+          try {
+            const st = await fsModule.promises.stat(localPath);
+            if (Math.floor(st.mtimeMs / 1000) <= commitTs) continue;
+          } catch { /* fall through to hash */ }
+        }
+
+        const oid = await localFileOid(fsModule, localPath);
         if (oid !== repoInfo.oid) {
           updateRels.push(rel);
         } else if (repoInfo.mode !== MODE_LINK) {
-          const diskMode = await modeFromDisk(fsModule, join(dest, rel));
+          const diskMode = await modeFromDisk(fsModule, localPath);
           if (diskMode !== repoInfo.mode) updateRels.push(rel);
         }
       } catch {
@@ -994,7 +1057,7 @@ export async function syncIn(
       ...opts,
       delete: true,
       operation: 'sync',
-    } as any);
+    });
   } catch (err: any) {
     if (err instanceof FileNotFoundError || err instanceof NotADirectoryError) {
       // Nonexistent local → delete everything under repoPath

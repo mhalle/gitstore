@@ -95,6 +95,10 @@ export class RefDict {
         throw new Error(`Tag '${name}' already exists`);
       }
 
+      const oldSha = exists
+        ? await git.resolveRef({ fs: this._fsModule, gitdir: this._gitdir, ref: refName }).catch(() => ZERO_SHA)
+        : ZERO_SHA;
+
       await git.writeRef({
         fs: this._fsModule,
         gitdir: this._gitdir,
@@ -107,10 +111,6 @@ export class RefDict {
       const msg = exists
         ? `branch: set to ${(await fs.getMessage()).split('\n')[0]}`
         : `branch: Created from ${(await fs.getMessage()).split('\n')[0]}`;
-
-      const oldSha = exists
-        ? await git.resolveRef({ fs: this._fsModule, gitdir: this._gitdir, ref: refName }).catch(() => ZERO_SHA)
-        : ZERO_SHA;
 
       await writeReflogEntry(
         this._fsModule,
