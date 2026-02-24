@@ -146,9 +146,9 @@ pub struct MoveOptions {
     pub message: Option<String>,
 }
 
-/// Options for [`Fs::copy_ref`].
+/// Options for [`Fs::copy_from_ref`].
 #[derive(Debug, Clone, Default)]
-pub struct CopyRefOptions {
+pub struct CopyFromRefOptions {
     /// Remove dest files under `dest_path` that are not in the source.
     pub delete: bool,
     /// Preview only; when `true` the store is not modified but the returned
@@ -1154,17 +1154,17 @@ impl Fs {
     /// * `src_path` - Subtree in source to copy from. `""` = root (everything).
     /// * `dest_path` - Subtree in dest to copy into. Defaults to `src_path`
     ///   when `None`.
-    /// * `opts` - [`CopyRefOptions`] for delete, dry-run, and message.
+    /// * `opts` - [`CopyFromRefOptions`] for delete, dry-run, and message.
     ///
     /// # Errors
     /// Returns an error if `source` belongs to a different repo.
     /// Returns [`Error::Permission`] if this `Fs` is read-only.
-    pub fn copy_ref(
+    pub fn copy_from_ref(
         &self,
         source: &Fs,
         src_path: &str,
         dest_path: Option<&str>,
-        opts: CopyRefOptions,
+        opts: CopyFromRefOptions,
     ) -> Result<Fs> {
         self.require_writable("write to")?;
 
@@ -1786,7 +1786,7 @@ where
 }
 
 // ---------------------------------------------------------------------------
-// walk_subtree helper for copy_ref
+// walk_subtree helper for copy_from_ref
 // ---------------------------------------------------------------------------
 
 use std::collections::BTreeMap;

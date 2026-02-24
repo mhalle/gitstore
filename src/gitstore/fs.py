@@ -1077,7 +1077,7 @@ class FS:
             recursive=recursive, message=message,
         )
 
-    def copy_ref(
+    def copy_from_ref(
         self,
         source: FS,
         src_path: str = "",

@@ -14,7 +14,7 @@ All notable changes to gitstore are documented in this file.
 
 **Python:**
 
-- Update README with missing API docs (partial reads, stat, listdir, apply, copy_ref, disk_glob, reflog, git notes)
+- Update README with missing API docs (partial reads, stat, listdir, apply, copy_from_ref, disk_glob, reflog, git notes)
 - Fix stale API names in README (`branches.default` → `.current`, `fs.branch` → `.ref_name`)
 - Add `readme` and `description` fields to pyproject.toml for PyPI
 - Add sdist excludes for `rs/target`, `ts/node_modules`, `site`, `tmp`
@@ -106,7 +106,7 @@ All notable changes to gitstore are documented in this file.
 - Add `FS.writable` property — `True` for branches, `False` for tags/detached commits
 - Add `RefDict.current` / `current_name` (replaces `.default`) — access HEAD branch
 - Port `FS.ref_name`, `.writable`, and `RefDict.current` API to TypeScript and Rust
-- Add `FS.copy_ref()` for branch-to-branch atomic copy; port to TypeScript and Rust (42 new tests each)
+- Add `FS.copy_from_ref()` for branch-to-branch atomic copy; port to TypeScript and Rust (42 new tests each)
 - Rename notes `current_ref` → `for_current_branch` across all bindings for clarity
 
 ## v0.55.0 (2026-02-22)

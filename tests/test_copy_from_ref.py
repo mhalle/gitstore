@@ -1,4 +1,4 @@
-"""Tests for FS.copy_ref() — branch-to-branch atomic copy."""
+"""Tests for FS.copy_from_ref() — branch-to-branch atomic copy."""
 
 import os
 
@@ -40,7 +40,7 @@ class TestCopyRefBasic:
         main = store.branches["main"]
         worker = store.branches["worker"]
 
-        main = main.copy_ref(worker, "results")
+        main = main.copy_from_ref(worker, "results")
         assert main.read("results/a.json") == b'{"a":1}'
         assert main.read("results/b.json") == b'{"b":2}'
         # Existing files untouched
@@ -50,7 +50,7 @@ class TestCopyRefBasic:
         main = store.branches["main"]
         worker = store.branches["worker"]
 
-        main = main.copy_ref(worker, "data")
+        main = main.copy_from_ref(worker, "data")
         assert main.read("data/x.txt") == b"x-worker"
         assert main.read("data/y.txt") == b"y-worker"
 
@@ -58,7 +58,7 @@ class TestCopyRefBasic:
         main = store.branches["main"]
         worker = store.branches["worker"]
 
-        main = main.copy_ref(worker, "results")
+        main = main.copy_from_ref(worker, "results")
         assert main.exists("results/a.json")
         assert main.exists("results/b.json")
 
@@ -66,7 +66,7 @@ class TestCopyRefBasic:
         main = store.branches["main"]
         worker = store.branches["worker"]
 
-        main = main.copy_ref(worker, "results", "backup/results")
+        main = main.copy_from_ref(worker, "results", "backup/results")
         assert main.read("backup/results/a.json") == b'{"a":1}'
         assert main.read("backup/results/b.json") == b'{"b":2}'
         # Original path untouched
@@ -77,7 +77,7 @@ class TestCopyRefBasic:
         main = store.branches["main"]
         worker = store.branches["worker"]
 
-        main = main.copy_ref(worker)
+        main = main.copy_from_ref(worker)
         # Worker files present
         assert main.read("results/a.json") == b'{"a":1}'
         assert main.read("data/x.txt") == b"x-worker"
@@ -93,7 +93,7 @@ class TestCopyRefDelete:
 
         # main has data/x.txt, worker has data/x.txt + data/y.txt
         # Copy worker data/ into main data/ — no deletes yet
-        main = main.copy_ref(worker, "data")
+        main = main.copy_from_ref(worker, "data")
         assert main.exists("data/x.txt")
         assert main.exists("data/y.txt")
 
@@ -101,7 +101,7 @@ class TestCopyRefDelete:
         worker = store.branches["worker"]
         worker = worker.remove("data/y.txt")
         main = store.branches["main"]
-        main = main.copy_ref(worker, "data", delete=True)
+        main = main.copy_from_ref(worker, "data", delete=True)
         assert main.exists("data/x.txt")
         assert not main.exists("data/y.txt")
 
@@ -109,7 +109,7 @@ class TestCopyRefDelete:
         main = store.branches["main"]
         worker = store.branches["worker"]
 
-        main = main.copy_ref(worker, "results", delete=True)
+        main = main.copy_from_ref(worker, "results", delete=True)
         # readme.txt is outside dest_path, should be untouched
         assert main.read("readme.txt") == b"hello"
 
@@ -120,7 +120,7 @@ class TestCopyRefDryRun:
         worker = store.branches["worker"]
         original_hash = main.commit_hash
 
-        result = main.copy_ref(worker, "results", dry_run=True)
+        result = main.copy_from_ref(worker, "results", dry_run=True)
         assert result.commit_hash == original_hash
         assert result.changes is not None
         assert len(result.changes.add) == 2
@@ -131,7 +131,7 @@ class TestCopyRefDryRun:
         main = store.branches["main"]
         worker = store.branches["worker"]
 
-        result = main.copy_ref(worker, "data", dry_run=True)
+        result = main.copy_from_ref(worker, "data", dry_run=True)
         assert result.changes is not None
         assert paths(result.changes.update) == {"data/x.txt"}
         assert paths(result.changes.add) == {"data/y.txt"}
@@ -144,7 +144,7 @@ class TestCopyRefDryRun:
         main = main.write("results/extra.txt", b"extra")
         worker = store.branches["worker"]
 
-        result = main.copy_ref(worker, "results", delete=True, dry_run=True)
+        result = main.copy_from_ref(worker, "results", delete=True, dry_run=True)
         assert result.changes is not None
         assert paths(result.changes.delete) == {"results/extra.txt"}
 
@@ -156,7 +156,7 @@ class TestCopyRefFromTag:
 
         main = store.branches["main"]
         tag_fs = store.tags["v1.0"]
-        main = main.copy_ref(tag_fs, "results")
+        main = main.copy_from_ref(tag_fs, "results")
         assert main.read("results/a.json") == b'{"a":1}'
 
     def test_copy_from_detached(self, store):
@@ -164,7 +164,7 @@ class TestCopyRefFromTag:
         detached = FS(store, worker._commit_oid)  # branch=None → read-only
 
         main = store.branches["main"]
-        main = main.copy_ref(detached, "results")
+        main = main.copy_from_ref(detached, "results")
         assert main.read("results/a.json") == b'{"a":1}'
 
 
@@ -175,12 +175,12 @@ class TestCopyRefNoop:
         worker = store.branches["worker"]
 
         # Copy results in
-        main = main.copy_ref(worker, "results")
+        main = main.copy_from_ref(worker, "results")
         hash_after_first = main.commit_hash
 
         # Copy again — same content, should be a noop
         worker = store.branches["worker"]
-        main = main.copy_ref(worker, "results")
+        main = main.copy_from_ref(worker, "results")
         assert main.commit_hash == hash_after_first
 
 
@@ -194,14 +194,14 @@ class TestCopyRefValidation:
         fs2 = fs2.write("b.txt", b"b")
 
         with pytest.raises(ValueError, match="same repo"):
-            fs2.copy_ref(fs1, "a.txt")
+            fs2.copy_from_ref(fs1, "a.txt")
 
     def test_reject_readonly_dest(self, store):
         worker = store.branches["worker"]
         readonly = FS(store, worker._commit_oid)  # branch=None → read-only
 
         with pytest.raises(PermissionError):
-            readonly.copy_ref(worker, "results")
+            readonly.copy_from_ref(worker, "results")
 
     def test_nonexistent_src_path_is_noop(self, store):
         """Copying from a nonexistent subtree should be a noop."""
@@ -209,7 +209,7 @@ class TestCopyRefValidation:
         worker = store.branches["worker"]
         original_hash = main.commit_hash
 
-        main = main.copy_ref(worker, "nonexistent")
+        main = main.copy_from_ref(worker, "nonexistent")
         assert main.commit_hash == original_hash
 
 
@@ -219,7 +219,7 @@ class TestCopyRefMode:
         worker = worker.write("bin/run.sh", b"#!/bin/sh", mode=FileType.EXECUTABLE)
 
         main = store.branches["main"]
-        main = main.copy_ref(worker, "bin")
+        main = main.copy_from_ref(worker, "bin")
         assert main.file_type("bin/run.sh") == FileType.EXECUTABLE
 
     def test_preserves_symlink(self, store):
@@ -227,7 +227,7 @@ class TestCopyRefMode:
         worker = worker.write_symlink("links/readme", "../readme.txt")
 
         main = store.branches["main"]
-        main = main.copy_ref(worker, "links")
+        main = main.copy_from_ref(worker, "links")
         assert main.file_type("links/readme") == FileType.LINK
         assert main.readlink("links/readme") == "../readme.txt"
 
@@ -237,49 +237,49 @@ class TestCopyRefMessage:
         main = store.branches["main"]
         worker = store.branches["worker"]
 
-        main = main.copy_ref(worker, "results", message="Import results from worker")
+        main = main.copy_from_ref(worker, "results", message="Import results from worker")
         assert main.message == "Import results from worker"
 
     def test_auto_message(self, store):
         main = store.branches["main"]
         worker = store.branches["worker"]
 
-        main = main.copy_ref(worker, "results")
+        main = main.copy_from_ref(worker, "results")
         # Auto-generated message should exist and not be empty
         assert main.message
 
 
 class TestCopyRefPathNormalization:
-    """Fix 1: copy_ref normalizes leading/trailing slashes."""
+    """Fix 1: copy_from_ref normalizes leading/trailing slashes."""
 
     def test_leading_slash_src_path(self, store):
         main = store.branches["main"]
         worker = store.branches["worker"]
-        main = main.copy_ref(worker, "/results")
+        main = main.copy_from_ref(worker, "/results")
         assert main.read("results/a.json") == b'{"a":1}'
 
     def test_trailing_slash_src_path(self, store):
         main = store.branches["main"]
         worker = store.branches["worker"]
-        main = main.copy_ref(worker, "results/")
+        main = main.copy_from_ref(worker, "results/")
         assert main.read("results/a.json") == b'{"a":1}'
 
     def test_leading_and_trailing_slashes(self, store):
         main = store.branches["main"]
         worker = store.branches["worker"]
-        main = main.copy_ref(worker, "/results/", "/backup/results/")
+        main = main.copy_from_ref(worker, "/results/", "/backup/results/")
         assert main.read("backup/results/a.json") == b'{"a":1}'
 
     def test_dest_path_trailing_slash(self, store):
         main = store.branches["main"]
         worker = store.branches["worker"]
-        main = main.copy_ref(worker, "results", "backup/")
+        main = main.copy_from_ref(worker, "results", "backup/")
         assert main.read("backup/a.json") == b'{"a":1}'
 
     def test_dry_run_with_slashes(self, store):
         main = store.branches["main"]
         worker = store.branches["worker"]
-        result = main.copy_ref(worker, "/results/", dry_run=True)
+        result = main.copy_from_ref(worker, "/results/", dry_run=True)
         assert result.changes is not None
         assert len(result.changes.add) == 2
 
@@ -296,4 +296,4 @@ class TestCopyRefStale:
         main2.write("conflict.txt", b"conflict")
 
         with pytest.raises(StaleSnapshotError):
-            main.copy_ref(worker, "results")
+            main.copy_from_ref(worker, "results")

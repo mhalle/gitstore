@@ -133,7 +133,7 @@ gitstore has four ways to move data. They differ in **what** they transfer and *
         - sync_out
         - remove
         - move
-        - copy_ref
+        - copy_from_ref
         - apply
 
 ### History & Navigation

@@ -394,7 +394,7 @@ Deno.test('commit time is valid Date', async () => {
 // Copy ref (branch-to-branch)
 // ---------------------------------------------------------------------------
 
-Deno.test('copyRef copies subtree between branches', async () => {
+Deno.test('copyFromRef copies subtree between branches', async () => {
   const { store, snap, tmpDir } = await storeWithFiles();
   try {
     // Create a dev branch, write extra files on main
@@ -404,7 +404,7 @@ Deno.test('copyRef copies subtree between branches', async () => {
 
     // Copy extra/ from main to dev
     let dev = await store.branches.get('dev');
-    dev = await dev.copyRef(main, 'extra');
+    dev = await dev.copyFromRef(main, 'extra');
     assert(await dev.exists('extra/e.txt'));
     assertEquals(fromBytes(await dev.read('extra/e.txt')), 'eee');
   } finally {
@@ -412,7 +412,7 @@ Deno.test('copyRef copies subtree between branches', async () => {
   }
 });
 
-Deno.test('copyRef dry run reports changes', async () => {
+Deno.test('copyFromRef dry run reports changes', async () => {
   const { store, snap, tmpDir } = await storeWithFiles();
   try {
     await store.branches.setAndGet('dev', snap);
@@ -420,7 +420,7 @@ Deno.test('copyRef dry run reports changes', async () => {
     main = await main.write('new/f.txt', toBytes('fff'));
 
     const dev = await store.branches.get('dev');
-    const result = await dev.copyRef(main, 'new', null, { dryRun: true });
+    const result = await dev.copyFromRef(main, 'new', null, { dryRun: true });
     const changes = result.changes;
     assert(changes !== null);
     assert((changes as any).add.length > 0);

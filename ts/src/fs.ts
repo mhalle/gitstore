@@ -1126,7 +1126,7 @@ export class FS {
    * @throws {Error} If source belongs to a different repo.
    * @throws {PermissionError} If this FS is read-only.
    */
-  async copyRef(
+  async copyFromRef(
     source: FS,
     srcPath?: string,
     destPath?: string | null,

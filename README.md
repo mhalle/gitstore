@@ -189,7 +189,7 @@ dev = dev.copy_in(["./features/"], "src")
 
 # Copy between branches (atomic, no disk I/O)
 main = repo.branches["main"]
-dev = dev.copy_ref(main, "config", "config")     # copy config/ from main into dev
+dev = dev.copy_from_ref(main, "config", "config")  # copy config/ from main into dev
 
 # Sync (make identical, including deletes)
 fs = fs.sync_in("./local", "data")

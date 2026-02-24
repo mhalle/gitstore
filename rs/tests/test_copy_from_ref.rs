@@ -45,7 +45,7 @@ fn copy_subtree_adds_files() {
     let main = store.branches().get("main").unwrap();
     let worker = store.branches().get("worker").unwrap();
 
-    let main = main.copy_ref(&worker, "results", None, Default::default()).unwrap();
+    let main = main.copy_from_ref(&worker, "results", None, Default::default()).unwrap();
     assert_eq!(main.read_text("results/a.json").unwrap(), "{\"a\":1}");
     assert_eq!(main.read_text("results/b.json").unwrap(), "{\"b\":2}");
     // Existing files untouched
@@ -60,7 +60,7 @@ fn copy_with_updates() {
     let main = store.branches().get("main").unwrap();
     let worker = store.branches().get("worker").unwrap();
 
-    let main = main.copy_ref(&worker, "data", None, Default::default()).unwrap();
+    let main = main.copy_from_ref(&worker, "data", None, Default::default()).unwrap();
     assert_eq!(main.read_text("data/x.txt").unwrap(), "x-worker");
     assert_eq!(main.read_text("data/y.txt").unwrap(), "y-worker");
 }
@@ -73,7 +73,7 @@ fn dest_defaults_to_src_path() {
     let main = store.branches().get("main").unwrap();
     let worker = store.branches().get("worker").unwrap();
 
-    let main = main.copy_ref(&worker, "results", None, Default::default()).unwrap();
+    let main = main.copy_from_ref(&worker, "results", None, Default::default()).unwrap();
     assert!(main.exists("results/a.json").unwrap());
     assert!(main.exists("results/b.json").unwrap());
 }
@@ -87,7 +87,7 @@ fn copy_to_different_dest() {
     let worker = store.branches().get("worker").unwrap();
 
     let main = main
-        .copy_ref(&worker, "results", Some("backup/results"), Default::default())
+        .copy_from_ref(&worker, "results", Some("backup/results"), Default::default())
         .unwrap();
     assert_eq!(
         main.read_text("backup/results/a.json").unwrap(),
@@ -109,7 +109,7 @@ fn copy_root_to_root() {
     let main = store.branches().get("main").unwrap();
     let worker = store.branches().get("worker").unwrap();
 
-    let main = main.copy_ref(&worker, "", None, Default::default()).unwrap();
+    let main = main.copy_from_ref(&worker, "", None, Default::default()).unwrap();
     assert_eq!(main.read_text("results/a.json").unwrap(), "{\"a\":1}");
     assert_eq!(main.read_text("data/x.txt").unwrap(), "x-worker");
     assert_eq!(main.read_text("data/y.txt").unwrap(), "y-worker");
@@ -130,7 +130,7 @@ fn delete_removes_extra_dest_files() {
     let worker = store.branches().get("worker").unwrap();
 
     // First sync data/
-    let main = main.copy_ref(&worker, "data", None, Default::default()).unwrap();
+    let main = main.copy_from_ref(&worker, "data", None, Default::default()).unwrap();
     assert!(main.exists("data/y.txt").unwrap());
 
     // Remove y from worker and sync with delete
@@ -141,11 +141,11 @@ fn delete_removes_extra_dest_files() {
     let _ = worker; // ensure commit
     let main = store.branches().get("main").unwrap();
     let main = main
-        .copy_ref(
+        .copy_from_ref(
             &store.branches().get("worker").unwrap(),
             "data",
             None,
-            fs::CopyRefOptions {
+            fs::CopyFromRefOptions {
                 delete: true,
                 ..Default::default()
             },
@@ -164,11 +164,11 @@ fn delete_only_affects_dest_path() {
     let worker = store.branches().get("worker").unwrap();
 
     let main = main
-        .copy_ref(
+        .copy_from_ref(
             &worker,
             "results",
             None,
-            fs::CopyRefOptions {
+            fs::CopyFromRefOptions {
                 delete: true,
                 ..Default::default()
             },
@@ -192,11 +192,11 @@ fn dry_run_no_commit() {
     let original_hash = main.commit_hash().unwrap();
 
     let result = main
-        .copy_ref(
+        .copy_from_ref(
             &worker,
             "results",
             None,
-            fs::CopyRefOptions {
+            fs::CopyFromRefOptions {
                 dry_run: true,
                 ..Default::default()
             },
@@ -218,11 +218,11 @@ fn dry_run_with_updates() {
     let worker = store.branches().get("worker").unwrap();
 
     let result = main
-        .copy_ref(
+        .copy_from_ref(
             &worker,
             "data",
             None,
-            fs::CopyRefOptions {
+            fs::CopyFromRefOptions {
                 dry_run: true,
                 ..Default::default()
             },
@@ -253,11 +253,11 @@ fn dry_run_with_delete() {
         .unwrap();
 
     let result = main
-        .copy_ref(
+        .copy_from_ref(
             &worker,
             "results",
             None,
-            fs::CopyRefOptions {
+            fs::CopyFromRefOptions {
                 delete: true,
                 dry_run: true,
                 ..Default::default()
@@ -285,7 +285,7 @@ fn copy_from_tag() {
 
     let main = store.branches().get("main").unwrap();
     let tag_fs = store.tags().get("v1.0").unwrap();
-    let main = main.copy_ref(&tag_fs, "results", None, Default::default()).unwrap();
+    let main = main.copy_from_ref(&tag_fs, "results", None, Default::default()).unwrap();
     assert_eq!(main.read_text("results/a.json").unwrap(), "{\"a\":1}");
 }
 
@@ -302,7 +302,7 @@ fn copy_from_detached() {
     assert!(!detached.writable()); // confirm it's readonly
 
     let main = store.branches().get("main").unwrap();
-    let main = main.copy_ref(&detached, "results", None, Default::default()).unwrap();
+    let main = main.copy_from_ref(&detached, "results", None, Default::default()).unwrap();
     assert_eq!(main.read_text("results/a.json").unwrap(), "{\"a\":1}");
 }
 
@@ -318,12 +318,12 @@ fn noop_returns_same_fs() {
     let main = store.branches().get("main").unwrap();
     let worker = store.branches().get("worker").unwrap();
 
-    let main = main.copy_ref(&worker, "results", None, Default::default()).unwrap();
+    let main = main.copy_from_ref(&worker, "results", None, Default::default()).unwrap();
     let hash_after_first = main.commit_hash().unwrap();
 
     // Copy again — same content, should be a noop
     let worker = store.branches().get("worker").unwrap();
-    let main = main.copy_ref(&worker, "results", None, Default::default()).unwrap();
+    let main = main.copy_from_ref(&worker, "results", None, Default::default()).unwrap();
     assert_eq!(main.commit_hash().unwrap(), hash_after_first);
 }
 
@@ -341,7 +341,7 @@ fn reject_cross_repo() {
     let fs2 = store2.branches().get("main").unwrap();
     let fs2 = fs2.write("b.txt", b"b", Default::default()).unwrap();
 
-    let result = fs2.copy_ref(&fs1, "a.txt", None, Default::default());
+    let result = fs2.copy_from_ref(&fs1, "a.txt", None, Default::default());
     assert!(result.is_err());
     let err_msg = format!("{}", result.unwrap_err());
     assert!(err_msg.contains("same repo"));
@@ -357,7 +357,7 @@ fn reject_readonly_dest() {
     store.tags().set("v-readonly", &worker).unwrap();
     let readonly = store.tags().get("v-readonly").unwrap();
 
-    let result = readonly.copy_ref(&worker, "results", None, Default::default());
+    let result = readonly.copy_from_ref(&worker, "results", None, Default::default());
     assert!(result.is_err());
 }
 
@@ -371,7 +371,7 @@ fn nonexistent_src_path_is_noop() {
     let original_hash = main.commit_hash().unwrap();
 
     let main = main
-        .copy_ref(&worker, "nonexistent", None, Default::default())
+        .copy_from_ref(&worker, "nonexistent", None, Default::default())
         .unwrap();
     assert_eq!(main.commit_hash().unwrap(), original_hash);
 }
@@ -399,7 +399,7 @@ fn preserves_executable_mode() {
 
     let main = store.branches().get("main").unwrap();
     let worker = store.branches().get("worker").unwrap();
-    let main = main.copy_ref(&worker, "bin", None, Default::default()).unwrap();
+    let main = main.copy_from_ref(&worker, "bin", None, Default::default()).unwrap();
     assert_eq!(main.file_type("bin/run.sh").unwrap(), FileType::Executable);
 }
 
@@ -415,7 +415,7 @@ fn preserves_symlink() {
 
     let main = store.branches().get("main").unwrap();
     let worker = store.branches().get("worker").unwrap();
-    let main = main.copy_ref(&worker, "links", None, Default::default()).unwrap();
+    let main = main.copy_from_ref(&worker, "links", None, Default::default()).unwrap();
     assert_eq!(main.file_type("links/readme").unwrap(), FileType::Link);
     assert_eq!(main.readlink("links/readme").unwrap(), "../readme.txt");
 }
@@ -433,11 +433,11 @@ fn custom_message() {
     let worker = store.branches().get("worker").unwrap();
 
     let main = main
-        .copy_ref(
+        .copy_from_ref(
             &worker,
             "results",
             None,
-            fs::CopyRefOptions {
+            fs::CopyFromRefOptions {
                 message: Some("Import results from worker".into()),
                 ..Default::default()
             },
@@ -454,7 +454,7 @@ fn auto_message() {
     let main = store.branches().get("main").unwrap();
     let worker = store.branches().get("worker").unwrap();
 
-    let main = main.copy_ref(&worker, "results", None, Default::default()).unwrap();
+    let main = main.copy_from_ref(&worker, "results", None, Default::default()).unwrap();
     let msg = main.message().unwrap();
     assert!(!msg.is_empty());
 }
@@ -475,7 +475,7 @@ fn stale_snapshot_propagates() {
     let main2 = store.branches().get("main").unwrap();
     main2.write("conflict.txt", b"conflict", Default::default()).unwrap();
 
-    let result = main.copy_ref(&worker, "results", None, Default::default());
+    let result = main.copy_from_ref(&worker, "results", None, Default::default());
     assert!(result.is_err());
     let err = result.unwrap_err();
     assert!(matches!(err, Error::StaleSnapshot(_)));
