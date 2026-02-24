@@ -11,6 +11,7 @@ pub fn create_store(dir: &Path, branch: &str) -> GitStore {
     .unwrap()
 }
 
+#[allow(dead_code)]
 pub fn store_with_files(dir: &Path) -> (GitStore, Fs) {
     let store = create_store(dir, "main");
     let fs = store.branches().get("main").unwrap();

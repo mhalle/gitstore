@@ -4,6 +4,21 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.58.3 / TS v0.3.3 / Rust v0.3.3 (2026-02-24)
+
+**Python:**
+
+- Add `py.typed` marker file (PEP 561) for typed package support
+- Add pyproject.toml classifiers (Beta status, Python versions, license, topics)
+
+**TypeScript:**
+
+- Add package README
+
+**Rust:**
+
+- Fix clippy warnings (redundant closures, useless conversions, collapsible ifs, etc.)
+
 ## v0.58.2 / TS v0.3.2 / Rust v0.3.2 (2026-02-24)
 
 **TypeScript & Rust:**

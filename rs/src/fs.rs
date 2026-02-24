@@ -1282,7 +1282,7 @@ impl Fs {
             let parent_oid = commit_ref.parents().next();
             match parent_oid {
                 Some(pid) => {
-                    let parent_id: gix::ObjectId = pid.into();
+                    let parent_id: gix::ObjectId = pid;
                     // Drop the repo lock before calling from_commit (which re-locks)
                     Ok(Some(parent_id))
                 }
@@ -1502,7 +1502,7 @@ impl Fs {
 
         let skip = opts.skip.unwrap_or(0);
         let limit = opts.limit.unwrap_or(usize::MAX);
-        let filter_path = opts.path.as_deref().map(|p| crate::paths::normalize_path(p)).transpose()?;
+        let filter_path = opts.path.as_deref().map(crate::paths::normalize_path).transpose()?;
         let match_pattern = opts.match_pattern.as_deref();
         let before = opts.before;
 
@@ -1523,9 +1523,9 @@ impl Fs {
 
             let timestamp = commit_ref.author.time().map(|t| t.seconds as u64).unwrap_or(0);
             let message = commit_ref.message.to_string();
-            let tree_oid: gix::ObjectId = commit_ref.tree().into();
+            let tree_oid: gix::ObjectId = commit_ref.tree();
             let parent_oid: Option<gix::ObjectId> =
-                commit_ref.parents().next().map(|p| p.into());
+                commit_ref.parents().next();
 
             // Apply filters
             let mut include = true;
@@ -1555,7 +1555,7 @@ impl Fs {
                         let pdata = pobj.data.to_vec();
                         let parent_commit =
                             gix::objs::CommitRef::from_bytes(&pdata).map_err(Error::git)?;
-                        let parent_tree: gix::ObjectId = parent_commit.tree().into();
+                        let parent_tree: gix::ObjectId = parent_commit.tree();
                         tree::entry_at_path(&repo, parent_tree, filter)?
                     } else {
                         None
@@ -1617,7 +1617,7 @@ impl Fs {
             let data = obj.data.to_vec();
             let commit_ref =
                 gix::objs::CommitRef::from_bytes(&data).map_err(Error::git)?;
-            let tree_oid: gix::ObjectId = commit_ref.tree().into();
+            let tree_oid: gix::ObjectId = commit_ref.tree();
             tree_oid
         };
 

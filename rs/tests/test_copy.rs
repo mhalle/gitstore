@@ -595,9 +595,8 @@ fn remove_nonexistent_path() {
     let fs = store.branches().get("main").unwrap();
     let result = fs.remove_from_disk(&target, Default::default());
     // Either returns empty report or errors — either is acceptable
-    match result {
-        Ok(report) => assert_eq!(report.total(), 0),
-        Err(_) => {} // also fine
+    if let Ok(report) = result {
+        assert_eq!(report.total(), 0);
     }
 }
 
@@ -699,7 +698,7 @@ fn sync_in_detects_updates() {
 
     // Second sync should detect the update
     let (report, _) = fs.sync_in(&src, "", Default::default()).unwrap();
-    assert!(report.update.len() >= 1);
+    assert!(!report.update.is_empty());
     assert!(report.update.iter().any(|f| f.path == "file1.txt"));
 
     let fs = store.branches().get("main").unwrap();
@@ -725,7 +724,7 @@ fn sync_in_detects_deletes() {
 
     // Second sync should detect the deletion
     let (report, _) = fs.sync_in(&src, "", Default::default()).unwrap();
-    assert!(report.delete.len() >= 1);
+    assert!(!report.delete.is_empty());
     assert!(report.delete.iter().any(|f| f.path == "file2.txt"));
 
     let fs = store.branches().get("main").unwrap();
@@ -750,7 +749,7 @@ fn sync_in_detects_adds() {
 
     // Second sync should detect the addition
     let (report, _) = fs.sync_in(&src, "", Default::default()).unwrap();
-    assert!(report.add.len() >= 1);
+    assert!(!report.add.is_empty());
     assert!(report.add.iter().any(|f| f.path == "new_file.txt"));
 
     let fs = store.branches().get("main").unwrap();
@@ -867,7 +866,7 @@ fn sync_out_updates_changed_files() {
     // Sync again — should overwrite with repo content
     let report = fs.sync_out("", &dest, Default::default()).unwrap();
     assert_eq!(std::fs::read_to_string(dest.join("file.txt")).unwrap(), "original");
-    assert!(report.update.len() >= 1);
+    assert!(!report.update.is_empty());
 }
 
 #[test]

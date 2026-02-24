@@ -602,9 +602,8 @@ fn reflog_nonexistent_branch_errors() {
     // Reflog for a branch that doesn't exist should error or return empty
     let result = store.branches().reflog("nonexistent");
     // Either errors or returns empty vec
-    match result {
-        Ok(entries) => assert!(entries.is_empty()),
-        Err(_) => {} // also acceptable
+    if let Ok(entries) = result {
+        assert!(entries.is_empty());
     }
 }
 
@@ -1069,7 +1068,6 @@ fn log_path_filter_detects_mode_change() {
     fs.write("script.sh", b"#!/bin/sh", fs::WriteOptions {
         mode: Some(MODE_BLOB_EXEC),
         message: Some("make executable".into()),
-        ..Default::default()
     })
     .unwrap();
     let fs = store.branches().get("main").unwrap();

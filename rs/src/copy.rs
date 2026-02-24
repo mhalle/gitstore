@@ -196,6 +196,7 @@ pub fn copy_out(
 /// * `include` - Optional glob patterns; only matching files are synced.
 /// * `exclude` - Optional glob patterns; matching files are skipped.
 /// * `checksum` - When `true`, skip unchanged files (OID + mode comparison).
+#[allow(clippy::type_complexity)]
 pub fn sync_in(
     repo: &gix::Repository,
     base_tree: gix::ObjectId,
@@ -459,7 +460,7 @@ fn prune_empty_dirs(root: &Path) -> Result<()> {
     let mut dirs = Vec::new();
     collect_dirs(root, root, &mut dirs)?;
     // Sort by depth (deepest first) for bottom-up removal
-    dirs.sort_by(|a, b| b.len().cmp(&a.len()));
+    dirs.sort_by_key(|b| std::cmp::Reverse(b.len()));
     for dir in dirs {
         let full = root.join(&dir);
         // Try to remove — will fail silently if not empty

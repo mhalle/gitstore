@@ -104,11 +104,10 @@ impl<'a> RefDict<'a> {
         let refname = self.full_name(name);
 
         // 3. Tag overwrite protection
-        if self.is_tags() {
-            if repo.find_reference(refname.as_str()).is_ok() {
+        if self.is_tags()
+            && repo.find_reference(refname.as_str()).is_ok() {
                 return Err(Error::key_exists(format!("tag '{}' already exists", name)));
             }
-        }
 
         // Read old OID for reflog
         let old_oid = repo
@@ -184,7 +183,7 @@ impl<'a> RefDict<'a> {
                 expected: PreviousValue::Any,
                 log: RefLog::AndReference,
             },
-            name: FullName::try_from(refname).map_err(|e| Error::git(e))?,
+            name: FullName::try_from(refname).map_err(Error::git)?,
             deref: false,
         };
         repo.edit_reference(edit).map_err(Error::git)?;
@@ -217,12 +216,10 @@ impl<'a> RefDict<'a> {
 
         let refs_platform = repo.references().map_err(Error::git)?;
         let mut names = Vec::new();
-        for r in refs_platform.prefixed(self.prefix).map_err(Error::git)? {
-            if let Ok(reference) = r {
-                let full_name = reference.name().as_bstr().to_string();
-                if let Some(short) = full_name.strip_prefix(self.prefix) {
-                    names.push(short.to_string());
-                }
+        for reference in refs_platform.prefixed(self.prefix).map_err(Error::git)?.flatten() {
+            let full_name = reference.name().as_bstr().to_string();
+            if let Some(short) = full_name.strip_prefix(self.prefix) {
+                names.push(short.to_string());
             }
         }
         names.sort();
@@ -241,13 +238,11 @@ impl<'a> RefDict<'a> {
 
             let refs_platform = repo.references().map_err(Error::git)?;
             let mut raw_pairs = Vec::new();
-            for r in refs_platform.prefixed(self.prefix).map_err(Error::git)? {
-                if let Ok(reference) = r {
-                    let full_name = reference.name().as_bstr().to_string();
-                    if let Some(short) = full_name.strip_prefix(self.prefix) {
-                        let oid = reference.id().detach();
-                        raw_pairs.push((short.to_string(), oid));
-                    }
+            for reference in refs_platform.prefixed(self.prefix).map_err(Error::git)?.flatten() {
+                let full_name = reference.name().as_bstr().to_string();
+                if let Some(short) = full_name.strip_prefix(self.prefix) {
+                    let oid = reference.id().detach();
+                    raw_pairs.push((short.to_string(), oid));
                 }
             }
             raw_pairs.sort_by(|a, b| a.0.cmp(&b.0));
@@ -335,10 +330,10 @@ impl<'a> RefDict<'a> {
                 },
                 expected: PreviousValue::Any,
                 new: Target::Symbolic(
-                    FullName::try_from(target_refname).map_err(|e| Error::git(e))?,
+                    FullName::try_from(target_refname).map_err(Error::git)?,
                 ),
             },
-            name: FullName::try_from("HEAD".to_string()).map_err(|e| Error::git(e))?,
+            name: FullName::try_from("HEAD".to_string()).map_err(Error::git)?,
             deref: false,
         };
         repo.edit_reference(edit).map_err(Error::git)?;

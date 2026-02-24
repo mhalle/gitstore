@@ -67,6 +67,7 @@ impl GitStore {
             )));
         };
 
+        #[allow(clippy::arc_with_non_send_sync)]
         Ok(GitStore {
             inner: Arc::new(GitStoreInner {
                 repo: Mutex::new(repo),
@@ -141,10 +142,10 @@ impl GitStore {
                 },
                 expected: PreviousValue::Any,
                 new: Target::Symbolic(
-                    FullName::try_from(refname).map_err(|e| Error::git(e))?,
+                    FullName::try_from(refname).map_err(Error::git)?,
                 ),
             },
-            name: FullName::try_from("HEAD".to_string()).map_err(|e| Error::git(e))?,
+            name: FullName::try_from("HEAD".to_string()).map_err(Error::git)?,
             deref: false,
         };
         repo.edit_reference(edit).map_err(Error::git)?;

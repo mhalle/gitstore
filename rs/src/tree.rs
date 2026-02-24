@@ -396,7 +396,7 @@ pub fn rebuild_tree(
         // Convert sub_changes to owned format for recursion
         let owned_writes: Vec<(String, Option<crate::fs::TreeWrite>)> = sub_changes
             .iter()
-            .map(|(path, tw)| (path.clone(), tw.map(|tw| tw.clone())))
+            .map(|(path, tw)| (path.clone(), tw.cloned()))
             .collect();
 
         let new_subtree_oid = rebuild_tree(repo, existing_subtree, &owned_writes)?;

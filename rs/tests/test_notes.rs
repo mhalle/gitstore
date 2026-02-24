@@ -27,9 +27,7 @@ fn create_fanout_note(store: &GitStore, namespace: &str, hash: &str, text: &str)
 
     // Read existing root entries
     let mut root_entries = Vec::new();
-    let parents: Vec<gix::ObjectId>;
-
-    match repo.find_reference(&ref_name) {
+    let parents: Vec<gix::ObjectId> = match repo.find_reference(&ref_name) {
         Ok(r) => {
             let tip = r.id().detach();
             let data = repo.find_object(tip).unwrap();
@@ -43,12 +41,12 @@ fn create_fanout_note(store: &GitStore, namespace: &str, hash: &str, text: &str)
                     oid: e.oid.to_owned(),
                 });
             }
-            parents = vec![tip];
+            vec![tip]
         }
         Err(_) => {
-            parents = vec![];
+            vec![]
         }
-    }
+    };
 
     // Add fanout subtree
     root_entries.push(gix::objs::tree::Entry {
