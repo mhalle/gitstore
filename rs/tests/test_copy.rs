@@ -812,6 +812,182 @@ fn sync_in_dry_run() {
     assert!(fs.exists("file2.txt").unwrap());
 }
 
+// ---------------------------------------------------------------------------
+// sync_out — deletes extra local files (Fix 1)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn sync_out_deletes_extra_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_, fs) = common::store_with_files(dir.path());
+    let dest = dir.path().join("synced");
+    std::fs::create_dir(&dest).unwrap();
+
+    // First sync: writes hello.txt, dir/a.txt, dir/b.txt
+    fs.sync_out("", &dest, Default::default()).unwrap();
+    assert!(dest.join("hello.txt").exists());
+    assert!(dest.join("dir/a.txt").exists());
+
+    // Create extra files on disk that are NOT in the repo
+    std::fs::write(dest.join("extra.txt"), b"extra").unwrap();
+    std::fs::create_dir_all(dest.join("orphan_dir")).unwrap();
+    std::fs::write(dest.join("orphan_dir/stale.txt"), b"stale").unwrap();
+
+    // Second sync should delete the extra files
+    let report = fs.sync_out("", &dest, Default::default()).unwrap();
+    assert!(!dest.join("extra.txt").exists());
+    assert!(!dest.join("orphan_dir/stale.txt").exists());
+    // Orphan dir should be pruned
+    assert!(!dest.join("orphan_dir").exists());
+    // Original files still present
+    assert!(dest.join("hello.txt").exists());
+    assert!(dest.join("dir/a.txt").exists());
+    // Report should include deletes
+    assert!(report.delete.len() >= 2);
+}
+
+#[test]
+fn sync_out_updates_changed_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.branches().get("main").unwrap();
+    fs.write("file.txt", b"original", Default::default()).unwrap();
+    let fs = store.branches().get("main").unwrap();
+
+    let dest = dir.path().join("synced");
+    std::fs::create_dir(&dest).unwrap();
+
+    // First sync
+    fs.sync_out("", &dest, Default::default()).unwrap();
+    assert_eq!(std::fs::read_to_string(dest.join("file.txt")).unwrap(), "original");
+
+    // Modify the local file to something different
+    std::fs::write(dest.join("file.txt"), b"modified locally").unwrap();
+
+    // Sync again — should overwrite with repo content
+    let report = fs.sync_out("", &dest, Default::default()).unwrap();
+    assert_eq!(std::fs::read_to_string(dest.join("file.txt")).unwrap(), "original");
+    assert!(report.update.len() >= 1);
+}
+
+#[test]
+fn sync_out_prunes_empty_dirs() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.branches().get("main").unwrap();
+    fs.write("keep.txt", b"keep", Default::default()).unwrap();
+    let fs = store.branches().get("main").unwrap();
+
+    let dest = dir.path().join("synced");
+    std::fs::create_dir(&dest).unwrap();
+    fs.sync_out("", &dest, Default::default()).unwrap();
+
+    // Create a deep directory structure with files not in repo
+    std::fs::create_dir_all(dest.join("a/b/c")).unwrap();
+    std::fs::write(dest.join("a/b/c/orphan.txt"), b"orphan").unwrap();
+
+    // Sync should delete the orphan and prune the empty dirs
+    fs.sync_out("", &dest, Default::default()).unwrap();
+    assert!(!dest.join("a/b/c/orphan.txt").exists());
+    assert!(!dest.join("a/b/c").exists());
+    assert!(!dest.join("a/b").exists());
+    assert!(!dest.join("a").exists());
+}
+
+// ---------------------------------------------------------------------------
+// copy_in — checksum optimization (Fix 7)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn copy_in_checksum_skips_unchanged() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("src_files");
+    create_disk_files(&src);
+
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.branches().get("main").unwrap();
+
+    // First copy_in
+    let (report1, _) = fs.copy_in(&src, "", fs::CopyInOptions {
+        checksum: true,
+        ..Default::default()
+    })
+    .unwrap();
+    assert!(report1.total() > 0);
+    let fs = store.branches().get("main").unwrap();
+    let hash_after_first = fs.commit_hash().unwrap();
+
+    // Second copy_in with same files + checksum=true → should be no-op
+    let (report2, _) = fs.copy_in(&src, "", fs::CopyInOptions {
+        checksum: true,
+        ..Default::default()
+    })
+    .unwrap();
+    assert_eq!(report2.total(), 0);
+    let fs = store.branches().get("main").unwrap();
+    assert_eq!(fs.commit_hash().unwrap(), hash_after_first);
+}
+
+#[test]
+fn copy_in_no_checksum_always_writes() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("src_files");
+    create_disk_files(&src);
+
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.branches().get("main").unwrap();
+
+    // First copy_in with checksum=false
+    fs.copy_in(&src, "", fs::CopyInOptions {
+        checksum: false,
+        ..Default::default()
+    })
+    .unwrap();
+    let fs = store.branches().get("main").unwrap();
+
+    // Second copy_in with checksum=false → should still report all files
+    let (report, _) = fs.copy_in(&src, "", fs::CopyInOptions {
+        checksum: false,
+        ..Default::default()
+    })
+    .unwrap();
+    // Without checksum, all files are included in the report even if unchanged
+    assert!(report.total() > 0);
+}
+
+#[test]
+fn copy_in_checksum_detects_changes() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("src_files");
+    create_disk_files(&src);
+
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.branches().get("main").unwrap();
+
+    // First copy_in
+    fs.copy_in(&src, "", fs::CopyInOptions {
+        checksum: true,
+        ..Default::default()
+    })
+    .unwrap();
+    let fs = store.branches().get("main").unwrap();
+
+    // Modify a file
+    std::fs::write(src.join("file1.txt"), b"changed content").unwrap();
+
+    // Second copy_in with checksum → should detect the change
+    let (report, _) = fs.copy_in(&src, "", fs::CopyInOptions {
+        checksum: true,
+        ..Default::default()
+    })
+    .unwrap();
+    // Changed file should appear in the report
+    assert!(report.add.iter().any(|f| f.path == "file1.txt"));
+    // Unchanged files should NOT be in the report
+    assert!(!report.add.iter().any(|f| f.path == "file2.txt"));
+    assert!(!report.add.iter().any(|f| f.path == "sub/deep.txt"));
+}
+
 #[test]
 fn sync_in_with_dest_prefix() {
     let dir = tempfile::tempdir().unwrap();

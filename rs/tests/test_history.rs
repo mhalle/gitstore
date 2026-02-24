@@ -1002,6 +1002,94 @@ fn log_filter_by_before_includes_all() {
 // Log filtering — combined
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// undo/redo — stale snapshot detection (Fix 2)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn undo_stale_snapshot_errors() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.branches().get("main").unwrap();
+    fs.write("a.txt", b"a", Default::default()).unwrap();
+    let fs = store.branches().get("main").unwrap();
+
+    // Grab a snapshot
+    let stale = store.branches().get("main").unwrap();
+
+    // Advance the branch past the snapshot
+    fs.write("b.txt", b"b", Default::default()).unwrap();
+
+    // Now stale's commit_oid doesn't match the branch tip
+    let result = stale.undo(1);
+    assert!(result.is_err());
+    let err_msg = format!("{}", result.unwrap_err());
+    assert!(err_msg.contains("stale") || err_msg.contains("moved"));
+}
+
+#[test]
+fn redo_stale_snapshot_errors() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.branches().get("main").unwrap();
+    fs.write("a.txt", b"a", Default::default()).unwrap();
+    let fs = store.branches().get("main").unwrap();
+
+    // Undo to create reflog for redo
+    let undone = fs.undo(1).unwrap();
+
+    // Grab the undone snapshot
+    let stale = store.branches().get("main").unwrap();
+
+    // Advance the branch by writing something new
+    undone.write("c.txt", b"c", Default::default()).unwrap();
+
+    // Now stale's commit_oid doesn't match the branch tip
+    let result = stale.redo(1);
+    assert!(result.is_err());
+    let err_msg = format!("{}", result.unwrap_err());
+    assert!(err_msg.contains("stale") || err_msg.contains("moved"));
+}
+
+// ---------------------------------------------------------------------------
+// log — mode-only changes detected (Fix 5)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn log_path_filter_detects_mode_change() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.branches().get("main").unwrap();
+
+    // Write a file as a regular blob
+    fs.write("script.sh", b"#!/bin/sh", Default::default()).unwrap();
+    let fs = store.branches().get("main").unwrap();
+
+    // Rewrite the same file with executable mode (same content, different mode)
+    fs.write("script.sh", b"#!/bin/sh", fs::WriteOptions {
+        mode: Some(MODE_BLOB_EXEC),
+        message: Some("make executable".into()),
+        ..Default::default()
+    })
+    .unwrap();
+    let fs = store.branches().get("main").unwrap();
+
+    // Log filtered by path should show BOTH commits
+    let log = fs.log(fs::LogOptions {
+        path: Some("script.sh".into()),
+        ..Default::default()
+    })
+    .unwrap();
+    assert_eq!(log.len(), 2, "mode-only change should appear in path-filtered log");
+
+    // Verify the most recent one is the mode change
+    assert_eq!(log[0].message, "make executable");
+}
+
+// ---------------------------------------------------------------------------
+// Log filtering — combined
+// ---------------------------------------------------------------------------
+
 #[test]
 fn log_combined_path_and_match() {
     let dir = tempfile::tempdir().unwrap();

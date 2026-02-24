@@ -299,8 +299,9 @@ impl NoteNamespace {
                 .lock()
                 .map_err(|e| Error::git_msg(e.to_string()))?;
 
-            // Re-read tip inside lock
-            let parents: Vec<gix::ObjectId> = match self.tip_oid(&repo)? {
+            // Re-read tip inside lock for CAS
+            let tip = self.tip_oid(&repo)?;
+            let parents: Vec<gix::ObjectId> = match tip {
                 Some(oid) => vec![oid],
                 None => vec![],
             };
@@ -328,13 +329,18 @@ impl NoteNamespace {
             let commit_oid = repo.write_object(&commit).map_err(Error::git)?;
 
             use gix::refs::transaction::PreviousValue;
+            use gix::refs::Target;
+            let previous = match tip {
+                Some(oid) => PreviousValue::ExistingMustMatch(Target::Object(oid)),
+                None => PreviousValue::MustNotExist,
+            };
             repo.reference(
                 self.ref_name.as_str(),
                 commit_oid,
-                PreviousValue::Any,
+                previous,
                 message,
             )
-            .map_err(Error::git)?;
+            .map_err(|_| Error::stale_snapshot("notes ref changed during update"))?;
 
             Ok(())
         })

@@ -26,6 +26,11 @@ impl<'a> RefDict<'a> {
         self.prefix == "refs/heads/"
     }
 
+    /// Whether this RefDict is for tags.
+    fn is_tags(&self) -> bool {
+        self.prefix == "refs/tags/"
+    }
+
     /// Build an `Fs` from a resolved commit OID and ref name.
     fn fs_for_ref(&self, commit_oid: gix::ObjectId, name: &str) -> Result<Fs> {
         let writable = self.is_branch_prefix();
@@ -54,6 +59,21 @@ impl<'a> RefDict<'a> {
 
     /// Point the named ref at the commit of `fs`.
     pub fn set(&self, name: &str, fs: &Fs) -> Result<()> {
+        // 1. Validate ref name
+        crate::paths::validate_ref_name(name)?;
+
+        // 2. Same-repo check
+        let same = Arc::ptr_eq(&self.store.inner, &fs.inner) || {
+            let self_canon = std::fs::canonicalize(&self.store.inner.path).ok();
+            let fs_canon = std::fs::canonicalize(&fs.inner.path).ok();
+            self_canon.is_some() && self_canon == fs_canon
+        };
+        if !same {
+            return Err(Error::invalid_path(
+                "Fs belongs to a different repository".to_string(),
+            ));
+        }
+
         let commit_oid = fs
             .commit_oid
             .ok_or_else(|| Error::git_msg("Fs has no commit".to_string()))?;
@@ -65,9 +85,45 @@ impl<'a> RefDict<'a> {
             .map_err(|e| Error::git_msg(e.to_string()))?;
         let refname = self.full_name(name);
 
+        // 3. Tag overwrite protection
+        if self.is_tags() {
+            if repo.find_reference(refname.as_str()).is_ok() {
+                return Err(Error::key_exists(format!("tag '{}' already exists", name)));
+            }
+        }
+
+        // Read old OID for reflog
+        let old_oid = repo
+            .find_reference(refname.as_str())
+            .ok()
+            .map(|r| r.id().detach());
+
         use gix::refs::transaction::PreviousValue;
         repo.reference(refname.as_str(), commit_oid, PreviousValue::Any, "refdict: set")
             .map_err(Error::git)?;
+
+        // Write reflog entry
+        let old_sha = old_oid
+            .map(|o| format!("{}", o))
+            .unwrap_or_else(|| crate::reflog::ZERO_SHA.to_string());
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default();
+        let _ = crate::reflog::write_reflog_entry(
+            &self.store.inner.path,
+            &refname,
+            &ReflogEntry {
+                old_sha,
+                new_sha: format!("{}", commit_oid),
+                committer: format!(
+                    "{} <{}>",
+                    self.store.inner.signature.name, self.store.inner.signature.email
+                ),
+                timestamp: now.as_secs(),
+                message: format!("refdict: set {}", name),
+            },
+        );
+
         Ok(())
     }
 
@@ -179,7 +235,11 @@ impl<'a> RefDict<'a> {
     }
 
     /// Get the current branch name (HEAD symbolic target within this prefix).
+    /// Returns `Ok(None)` for tags (tags do not have a "current" concept).
     pub fn get_current_name(&self) -> Result<Option<String>> {
+        if self.is_tags() {
+            return Ok(None);
+        }
         let repo = self
             .store
             .inner
@@ -199,8 +259,11 @@ impl<'a> RefDict<'a> {
         }
     }
 
-    /// Get the current branch as an Fs. Returns None if HEAD is dangling.
+    /// Get the current branch as an Fs. Returns None if HEAD is dangling or for tags.
     pub fn get_current(&self) -> Result<Option<Fs>> {
+        if self.is_tags() {
+            return Ok(None);
+        }
         match self.get_current_name()? {
             Some(name) => match self.get(&name) {
                 Ok(fs) => Ok(Some(fs)),
@@ -210,8 +273,11 @@ impl<'a> RefDict<'a> {
         }
     }
 
-    /// Set the current branch (HEAD symbolic target).
+    /// Set the current branch (HEAD symbolic target). Errors for tags.
     pub fn set_current(&self, name: &str) -> Result<()> {
+        if self.is_tags() {
+            return Err(Error::permission("tags do not support set_current"));
+        }
         let repo = self
             .store
             .inner
@@ -243,8 +309,11 @@ impl<'a> RefDict<'a> {
         Ok(())
     }
 
-    /// Read the reflog for the named ref.
+    /// Read the reflog for the named ref. Errors for tags.
     pub fn reflog(&self, name: &str) -> Result<Vec<ReflogEntry>> {
+        if self.is_tags() {
+            return Err(Error::permission("tags do not have reflogs"));
+        }
         let refname = self.full_name(name);
         crate::reflog::read_reflog(&self.store.inner.path, &refname)
     }

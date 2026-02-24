@@ -400,23 +400,131 @@ fn branches_delete_nonexistent() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn tags_set_overwrite() {
+fn tags_set_overwrite_rejected() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
     let fs1 = store.branches().get("main").unwrap();
-    let sha1 = fs1.commit_hash().unwrap();
     store.tags().set("v1", &fs1).unwrap();
 
     // Advance branch to get a new SHA
     let fs = store.branches().get("main").unwrap();
     fs.write("new.txt", b"data", Default::default()).unwrap();
     let fs2 = store.branches().get("main").unwrap();
-    let sha2 = fs2.commit_hash().unwrap();
-    assert_ne!(sha1, sha2);
 
-    // Overwrite tag to point at new SHA
-    store.tags().set("v1", &fs2).unwrap();
-    assert_eq!(store.tags().get("v1").unwrap().commit_hash().unwrap(), sha2);
+    // Overwriting an existing tag should be rejected
+    let result = store.tags().set("v1", &fs2);
+    assert!(result.is_err());
+    // Original tag should be unchanged
+    assert_eq!(store.tags().get("v1").unwrap().commit_hash().unwrap(), fs1.commit_hash().unwrap());
+}
+
+// ---------------------------------------------------------------------------
+// RefDict::set — validations (Fix 4)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn branches_set_rejects_invalid_ref_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.branches().get("main").unwrap();
+
+    // Invalid ref names should be rejected
+    let result = store.branches().set("bad..name", &fs);
+    assert!(result.is_err());
+
+    let result = store.branches().set("bad/./name", &fs);
+    assert!(result.is_err());
+
+    let result = store.branches().set(".hidden", &fs);
+    assert!(result.is_err());
+}
+
+#[test]
+fn branches_set_rejects_cross_repo_fs() {
+    let dir1 = tempfile::tempdir().unwrap();
+    let dir2 = tempfile::tempdir().unwrap();
+    let store1 = common::create_store(dir1.path(), "main");
+    let store2 = common::create_store(dir2.path(), "main");
+
+    let fs2 = store2.branches().get("main").unwrap();
+
+    // Setting a branch with an Fs from a different repo should fail
+    let result = store1.branches().set("cross", &fs2);
+    assert!(result.is_err());
+}
+
+#[test]
+fn tags_set_rejects_cross_repo_fs() {
+    let dir1 = tempfile::tempdir().unwrap();
+    let dir2 = tempfile::tempdir().unwrap();
+    let store1 = common::create_store(dir1.path(), "main");
+    let store2 = common::create_store(dir2.path(), "main");
+
+    let fs2 = store2.branches().get("main").unwrap();
+
+    let result = store1.tags().set("v1", &fs2);
+    assert!(result.is_err());
+}
+
+// ---------------------------------------------------------------------------
+// Tags — branch-only operations rejected (Fix 6)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn tags_set_current_errors() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.branches().get("main").unwrap();
+    store.tags().set("v1", &fs).unwrap();
+
+    let result = store.tags().set_current("v1");
+    assert!(result.is_err());
+}
+
+#[test]
+fn tags_get_current_name_returns_none() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+
+    let result = store.tags().get_current_name().unwrap();
+    assert!(result.is_none());
+}
+
+#[test]
+fn tags_get_current_returns_none() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+
+    let result = store.tags().get_current().unwrap();
+    assert!(result.is_none());
+}
+
+#[test]
+fn tags_reflog_errors() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.branches().get("main").unwrap();
+    store.tags().set("v1", &fs).unwrap();
+
+    let result = store.tags().reflog("v1");
+    assert!(result.is_err());
+}
+
+// ---------------------------------------------------------------------------
+// RefDict::set — reflog entry written (Fix 4)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn branches_set_writes_reflog() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.branches().get("main").unwrap();
+
+    store.branches().set("dev", &fs).unwrap();
+
+    // The reflog for "dev" should have at least one entry
+    let entries = store.branches().reflog("dev").unwrap();
+    assert!(!entries.is_empty());
 }
 
 // ---------------------------------------------------------------------------

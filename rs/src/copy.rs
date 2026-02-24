@@ -8,15 +8,38 @@ use crate::types::{ChangeReport, FileEntry, FileType, MODE_BLOB, MODE_LINK, MODE
 /// Copy files from disk into a tree, returning a list of (path, TreeWrite) pairs.
 pub fn copy_in(
     repo: &gix::Repository,
-    _base_tree: gix::ObjectId,
+    base_tree: gix::ObjectId,
     src: &Path,
     dest: &str,
     include: Option<&[&str]>,
     exclude: Option<&[&str]>,
+    checksum: bool,
 ) -> Result<(Vec<(String, TreeWrite)>, ChangeReport)> {
     let mut writes = Vec::new();
     let mut report = ChangeReport::new();
     let dest_norm = crate::paths::normalize_path(dest)?;
+
+    // Build existing entries map when checksum is enabled
+    let existing: std::collections::HashMap<String, (gix::ObjectId, u32)> = if checksum {
+        let target_oid = if dest_norm.is_empty() {
+            base_tree
+        } else {
+            match tree::entry_at_path(repo, base_tree, &dest_norm)? {
+                Some(entry) if entry.mode == MODE_TREE => entry.oid,
+                _ => gix::ObjectId::empty_tree(gix::hash::Kind::Sha1),
+            }
+        };
+        if target_oid == gix::ObjectId::empty_tree(gix::hash::Kind::Sha1) {
+            std::collections::HashMap::new()
+        } else {
+            tree::walk_tree(repo, target_oid)?
+                .into_iter()
+                .map(|(p, e)| (p, (e.oid, e.mode)))
+                .collect()
+        }
+    } else {
+        std::collections::HashMap::new()
+    };
 
     let disk_files = disk_glob(src, include, exclude)?;
 
@@ -38,6 +61,16 @@ pub fn copy_in(
 
         let file_type = FileType::from_mode(mode).unwrap_or(FileType::Blob);
         let blob_oid = repo.write_blob(&data).map_err(Error::git)?;
+
+        // Skip unchanged files when checksum is enabled
+        if checksum {
+            if let Some((existing_oid, existing_mode)) = existing.get(rel_path) {
+                if *existing_oid == blob_oid.detach() && *existing_mode == mode {
+                    continue;
+                }
+            }
+        }
+
         writes.push((
             store_path.clone(),
             TreeWrite {
@@ -239,6 +272,9 @@ pub fn sync_in(
 }
 
 /// Sync files from a tree to disk (add + update + delete).
+///
+/// Unlike `copy_out`, this also deletes local files that are not present in
+/// the repo tree, and classifies changes as add/update/delete.
 pub fn sync_out(
     repo: &gix::Repository,
     tree_oid: gix::ObjectId,
@@ -246,8 +282,162 @@ pub fn sync_out(
     dest: &Path,
     include: Option<&[&str]>,
     exclude: Option<&[&str]>,
+    checksum: bool,
 ) -> Result<ChangeReport> {
-    copy_out(repo, tree_oid, src, dest, include, exclude)
+    let mut report = ChangeReport::new();
+    let src_norm = crate::paths::normalize_path(src)?;
+
+    // Walk repo tree to get source files
+    let target_oid = if src_norm.is_empty() {
+        tree_oid
+    } else {
+        let entry = tree::entry_at_path(repo, tree_oid, &src_norm)?
+            .ok_or_else(|| Error::not_found(&src_norm))?;
+        if entry.mode != MODE_TREE {
+            return Err(Error::not_a_directory(&src_norm));
+        }
+        entry.oid
+    };
+
+    let repo_entries = tree::walk_tree(repo, target_oid)?;
+    let repo_map: std::collections::HashMap<&str, &crate::types::WalkEntry> =
+        repo_entries.iter().map(|(p, e)| (p.as_str(), e)).collect();
+
+    // Walk local destination to get existing disk files
+    let disk_files = if dest.exists() {
+        disk_glob(dest, None, None)?
+    } else {
+        Vec::new()
+    };
+    let disk_set: std::collections::HashSet<&str> = disk_files.iter().map(|s| s.as_str()).collect();
+
+    // Process repo files: write new/updated files to disk
+    for (rel_path, entry) in &repo_entries {
+        if !matches_filters(rel_path, include, exclude) {
+            continue;
+        }
+
+        let dest_path = dest.join(rel_path);
+        let obj = repo.find_object(entry.oid).map_err(Error::git)?;
+        let file_type = FileType::from_mode(entry.mode).unwrap_or(FileType::Blob);
+
+        // Check if file exists on disk and whether it's changed
+        let needs_write = if disk_set.contains(rel_path.as_str()) {
+            if checksum {
+                // Compare blob OID of new content vs existing file
+                let existing_data = if entry.mode == MODE_LINK {
+                    match std::fs::read_link(&dest_path) {
+                        Ok(target) => target.to_string_lossy().into_owned().into_bytes(),
+                        Err(_) => vec![], // force write if can't read
+                    }
+                } else {
+                    std::fs::read(&dest_path).unwrap_or_default()
+                };
+                let existing_oid = repo.write_blob(&existing_data).map_err(Error::git)?;
+                existing_oid.detach() != entry.oid
+            } else {
+                true // without checksum, always write
+            }
+        } else {
+            true // file doesn't exist on disk
+        };
+
+        if needs_write {
+            if let Some(parent) = dest_path.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| Error::io(parent, e))?;
+            }
+
+            if entry.mode == MODE_LINK {
+                let target = String::from_utf8_lossy(&obj.data);
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::symlink;
+                    let _ = std::fs::remove_file(&dest_path);
+                    symlink(target.as_ref(), &dest_path)
+                        .map_err(|e| Error::io(&dest_path, e))?;
+                }
+                #[cfg(not(unix))]
+                {
+                    std::fs::write(&dest_path, target.as_bytes())
+                        .map_err(|e| Error::io(&dest_path, e))?;
+                }
+            } else {
+                std::fs::write(&dest_path, &obj.data).map_err(|e| Error::io(&dest_path, e))?;
+
+                #[cfg(unix)]
+                if entry.mode == crate::types::MODE_BLOB_EXEC {
+                    use std::os::unix::fs::PermissionsExt;
+                    let perms = std::fs::Permissions::from_mode(0o755);
+                    std::fs::set_permissions(&dest_path, perms)
+                        .map_err(|e| Error::io(&dest_path, e))?;
+                }
+            }
+
+            if disk_set.contains(rel_path.as_str()) {
+                report.update.push(FileEntry::with_src(rel_path, file_type, &dest_path));
+            } else {
+                report.add.push(FileEntry::with_src(rel_path, file_type, &dest_path));
+            }
+        }
+    }
+
+    // Delete disk files not in repo tree
+    for rel_path in &disk_files {
+        if !matches_filters(rel_path, include, exclude) {
+            continue;
+        }
+        if !repo_map.contains_key(rel_path.as_str()) {
+            let full_path = dest.join(rel_path);
+            if full_path.exists() || full_path.symlink_metadata().is_ok() {
+                std::fs::remove_file(&full_path).map_err(|e| Error::io(&full_path, e))?;
+                report.delete.push(FileEntry::with_src(rel_path, FileType::Blob, &full_path));
+            }
+        }
+    }
+
+    // Prune empty directories
+    prune_empty_dirs(dest)?;
+
+    Ok(report)
+}
+
+/// Remove empty directories under `root`, bottom-up.
+fn prune_empty_dirs(root: &Path) -> Result<()> {
+    if !root.is_dir() {
+        return Ok(());
+    }
+    // Collect all directories first, then try to remove bottom-up
+    let mut dirs = Vec::new();
+    collect_dirs(root, root, &mut dirs)?;
+    // Sort by depth (deepest first) for bottom-up removal
+    dirs.sort_by(|a, b| b.len().cmp(&a.len()));
+    for dir in dirs {
+        let full = root.join(&dir);
+        // Try to remove — will fail silently if not empty
+        let _ = std::fs::remove_dir(&full);
+    }
+    Ok(())
+}
+
+fn collect_dirs(root: &Path, dir: &Path, results: &mut Vec<String>) -> Result<()> {
+    let read_dir = match std::fs::read_dir(dir) {
+        Ok(rd) => rd,
+        Err(_) => return Ok(()),
+    };
+    for entry in read_dir {
+        let entry = entry.map_err(|e| Error::io(dir, e))?;
+        let path = entry.path();
+        if path.is_dir() {
+            let rel = path
+                .strip_prefix(root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .into_owned();
+            results.push(rel);
+            collect_dirs(root, &path, results)?;
+        }
+    }
+    Ok(())
 }
 
 /// Remove files from disk that match patterns.

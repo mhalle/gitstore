@@ -622,10 +622,11 @@ impl Fs {
         opts: CopyInOptions,
     ) -> Result<(ChangeReport, Fs)> {
         let tree_oid = self.require_tree()?;
+        let checksum = opts.checksum;
         let (writes, report) = self.with_repo(|repo| {
             let inc: Option<Vec<&str>> = opts.include.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect());
             let exc: Option<Vec<&str>> = opts.exclude.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect());
-            crate::copy::copy_in(repo, tree_oid, src, dest, inc.as_deref(), exc.as_deref())
+            crate::copy::copy_in(repo, tree_oid, src, dest, inc.as_deref(), exc.as_deref(), checksum)
         })?;
         if opts.dry_run {
             return Ok((report, self.clone()));
@@ -695,10 +696,11 @@ impl Fs {
         opts: SyncOptions,
     ) -> Result<ChangeReport> {
         let tree_oid = self.require_tree()?;
+        let checksum = opts.checksum;
         self.with_repo(|repo| {
             let inc: Option<Vec<&str>> = opts.include.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect());
             let exc: Option<Vec<&str>> = opts.exclude.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect());
-            crate::copy::sync_out(repo, tree_oid, src, dest, inc.as_deref(), exc.as_deref())
+            crate::copy::sync_out(repo, tree_oid, src, dest, inc.as_deref(), exc.as_deref(), checksum)
         })
     }
 
@@ -1044,10 +1046,6 @@ impl Fs {
 
         let refname = format!("refs/heads/{}", branch);
         let inner = Arc::clone(&self.inner);
-        let repo = inner
-            .repo
-            .lock()
-            .map_err(|e| Error::git_msg(e.to_string()))?;
 
         let current_oid = self
             .commit_oid
@@ -1055,6 +1053,23 @@ impl Fs {
 
         use gix::refs::transaction::PreviousValue;
         with_repo_lock(&inner.path, || {
+            let repo = inner
+                .repo
+                .lock()
+                .map_err(|e| Error::git_msg(e.to_string()))?;
+
+            // Stale snapshot check
+            let current_ref = repo
+                .find_reference(refname.as_str())
+                .map_err(|_| Error::not_found(format!("branch '{}' not found", branch)))?;
+            let actual_oid = current_ref.id().detach();
+            if actual_oid != current_oid {
+                return Err(Error::stale_snapshot(format!(
+                    "branch '{}' has moved: expected {}, found {}",
+                    branch, current_oid, actual_oid
+                )));
+            }
+
             repo.reference(
                 refname.as_str(),
                 target_oid,
@@ -1062,27 +1077,28 @@ impl Fs {
                 "undo: move back",
             )
             .map_err(Error::git)?;
+
+            // Write reflog entry for undo
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default();
+            let _ = crate::reflog::write_reflog_entry(
+                &inner.path,
+                &refname,
+                &crate::types::ReflogEntry {
+                    old_sha: format!("{}", current_oid),
+                    new_sha: format!("{}", target_oid),
+                    committer: format!(
+                        "{} <{}>",
+                        inner.signature.name, inner.signature.email
+                    ),
+                    timestamp: now.as_secs(),
+                    message: "undo: move back".to_string(),
+                },
+            );
+
             Ok(())
         })?;
-
-        // Write reflog entry for undo
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default();
-        let _ = crate::reflog::write_reflog_entry(
-            &inner.path,
-            &refname,
-            &crate::types::ReflogEntry {
-                old_sha: format!("{}", current_oid),
-                new_sha: format!("{}", target_oid),
-                committer: format!(
-                    "{} <{}>",
-                    inner.signature.name, inner.signature.email
-                ),
-                timestamp: now.as_secs(),
-                message: "undo: move back".to_string(),
-            },
-        );
 
         Ok(target)
     }
@@ -1096,6 +1112,10 @@ impl Fs {
             .commit_oid
             .map(|oid| format!("{}", oid))
             .unwrap_or_default();
+
+        let current_oid = self
+            .commit_oid
+            .ok_or_else(|| Error::not_found("no commit in snapshot"))?;
 
         // Read reflog to find forward commits
         let reflog_entries = crate::reflog::read_reflog(&self.inner.path, &refname)?;
@@ -1116,13 +1136,26 @@ impl Fs {
             gix::ObjectId::from_hex(forward_sha.as_bytes()).map_err(Error::git)?;
 
         let inner = Arc::clone(&self.inner);
-        let repo = inner
-            .repo
-            .lock()
-            .map_err(|e| Error::git_msg(e.to_string()))?;
 
         use gix::refs::transaction::PreviousValue;
         with_repo_lock(&inner.path, || {
+            let repo = inner
+                .repo
+                .lock()
+                .map_err(|e| Error::git_msg(e.to_string()))?;
+
+            // Stale snapshot check
+            let current_ref = repo
+                .find_reference(refname.as_str())
+                .map_err(|_| Error::not_found(format!("branch '{}' not found", branch)))?;
+            let actual_oid = current_ref.id().detach();
+            if actual_oid != current_oid {
+                return Err(Error::stale_snapshot(format!(
+                    "branch '{}' has moved: expected {}, found {}",
+                    branch, current_oid, actual_oid
+                )));
+            }
+
             repo.reference(
                 refname.as_str(),
                 forward_oid,
@@ -1130,29 +1163,29 @@ impl Fs {
                 "redo: move forward",
             )
             .map_err(Error::git)?;
+
+            // Write reflog entry for redo
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default();
+            let _ = crate::reflog::write_reflog_entry(
+                &inner.path,
+                &refname,
+                &crate::types::ReflogEntry {
+                    old_sha: current_hex.clone(),
+                    new_sha: forward_sha.clone(),
+                    committer: format!(
+                        "{} <{}>",
+                        inner.signature.name, inner.signature.email
+                    ),
+                    timestamp: now.as_secs(),
+                    message: "redo: move forward".to_string(),
+                },
+            );
+
             Ok(())
         })?;
 
-        // Write reflog entry for redo
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default();
-        let _ = crate::reflog::write_reflog_entry(
-            &inner.path,
-            &refname,
-            &crate::types::ReflogEntry {
-                old_sha: current_hex,
-                new_sha: forward_sha,
-                committer: format!(
-                    "{} <{}>",
-                    inner.signature.name, inner.signature.email
-                ),
-                timestamp: now.as_secs(),
-                message: "redo: move forward".to_string(),
-            },
-        );
-
-        drop(repo);
         Fs::from_commit(inner, forward_oid, self.ref_name.clone(), Some(self.writable))
     }
 
@@ -1224,7 +1257,7 @@ impl Fs {
                     };
 
                     let same = match (&this_entry, &parent_entry) {
-                        (Some(a), Some(b)) => a.oid == b.oid,
+                        (Some(a), Some(b)) => a.oid == b.oid && a.mode == b.mode,
                         (None, None) => true,
                         _ => false,
                     };
