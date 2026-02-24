@@ -34,8 +34,8 @@ impl FileType {
         }
     }
 
-    /// Convert to a raw git mode.
-    pub fn to_mode(self) -> u32 {
+    /// Return the raw git filemode for this type.
+    pub fn filemode(self) -> u32 {
         match self {
             Self::Blob => MODE_BLOB,
             Self::Executable => MODE_BLOB_EXEC,
@@ -246,14 +246,14 @@ impl Ord for ChangeAction {
 #[derive(Debug, Clone)]
 pub struct ChangeError {
     pub path: String,
-    pub message: String,
+    pub error: String,
 }
 
 impl ChangeError {
-    pub fn new(path: impl Into<String>, message: impl Into<String>) -> Self {
+    pub fn new(path: impl Into<String>, error: impl Into<String>) -> Self {
         Self {
             path: path.into(),
-            message: message.into(),
+            error: error.into(),
         }
     }
 }
@@ -304,7 +304,7 @@ impl ChangeReport {
         if self.errors.is_empty() {
             Ok(self)
         } else {
-            let msgs: Vec<_> = self.errors.iter().map(|e| e.message.clone()).collect();
+            let msgs: Vec<_> = self.errors.iter().map(|e| e.error.clone()).collect();
             Err(crate::error::Error::Permission(msgs.join("; ")))
         }
     }

@@ -21,3 +21,4 @@ pub use batch::Batch;
 pub use refdict::RefDict;
 pub use notes::{NoteDict, NoteNamespace, NotesBatch};
 pub use types::*;
+pub use copy::disk_glob;

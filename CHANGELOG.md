@@ -4,6 +4,14 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## Rust v0.1.1 (2026-02-24)
+
+**Cross-platform API consistency:**
+
+- Rename `ChangeError.message` → `.error` to match Python/TS **[breaking]**
+- Rename `FileType::to_mode()` → `.filemode()` to follow git naming conventions (Python: `.filemode`, TS: `fileModeFromType()`) **[breaking]**
+- Re-export `disk_glob` from crate root for public use
+
 ## v0.57.0 (2026-02-24)
 
 **API changes:**

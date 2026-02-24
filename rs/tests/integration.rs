@@ -12,7 +12,7 @@ fn types_are_constructible() {
     assert_eq!(FileType::from_mode(MODE_BLOB_EXEC), Some(FileType::Executable));
     assert_eq!(FileType::from_mode(MODE_LINK), Some(FileType::Link));
     assert_eq!(FileType::from_mode(MODE_TREE), Some(FileType::Tree));
-    assert_eq!(FileType::Blob.to_mode(), MODE_BLOB);
+    assert_eq!(FileType::Blob.filemode(), MODE_BLOB);
     assert!(FileType::Blob.is_file());
     assert!(FileType::Tree.is_dir());
     assert!(FileType::Link.is_link());

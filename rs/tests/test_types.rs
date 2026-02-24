@@ -128,7 +128,7 @@ fn change_action_same_path_equal() {
 fn change_error_fields() {
     let e = ChangeError::new("path/to/file", "something went wrong");
     assert_eq!(e.path, "path/to/file");
-    assert_eq!(e.message, "something went wrong");
+    assert_eq!(e.error, "something went wrong");
 }
 
 // ---------------------------------------------------------------------------
