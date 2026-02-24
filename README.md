@@ -21,8 +21,8 @@ from gitstore import GitStore
 # Create (or open) a repository with a "main" branch
 repo = GitStore.open("data.git")
 
-# Get a snapshot of the branch
-fs = repo.branches["main"]
+# Get a snapshot of the current branch ("main" by default)
+fs = repo.branches.current
 
 # Write a file -- returns a new immutable snapshot
 fs = fs.write_text("hello.txt", "Hello, world!")
