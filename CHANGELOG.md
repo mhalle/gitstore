@@ -4,6 +4,15 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.58.4 (2026-02-24)
+
+**Python:**
+
+- Update README with missing API docs (partial reads, stat, listdir, apply, copy_ref, disk_glob, reflog, git notes)
+- Fix stale API names in README (`branches.default` → `.current`, `fs.branch` → `.ref_name`)
+- Add `readme` and `description` fields to pyproject.toml for PyPI
+- Add sdist excludes for `rs/target`, `ts/node_modules`, `site`, `tmp`
+
 ## v0.58.3 / TS v0.3.3 / Rust v0.3.3 (2026-02-24)
 
 **Python:**

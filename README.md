@@ -43,7 +43,7 @@ print(fs.message)               # '+ hello.txt'
 
 **`FS`** is an immutable snapshot of a committed tree. Reading methods (`read`, `ls`, `walk`, `exists`, `open`) never mutate state. Writing methods (`write`, `write_from_file`, `remove`, `batch`) return a *new* `FS` pointing at the new commit -- the original `FS` is unchanged.
 
-Snapshots obtained from **branches** are writable. Snapshots obtained from **tags** are read-only.
+Snapshots obtained from **branches** are writable (`fs.writable == True`). Snapshots obtained from **tags** are read-only (`fs.writable == False`).
 
 ## API
 
@@ -68,8 +68,8 @@ del repo.branches["experiment"]    # delete a branch
 repo.tags["v1.0"] = fs            # create a tag
 snapshot = repo.tags["v1.0"]       # read-only FS
 
-repo.branches.default                # "main"
-repo.branches.default = "dev"        # set default branch
+repo.branches.current_name           # "main"
+repo.branches.current = "dev"        # set current branch
 
 for name in repo.branches:
     print(name)
@@ -81,17 +81,23 @@ for name in repo.branches:
 ```python
 data = fs.read("path/to/file.bin")           # bytes
 text = fs.read_text("config.json")           # str (UTF-8)
-entries = fs.ls()                             # root listing
+chunk = fs.read("big.bin", offset=100, size=50)  # partial read (50 bytes at offset 100)
+chunk = fs.read_by_hash(sha, offset=0, size=1024)  # read blob by SHA, bypasses tree walk
+
+entries = fs.ls()                             # root listing — list of name strings
 entries = fs.ls("src")                        # subdirectory listing
+details = fs.listdir("src")                  # list of WalkEntry (name, oid, mode)
 exists = fs.exists("path/to/file.bin")        # bool
+info = fs.stat("path/to/file.bin")           # StatResult (mode, file_type, size, hash, nlink, mtime)
 ftype = fs.file_type("run.sh")               # FileType.EXECUTABLE
 nbytes = fs.size("path/to/file.bin")         # int (bytes)
 sha = fs.object_hash("path/to/file.bin")     # 40-char hex SHA
+tree_sha = fs.tree_hash                      # root tree 40-char hex SHA
 
 # Walk the tree (like os.walk)
 for dirpath, dirnames, file_entries in fs.walk():
     for entry in file_entries:
-        print(entry.name, entry.file_type)    # WalkEntry with name, oid, filemode
+        print(entry.name, entry.file_type)    # WalkEntry with name, oid, mode
 
 # Glob
 matches = fs.glob("**/*.py")                 # sorted list of matching paths
@@ -159,6 +165,10 @@ for snapshot in fs.log(before=cutoff):           # date filter
 
 fs = fs.undo()                                   # move branch back 1 commit
 fs = fs.redo()                                   # move branch forward 1 reflog step
+
+# Reflog — branch movement history
+for entry in repo.branches.reflog("main"):
+    print(entry.old_sha, entry.new_sha, entry.message)
 ```
 
 ### Copy and sync
@@ -171,20 +181,45 @@ print(fs.changes.add)                            # [FileEntry(...), ...]
 # Repo to disk
 fs.copy_out(["docs"], "./local-docs")
 
+# Copy between branches (atomic, no disk I/O)
+fs = fs.copy_ref(source_fs, "src/lib", "vendor/lib")
+
 # Sync (make identical, including deletes)
 fs = fs.sync_in("./local", "data")
 fs.sync_out("data", "./local")
+
+# Expand globs on disk (same dotfile rules as fs.glob)
+from gitstore import disk_glob
+files = disk_glob("./data/**/*.csv")
 
 # Remove and move within repo
 fs = fs.remove(["old-dir"], recursive=True)
 fs = fs.move(["old.txt"], "new.txt")
 ```
 
+### Atomic apply
+
+Apply multiple writes and removes in a single commit without a context manager:
+
+```python
+from gitstore import WriteEntry
+
+fs = fs.apply(
+    writes={
+        "config.json": b'{"v": 2}',
+        "script.sh": WriteEntry(data=b"#!/bin/sh\n", mode=0o100755),
+        "link": WriteEntry(target="config.json"),          # symlink
+    },
+    removes=["old.txt", "deprecated/"],
+    message="Update config and clean up",
+)
+```
+
 ### Snapshot properties
 
 ```python
 fs.commit_hash           # str -- full 40-character commit SHA
-fs.branch                # str | None -- branch name, or None for tags
+fs.ref_name              # str | None -- ref name (branch or tag), or None for detached
 fs.message               # str -- commit message
 fs.time                  # datetime -- commit timestamp (timezone-aware)
 fs.author_name           # str -- commit author name
@@ -267,7 +302,7 @@ main~3:file.txt        3 commits back on main
 
 This applies to `cp`, `sync`, `rm`, `mv`, `ls`, `cat`, and other commands. For `ls`, `cat`, `rm`, and `write` the `:` is optional (arguments are always repo paths), but it is **required** for `cp`, `sync`, and `mv` to distinguish repo paths from local paths.
 
-For full details on path parsing, ancestor syntax (`~N`), and interaction with flags, see [Path Syntax](docs/paths.md).
+For full details on path parsing, ancestor syntax (`~N`), and interaction with flags, see [Path Syntax](https://github.com/mhalle/gitstore/blob/master/docs/paths.md).
 
 ```bash
 # Repository management
@@ -332,14 +367,39 @@ gitstore serve --all --cors                           # all refs with CORS
 gitstore gitserve
 ```
 
-For full CLI documentation, see [docs/cli.md](docs/cli.md).
+For full CLI documentation, see [CLI Reference](https://github.com/mhalle/gitstore/blob/master/docs/cli.md).
+
+## Git notes
+
+Attach metadata to commits without modifying history:
+
+```python
+# Default namespace (refs/notes/commits)
+ns = repo.notes.commits
+ns[fs.commit_hash] = "reviewed by Alice"
+print(ns[fs.commit_hash])                       # "reviewed by Alice"
+del ns[fs.commit_hash]
+
+# Custom namespaces
+reviews = repo.notes["reviews"]
+reviews[fs.commit_hash] = "LGTM"
+
+# Batch writes (single commit)
+with repo.notes.commits.batch() as b:
+    b[hash1] = "note one"
+    b[hash2] = "note two"
+
+# Iteration
+for commit_hash, text in ns.items():
+    print(commit_hash, text)
+```
 
 ## Documentation
 
-- [Documentation hub](docs/index.md) -- quick start and navigation
-- [Python API Reference](docs/api.md) -- classes, methods, and data types
-- [CLI Reference](docs/cli.md) -- the `gitstore` command-line tool
-- [Path Syntax](docs/paths.md) -- how `ref:path` works across commands
+- [Documentation hub](https://github.com/mhalle/gitstore/blob/master/docs/index.md) -- quick start and navigation
+- [Python API Reference](https://github.com/mhalle/gitstore/blob/master/docs/api.md) -- classes, methods, and data types
+- [CLI Reference](https://github.com/mhalle/gitstore/blob/master/docs/cli.md) -- the `gitstore` command-line tool
+- [Path Syntax](https://github.com/mhalle/gitstore/blob/master/docs/paths.md) -- how `ref:path` works across commands
 
 ## Development
 
