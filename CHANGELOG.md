@@ -4,6 +4,16 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.58.0 / TS v0.3.0 / Rust v0.3.0 (2026-02-24)
+
+**API changes:**
+
+- Remove `FS.export()` method from all three languages — use `copy_out("/", dest)` instead **[breaking]**
+
+**CLI changes:**
+
+- Rename `archive` → `archive_out` and `unarchive` → `archive_in` for consistent directionality matching `copy_in`/`copy_out` **[breaking]**
+
 ## Rust v0.1.1 (2026-02-24)
 
 **Cross-platform API consistency:**

@@ -1,6 +1,6 @@
 {
   "name": "gitstore",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "A versioned filesystem backed by a bare git repository",
   "type": "module",
   "main": "dist/index.js",
