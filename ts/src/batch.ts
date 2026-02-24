@@ -21,6 +21,9 @@ import type { GitStore } from './gitstore.js';
 /**
  * Accumulates writes and removes, then commits all changes atomically
  * when `commit()` is called.
+ *
+ * Nothing is committed if the batch is not explicitly committed.
+ * Use `commit()` to finalize all staged changes in a single commit.
  */
 export class Batch {
   private _fs: FS;
@@ -53,7 +56,11 @@ export class Batch {
   }
 
   /**
-   * Stage a blob write. Creates the blob immediately in the object store.
+   * Stage a file write. Creates the blob immediately in the object store.
+   *
+   * @param path - Destination path in the repo.
+   * @param data - Raw bytes to write.
+   * @param opts.mode - File mode override (e.g. MODE_BLOB_EXEC for executable).
    */
   async write(path: string, data: Uint8Array, opts?: { mode?: string }): Promise<void> {
     this._checkOpen();
@@ -68,6 +75,12 @@ export class Batch {
 
   /**
    * Stage a write from a local file. Reads the file and creates the blob.
+   *
+   * Executable permission is auto-detected from disk unless `opts.mode` is set.
+   *
+   * @param path - Destination path in the repo.
+   * @param localPath - Path to the local file.
+   * @param opts.mode - File mode override (e.g. MODE_BLOB_EXEC for executable).
    */
   async writeFromFile(
     path: string,
@@ -86,7 +99,10 @@ export class Batch {
   }
 
   /**
-   * Stage a symlink write.
+   * Stage a symbolic link entry.
+   *
+   * @param path - Symlink path in the repo.
+   * @param target - The symlink target string.
    */
   async writeSymlink(path: string, target: string): Promise<void> {
     this._checkOpen();
@@ -99,6 +115,10 @@ export class Batch {
 
   /**
    * Stage a file removal.
+   *
+   * @param path - Path to remove from the repo.
+   * @throws {FileNotFoundError} If the path does not exist in the repo or pending writes.
+   * @throws {IsADirectoryError} If the path is a directory.
    */
   async remove(path: string): Promise<void> {
     this._checkOpen();
@@ -130,7 +150,12 @@ export class Batch {
   }
 
   /**
-   * Commit all accumulated changes. Returns the new FS snapshot.
+   * Commit all accumulated changes atomically.
+   *
+   * After calling this the batch is closed and no further writes are allowed.
+   *
+   * @returns The resulting FS snapshot.
+   * @throws {StaleSnapshotError} If the branch has advanced since the snapshot.
    */
   async commit(): Promise<FS> {
     if (this._closed) throw new Error('Batch is already committed');

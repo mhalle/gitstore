@@ -22,7 +22,15 @@ pub(crate) fn u32_to_mode(mode: u32) -> EntryMode {
     EntryMode::try_from(mode).unwrap_or(EntryMode::from(EntryKind::Blob))
 }
 
-/// Get the entry (oid + mode) at a specific path in a tree.
+/// Return the `(oid, mode)` of the entry at `path`, or `None` if missing.
+///
+/// Walks the tree from `tree_oid` through each path segment. Returns `None`
+/// when any segment is not found or an intermediate entry is not a tree.
+///
+/// # Arguments
+/// * `repo` - The git repository.
+/// * `tree_oid` - Root tree to search from.
+/// * `path` - Normalized forward-slash path (e.g. `"dir/file.txt"`).
 pub fn entry_at_path(
     repo: &gix::Repository,
     tree_oid: gix::ObjectId,
@@ -74,7 +82,14 @@ pub fn entry_at_path(
     Ok(None)
 }
 
-/// Walk to a path within a tree, returning each intermediate tree oid.
+/// Walk to a path within a tree, returning every entry along the way.
+///
+/// Unlike [`entry_at_path`], this returns the full chain of
+/// [`TreeEntryResult`] objects from the first segment to the last.
+///
+/// # Errors
+/// Returns [`Error::NotFound`] if a segment is missing, or
+/// [`Error::NotADirectory`] if an intermediate entry is not a tree.
 pub fn walk_to(
     repo: &gix::Repository,
     tree_oid: gix::ObjectId,
@@ -127,7 +142,11 @@ pub fn walk_to(
     Ok(results)
 }
 
-/// Read a blob at a given path, returning its bytes.
+/// Read a blob at a given path in the tree, returning its raw bytes.
+///
+/// # Errors
+/// Returns [`Error::IsADirectory`] if the path points to a tree,
+/// [`Error::NotFound`] if the path does not exist.
 pub fn read_blob_at_path(
     repo: &gix::Repository,
     tree_oid: gix::ObjectId,
@@ -147,6 +166,13 @@ pub fn read_blob_at_path(
 }
 
 /// List the immediate children of a tree at the given path.
+///
+/// Returns [`WalkEntry`] objects with `name`, `oid`, and `mode` for each
+/// child. Pass an empty or root path to list the top-level tree.
+///
+/// # Errors
+/// Returns [`Error::NotFound`] if the path does not exist, or
+/// [`Error::NotADirectory`] if it is not a tree.
 pub fn list_tree_at_path(
     repo: &gix::Repository,
     tree_oid: gix::ObjectId,
@@ -177,7 +203,11 @@ pub fn list_tree_at_path(
     Ok(entries)
 }
 
-/// List all entries (recursive) under the given path.
+/// List all entries recursively under the given path.
+///
+/// Returns a flat list of non-tree [`WalkEntry`] items with their names
+/// (basenames, not full paths). Directories are traversed but not included
+/// in the output.
 pub fn list_entries_at_path(
     repo: &gix::Repository,
     tree_oid: gix::ObjectId,
@@ -198,7 +228,10 @@ pub fn list_entries_at_path(
     Ok(entries.into_iter().map(|(_path, entry)| entry).collect())
 }
 
-/// Recursively walk a tree, yielding all entries with full paths.
+/// Recursively walk a tree, returning all non-tree entries with full paths.
+///
+/// Each element is a `(full_path, WalkEntry)` pair where `full_path` is
+/// the slash-separated path from the tree root (e.g. `"dir/sub/file.txt"`).
 pub fn walk_tree(
     repo: &gix::Repository,
     tree_oid: gix::ObjectId,
@@ -243,7 +276,10 @@ fn walk_tree_recursive(
     Ok(())
 }
 
-/// Check whether an entry exists at a path in the tree.
+/// Check whether an entry exists at the given path in the tree.
+///
+/// Returns `Ok(true)` if the path resolves to any object (blob, tree,
+/// symlink), `Ok(false)` if not found.
 pub fn exists_at_path(
     repo: &gix::Repository,
     tree_oid: gix::ObjectId,
@@ -252,7 +288,9 @@ pub fn exists_at_path(
     Ok(entry_at_path(repo, tree_oid, path)?.is_some())
 }
 
-/// Count the number of immediate subdirectories in a tree.
+/// Count immediate subdirectory entries in a tree (no recursion).
+///
+/// Used to compute `nlink` for directory stat results.
 pub fn count_subdirs(repo: &gix::Repository, tree_oid: gix::ObjectId) -> Result<u32> {
     let tree_data = repo.find_object(tree_oid).map_err(Error::git)?;
     let tree_ref = gix::objs::TreeRef::from_bytes(&tree_data.data).map_err(Error::git)?;
@@ -264,8 +302,20 @@ pub fn count_subdirs(repo: &gix::Repository, tree_oid: gix::ObjectId) -> Result<
     Ok(count as u32)
 }
 
-/// Rebuild a tree by applying a set of writes (add/update/delete).
-/// `None` in the value position means delete.
+/// Rebuild a tree by applying writes and deletes.
+///
+/// Only the ancestor chain from changed leaves to root is rebuilt;
+/// sibling subtrees are shared by hash reference. Empty directories
+/// are automatically pruned.
+///
+/// # Arguments
+/// * `repo` - The git repository.
+/// * `base_tree` - OID of the existing tree (null OID for empty).
+/// * `writes` - Slice of `(path, Option<TreeWrite>)`. `Some` means add/update,
+///   `None` means delete.
+///
+/// # Returns
+/// OID of the new root tree.
 pub fn rebuild_tree(
     repo: &gix::Repository,
     base_tree: gix::ObjectId,
@@ -380,7 +430,10 @@ pub fn rebuild_tree(
     Ok(tree_oid.detach())
 }
 
-/// Determine the git mode for a file on disk.
+/// Determine the git filemode for a file on disk.
+///
+/// Returns [`MODE_LINK`] for symlinks, [`MODE_BLOB_EXEC`] for executable
+/// files (Unix only), or [`MODE_BLOB`] otherwise.
 pub fn mode_from_disk(path: &std::path::Path) -> Result<u32> {
     let meta = std::fs::symlink_metadata(path).map_err(|e| Error::io(path, e))?;
     if meta.file_type().is_symlink() {

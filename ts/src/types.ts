@@ -6,19 +6,26 @@
 // Git file mode constants (octal → string for isomorphic-git)
 // ---------------------------------------------------------------------------
 
+/** Git filemode for tree (directory) entries. */
 export const MODE_TREE = '040000';
+/** Git filemode for regular blob (file) entries. */
 export const MODE_BLOB = '100644';
+/** Git filemode for executable blob entries. */
 export const MODE_BLOB_EXEC = '100755';
+/** Git filemode for symbolic link entries. */
 export const MODE_LINK = '120000';
 
+/** Convert an octal mode string (e.g. '100644') to an integer. */
 export function modeToInt(mode: string): number {
   return parseInt(mode, 8);
 }
 
+/** Convert an integer filemode to a zero-padded octal string. */
 export function modeFromInt(mode: number): string {
   return mode.toString(8).padStart(6, '0');
 }
 
+/** Return the isomorphic-git object type for a given mode string. */
 export function typeForMode(mode: string): 'blob' | 'tree' | 'commit' {
   if (mode === MODE_TREE) return 'tree';
   if (mode === '160000') return 'commit';
@@ -29,13 +36,26 @@ export function typeForMode(mode: string): 'blob' | 'tree' | 'commit' {
 // FileType enum
 // ---------------------------------------------------------------------------
 
+/**
+ * File type classification for git tree entries.
+ *
+ * - `BLOB` - Regular file (mode 100644).
+ * - `EXECUTABLE` - Executable file (mode 100755).
+ * - `LINK` - Symbolic link (mode 120000).
+ * - `TREE` - Directory (mode 040000).
+ */
 export const FileType = {
+  /** Regular file (mode 100644). */
   BLOB: 'blob',
+  /** Executable file (mode 100755). */
   EXECUTABLE: 'executable',
+  /** Symbolic link (mode 120000). */
   LINK: 'link',
+  /** Directory (mode 040000). */
   TREE: 'tree',
 } as const;
 
+/** Union type of all FileType values. */
 export type FileType = (typeof FileType)[keyof typeof FileType];
 
 const MODE_TO_TYPE: Record<string, FileType> = {
@@ -52,12 +72,25 @@ const TYPE_TO_MODE: Record<FileType, string> = {
   [FileType.TREE]: MODE_TREE,
 };
 
+/**
+ * Convert a git filemode string to a FileType enum value.
+ *
+ * @param mode - Octal mode string (e.g. '100644').
+ * @returns The corresponding FileType.
+ * @throws {Error} If the mode is not recognized.
+ */
 export function fileTypeFromMode(mode: string): FileType {
   const ft = MODE_TO_TYPE[mode];
   if (!ft) throw new Error(`Unknown git mode: ${mode}`);
   return ft;
 }
 
+/**
+ * Convert a FileType enum value to a git filemode string.
+ *
+ * @param ft - FileType value.
+ * @returns The corresponding octal mode string.
+ */
 export function fileModeFromType(ft: FileType): string {
   return TYPE_TO_MODE[ft];
 }
@@ -66,6 +99,7 @@ export function fileModeFromType(ft: FileType): string {
 // Error classes
 // ---------------------------------------------------------------------------
 
+/** Base error class for all gitstore errors. */
 export class GitStoreError extends Error {
   constructor(message: string) {
     super(message);
@@ -73,6 +107,10 @@ export class GitStoreError extends Error {
   }
 }
 
+/**
+ * Raised when a branch has advanced since the FS snapshot was taken,
+ * causing a compare-and-swap (CAS) failure on commit.
+ */
 export class StaleSnapshotError extends GitStoreError {
   constructor(message: string) {
     super(message);
@@ -80,6 +118,7 @@ export class StaleSnapshotError extends GitStoreError {
   }
 }
 
+/** Raised when a path does not exist in the repository tree. */
 export class FileNotFoundError extends GitStoreError {
   code = 'ENOENT';
   constructor(path: string) {
@@ -88,6 +127,7 @@ export class FileNotFoundError extends GitStoreError {
   }
 }
 
+/** Raised when an operation expected a file but found a directory. */
 export class IsADirectoryError extends GitStoreError {
   code = 'EISDIR';
   constructor(path: string) {
@@ -96,6 +136,7 @@ export class IsADirectoryError extends GitStoreError {
   }
 }
 
+/** Raised when an operation expected a directory but found a file. */
 export class NotADirectoryError extends GitStoreError {
   code = 'ENOTDIR';
   constructor(path: string) {
@@ -104,6 +145,7 @@ export class NotADirectoryError extends GitStoreError {
   }
 }
 
+/** Raised when a write is attempted on a read-only snapshot (e.g. a tag). */
 export class PermissionError extends GitStoreError {
   code = 'EPERM';
   constructor(message: string) {
@@ -116,34 +158,68 @@ export class PermissionError extends GitStoreError {
 // Data structures
 // ---------------------------------------------------------------------------
 
+/**
+ * A file or directory entry yielded by `FS.walk()` and `FS.listdir()`.
+ */
 export interface WalkEntry {
+  /** Entry name (file or directory basename). */
   name: string;
+  /** 40-char hex object ID (SHA). */
   oid: string;
+  /** Git filemode string (e.g. '100644', '040000'). */
   mode: string;
 }
 
+/**
+ * POSIX-like stat result for a gitstore path.
+ *
+ * Combines file type, size, OID, nlink, and mtime in a single structure,
+ * optimized for the FUSE `getattr` hot path.
+ */
 export interface StatResult {
-  mode: number;        // raw git filemode as integer (0o100644, etc.)
-  fileType: FileType;  // 'blob' | 'executable' | 'link' | 'tree'
-  size: number;        // blob bytes (symlinks: target length; dirs: 0)
-  hash: string;        // 40-char hex SHA
-  nlink: number;       // 1 for files/symlinks, 2+subdirs for directories
-  mtime: number;       // commit timestamp as POSIX epoch seconds
+  /** Raw git filemode as integer (e.g. 0o100644, 0o040000). */
+  mode: number;
+  /** File type classification. */
+  fileType: FileType;
+  /** Object size in bytes (0 for directories). */
+  size: number;
+  /** 40-char hex SHA of the object (inode proxy). */
+  hash: string;
+  /** 1 for files/symlinks, 2 + subdirectory count for directories. */
+  nlink: number;
+  /** Commit timestamp as POSIX epoch seconds. */
+  mtime: number;
 }
 
+/**
+ * Return the FileType for a WalkEntry.
+ *
+ * @param entry - A walk entry from `FS.walk()` or `FS.listdir()`.
+ * @returns The FileType corresponding to the entry's mode.
+ */
 export function walkEntryFileType(entry: WalkEntry): FileType {
   return fileTypeFromMode(entry.mode);
 }
 
+/**
+ * Describes a single file write for `FS.apply()`.
+ *
+ * Exactly one of `data` or `target` must be provided.
+ * `target` creates a symbolic link entry; `mode` is not allowed with it.
+ */
 export interface WriteEntry {
-  /** Raw data (bytes), text (string), or local file path to read. */
+  /** Raw data (bytes) or text (string). Mutually exclusive with `target`. */
   data?: Uint8Array | string;
   /** Git filemode override (e.g. FileType.EXECUTABLE). */
   mode?: FileType | string;
-  /** Symlink target (mutually exclusive with data). */
+  /** Symlink target string. Mutually exclusive with `data`. */
   target?: string;
 }
 
+/**
+ * Validate a WriteEntry, throwing if both `data` and `target` are set,
+ * neither is set, or `mode` is combined with `target`.
+ */
 export function validateWriteEntry(entry: WriteEntry): void {
   if (entry.data != null && entry.target != null) {
     throw new Error('Cannot specify both data and target');
@@ -160,46 +236,79 @@ export function validateWriteEntry(entry: WriteEntry): void {
 // Change tracking
 // ---------------------------------------------------------------------------
 
+/**
+ * A file entry in a change report, with path and type information.
+ */
 export interface FileEntry {
+  /** Repo-relative path. */
   path: string;
+  /** File type (blob, executable, link, or tree). */
   type: FileType;
+  /** Optional source path (for copy operations). */
   src?: string;
 }
 
+/**
+ * Create a FileEntry from a path and git filemode string.
+ *
+ * @param path - Repo-relative path.
+ * @param mode - Git filemode string.
+ * @param src - Optional source path.
+ */
 export function fileEntryFromMode(path: string, mode: string, src?: string): FileEntry {
   return { path, type: fileTypeFromMode(mode), src };
 }
 
+/** A single action entry (add, update, or delete) for a path. */
 export interface ChangeAction {
+  /** Repo-relative path. */
   path: string;
+  /** The kind of change. */
   action: 'add' | 'update' | 'delete';
 }
 
+/** An error or warning associated with a path during a copy/sync operation. */
 export interface ChangeError {
+  /** Repo-relative path that caused the error. */
   path: string;
+  /** Human-readable error description. */
   error: string;
 }
 
+/**
+ * Report of changes from a write, copy, sync, remove, or move operation.
+ *
+ * Available on the resulting FS via `fs.changes`.
+ */
 export interface ChangeReport {
+  /** Files that were added. */
   add: FileEntry[];
+  /** Files that were updated. */
   update: FileEntry[];
+  /** Files that were deleted. */
   delete: FileEntry[];
+  /** Errors encountered during the operation. */
   errors: ChangeError[];
+  /** Warnings encountered during the operation. */
   warnings: ChangeError[];
 }
 
+/** Create an empty ChangeReport with no actions or errors. */
 export function emptyChangeReport(): ChangeReport {
   return { add: [], update: [], delete: [], errors: [], warnings: [] };
 }
 
+/** Return true if the report contains no adds, updates, or deletes. */
 export function changeReportInSync(cr: ChangeReport): boolean {
   return cr.add.length === 0 && cr.update.length === 0 && cr.delete.length === 0;
 }
 
+/** Return the total number of adds, updates, and deletes. */
 export function changeReportTotal(cr: ChangeReport): number {
   return cr.add.length + cr.update.length + cr.delete.length;
 }
 
+/** Flatten a ChangeReport into a sorted list of ChangeAction entries. */
 export function changeReportActions(cr: ChangeReport): ChangeAction[] {
   const result: ChangeAction[] = [];
   for (const e of cr.add) result.push({ path: e.path, action: 'add' });
@@ -209,6 +318,7 @@ export function changeReportActions(cr: ChangeReport): ChangeAction[] {
   return result;
 }
 
+/** Return null if the report is completely empty, otherwise return it as-is. */
 export function finalizeChanges(cr: ChangeReport): ChangeReport | null {
   if (
     cr.add.length === 0 &&
@@ -222,6 +332,17 @@ export function finalizeChanges(cr: ChangeReport): ChangeReport | null {
   return cr;
 }
 
+/**
+ * Generate a commit message from a ChangeReport.
+ *
+ * If `customMessage` is provided and contains `{` placeholders, they are
+ * expanded (e.g. `{add_count}`, `{total_count}`, `{default}`).
+ * Otherwise, an auto-generated summary is used.
+ *
+ * @param changes - The change report to summarize.
+ * @param customMessage - Optional user-provided message template.
+ * @param operation - Optional operation name for auto messages (e.g. 'cp').
+ */
 export function formatCommitMessage(
   changes: ChangeReport,
   customMessage?: string | null,
@@ -272,22 +393,34 @@ function autoMessage(changes: ChangeReport, operation: string | null): string {
 // Mirror data structures
 // ---------------------------------------------------------------------------
 
+/** A single ref change in a mirror operation (backup or restore). */
 export interface RefChange {
+  /** Full ref name (e.g. 'refs/heads/main'). */
   ref: string;
+  /** Previous target SHA, or undefined for newly created refs. */
   oldTarget?: string;
+  /** New target SHA, or undefined for deleted refs. */
   newTarget?: string;
 }
 
+/**
+ * Report of ref changes from a `backup()` or `restore()` mirror operation.
+ */
 export interface MirrorDiff {
+  /** Refs that were created. */
   add: RefChange[];
+  /** Refs whose target changed. */
   update: RefChange[];
+  /** Refs that were deleted. */
   delete: RefChange[];
 }
 
+/** Return true if the mirror diff contains no changes. */
 export function mirrorDiffInSync(md: MirrorDiff): boolean {
   return md.add.length === 0 && md.update.length === 0 && md.delete.length === 0;
 }
 
+/** Return the total number of ref changes. */
 export function mirrorDiffTotal(md: MirrorDiff): number {
   return md.add.length + md.update.length + md.delete.length;
 }
@@ -296,11 +429,19 @@ export function mirrorDiffTotal(md: MirrorDiff): number {
 // Reflog
 // ---------------------------------------------------------------------------
 
+/**
+ * A single reflog entry recording a branch movement.
+ */
 export interface ReflogEntry {
+  /** Previous 40-char hex commit SHA. */
   oldSha: string;
+  /** New 40-char hex commit SHA. */
   newSha: string;
+  /** Identity string of the committer. */
   committer: string;
+  /** POSIX epoch seconds of the entry. */
   timestamp: number;
+  /** Reflog message (e.g. 'commit: + file.txt'). */
   message: string;
 }
 
@@ -349,19 +490,27 @@ export interface FsModule {
   chmod: Function;
 }
 
+/** HTTP client interface for mirror operations (compatible with isomorphic-git). */
 export interface HttpClient {
   request: Function;
 }
 
-/** Author/committer identity. */
+/** Author/committer identity used for commits. */
 export interface Signature {
+  /** Author name (e.g. 'gitstore'). */
   name: string;
+  /** Author email (e.g. 'gitstore@localhost'). */
   email: string;
 }
 
+/** Metadata extracted from a git commit object. */
 export interface CommitInfo {
+  /** Commit message (trailing newline stripped). */
   message: string;
+  /** Timezone-aware commit timestamp. */
   time: Date;
+  /** Commit author's name. */
   authorName: string;
+  /** Commit author's email address. */
   authorEmail: string;
 }

@@ -26,6 +26,12 @@ function validateHash(h: string): void {
 // NoteNamespace
 // -----------------------------------------------------------------------
 
+/**
+ * One git notes namespace, backed by `refs/notes/<name>`.
+ *
+ * Maps 40-char hex commit hashes to UTF-8 note text.
+ * Supports `get`, `set`, `delete`, `has`, `list`, and `batch()`.
+ */
 export class NoteNamespace {
   /** @internal */ _store: GitStore;
   /** @internal */ _namespace: string;
@@ -326,6 +332,13 @@ export class NoteNamespace {
 
   // -- public API --------------------------------------------------------
 
+  /**
+   * Get the note text for a commit hash.
+   *
+   * @param hash - 40-char lowercase hex commit hash.
+   * @returns The note text (UTF-8).
+   * @throws {GitStoreError} If no note exists for the hash.
+   */
   async get(hash: string): Promise<string> {
     validateHash(hash);
     const treeOid = await this._treeOid();
@@ -344,6 +357,14 @@ export class NoteNamespace {
     return new TextDecoder().decode(blob);
   }
 
+  /**
+   * Set or overwrite the note text for a commit hash.
+   *
+   * Creates a commit on the namespace's notes ref.
+   *
+   * @param hash - 40-char lowercase hex commit hash.
+   * @param text - Note text (UTF-8 string).
+   */
   async set(hash: string, text: string): Promise<void> {
     validateHash(hash);
     const writes = new Map<string, string>();
@@ -353,6 +374,12 @@ export class NoteNamespace {
     await this._commitNoteTree(newTreeOid, `Notes added by 'git notes' on ${hash.slice(0, 7)}`);
   }
 
+  /**
+   * Delete the note for a commit hash.
+   *
+   * @param hash - 40-char lowercase hex commit hash.
+   * @throws {GitStoreError} If no note exists for the hash.
+   */
   async delete(hash: string): Promise<void> {
     validateHash(hash);
     const treeOid = await this._treeOid();
@@ -365,6 +392,12 @@ export class NoteNamespace {
     await this._commitNoteTree(newTreeOid, `Notes removed by 'git notes' on ${hash.slice(0, 7)}`);
   }
 
+  /**
+   * Check if a note exists for a commit hash.
+   *
+   * @param hash - 40-char lowercase hex commit hash.
+   * @returns True if a note exists.
+   */
   async has(hash: string): Promise<boolean> {
     validateHash(hash);
     const treeOid = await this._treeOid();
@@ -372,6 +405,11 @@ export class NoteNamespace {
     return (await this._findNoteInTree(treeOid, hash)) !== null;
   }
 
+  /**
+   * List all commit hashes that have notes in this namespace.
+   *
+   * @returns Array of 40-char hex commit hashes.
+   */
   async list(): Promise<string[]> {
     const treeOid = await this._treeOid();
     if (treeOid === null) return [];
@@ -379,6 +417,7 @@ export class NoteNamespace {
     return notes.map(([h]) => h);
   }
 
+  /** Return the number of notes in this namespace. */
   async size(): Promise<number> {
     const treeOid = await this._treeOid();
     if (treeOid === null) return 0;
@@ -386,6 +425,12 @@ export class NoteNamespace {
     return notes.length;
   }
 
+  /**
+   * Get the note for the current HEAD commit.
+   *
+   * @returns The note text.
+   * @throws {GitStoreError} If HEAD is dangling or no note exists.
+   */
   async getForCurrentBranch(): Promise<string> {
     const current = await this._store.branches.getCurrent();
     if (current === null) {
@@ -394,6 +439,12 @@ export class NoteNamespace {
     return this.get(current.commitHash);
   }
 
+  /**
+   * Set the note for the current HEAD commit.
+   *
+   * @param text - Note text (UTF-8 string).
+   * @throws {GitStoreError} If HEAD is dangling.
+   */
   async setForCurrentBranch(text: string): Promise<void> {
     const current = await this._store.branches.getCurrent();
     if (current === null) {
@@ -402,6 +453,10 @@ export class NoteNamespace {
     return this.set(current.commitHash, text);
   }
 
+  /**
+   * Return a NotesBatch that collects writes/deletes and applies them
+   * in a single commit when `commit()` is called.
+   */
   batch(): NotesBatch {
     return new NotesBatch(this);
   }
@@ -411,6 +466,11 @@ export class NoteNamespace {
 // NotesBatch
 // -----------------------------------------------------------------------
 
+/**
+ * Collects note writes and deletes, applying them in one commit.
+ *
+ * Call `set()` and `delete()` to stage changes, then `commit()` to flush.
+ */
 export class NotesBatch {
   private _ns: NoteNamespace;
   private _writes = new Map<string, string>();
@@ -421,6 +481,12 @@ export class NotesBatch {
     this._ns = ns;
   }
 
+  /**
+   * Stage a note write.
+   *
+   * @param hash - 40-char lowercase hex commit hash.
+   * @param text - Note text (UTF-8 string).
+   */
   async set(hash: string, text: string): Promise<void> {
     if (this._closed) throw new GitStoreError('Batch is closed');
     validateHash(hash);
@@ -428,6 +494,11 @@ export class NotesBatch {
     this._writes.set(hash, text);
   }
 
+  /**
+   * Stage a note deletion.
+   *
+   * @param hash - 40-char lowercase hex commit hash.
+   */
   delete(hash: string): void {
     if (this._closed) throw new GitStoreError('Batch is closed');
     validateHash(hash);
@@ -435,6 +506,11 @@ export class NotesBatch {
     this._deletes.add(hash);
   }
 
+  /**
+   * Commit all staged writes and deletes in a single commit.
+   *
+   * After calling this the batch is closed and no further changes are allowed.
+   */
   async commit(): Promise<void> {
     if (this._closed) throw new GitStoreError('Batch is already committed');
     this._closed = true;
@@ -461,6 +537,12 @@ export class NotesBatch {
 // NoteDict
 // -----------------------------------------------------------------------
 
+/**
+ * Outer container for git notes namespaces on a GitStore.
+ *
+ * `store.notes.commits` returns the default namespace (`refs/notes/commits`).
+ * `store.notes.namespace('reviews')` returns a custom namespace.
+ */
 export class NoteDict {
   private _store: GitStore;
 
@@ -472,10 +554,17 @@ export class NoteDict {
     return `NoteDict(${this._store.toString()})`;
   }
 
+  /** The default `refs/notes/commits` namespace. */
   get commits(): NoteNamespace {
     return new NoteNamespace(this._store, 'commits');
   }
 
+  /**
+   * Access a custom notes namespace.
+   *
+   * @param name - Namespace name (e.g. 'reviews').
+   * @returns NoteNamespace for `refs/notes/<name>`.
+   */
   namespace(name: string): NoteNamespace {
     return new NoteNamespace(this._store, name);
   }

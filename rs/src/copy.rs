@@ -5,7 +5,21 @@ use crate::fs::TreeWrite;
 use crate::tree;
 use crate::types::{ChangeReport, FileEntry, FileType, MODE_BLOB, MODE_LINK, MODE_TREE};
 
-/// Copy files from disk into a tree, returning a list of (path, TreeWrite) pairs.
+/// Copy files from a local directory into a git tree.
+///
+/// Walks `src` on disk, writes blobs to the object store, and returns a list
+/// of `(store_path, TreeWrite)` pairs that the caller should apply to
+/// the tree, along with a [`ChangeReport`] describing what was added.
+///
+/// # Arguments
+/// * `repo` - The git repository to write blobs into.
+/// * `base_tree` - Root tree OID of the current commit (used for checksum dedup).
+/// * `src` - Local directory to copy from.
+/// * `dest` - Destination path prefix inside the repo (e.g. `"data"` or `""`).
+/// * `include` - Optional glob patterns; only matching files are copied.
+/// * `exclude` - Optional glob patterns; matching files are skipped.
+/// * `checksum` - When `true`, skip files whose blob OID and mode already
+///   match the existing tree entry (content-based deduplication).
 pub fn copy_in(
     repo: &gix::Repository,
     base_tree: gix::ObjectId,
@@ -85,7 +99,18 @@ pub fn copy_in(
     Ok((writes, report))
 }
 
-/// Copy files from a tree to disk.
+/// Copy files from a git tree to a local directory.
+///
+/// Reads blobs from the tree rooted at `src` and writes them to `dest` on
+/// disk. Symlinks and executable permissions are preserved on Unix.
+///
+/// # Arguments
+/// * `repo` - The git repository to read objects from.
+/// * `tree_oid` - Root tree OID of the commit to export from.
+/// * `src` - Source path prefix inside the repo (e.g. `"data"` or `""`).
+/// * `dest` - Local directory to write files into.
+/// * `include` - Optional glob patterns; only matching files are copied.
+/// * `exclude` - Optional glob patterns; matching files are skipped.
 pub fn copy_out(
     repo: &gix::Repository,
     tree_oid: gix::ObjectId,
@@ -157,8 +182,20 @@ pub fn copy_out(
 
 /// Sync files from disk into a tree (add + update + delete).
 ///
-/// Unlike `copy_in`, this also deletes files in the destination tree that
-/// are not present on disk, and classifies changes as add/update/delete.
+/// Makes the tree subtree at `dest` identical to the local directory `src`.
+/// Unlike [`copy_in`], this also deletes files in the destination tree that
+/// are not present on disk, and classifies changes as add/update/delete in
+/// the returned [`ChangeReport`]. Entries with `None` in the returned vec
+/// represent deletions.
+///
+/// # Arguments
+/// * `repo` - The git repository.
+/// * `base_tree` - Root tree OID of the current commit.
+/// * `src` - Local directory to sync from.
+/// * `dest` - Destination path prefix inside the repo.
+/// * `include` - Optional glob patterns; only matching files are synced.
+/// * `exclude` - Optional glob patterns; matching files are skipped.
+/// * `checksum` - When `true`, skip unchanged files (OID + mode comparison).
 pub fn sync_in(
     repo: &gix::Repository,
     base_tree: gix::ObjectId,
@@ -273,8 +310,19 @@ pub fn sync_in(
 
 /// Sync files from a tree to disk (add + update + delete).
 ///
-/// Unlike `copy_out`, this also deletes local files that are not present in
-/// the repo tree, and classifies changes as add/update/delete.
+/// Makes the local directory `dest` identical to the tree subtree at `src`.
+/// Unlike [`copy_out`], this also deletes local files that are not present
+/// in the repo tree, prunes empty directories, and classifies all changes
+/// as add/update/delete in the returned [`ChangeReport`].
+///
+/// # Arguments
+/// * `repo` - The git repository.
+/// * `tree_oid` - Root tree OID of the commit to export from.
+/// * `src` - Source path prefix inside the repo.
+/// * `dest` - Local directory to sync into.
+/// * `include` - Optional glob patterns; only matching files are synced.
+/// * `exclude` - Optional glob patterns; matching files are skipped.
+/// * `checksum` - When `true`, skip unchanged files (content comparison).
 pub fn sync_out(
     repo: &gix::Repository,
     tree_oid: gix::ObjectId,
@@ -401,7 +449,8 @@ pub fn sync_out(
     Ok(report)
 }
 
-/// Remove empty directories under `root`, bottom-up.
+/// Remove empty directories under `root`, bottom-up. Silently skips
+/// directories that still contain files.
 fn prune_empty_dirs(root: &Path) -> Result<()> {
     if !root.is_dir() {
         return Ok(());
@@ -440,7 +489,12 @@ fn collect_dirs(root: &Path, dir: &Path, results: &mut Vec<String>) -> Result<()
     Ok(())
 }
 
-/// Remove files from disk that match patterns.
+/// Remove files from disk that match the given include/exclude patterns.
+///
+/// # Arguments
+/// * `dest` - Root directory to scan for files.
+/// * `include` - Optional glob patterns; only matching files are removed.
+/// * `exclude` - Optional glob patterns; matching files are kept.
 pub fn remove_from_disk(
     dest: &Path,
     include: Option<&[&str]>,
@@ -458,7 +512,20 @@ pub fn remove_from_disk(
     Ok(report)
 }
 
-/// Rename a path within a tree, returning updated tree writes.
+/// Rename a path within a tree, returning tree writes for the move.
+///
+/// Handles both single-file renames and directory renames (moving all
+/// children). Each returned entry is either a deletion (`None`) of the
+/// old path or a write (`Some(TreeWrite)`) at the new path.
+///
+/// # Arguments
+/// * `repo` - The git repository.
+/// * `base_tree` - Root tree OID of the current commit.
+/// * `src` - Normalized source path in the tree.
+/// * `dest` - Normalized destination path in the tree.
+///
+/// # Errors
+/// Returns [`Error::NotFound`] if `src` does not exist in the tree.
 pub fn rename(
     repo: &gix::Repository,
     base_tree: gix::ObjectId,
@@ -509,7 +576,13 @@ pub fn rename(
     Ok(writes)
 }
 
-/// Glob files on disk, respecting include/exclude patterns.
+/// Recursively list all files under `root`, filtered by include/exclude
+/// glob patterns. Returns sorted relative paths.
+///
+/// # Arguments
+/// * `root` - Directory to walk.
+/// * `include` - Optional glob patterns; only matching files are returned.
+/// * `exclude` - Optional glob patterns; matching files are excluded.
 pub fn disk_glob(
     root: &Path,
     include: Option<&[&str]>,

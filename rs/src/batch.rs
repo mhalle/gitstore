@@ -5,10 +5,10 @@ use crate::fs::{Fs, TreeWrite};
 use crate::tree;
 use crate::types::{MODE_BLOB, MODE_LINK};
 
-/// Accumulates writes and commits them atomically when consumed.
+/// Accumulates writes and removes, committing them atomically.
 ///
-/// `commit(self)` takes ownership, so the compiler enforces that
-/// no further writes happen after committing.
+/// [`commit`](Batch::commit) takes ownership (`self`), so the compiler
+/// enforces that no further writes happen after committing.
 pub struct Batch {
     pub(crate) fs: Fs,
     pub(crate) writes: Vec<(String, Option<TreeWrite>)>,
@@ -27,7 +27,7 @@ impl Batch {
         }
     }
 
-    /// Write raw bytes to `path`.
+    /// Write raw bytes to `path` with the default blob mode (`0o100644`).
     pub fn write(&mut self, path: &str, data: &[u8]) -> Result<()> {
         self.write_with_mode(path, data, MODE_BLOB)
     }
@@ -96,7 +96,14 @@ impl Batch {
         Ok(())
     }
 
-    /// Commit all accumulated writes. Consumes the `Batch` and returns the new `Fs` snapshot.
+    /// Commit all accumulated writes and removes atomically.
+    ///
+    /// Consumes the `Batch` and returns the resulting [`Fs`] snapshot.
+    /// If no writes or removes were recorded, the original `Fs` is
+    /// returned unchanged (no empty commit is created).
+    ///
+    /// # Errors
+    /// Returns an error if the batch is already closed or the commit fails.
     pub fn commit(mut self) -> Result<Fs> {
         self.closed = true;
 

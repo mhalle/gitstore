@@ -7,6 +7,13 @@ use crate::types::ReflogEntry;
 pub const ZERO_SHA: &str = "0000000000000000000000000000000000000000";
 
 /// Read all reflog entries for the given ref.
+///
+/// Parses `<gitdir>/logs/<refname>` line by line. Returns an empty vec
+/// if the reflog file does not exist.
+///
+/// # Arguments
+/// * `gitdir` - Path to the bare repository directory.
+/// * `refname` - Full ref name (e.g. `"refs/heads/main"`).
 pub fn read_reflog(gitdir: &Path, refname: &str) -> Result<Vec<ReflogEntry>> {
     let log_path = gitdir.join("logs").join(refname);
     if !log_path.exists() {
@@ -56,7 +63,15 @@ pub fn read_reflog(gitdir: &Path, refname: &str) -> Result<Vec<ReflogEntry>> {
     Ok(entries)
 }
 
-/// Append a single reflog entry.
+/// Append a single reflog entry to `<gitdir>/logs/<refname>`.
+///
+/// Creates the parent directories if they do not exist. The entry is
+/// written in standard git reflog format: `<old> <new> <committer> <ts> +0000\t<msg>`.
+///
+/// # Arguments
+/// * `gitdir` - Path to the bare repository directory.
+/// * `refname` - Full ref name (e.g. `"refs/heads/main"`).
+/// * `entry` - The [`ReflogEntry`] to append.
 pub fn write_reflog_entry(
     gitdir: &Path,
     refname: &str,

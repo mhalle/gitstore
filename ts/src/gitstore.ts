@@ -7,13 +7,22 @@ import type { FsModule, Signature, MirrorDiff, HttpClient } from './types.js';
 import { RefDict } from './refdict.js';
 import { NoteDict } from './notes.js';
 
+/**
+ * A versioned filesystem backed by a bare git repository.
+ *
+ * Open or create a store with `GitStore.open()`. Access snapshots via
+ * `branches`, `tags`, and `notes`.
+ */
 export class GitStore {
   /** @internal */ _fsModule: FsModule;
   /** @internal */ _gitdir: string;
   /** @internal */ _signature: Signature;
 
+  /** Dict-like access to branches. */
   branches: RefDict;
+  /** Dict-like access to tags. */
   tags: RefDict;
+  /** Git notes namespaces. */
   notes: NoteDict;
 
   constructor(fsModule: FsModule, gitdir: string, author: string, email: string) {
@@ -114,7 +123,15 @@ export class GitStore {
   }
 
   /**
-   * Push all refs to url, creating an exact mirror. (HTTP only)
+   * Push all refs to url, creating an exact mirror.
+   *
+   * Remote-only refs are deleted.
+   *
+   * @param url - Remote repository URL (HTTPS or local path).
+   * @param opts.http - HTTP client (isomorphic-git compatible).
+   * @param opts.dryRun - Compute diff without pushing.
+   * @param opts.onAuth - Optional authentication callback.
+   * @returns A MirrorDiff describing what changed (or would change).
    */
   async backup(
     url: string,
@@ -125,7 +142,15 @@ export class GitStore {
   }
 
   /**
-   * Fetch all refs from url, overwriting local state. (HTTP only)
+   * Fetch all refs from url, overwriting local state.
+   *
+   * Local-only refs are deleted.
+   *
+   * @param url - Remote repository URL (HTTPS or local path).
+   * @param opts.http - HTTP client (isomorphic-git compatible).
+   * @param opts.dryRun - Compute diff without fetching.
+   * @param opts.onAuth - Optional authentication callback.
+   * @returns A MirrorDiff describing what changed (or would change).
    */
   async restore(
     url: string,

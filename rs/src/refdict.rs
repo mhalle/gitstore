@@ -7,6 +7,9 @@ use crate::types::ReflogEntry;
 
 /// A transient, borrowed view over a set of git references sharing a common
 /// prefix (e.g. `refs/heads/` or `refs/tags/`).
+///
+/// `store.branches()` and `store.tags()` both return `RefDict` instances.
+/// Branches yield writable [`Fs`] snapshots; tags yield read-only ones.
 pub struct RefDict<'a> {
     store: &'a GitStore,
     prefix: &'static str,
@@ -37,10 +40,12 @@ impl<'a> RefDict<'a> {
         Fs::from_commit(Arc::clone(&self.store.inner), commit_oid, Some(name.to_string()), Some(writable))
     }
 
-    /// Get the `Fs` for the named ref.
+    /// Get the [`Fs`] snapshot for the named branch or tag.
     ///
-    /// Branches return a writable `Fs`; tags return a readonly (detached) `Fs`.
-    /// Errors if the ref does not exist.
+    /// Branches return a writable `Fs`; tags return a read-only `Fs`.
+    ///
+    /// # Errors
+    /// Returns [`Error::NotFound`] if the ref does not exist.
     pub fn get(&self, name: &str) -> Result<Fs> {
         let repo = self
             .store
@@ -58,6 +63,19 @@ impl<'a> RefDict<'a> {
     }
 
     /// Point the named ref at the commit of `fs`.
+    ///
+    /// For branches, updates (or creates) the ref and writes a reflog entry.
+    /// For tags, creates the ref but returns [`Error::KeyExists`] if the tag
+    /// already exists (tags are immutable).
+    ///
+    /// # Arguments
+    /// * `name` - Branch or tag name (e.g. `"main"`).
+    /// * `fs` - The snapshot whose commit will become the ref target.
+    ///
+    /// # Errors
+    /// * [`Error::InvalidRefName`] if `name` is not a valid git ref name.
+    /// * [`Error::InvalidPath`] if `fs` belongs to a different repository.
+    /// * [`Error::KeyExists`] if setting a tag that already exists.
     pub fn set(&self, name: &str, fs: &Fs) -> Result<()> {
         // 1. Validate ref name
         crate::paths::validate_ref_name(name)?;
@@ -127,21 +145,28 @@ impl<'a> RefDict<'a> {
         Ok(())
     }
 
-    /// Point the named ref at the commit of `fs` and return a new writable `Fs`
-    /// for the updated ref.
+    /// Point the named ref at the commit of `fs` and return a new writable [`Fs`]
+    /// bound to the updated ref.
+    ///
+    /// Convenience wrapper: equivalent to calling [`set`](Self::set) followed by
+    /// [`get`](Self::get).
     pub fn set_to(&self, name: &str, fs: &Fs) -> Result<Fs> {
         self.set(name, fs)?;
         self.get(name)
     }
 
-    /// Point the named ref at the commit of `fs` and return the previous `Fs`.
+    /// Point the named ref at the commit of `fs` and return the previous [`Fs`]
+    /// (or `None` if the ref did not exist before).
     pub fn set_and_get(&self, name: &str, fs: &Fs) -> Result<Option<Fs>> {
         let old = self.try_get(name)?;
         self.set(name, fs)?;
         Ok(old)
     }
 
-    /// Delete the named ref.
+    /// Delete the named branch or tag.
+    ///
+    /// # Errors
+    /// Returns a git error if the ref does not exist or cannot be deleted.
     pub fn delete(&self, name: &str) -> Result<()> {
         let repo = self
             .store
@@ -166,7 +191,7 @@ impl<'a> RefDict<'a> {
         Ok(())
     }
 
-    /// Returns `true` if the named ref exists.
+    /// Returns `true` if the named branch or tag exists.
     pub fn has(&self, name: &str) -> Result<bool> {
         let repo = self
             .store
@@ -178,7 +203,10 @@ impl<'a> RefDict<'a> {
         Ok(repo.find_reference(refname.as_str()).is_ok())
     }
 
-    /// List all ref names under this prefix.
+    /// List all ref short names under this prefix, sorted alphabetically.
+    ///
+    /// For branches this returns names like `["dev", "main"]`; for tags
+    /// `["v1.0", "v2.0"]`.
     pub fn list(&self) -> Result<Vec<String>> {
         let repo = self
             .store
@@ -201,7 +229,7 @@ impl<'a> RefDict<'a> {
         Ok(names)
     }
 
-    /// Iterate over `(name, Fs)` pairs.
+    /// Return all `(name, Fs)` pairs, sorted by name.
     pub fn iter(&self) -> Result<Vec<(String, Fs)>> {
         let pairs = {
             let repo = self
@@ -235,7 +263,10 @@ impl<'a> RefDict<'a> {
     }
 
     /// Get the current branch name (HEAD symbolic target within this prefix).
-    /// Returns `Ok(None)` for tags (tags do not have a "current" concept).
+    ///
+    /// Returns `Ok(None)` when HEAD is detached or dangling.
+    /// Always returns `Ok(None)` for tags (tags do not have a "current" concept).
+    /// This is a cheap operation — it does not construct an [`Fs`] object.
     pub fn get_current_name(&self) -> Result<Option<String>> {
         if self.is_tags() {
             return Ok(None);
@@ -259,7 +290,9 @@ impl<'a> RefDict<'a> {
         }
     }
 
-    /// Get the current branch as an Fs. Returns None if HEAD is dangling or for tags.
+    /// Get the [`Fs`] for the current (HEAD) branch.
+    ///
+    /// Returns `Ok(None)` if HEAD is dangling or detached, or for tags.
     pub fn get_current(&self) -> Result<Option<Fs>> {
         if self.is_tags() {
             return Ok(None);
@@ -273,7 +306,10 @@ impl<'a> RefDict<'a> {
         }
     }
 
-    /// Set the current branch (HEAD symbolic target). Errors for tags.
+    /// Set the current branch (HEAD symbolic ref target).
+    ///
+    /// # Errors
+    /// Returns [`Error::Permission`] for tags (tags have no current branch).
     pub fn set_current(&self, name: &str) -> Result<()> {
         if self.is_tags() {
             return Err(Error::permission("tags do not support set_current"));
@@ -309,7 +345,13 @@ impl<'a> RefDict<'a> {
         Ok(())
     }
 
-    /// Read the reflog for the named ref. Errors for tags.
+    /// Read the reflog entries for the named branch.
+    ///
+    /// Returns a list of [`ReflogEntry`] objects recording each branch movement.
+    ///
+    /// # Errors
+    /// * [`Error::Permission`] for tags (tags do not have reflogs).
+    /// * [`Error::NotFound`] if no reflog file exists for the branch.
     pub fn reflog(&self, name: &str) -> Result<Vec<ReflogEntry>> {
         if self.is_tags() {
             return Err(Error::permission("tags do not have reflogs"));

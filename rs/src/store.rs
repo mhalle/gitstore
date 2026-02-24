@@ -33,6 +33,14 @@ pub struct GitStore {
 
 impl GitStore {
     /// Open (or create) a bare git repository at `path`.
+    ///
+    /// # Arguments
+    /// * `path` - Path to the bare repository.
+    /// * `options` - [`OpenOptions`] controlling creation, branch name, and author.
+    ///
+    /// # Errors
+    /// Returns [`Error::NotFound`] if the repository does not exist and
+    /// `options.create` is `false`.
     pub fn open(path: impl AsRef<Path>, options: OpenOptions) -> Result<Self> {
         let path = path.as_ref().to_path_buf();
 
@@ -144,7 +152,9 @@ impl GitStore {
         Ok(())
     }
 
-    /// Return a detached (readonly) `Fs` for a commit identified by hex SHA.
+    /// Return a detached (read-only) [`Fs`] for a commit identified by hex SHA.
+    ///
+    /// The returned snapshot is not bound to any branch and cannot be written to.
     pub fn fs(&self, hash: &str) -> Result<Fs> {
         let oid = gix::ObjectId::from_hex(hash.as_bytes()).map_err(Error::git)?;
         Fs::from_commit(Arc::clone(&self.inner), oid, None, Some(false))
@@ -175,12 +185,16 @@ impl GitStore {
         &self.inner.signature
     }
 
-    /// Back up this repository to a target path.
+    /// Push all refs to `dest`, creating an exact mirror.
+    ///
+    /// **Not yet implemented** -- delegates to [`crate::mirror::backup`].
     pub fn backup(&self, dest: impl AsRef<Path>) -> Result<MirrorDiff> {
         crate::mirror::backup(&self.inner.path, dest.as_ref())
     }
 
-    /// Restore this repository from a backup.
+    /// Fetch all refs from `src`, overwriting local state.
+    ///
+    /// **Not yet implemented** -- delegates to [`crate::mirror::restore`].
     pub fn restore(&self, src: impl AsRef<Path>) -> Result<MirrorDiff> {
         crate::mirror::restore(src.as_ref(), &self.inner.path)
     }

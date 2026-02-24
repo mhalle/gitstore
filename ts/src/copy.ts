@@ -104,6 +104,18 @@ async function walkLocalPaths(
   return result;
 }
 
+/**
+ * Walk a git tree and return file entries as a map.
+ *
+ * Builds a `{relativePath: {oid, mode}}` map for all files under
+ * `repoPath`. OID values are hex strings suitable for comparison
+ * against local file hashes. Returns an empty map when `repoPath`
+ * does not exist or is not a directory.
+ *
+ * @param fs - Filesystem snapshot to walk.
+ * @param repoPath - Root path in the repo tree (empty string for root).
+ * @returns Map of relative paths to `{oid, mode}` objects.
+ */
 export async function walkRepo(
   fs: FS,
   repoPath: string,
@@ -133,6 +145,17 @@ export async function walkRepo(
 // Disk-side glob
 // ---------------------------------------------------------------------------
 
+/**
+ * Expand a glob pattern against the local filesystem.
+ *
+ * Uses the same dotfile-aware rules as the repo-side `fs.glob()`:
+ * `*` and `?` do not match a leading `.` unless the pattern segment
+ * itself starts with `.`.
+ *
+ * @param fsModule - Node.js-compatible filesystem module.
+ * @param pattern - Glob pattern (e.g. `"src/**\/*.ts"`). Supports `*`, `?`, and `**`.
+ * @returns Sorted list of matching paths.
+ */
 export async function diskGlob(fsModule: FsModule, pattern: string): Promise<string[]> {
   pattern = pattern.replace(/\/+$/, '');
   if (!pattern) return [];
@@ -606,6 +629,35 @@ async function makeEntriesFromRepoDict(
 // Copy: disk → repo
 // ---------------------------------------------------------------------------
 
+/**
+ * Copy local files, directories, or globs into the repo.
+ *
+ * Sources may use a trailing `/` for "contents" mode (pour directory
+ * contents into `dest` without creating a subdirectory).
+ *
+ * With `dryRun: true`, no changes are written; the input FS is
+ * returned with `.changes` populated.
+ *
+ * With `delete: true`, files under `dest` that are not covered by
+ * `sources` are removed (rsync `--delete` semantics).
+ *
+ * @param fs - Filesystem snapshot (must be writable, i.e. a branch).
+ * @param sources - One or more local paths to copy. A trailing `/` means "contents of directory".
+ * @param dest - Destination path in the repo tree.
+ * @param opts - Copy options.
+ * @param opts.dryRun - Preview changes without writing. Default `false`.
+ * @param opts.followSymlinks - Dereference symlinks instead of storing them. Default `false`.
+ * @param opts.message - Custom commit message.
+ * @param opts.mode - Override file mode for all written files.
+ * @param opts.ignoreExisting - Skip files that already exist at the destination. Default `false`.
+ * @param opts.delete - Remove destination files not present in sources. Default `false`.
+ * @param opts.ignoreErrors - Continue on per-file errors, collecting them in `changes.errors`. Default `false`.
+ * @param opts.checksum - Use content hashing to detect changes. When `false`, uses mtime comparison. Default `true`.
+ * @param opts.operation - Operation name for the commit message. Default `"cp"`.
+ * @returns FS snapshot after the copy, with `.changes` set.
+ * @throws {FileNotFoundError} If a source path does not exist (unless `ignoreErrors` is set).
+ * @throws {NotADirectoryError} If a trailing-`/` source is not a directory.
+ */
 export async function copyIn(
   fs: FS,
   sources: string | string[],
@@ -792,6 +844,32 @@ export async function copyIn(
 // Copy: repo → disk
 // ---------------------------------------------------------------------------
 
+/**
+ * Copy repo files, directories, or globs to local disk.
+ *
+ * Sources may use a trailing `/` for "contents" mode (pour directory
+ * contents into `dest` without creating a subdirectory).
+ *
+ * With `dryRun: true`, no changes are written; the input FS is
+ * returned with `.changes` populated.
+ *
+ * With `delete: true`, local files under `dest` that are not covered
+ * by `sources` are removed (rsync `--delete` semantics).
+ *
+ * @param fs - Filesystem snapshot to copy from.
+ * @param sources - One or more repo paths to copy. A trailing `/` means "contents of directory".
+ * @param dest - Destination directory on local disk.
+ * @param opts - Copy options.
+ * @param opts.dryRun - Preview changes without writing. Default `false`.
+ * @param opts.ignoreExisting - Skip files that already exist at the destination. Default `false`.
+ * @param opts.delete - Remove local files not present in sources. Default `false`.
+ * @param opts.ignoreErrors - Continue on per-file errors, collecting them in `changes.errors`. Default `false`.
+ * @param opts.checksum - Use content hashing to detect changes. When `false`, uses mtime comparison. Default `true`.
+ * @param opts.operation - Operation name for the commit message.
+ * @returns FS snapshot with `.changes` set describing what was copied.
+ * @throws {FileNotFoundError} If a source path does not exist in the repo (unless `ignoreErrors` is set).
+ * @throws {NotADirectoryError} If a trailing-`/` source is not a directory.
+ */
 export async function copyOut(
   fs: FS,
   sources: string | string[],
@@ -1009,6 +1087,22 @@ async function collectRemovePaths(
   return [...new Set(deletePaths)].sort();
 }
 
+/**
+ * Remove files or directories from the repo.
+ *
+ * With `dryRun: true`, no changes are written; the input FS is
+ * returned with `.changes` populated.
+ *
+ * @param fs - Filesystem snapshot (must be writable, i.e. a branch).
+ * @param sources - One or more repo paths to remove.
+ * @param opts - Remove options.
+ * @param opts.recursive - Allow removal of directories. Default `false`.
+ * @param opts.dryRun - Preview changes without writing. Default `false`.
+ * @param opts.message - Custom commit message.
+ * @returns FS snapshot after the removal, with `.changes` set.
+ * @throws {FileNotFoundError} If no source matches any file.
+ * @throws {IsADirectoryError} If a source is a directory and `recursive` is `false`.
+ */
 export async function remove(
   fs: FS,
   sources: string | string[],
@@ -1040,6 +1134,29 @@ export async function remove(
 // Sync
 // ---------------------------------------------------------------------------
 
+/**
+ * Make `repoPath` identical to `localPath` (disk to repo sync).
+ *
+ * Copies new and changed files from `localPath` into `repoPath` and
+ * deletes repo files that do not exist on disk. Equivalent to
+ * `copyIn` with `delete: true`.
+ *
+ * If `localPath` does not exist, all files under `repoPath` are
+ * deleted (treating the source as empty).
+ *
+ * With `dryRun: true`, no changes are written; the input FS is
+ * returned with `.changes` populated.
+ *
+ * @param fs - Filesystem snapshot (must be writable, i.e. a branch).
+ * @param localPath - Source directory on local disk.
+ * @param repoPath - Destination path in the repo tree.
+ * @param opts - Sync options.
+ * @param opts.dryRun - Preview changes without writing. Default `false`.
+ * @param opts.message - Custom commit message.
+ * @param opts.ignoreErrors - Continue on per-file errors. Default `false`.
+ * @param opts.checksum - Use content hashing. When `false`, uses mtime. Default `true`.
+ * @returns FS snapshot after sync, with `.changes` set.
+ */
 export async function syncIn(
   fs: FS,
   localPath: string,
@@ -1105,6 +1222,28 @@ export async function syncIn(
   }
 }
 
+/**
+ * Make `localPath` identical to `repoPath` (repo to disk sync).
+ *
+ * Copies new and changed files from the repo to `localPath` and
+ * deletes local files that do not exist in the repo. Equivalent to
+ * `copyOut` with `delete: true`.
+ *
+ * If `repoPath` does not exist in the repo, all files under
+ * `localPath` are deleted (treating the source as empty).
+ *
+ * With `dryRun: true`, no changes are written; the input FS is
+ * returned with `.changes` populated.
+ *
+ * @param fs - Filesystem snapshot to sync from.
+ * @param repoPath - Source path in the repo tree.
+ * @param localPath - Destination directory on local disk.
+ * @param opts - Sync options.
+ * @param opts.dryRun - Preview changes without writing. Default `false`.
+ * @param opts.ignoreErrors - Continue on per-file errors. Default `false`.
+ * @param opts.checksum - Use content hashing. When `false`, uses mtime. Default `true`.
+ * @returns FS snapshot with `.changes` set describing what was synced.
+ */
 export async function syncOut(
   fs: FS,
   repoPath: string,
@@ -1152,6 +1291,29 @@ export async function syncOut(
 // Move
 // ---------------------------------------------------------------------------
 
+/**
+ * Move or rename files within the repo.
+ *
+ * Implements POSIX `mv` semantics: when there is a single source file
+ * and `dest` is not an existing directory and does not end with `/`,
+ * the destination is the exact target path (rename). Otherwise files
+ * are placed inside `dest`.
+ *
+ * With `dryRun: true`, no changes are written; the input FS is
+ * returned with `.changes` populated.
+ *
+ * @param fs - Filesystem snapshot (must be writable, i.e. a branch).
+ * @param sources - One or more repo paths to move.
+ * @param dest - Destination path in the repo tree.
+ * @param opts - Move options.
+ * @param opts.recursive - Allow moving directories. Default `false`.
+ * @param opts.dryRun - Preview changes without writing. Default `false`.
+ * @param opts.message - Custom commit message.
+ * @returns FS snapshot after the move, with `.changes` set.
+ * @throws {FileNotFoundError} If no source matches any file.
+ * @throws {IsADirectoryError} If a source is a directory and `recursive` is `false`.
+ * @throws {Error} If source and destination are the same path.
+ */
 export async function move(
   fs: FS,
   sources: string | string[],

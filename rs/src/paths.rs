@@ -1,7 +1,15 @@
 use crate::error::{Error, Result};
 
-/// Normalize a store path: strip leading/trailing slashes, reject `.`/`..`/empty
-/// segments, collapse repeated slashes.
+/// Normalize a store path: strip leading/trailing slashes, reject `.`/`..`
+/// segments, and collapse repeated slashes.
+///
+/// An empty input returns an empty string (root).
+///
+/// # Arguments
+/// * `path` - The raw path string to normalize.
+///
+/// # Errors
+/// Returns [`Error::InvalidPath`] if the path contains `.` or `..` segments.
 pub fn normalize_path(path: &str) -> Result<String> {
     if path.is_empty() {
         return Ok(String::new());
@@ -25,8 +33,17 @@ pub fn normalize_path(path: &str) -> Result<String> {
     Ok(segments.join("/"))
 }
 
-/// Validate a git reference name. Rejects `:`, space, tab, newline,
-/// and a few other characters that are problematic in refnames.
+/// Validate a git reference name.
+///
+/// Rejects colons (conflict with gitstore's `ref:path` syntax), spaces,
+/// tabs, control characters, `..`, `@{`, trailing `.`, and `.lock` suffix
+/// per git's `check-ref-format` rules.
+///
+/// # Arguments
+/// * `name` - Reference name to validate (without `refs/heads/` prefix).
+///
+/// # Errors
+/// Returns [`Error::InvalidRefName`] if the name violates any rule.
 pub fn validate_ref_name(name: &str) -> Result<()> {
     if name.is_empty() {
         return Err(Error::invalid_ref_name("ref name must not be empty"));
@@ -78,6 +95,9 @@ pub fn is_root_path(path: &str) -> bool {
 }
 
 /// Format a commit message from an operation and optional user message.
+///
+/// If `message` is `Some`, it is used directly; otherwise `operation` becomes
+/// the message.
 pub fn format_commit_message(operation: &str, message: Option<&str>) -> String {
     match message {
         Some(msg) => msg.to_string(),

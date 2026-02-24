@@ -27,28 +27,43 @@ pub struct TreeWrite {
 // Option structs
 // ---------------------------------------------------------------------------
 
+/// Options for [`Fs::write`], [`Fs::write_text`], [`Fs::write_from_file`],
+/// and [`Fs::write_symlink`].
 #[derive(Debug, Clone, Default)]
 pub struct WriteOptions {
+    /// Commit message. Auto-generated if `None`.
     pub message: Option<String>,
+    /// Git filemode override (e.g. `MODE_BLOB`, `MODE_LINK`). Auto-detected if `None`.
     pub mode: Option<u32>,
 }
 
+/// Options for [`Fs::apply`].
 #[derive(Debug, Clone, Default)]
 pub struct ApplyOptions {
+    /// Commit message. Auto-generated if `None`.
     pub message: Option<String>,
 }
 
+/// Options for [`Fs::batch`].
 #[derive(Debug, Clone, Default)]
 pub struct BatchOptions {
+    /// Commit message. Auto-generated if `None`.
     pub message: Option<String>,
 }
 
+/// Options for [`Fs::copy_in`].
 #[derive(Debug, Clone)]
 pub struct CopyInOptions {
+    /// Glob patterns to include. `None` means include all.
     pub include: Option<Vec<String>>,
+    /// Glob patterns to exclude. `None` means exclude nothing.
     pub exclude: Option<Vec<String>>,
+    /// Commit message. Auto-generated if `None`.
     pub message: Option<String>,
+    /// Preview only; when `true` the returned `Fs` is unchanged but the
+    /// `ChangeReport` reflects what *would* happen.
     pub dry_run: bool,
+    /// Compare by content hash to skip unchanged files (default `true`).
     pub checksum: bool,
 }
 
@@ -64,18 +79,27 @@ impl Default for CopyInOptions {
     }
 }
 
+/// Options for [`Fs::copy_out`].
 #[derive(Debug, Clone, Default)]
 pub struct CopyOutOptions {
+    /// Glob patterns to include. `None` means include all.
     pub include: Option<Vec<String>>,
+    /// Glob patterns to exclude. `None` means exclude nothing.
     pub exclude: Option<Vec<String>>,
 }
 
+/// Options for [`Fs::sync_in`] and [`Fs::sync_out`].
 #[derive(Debug, Clone)]
 pub struct SyncOptions {
+    /// Glob patterns to include. `None` means include all.
     pub include: Option<Vec<String>>,
+    /// Glob patterns to exclude. `None` means exclude nothing.
     pub exclude: Option<Vec<String>>,
+    /// Commit message (only used by `sync_in`). Auto-generated if `None`.
     pub message: Option<String>,
+    /// Preview only; when `true` the store is not modified.
     pub dry_run: bool,
+    /// Compare by content hash to skip unchanged files (default `true`).
     pub checksum: bool,
 }
 
@@ -91,40 +115,59 @@ impl Default for SyncOptions {
     }
 }
 
+/// Options for [`Fs::remove`].
 #[derive(Debug, Clone, Default)]
 pub struct RemoveOptions {
+    /// Allow removing directories (and their contents).
     pub recursive: bool,
+    /// Preview only; when `true` the store is not modified.
     pub dry_run: bool,
+    /// Commit message. Auto-generated if `None`.
     pub message: Option<String>,
 }
 
+/// Options for [`Fs::remove_from_disk`].
 #[derive(Debug, Clone, Default)]
 pub struct RemoveFromDiskOptions {
+    /// Glob patterns to include. `None` means include all.
     pub include: Option<Vec<String>>,
+    /// Glob patterns to exclude. `None` means exclude nothing.
     pub exclude: Option<Vec<String>>,
 }
 
+/// Options for [`Fs::move_paths`].
 #[derive(Debug, Clone, Default)]
 pub struct MoveOptions {
+    /// Allow moving directories (and their contents).
     pub recursive: bool,
+    /// Preview only; when `true` the store is not modified.
     pub dry_run: bool,
+    /// Commit message. Auto-generated if `None`.
     pub message: Option<String>,
 }
 
+/// Options for [`Fs::copy_ref`].
 #[derive(Debug, Clone, Default)]
 pub struct CopyRefOptions {
+    /// Remove dest files under `dest_path` that are not in the source.
     pub delete: bool,
+    /// Preview only; when `true` the store is not modified but the returned
+    /// `Fs` has its `changes` field set.
     pub dry_run: bool,
+    /// Commit message. Auto-generated if `None`.
     pub message: Option<String>,
 }
 
+/// Options for [`Fs::log`].
 #[derive(Debug, Clone, Default)]
 pub struct LogOptions {
+    /// Maximum number of entries to return.
     pub limit: Option<usize>,
+    /// Number of matching entries to skip before collecting results.
     pub skip: Option<usize>,
     /// Only include commits that changed this path.
     pub path: Option<String>,
-    /// Only include commits whose message matches this glob pattern.
+    /// Only include commits whose message matches this glob pattern (`*`/`?` wildcards).
     pub match_pattern: Option<String>,
     /// Only include commits with timestamp <= this value (seconds since epoch).
     pub before: Option<u64>,
@@ -134,9 +177,13 @@ pub struct LogOptions {
 // Fs
 // ---------------------------------------------------------------------------
 
-/// A snapshot view of a branch in the store.
+/// An immutable snapshot of a committed tree.
 ///
-/// Cheap to clone (`Arc` internally). No lifetime parameter — can be stored
+/// Read-only when [`writable()`](Fs::writable) returns `false` (tag or
+/// detached snapshot). Writable when `true` -- write methods auto-commit and
+/// return a **new** `Fs`.
+///
+/// Cheap to clone (`Arc` internally). No lifetime parameter -- can be stored
 /// in structs, returned from functions, sent across threads.
 #[derive(Clone, Debug)]
 pub struct Fs {
@@ -168,22 +215,26 @@ impl Fs {
             .ok_or_else(|| Error::not_found("no tree in snapshot"))
     }
 
-    /// The commit hash as hex string.
+    /// The 40-character hex SHA of this snapshot's commit, or `None` for an
+    /// empty (no-commit) snapshot.
     pub fn commit_hash(&self) -> Option<String> {
         self.commit_oid.map(|oid| format!("{}", oid))
     }
 
-    /// The root tree hash as hex string.
+    /// The 40-character hex SHA of the root tree, or `None` for an empty
+    /// (no-tree) snapshot.
     pub fn tree_hash(&self) -> Option<String> {
         self.tree_oid.map(|oid| format!("{}", oid))
     }
 
-    /// The ref name (branch or tag name), if this Fs is attached to a ref.
+    /// The branch or tag name, or `None` for detached snapshots.
     pub fn ref_name(&self) -> Option<&str> {
         self.ref_name.as_deref()
     }
 
-    /// Whether this Fs is writable (true for branches, false for tags/detached).
+    /// Whether this snapshot can be written to.
+    ///
+    /// Returns `true` for branch snapshots, `false` for tags and detached commits.
     pub fn writable(&self) -> bool {
         self.writable
     }
@@ -200,7 +251,10 @@ impl Fs {
             .ok_or_else(|| Error::permission(format!("cannot {} without a branch", verb)))
     }
 
-    /// The commit message (trailing newline stripped).
+    /// The commit message, with trailing newline stripped.
+    ///
+    /// # Errors
+    /// Returns an error if there is no commit in this snapshot.
     pub fn message(&self) -> Result<String> {
         let commit_oid = self
             .commit_oid
@@ -215,7 +269,10 @@ impl Fs {
         })
     }
 
-    /// The commit timestamp (seconds since epoch).
+    /// The commit timestamp as seconds since the Unix epoch.
+    ///
+    /// # Errors
+    /// Returns an error if there is no commit in this snapshot.
     pub fn time(&self) -> Result<u64> {
         let commit_oid = self
             .commit_oid
@@ -229,7 +286,10 @@ impl Fs {
         })
     }
 
-    /// The commit author name.
+    /// The commit author's name.
+    ///
+    /// # Errors
+    /// Returns an error if there is no commit in this snapshot.
     pub fn author_name(&self) -> Result<String> {
         let commit_oid = self
             .commit_oid
@@ -243,7 +303,10 @@ impl Fs {
         })
     }
 
-    /// The commit author email.
+    /// The commit author's email address.
+    ///
+    /// # Errors
+    /// Returns an error if there is no commit in this snapshot.
     pub fn author_email(&self) -> Result<String> {
         let commit_oid = self
             .commit_oid
@@ -257,32 +320,62 @@ impl Fs {
         })
     }
 
-    /// The change report from the last operation, if any.
+    /// The change report from the operation that produced this snapshot, if any.
+    ///
+    /// Set after write, copy, sync, remove, and move operations. `None` for
+    /// snapshots obtained directly from a branch or tag.
     pub fn changes(&self) -> Option<&ChangeReport> {
         self.changes.as_ref()
     }
 
     // -- Read ---------------------------------------------------------------
 
-    /// Read raw bytes at `path`.
+    /// Read file contents as bytes.
+    ///
+    /// # Arguments
+    /// * `path` - File path in the repo.
+    ///
+    /// # Errors
+    /// Returns [`Error::NotFound`] if the path does not exist.
+    /// Returns [`Error::IsADirectory`] if the path is a directory.
     pub fn read(&self, path: &str) -> Result<Vec<u8>> {
         let tree_oid = self.require_tree()?;
         self.with_repo(|repo| tree::read_blob_at_path(repo, tree_oid, path))
     }
 
-    /// Read UTF-8 text at `path`.
+    /// Read file contents as a UTF-8 string.
+    ///
+    /// # Arguments
+    /// * `path` - File path in the repo.
+    ///
+    /// # Errors
+    /// Returns [`Error::NotFound`] if the path does not exist.
+    /// Returns an error if the content is not valid UTF-8.
     pub fn read_text(&self, path: &str) -> Result<String> {
         let data = self.read(path)?;
         String::from_utf8(data).map_err(|e| Error::git_msg(format!("invalid UTF-8: {}", e)))
     }
 
-    /// List immediate children at `path`.
+    /// List entry names and types at `path` (or root if empty).
+    ///
+    /// Returns [`WalkEntry`] items with `name`, `oid`, and `mode` for each
+    /// immediate child.
+    ///
+    /// # Errors
+    /// Returns [`Error::NotADirectory`] if `path` is a file.
     pub fn ls(&self, path: &str) -> Result<Vec<WalkEntry>> {
         let tree_oid = self.require_tree()?;
         self.with_repo(|repo| tree::list_tree_at_path(repo, tree_oid, path))
     }
 
-    /// Recursively walk the tree under `path`.
+    /// Recursively walk the tree under `path`, returning all leaf entries.
+    ///
+    /// Returns `(relative_path, WalkEntry)` pairs for every file and symlink
+    /// under the given directory. Pass an empty string to walk the entire tree.
+    ///
+    /// # Errors
+    /// Returns [`Error::NotADirectory`] if `path` is a file.
+    /// Returns [`Error::NotFound`] if `path` does not exist.
     pub fn walk(&self, path: &str) -> Result<Vec<(String, WalkEntry)>> {
         let tree_oid = self.require_tree()?;
         let path_norm = crate::paths::normalize_path(path)?;
@@ -307,13 +400,15 @@ impl Fs {
         })
     }
 
-    /// Returns `true` if `path` exists.
+    /// Return `true` if `path` exists (file, directory, or symlink).
     pub fn exists(&self, path: &str) -> Result<bool> {
         let tree_oid = self.require_tree()?;
         self.with_repo(|repo| tree::exists_at_path(repo, tree_oid, path))
     }
 
-    /// Returns `true` if `path` is a directory (tree).
+    /// Return `true` if `path` is a directory (tree) in the repo.
+    ///
+    /// Returns `false` if the path does not exist or is a file/symlink.
     pub fn is_dir(&self, path: &str) -> Result<bool> {
         let tree_oid = self.require_tree()?;
         self.with_repo(|repo| {
@@ -324,7 +419,13 @@ impl Fs {
         })
     }
 
-    /// Return the file type at `path`.
+    /// Return the [`FileType`] of `path`.
+    ///
+    /// Returns `FileType::Blob`, `FileType::Executable`, `FileType::Link`,
+    /// or `FileType::Tree`.
+    ///
+    /// # Errors
+    /// Returns [`Error::NotFound`] if the path does not exist.
     pub fn file_type(&self, path: &str) -> Result<FileType> {
         let tree_oid = self.require_tree()?;
         self.with_repo(|repo| {
@@ -335,7 +436,11 @@ impl Fs {
         })
     }
 
-    /// Return the size of the blob at `path`.
+    /// Return the size in bytes of the object at `path`.
+    ///
+    /// # Errors
+    /// Returns [`Error::NotFound`] if the path does not exist.
+    /// Returns [`Error::IsADirectory`] if the path is a directory.
     pub fn size(&self, path: &str) -> Result<u64> {
         let tree_oid = self.require_tree()?;
         self.with_repo(|repo| {
@@ -349,7 +454,12 @@ impl Fs {
         })
     }
 
-    /// Return the object hash (hex) at `path`.
+    /// Return the 40-character hex SHA of the object at `path`.
+    ///
+    /// For files this is the blob SHA; for directories the tree SHA.
+    ///
+    /// # Errors
+    /// Returns [`Error::NotFound`] if the path does not exist.
     pub fn object_hash(&self, path: &str) -> Result<String> {
         let tree_oid = self.require_tree()?;
         self.with_repo(|repo| {
@@ -359,7 +469,11 @@ impl Fs {
         })
     }
 
-    /// Read the symlink target at `path`.
+    /// Read the target of a symlink at `path`.
+    ///
+    /// # Errors
+    /// Returns [`Error::NotFound`] if the path does not exist.
+    /// Returns an error if `path` is not a symlink.
     pub fn readlink(&self, path: &str) -> Result<String> {
         let tree_oid = self.require_tree()?;
         self.with_repo(|repo| {
@@ -379,7 +493,13 @@ impl Fs {
 
     // -- FUSE-readiness API -------------------------------------------------
 
-    /// Single-call getattr — returns all stat fields in one call.
+    /// Return a [`StatResult`] for `path` (pass `""` for the root).
+    ///
+    /// Combines file type, size, OID, nlink, and mtime in a single call --
+    /// the hot path for FUSE `getattr`.
+    ///
+    /// # Errors
+    /// Returns [`Error::NotFound`] if the path does not exist.
     pub fn stat(&self, path: &str) -> Result<StatResult> {
         let tree_oid = self.require_tree()?;
         let mtime = self.time()?;
@@ -429,12 +549,27 @@ impl Fs {
         })
     }
 
-    /// List immediate children at `path` with entry types (alias for `ls()`).
+    /// List directory entries with name, OID, and mode.
+    ///
+    /// Alias for [`ls()`](Fs::ls). Useful for FUSE `readdir` where you need
+    /// `d_type` information alongside names.
     pub fn listdir(&self, path: &str) -> Result<Vec<WalkEntry>> {
         self.ls(path)
     }
 
-    /// Read raw bytes at `path` with optional offset and size.
+    /// Read file contents as bytes with optional offset and size.
+    ///
+    /// Separate method from [`read()`](Fs::read) so the base `read` signature
+    /// stays simple (no breaking change).
+    ///
+    /// # Arguments
+    /// * `path` - File path in the repo.
+    /// * `offset` - Byte offset to start reading from.
+    /// * `size` - Maximum number of bytes to return (`None` for all remaining).
+    ///
+    /// # Errors
+    /// Returns [`Error::NotFound`] if the path does not exist.
+    /// Returns [`Error::IsADirectory`] if the path is a directory.
     pub fn read_range(&self, path: &str, offset: usize, size: Option<usize>) -> Result<Vec<u8>> {
         let data = self.read(path)?;
         let start = offset.min(data.len());
@@ -445,7 +580,18 @@ impl Fs {
         Ok(data[start..end].to_vec())
     }
 
-    /// Read a blob by its hex hash, bypassing tree walk.
+    /// Read raw blob data by its hex hash, bypassing tree lookup.
+    ///
+    /// FUSE pattern: `stat()` to cache the hash, then `read_by_hash(hash)`
+    /// for subsequent reads without re-walking the tree.
+    ///
+    /// # Arguments
+    /// * `hash` - 40-character hex SHA of the blob.
+    /// * `offset` - Byte offset to start reading from.
+    /// * `size` - Maximum number of bytes to return (`None` for all remaining).
+    ///
+    /// # Errors
+    /// Returns an error if the hash is invalid or the object is not found.
     pub fn read_by_hash(
         &self,
         hash: &str,
@@ -468,14 +614,23 @@ impl Fs {
 
     // -- Glob ---------------------------------------------------------------
 
-    /// Glob the tree, returning sorted matching paths.
+    /// Expand a glob pattern against the repo tree.
+    ///
+    /// Supports `*`, `?`, and `**`. `*` and `?` do not match a leading `.`
+    /// unless the pattern segment itself starts with `.`. `**` matches zero or
+    /// more directory levels, skipping directories whose names start with `.`.
+    ///
+    /// Returns a sorted, deduplicated list of matching paths.
     pub fn glob(&self, pattern: &str) -> Result<Vec<String>> {
         let mut paths = self.iglob(pattern)?;
         paths.sort();
         Ok(paths)
     }
 
-    /// Glob the tree, returning matching paths.
+    /// Expand a glob pattern against the repo tree (unsorted).
+    ///
+    /// Like [`glob()`](Fs::glob) but skips the final sort, which is cheaper
+    /// when you only need to iterate once.
     pub fn iglob(&self, pattern: &str) -> Result<Vec<String>> {
         let tree_oid = self.require_tree()?;
         let segments: Vec<&str> = pattern.split('/').collect();
@@ -489,7 +644,16 @@ impl Fs {
 
     // -- Write --------------------------------------------------------------
 
-    /// Write raw bytes to `path`. Returns the new `Fs` snapshot.
+    /// Write `data` to `path` and commit, returning a new [`Fs`].
+    ///
+    /// # Arguments
+    /// * `path` - Destination path in the repo.
+    /// * `data` - Raw bytes to write.
+    /// * `opts` - [`WriteOptions`] for commit message and mode override.
+    ///
+    /// # Errors
+    /// Returns [`Error::Permission`] if this snapshot is read-only.
+    /// Returns [`Error::StaleSnapshot`] if the branch has advanced since this snapshot.
     pub fn write(
         &self,
         path: &str,
@@ -515,7 +679,14 @@ impl Fs {
         self.commit_changes(&writes, &message)
     }
 
-    /// Write UTF-8 text to `path`. Returns the new `Fs` snapshot.
+    /// Write `text` to `path` and commit, returning a new [`Fs`].
+    ///
+    /// Convenience wrapper around [`write()`](Fs::write) that encodes the
+    /// string as UTF-8.
+    ///
+    /// # Errors
+    /// Returns [`Error::Permission`] if this snapshot is read-only.
+    /// Returns [`Error::StaleSnapshot`] if the branch has advanced since this snapshot.
     pub fn write_text(
         &self,
         path: &str,
@@ -525,7 +696,20 @@ impl Fs {
         self.write(path, text.as_bytes(), opts)
     }
 
-    /// Write the contents of a file on disk to `path`. Returns the new `Fs` snapshot.
+    /// Write a local file into the repo and commit, returning a new [`Fs`].
+    ///
+    /// Executable permission is auto-detected from disk unless
+    /// `opts.mode` is set.
+    ///
+    /// # Arguments
+    /// * `path` - Destination path in the repo.
+    /// * `src` - Path to the local file on disk.
+    /// * `opts` - [`WriteOptions`] for commit message and mode override.
+    ///
+    /// # Errors
+    /// Returns [`Error::Permission`] if this snapshot is read-only.
+    /// Returns [`Error::StaleSnapshot`] if the branch has advanced since this snapshot.
+    /// Returns an I/O error if the local file cannot be read.
     pub fn write_from_file(
         &self,
         path: &str,
@@ -543,7 +727,17 @@ impl Fs {
         self.write(path, &data, opts)
     }
 
-    /// Write a symlink at `path`. Returns the new `Fs` snapshot.
+    /// Create a symbolic link entry and commit, returning a new [`Fs`].
+    ///
+    /// # Arguments
+    /// * `path` - Symlink path in the repo.
+    /// * `target` - The symlink target string.
+    /// * `opts` - [`WriteOptions`] (the `mode` field is ignored; symlinks
+    ///   always use `MODE_LINK`).
+    ///
+    /// # Errors
+    /// Returns [`Error::Permission`] if this snapshot is read-only.
+    /// Returns [`Error::StaleSnapshot`] if the branch has advanced since this snapshot.
     pub fn write_symlink(
         &self,
         path: &str,
@@ -557,8 +751,16 @@ impl Fs {
         self.write(path, target.as_bytes(), opts)
     }
 
-    /// Apply a map of path → WriteEntry atomically, with optional removes.
-    /// Returns the new `Fs` snapshot.
+    /// Apply multiple writes and removes in a single atomic commit.
+    ///
+    /// `entries` maps repo paths to [`WriteEntry`] values describing the
+    /// content and mode. `removes` lists repo paths to delete.
+    ///
+    /// Returns the new [`Fs`] snapshot with the changes committed.
+    ///
+    /// # Errors
+    /// Returns [`Error::Permission`] if this snapshot is read-only.
+    /// Returns [`Error::StaleSnapshot`] if the branch has advanced since this snapshot.
     pub fn apply(
         &self,
         entries: &[(&str, WriteEntry)],
@@ -600,7 +802,13 @@ impl Fs {
         self.commit_changes(&writes, &message)
     }
 
-    /// Open a `Batch` for accumulating writes.
+    /// Return a [`Batch`] for accumulating multiple writes in one commit.
+    ///
+    /// Call [`Batch::commit()`] (or use it as a scope guard) to flush
+    /// accumulated changes atomically.
+    ///
+    /// # Errors
+    /// The batch itself is infallible; errors surface at commit time.
     pub fn batch(&self, opts: BatchOptions) -> Batch {
         Batch {
             fs: self.clone(),
@@ -614,7 +822,19 @@ impl Fs {
 
     // -- Copy / sync --------------------------------------------------------
 
-    /// Copy files from disk into the store. Returns `(report, new_fs)`.
+    /// Copy local files from disk into the repo.
+    ///
+    /// Returns `(report, new_fs)` where `report` describes what changed and
+    /// `new_fs` is the committed snapshot (or an unchanged clone when
+    /// `dry_run` is set).
+    ///
+    /// # Arguments
+    /// * `src` - Local directory or file to copy from.
+    /// * `dest` - Destination path in the repo.
+    /// * `opts` - [`CopyInOptions`] for filtering, dry-run, and checksum.
+    ///
+    /// # Errors
+    /// Returns [`Error::Permission`] if this snapshot is read-only.
     pub fn copy_in(
         &self,
         src: &Path,
@@ -644,7 +864,14 @@ impl Fs {
         Ok((report, new_fs))
     }
 
-    /// Copy files from the store to disk.
+    /// Copy repo files to local disk.
+    ///
+    /// Returns a [`ChangeReport`] describing what was written.
+    ///
+    /// # Arguments
+    /// * `src` - Repo path to copy from.
+    /// * `dest` - Local destination directory.
+    /// * `opts` - [`CopyOutOptions`] for include/exclude filtering.
     pub fn copy_out(
         &self,
         src: &str,
@@ -659,10 +886,16 @@ impl Fs {
         })
     }
 
-    /// Sync files from disk into the store. Returns `(report, new_fs)`.
+    /// Make `dest` in the repo identical to the local `src` directory.
     ///
-    /// Unlike `copy_in`, this also deletes files in the destination that are
-    /// not present on disk, and classifies changes as add/update/delete.
+    /// Unlike [`copy_in()`](Fs::copy_in), this also deletes files in the
+    /// destination that are not present on disk, making the two trees mirror
+    /// each other exactly.
+    ///
+    /// Returns `(report, new_fs)`.
+    ///
+    /// # Errors
+    /// Returns [`Error::Permission`] if this snapshot is read-only.
     pub fn sync_in(
         &self,
         src: &Path,
@@ -688,7 +921,12 @@ impl Fs {
         Ok((report, new_fs))
     }
 
-    /// Sync files from the store to disk.
+    /// Make the local `dest` directory identical to `src` in the repo.
+    ///
+    /// Deletes extra local files and prunes empty directories so the local
+    /// tree mirrors the repo subtree exactly.
+    ///
+    /// Returns a [`ChangeReport`] describing what was written and deleted.
     pub fn sync_out(
         &self,
         src: &str,
@@ -704,7 +942,9 @@ impl Fs {
         })
     }
 
-    /// Remove files from disk that match a pattern.
+    /// Remove files from local disk that match the include/exclude filters.
+    ///
+    /// Returns a [`ChangeReport`] describing what was deleted.
     pub fn remove_from_disk(
         &self,
         path: &Path,
@@ -715,7 +955,16 @@ impl Fs {
         crate::copy::remove_from_disk(path, inc.as_deref(), exc.as_deref())
     }
 
-    /// Remove paths from the git tree. Returns the new `Fs` snapshot.
+    /// Remove files from the repo and commit, returning a new [`Fs`].
+    ///
+    /// Sources must be literal paths; use [`glob()`](Fs::glob) to expand
+    /// patterns before calling.
+    ///
+    /// # Errors
+    /// Returns [`Error::Permission`] if this snapshot is read-only.
+    /// Returns [`Error::NotFound`] if a source path does not exist.
+    /// Returns [`Error::IsADirectory`] if a source is a directory and
+    /// `opts.recursive` is `false`.
     pub fn remove(
         &self,
         sources: &[&str],
@@ -770,7 +1019,15 @@ impl Fs {
         Ok(new_fs)
     }
 
-    /// Rename a path within the store. Returns the new `Fs` snapshot.
+    /// Rename a single path within the repo and commit, returning a new [`Fs`].
+    ///
+    /// # Arguments
+    /// * `src` - Current path in the repo.
+    /// * `dest` - New path in the repo.
+    /// * `opts` - [`WriteOptions`] for commit message (mode is ignored).
+    ///
+    /// # Errors
+    /// Returns [`Error::Permission`] if this snapshot is read-only.
     pub fn rename(
         &self,
         src: &str,
@@ -789,9 +1046,20 @@ impl Fs {
         }
     }
 
-    /// Move multiple source paths to a destination. Follows POSIX mv semantics:
-    /// - Single source to non-existing destination: rename
-    /// - Multiple sources: destination must be an existing directory
+    /// Move or rename files within the repo, following POSIX `mv` semantics.
+    ///
+    /// - Single source to a non-existing destination: rename.
+    /// - Multiple sources: destination must be an existing directory.
+    ///
+    /// Returns the new [`Fs`] snapshot.
+    ///
+    /// # Errors
+    /// Returns [`Error::Permission`] if this snapshot is read-only.
+    /// Returns [`Error::NotFound`] if a source does not exist.
+    /// Returns [`Error::NotADirectory`] if multiple sources are given but
+    /// `dest` is not an existing directory.
+    /// Returns [`Error::IsADirectory`] if a source is a directory and
+    /// `opts.recursive` is `false`.
     pub fn move_paths(
         &self,
         sources: &[&str],
@@ -875,9 +1143,22 @@ impl Fs {
         self.commit_changes(&all_writes, &msg)
     }
 
-    /// Copy files from another branch/tag/commit into this branch in a single
-    /// atomic commit. Both snapshots must belong to the same repository so
-    /// blobs are referenced by OID — no data is read into memory.
+    /// Copy files from another branch, tag, or detached commit into this
+    /// branch in a single atomic commit.
+    ///
+    /// Both snapshots must belong to the same repository so blobs are
+    /// referenced by OID -- no data is read into memory.
+    ///
+    /// # Arguments
+    /// * `source` - Any `Fs` (branch, tag, detached). Read-only; not modified.
+    /// * `src_path` - Subtree in source to copy from. `""` = root (everything).
+    /// * `dest_path` - Subtree in dest to copy into. Defaults to `src_path`
+    ///   when `None`.
+    /// * `opts` - [`CopyRefOptions`] for delete, dry-run, and message.
+    ///
+    /// # Errors
+    /// Returns an error if `source` belongs to a different repo.
+    /// Returns [`Error::Permission`] if this `Fs` is read-only.
     pub fn copy_ref(
         &self,
         source: &Fs,
@@ -987,7 +1268,7 @@ impl Fs {
 
     // -- History ------------------------------------------------------------
 
-    /// Return the parent `Fs` (previous commit on this branch).
+    /// The parent snapshot, or `None` for the initial commit.
     pub fn parent(&self) -> Result<Option<Fs>> {
         let commit_oid = self
             .commit_oid
@@ -1014,7 +1295,10 @@ impl Fs {
         .transpose()
     }
 
-    /// Go back `n` commits.
+    /// Return the `Fs` at the *n*-th ancestor commit.
+    ///
+    /// # Errors
+    /// Returns an error if the history is shorter than `n` commits.
     pub fn back(&self, n: usize) -> Result<Fs> {
         let mut current = self.clone();
         for _ in 0..n {
@@ -1028,7 +1312,16 @@ impl Fs {
         Ok(current)
     }
 
-    /// Undo the last `n` commits (soft reset).
+    /// Move the branch pointer back `n` commits (soft reset).
+    ///
+    /// Walks back through parent commits and updates the branch ref.
+    /// A reflog entry is written automatically so the change can be
+    /// reversed with [`redo()`](Fs::redo).
+    ///
+    /// # Errors
+    /// Returns [`Error::Permission`] if called on a read-only snapshot (tag).
+    /// Returns [`Error::StaleSnapshot`] if the branch has advanced since this snapshot.
+    /// Returns an error if there are fewer than `n` commits in the history.
     pub fn undo(&self, n: usize) -> Result<Fs> {
         let branch = self.require_writable("undo")?;
 
@@ -1103,7 +1396,15 @@ impl Fs {
         Ok(target)
     }
 
-    /// Redo `n` undone commits by scanning the reflog forward.
+    /// Move the branch pointer forward `n` steps using the reflog.
+    ///
+    /// Reads the reflog to find where the branch was before the last `n`
+    /// movements, resurrecting "orphaned" commits after an [`undo()`](Fs::undo).
+    ///
+    /// # Errors
+    /// Returns [`Error::Permission`] if called on a read-only snapshot (tag).
+    /// Returns [`Error::StaleSnapshot`] if the branch has advanced since this snapshot.
+    /// Returns an error if not enough redo history exists.
     pub fn redo(&self, n: usize) -> Result<Fs> {
         let branch = self.require_writable("redo")?;
         let refname = format!("refs/heads/{}", branch);
@@ -1189,7 +1490,11 @@ impl Fs {
         Fs::from_commit(inner, forward_oid, self.ref_name.clone(), Some(self.writable))
     }
 
-    /// Return commit log entries, with optional filtering.
+    /// Walk the commit history, returning [`CommitInfo`] entries.
+    ///
+    /// All filters in [`LogOptions`] are optional and combine with AND:
+    /// `path` restricts to commits that changed the given file, `match_pattern`
+    /// filters by commit message glob, and `before` caps the timestamp.
     pub fn log(&self, opts: LogOptions) -> Result<Vec<CommitInfo>> {
         let mut commit_oid = self
             .commit_oid
@@ -1452,7 +1757,14 @@ impl std::fmt::Display for Fs {
     }
 }
 
-/// Retry a write operation on stale-snapshot errors.
+/// Retry a write operation with automatic back-off on stale-snapshot errors.
+///
+/// Calls `f` up to 5 times. Uses exponential back-off with a base of 10 ms,
+/// factor 2x, and a cap of 200 ms to avoid thundering-herd problems.
+///
+/// # Errors
+/// Returns [`Error::StaleSnapshot`] if all attempts are exhausted.
+/// Returns any other error immediately.
 pub fn retry_write<F, T>(mut f: F) -> Result<T>
 where
     F: FnMut() -> Result<T>,

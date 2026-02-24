@@ -349,6 +349,10 @@ impl NoteNamespace {
     // -- public API ------------------------------------------------------
 
     /// Get the note text for `hash`.
+    ///
+    /// # Errors
+    /// * [`Error::InvalidHash`] if `hash` is not a valid 40-char hex string.
+    /// * [`Error::KeyNotFound`] if no note exists for `hash`.
     pub fn get(&self, hash: &str) -> Result<String> {
         validate_hash(hash)?;
         self.with_repo(|repo| {
@@ -364,7 +368,12 @@ impl NoteNamespace {
         })
     }
 
-    /// Set a note on `hash`. Creates or updates; each call = 1 commit.
+    /// Set a note on `hash`. Creates or updates the note; each call produces
+    /// one commit on the notes ref.
+    ///
+    /// # Errors
+    /// * [`Error::InvalidHash`] if `hash` is not a valid 40-char hex string.
+    /// * [`Error::StaleSnapshot`] if the notes ref changed concurrently.
     pub fn set(&self, hash: &str, text: &str) -> Result<()> {
         validate_hash(hash)?;
         let new_tree_oid = self.with_repo(|repo| {
@@ -378,6 +387,10 @@ impl NoteNamespace {
     }
 
     /// Delete the note for `hash`.
+    ///
+    /// # Errors
+    /// * [`Error::InvalidHash`] if `hash` is not a valid 40-char hex string.
+    /// * [`Error::KeyNotFound`] if no note exists for `hash`.
     pub fn delete(&self, hash: &str) -> Result<()> {
         validate_hash(hash)?;
         let new_tree_oid = self.with_repo(|repo| {
@@ -393,6 +406,9 @@ impl NoteNamespace {
     }
 
     /// Check whether a note exists for `hash`.
+    ///
+    /// # Errors
+    /// Returns [`Error::InvalidHash`] if `hash` is not a valid 40-char hex string.
     pub fn has(&self, hash: &str) -> Result<bool> {
         validate_hash(hash)?;
         self.with_repo(|repo| {
@@ -404,7 +420,7 @@ impl NoteNamespace {
         })
     }
 
-    /// List all hashes that have notes (sorted).
+    /// List all commit hashes that have notes in this namespace (sorted).
     pub fn list(&self) -> Result<Vec<String>> {
         self.with_repo(|repo| {
             let tree_oid = match self.tree_oid(repo)? {
@@ -418,7 +434,7 @@ impl NoteNamespace {
         })
     }
 
-    /// Count notes in this namespace.
+    /// Return the number of notes in this namespace.
     pub fn len(&self) -> Result<usize> {
         self.with_repo(|repo| {
             let tree_oid = match self.tree_oid(repo)? {
@@ -430,12 +446,15 @@ impl NoteNamespace {
         })
     }
 
-    /// Whether this namespace has no notes.
+    /// Returns `true` if this namespace contains no notes.
     pub fn is_empty(&self) -> Result<bool> {
         Ok(self.len()? == 0)
     }
 
     /// Get the note for the current HEAD commit.
+    ///
+    /// # Errors
+    /// Returns an error if HEAD is dangling or no note exists for the current commit.
     pub fn get_for_current_branch(&self, store: &GitStore) -> Result<String> {
         let current = store
             .branches()
@@ -448,6 +467,9 @@ impl NoteNamespace {
     }
 
     /// Set a note on the current HEAD commit.
+    ///
+    /// # Errors
+    /// Returns an error if HEAD is dangling.
     pub fn set_for_current_branch(&self, store: &GitStore, text: &str) -> Result<()> {
         let current = store
             .branches()
@@ -459,7 +481,8 @@ impl NoteNamespace {
         self.set(&hash, text)
     }
 
-    /// Create a batch for deferred writes.
+    /// Create a batch for deferred writes. All staged changes are applied
+    /// as a single commit when [`NotesBatch::commit`] is called.
     pub fn batch(&self) -> NotesBatch {
         NotesBatch {
             ns: self.clone(),
@@ -480,6 +503,10 @@ impl std::fmt::Display for NoteNamespace {
 // ---------------------------------------------------------------------------
 
 /// Collects note writes/deletes and applies them in one commit.
+///
+/// Created via [`NoteNamespace::batch`]. Call [`set`](Self::set) and
+/// [`delete`](Self::delete) to stage changes, then [`commit`](Self::commit)
+/// to flush them all as a single commit.
 pub struct NotesBatch {
     ns: NoteNamespace,
     writes: Vec<(String, String)>,
@@ -487,7 +514,11 @@ pub struct NotesBatch {
 }
 
 impl NotesBatch {
-    /// Stage a note write.
+    /// Stage a note write for `hash`. If the same hash is already staged
+    /// for deletion, the delete is cancelled. Last write wins for duplicate hashes.
+    ///
+    /// # Errors
+    /// Returns [`Error::InvalidHash`] if `hash` is not a valid 40-char hex string.
     pub fn set(&mut self, hash: &str, text: &str) -> Result<()> {
         validate_hash(hash)?;
         self.deletes.retain(|h| h != hash);
@@ -497,7 +528,11 @@ impl NotesBatch {
         Ok(())
     }
 
-    /// Stage a note delete.
+    /// Stage a note deletion for `hash`. If the same hash is already staged
+    /// for writing, the write is cancelled.
+    ///
+    /// # Errors
+    /// Returns [`Error::InvalidHash`] if `hash` is not a valid 40-char hex string.
     pub fn delete(&mut self, hash: &str) -> Result<()> {
         validate_hash(hash)?;
         self.writes.retain(|(h, _)| h != hash);
@@ -507,7 +542,13 @@ impl NotesBatch {
         Ok(())
     }
 
-    /// Commit all accumulated changes. Consumes `self`.
+    /// Commit all accumulated changes as a single commit. Consumes `self`.
+    ///
+    /// Does nothing if no writes or deletes were staged.
+    ///
+    /// # Errors
+    /// * [`Error::KeyNotFound`] if a staged delete targets a non-existent note.
+    /// * [`Error::StaleSnapshot`] if the notes ref changed concurrently.
     pub fn commit(self) -> Result<()> {
         if self.writes.is_empty() && self.deletes.is_empty() {
             return Ok(());
@@ -549,7 +590,7 @@ impl<'a> NoteDict<'a> {
         NoteNamespace::new(Arc::clone(&self.store.inner), "commits")
     }
 
-    /// A custom namespace.
+    /// Access a custom namespace by name (e.g. `"reviews"` for `refs/notes/reviews`).
     pub fn namespace(&self, name: &str) -> NoteNamespace {
         NoteNamespace::new(Arc::clone(&self.store.inner), name)
     }

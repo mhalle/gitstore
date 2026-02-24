@@ -10,6 +10,12 @@ import { readReflog, writeReflogEntry, ZERO_SHA } from './reflog.js';
 import { FS } from './fs.js';
 import type { GitStore } from './gitstore.js';
 
+/**
+ * Map-like access to branches or tags.
+ *
+ * `store.branches` and `store.tags` are both `RefDict` instances.
+ * Supports `get`, `set`, `delete`, `has`, `list`, and async iteration.
+ */
 export class RefDict {
   private _store: GitStore;
   private _prefix: string; // "refs/heads/" or "refs/tags/"
@@ -42,6 +48,12 @@ export class RefDict {
 
   /**
    * Get a branch or tag as an FS snapshot.
+   *
+   * Branches return a writable FS; tags return a read-only FS.
+   *
+   * @param name - Branch or tag name.
+   * @returns FS snapshot for the ref.
+   * @throws {Error} If the branch or tag does not exist.
    */
   async get(name: string): Promise<FS> {
     const refName = this._refName(name);
@@ -68,7 +80,16 @@ export class RefDict {
   }
 
   /**
-   * Set/create a branch from an FS snapshot.
+   * Set or create a branch pointing to an FS snapshot's commit.
+   *
+   * The FS must belong to the same repository. Tags cannot be overwritten;
+   * an error is thrown if the tag already exists.
+   *
+   * @param name - Branch or tag name.
+   * @param fs - FS snapshot whose commit to point the ref at.
+   * @throws {TypeError} If fs is not an FS instance.
+   * @throws {Error} If the FS belongs to a different repository.
+   * @throws {Error} If the tag already exists (tags only).
    */
   async set(name: string, fs: FS): Promise<void> {
     validateRefName(name);
@@ -125,7 +146,13 @@ export class RefDict {
   }
 
   /**
-   * Set branch and return a writable FS bound to it. Convenience for set + get.
+   * Set branch to an FS snapshot and return a writable FS bound to it.
+   *
+   * Convenience method that combines `set()` and `get()`.
+   *
+   * @param name - Branch name.
+   * @param fs - FS snapshot to set (can be read-only).
+   * @returns New writable FS bound to the branch.
    */
   async setAndGet(name: string, fs: FS): Promise<FS> {
     await this.set(name, fs);
@@ -134,6 +161,9 @@ export class RefDict {
 
   /**
    * Delete a branch or tag.
+   *
+   * @param name - Branch or tag name.
+   * @throws {Error} If the branch or tag does not exist.
    */
   async delete(name: string): Promise<void> {
     const refName = this._refName(name);
@@ -148,7 +178,10 @@ export class RefDict {
   }
 
   /**
-   * Check if a branch/tag exists.
+   * Check if a branch or tag exists.
+   *
+   * @param name - Branch or tag name.
+   * @returns True if the ref exists.
    */
   async has(name: string): Promise<boolean> {
     const refName = this._refName(name);
@@ -161,7 +194,9 @@ export class RefDict {
   }
 
   /**
-   * List all branch/tag names.
+   * List all branch or tag names.
+   *
+   * @returns Array of ref names (without the refs/heads/ or refs/tags/ prefix).
    */
   async list(): Promise<string[]> {
     if (this._isTags) {
@@ -181,7 +216,13 @@ export class RefDict {
   }
 
   /**
-   * Get the current branch name (HEAD target). Only valid for branches.
+   * Get the current (HEAD) branch name, or null if HEAD is dangling.
+   *
+   * Only valid for branches; throws for tags. Cheap -- does not
+   * construct an FS object.
+   *
+   * @returns Branch name string, or null.
+   * @throws {Error} If called on tags.
    */
   async getCurrentName(): Promise<string | null> {
     if (this._isTags) throw new Error('Tags do not have a current branch');
@@ -194,7 +235,12 @@ export class RefDict {
   }
 
   /**
-   * Get the current branch as an FS snapshot. Only valid for branches.
+   * Get the FS for the current (HEAD) branch, or null if HEAD is dangling.
+   *
+   * Only valid for branches; throws for tags.
+   *
+   * @returns Writable FS snapshot, or null.
+   * @throws {Error} If called on tags.
    */
   async getCurrent(): Promise<FS | null> {
     if (this._isTags) throw new Error('Tags do not have a current branch');
@@ -208,7 +254,13 @@ export class RefDict {
   }
 
   /**
-   * Set the current branch (HEAD target). Only valid for branches.
+   * Set the current branch (HEAD symbolic ref target).
+   *
+   * Only valid for branches; throws for tags.
+   *
+   * @param name - Branch name to set as current.
+   * @throws {Error} If called on tags.
+   * @throws {Error} If the branch does not exist.
    */
   async setCurrent(name: string): Promise<void> {
     if (this._isTags) throw new Error('Tags do not have a current branch');
@@ -225,6 +277,11 @@ export class RefDict {
 
   /**
    * Read reflog entries for a branch.
+   *
+   * @param name - Branch name (e.g. 'main').
+   * @returns List of ReflogEntry objects, newest first.
+   * @throws {Error} If called on tags.
+   * @throws {Error} If the branch does not exist.
    */
   async reflog(name: string): Promise<ReflogEntry[]> {
     if (this._isTags) throw new Error('Tags do not have reflog');

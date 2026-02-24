@@ -50,6 +50,12 @@ import { Batch } from './batch.js';
 
 import type { GitStore } from './gitstore.js';
 
+/**
+ * An immutable snapshot of a committed tree.
+ *
+ * Read-only when `writable` is false (tag snapshot).
+ * Writable when `writable` is true -- writes auto-commit and return a new FS.
+ */
 export class FS {
   /** @internal */
   _store: GitStore;
@@ -122,18 +128,26 @@ export class FS {
   // Properties
   // ---------------------------------------------------------------------------
 
+  /** The 40-character hex SHA of this snapshot's commit. */
   get commitHash(): string {
     return this._commitOid;
   }
 
+  /** The branch or tag name, or `null` for detached snapshots. */
   get refName(): string | null {
     return this._refName;
   }
 
+  /** Whether this snapshot can be written to. */
   get writable(): boolean {
     return this._writable;
   }
 
+  /**
+   * Fetch commit metadata (message, time, author name/email) in a single read.
+   *
+   * @returns Commit info object with message, time, authorName, and authorEmail.
+   */
   async getCommitInfo(): Promise<CommitInfo> {
     const { commit } = await git.readCommit({
       fs: this._fsModule,
@@ -149,26 +163,32 @@ export class FS {
     };
   }
 
+  /** The commit message (trailing newline stripped). */
   async getMessage(): Promise<string> {
     return (await this.getCommitInfo()).message;
   }
 
+  /** Timezone-aware commit timestamp. */
   async getTime(): Promise<Date> {
     return (await this.getCommitInfo()).time;
   }
 
+  /** The commit author's name. */
   async getAuthorName(): Promise<string> {
     return (await this.getCommitInfo()).authorName;
   }
 
+  /** The commit author's email address. */
   async getAuthorEmail(): Promise<string> {
     return (await this.getCommitInfo()).authorEmail;
   }
 
+  /** Report of the operation that created this snapshot, or `null`. */
   get changes(): ChangeReport | null {
     return this._changes;
   }
 
+  /** The 40-char hex SHA of the root tree. */
   get treeHash(): string {
     return this._treeOid;
   }
@@ -189,6 +209,17 @@ export class FS {
   // Read operations
   // ---------------------------------------------------------------------------
 
+  /**
+   * Read file contents as bytes.
+   *
+   * @param path - File path in the repo.
+   * @param opts - Optional read options.
+   * @param opts.offset - Byte offset to start reading from.
+   * @param opts.size - Maximum bytes to return (undefined for all).
+   * @returns Raw file contents as Uint8Array.
+   * @throws {FileNotFoundError} If path does not exist.
+   * @throws {IsADirectoryError} If path is a directory.
+   */
   async read(path: string, opts?: { offset?: number; size?: number }): Promise<Uint8Array> {
     const blob = await readBlobAtPath(this._fsModule, this._gitdir, this._treeOid, path);
     if (opts && (opts.offset !== undefined || opts.size !== undefined)) {
@@ -199,15 +230,40 @@ export class FS {
     return blob;
   }
 
+  /**
+   * Read file contents as a string.
+   *
+   * @param path - File path in the repo.
+   * @param encoding - Text encoding (default `"utf-8"`).
+   * @returns Decoded text content.
+   * @throws {FileNotFoundError} If path does not exist.
+   * @throws {IsADirectoryError} If path is a directory.
+   */
   async readText(path: string, encoding: string = 'utf-8'): Promise<string> {
     const data = await this.read(path);
     return new TextDecoder(encoding).decode(data);
   }
 
+  /**
+   * List entry names at path (or root if null/undefined).
+   *
+   * @param path - Directory path, or null/undefined for the repo root.
+   * @returns Array of entry names (files and subdirectories).
+   * @throws {NotADirectoryError} If path is a file.
+   */
   async ls(path?: string | null): Promise<string[]> {
     return listTreeAtPath(this._fsModule, this._gitdir, this._treeOid, path);
   }
 
+  /**
+   * Walk the repo tree recursively, like `os.walk`.
+   *
+   * Yields `[dirpath, dirnames, fileEntries]` tuples. Each file entry is a
+   * WalkEntry with `name`, `oid`, and `mode`.
+   *
+   * @param path - Subtree to walk, or null/undefined for root.
+   * @throws {NotADirectoryError} If path is a file.
+   */
   async *walk(
     path?: string | null,
   ): AsyncGenerator<[string, string[], WalkEntry[]]> {
@@ -221,10 +277,20 @@ export class FS {
     }
   }
 
+  /**
+   * Return true if path exists (file or directory).
+   *
+   * @param path - Path to check.
+   */
   async exists(path: string): Promise<boolean> {
     return existsAtPath(this._fsModule, this._gitdir, this._treeOid, path);
   }
 
+  /**
+   * Return true if path is a directory (tree) in the repo.
+   *
+   * @param path - Path to check.
+   */
   async isDir(path: string): Promise<boolean> {
     const normalized = normalizePath(path);
     const entry = await entryAtPath(this._fsModule, this._gitdir, this._treeOid, normalized);
@@ -232,6 +298,14 @@ export class FS {
     return entry.mode === MODE_TREE;
   }
 
+  /**
+   * Return the FileType of path.
+   *
+   * Returns `'blob'`, `'executable'`, `'link'`, or `'tree'`.
+   *
+   * @param path - Path to check.
+   * @throws {FileNotFoundError} If path does not exist.
+   */
   async fileType(path: string): Promise<FileType> {
     const normalized = normalizePath(path);
     const entry = await entryAtPath(this._fsModule, this._gitdir, this._treeOid, normalized);
@@ -239,6 +313,13 @@ export class FS {
     return fileTypeFromMode(entry.mode);
   }
 
+  /**
+   * Return the size in bytes of the object at path.
+   *
+   * @param path - Path to check.
+   * @returns Size in bytes.
+   * @throws {FileNotFoundError} If path does not exist.
+   */
   async size(path: string): Promise<number> {
     const normalized = normalizePath(path);
     const entry = await entryAtPath(this._fsModule, this._gitdir, this._treeOid, normalized);
@@ -247,6 +328,15 @@ export class FS {
     return blob.length;
   }
 
+  /**
+   * Return the 40-character hex SHA of the object at path.
+   *
+   * For files this is the blob SHA; for directories the tree SHA.
+   *
+   * @param path - Path to check.
+   * @returns 40-char hex SHA string.
+   * @throws {FileNotFoundError} If path does not exist.
+   */
   async objectHash(path: string): Promise<string> {
     const normalized = normalizePath(path);
     const entry = await entryAtPath(this._fsModule, this._gitdir, this._treeOid, normalized);
@@ -254,6 +344,14 @@ export class FS {
     return entry.oid;
   }
 
+  /**
+   * Read the target of a symlink.
+   *
+   * @param path - Symlink path in the repo.
+   * @returns The symlink target string.
+   * @throws {FileNotFoundError} If path does not exist.
+   * @throws {Error} If path is not a symlink.
+   */
   async readlink(path: string): Promise<string> {
     const normalized = normalizePath(path);
     const entry = await entryAtPath(this._fsModule, this._gitdir, this._treeOid, normalized);
@@ -263,6 +361,17 @@ export class FS {
     return new TextDecoder().decode(blob);
   }
 
+  /**
+   * Read raw blob data by hash, bypassing tree lookup.
+   *
+   * FUSE pattern: `stat()` -> cache hash -> `readByHash(hash)`.
+   *
+   * @param hash - 40-char hex SHA of the blob.
+   * @param opts - Optional read options.
+   * @param opts.offset - Byte offset to start reading from.
+   * @param opts.size - Maximum bytes to return (undefined for all).
+   * @returns Raw blob contents as Uint8Array.
+   */
   async readByHash(hash: string, opts?: { offset?: number; size?: number }): Promise<Uint8Array> {
     const { blob } = await git.readBlob({ fs: this._fsModule, gitdir: this._gitdir, oid: hash });
     if (opts && (opts.offset !== undefined || opts.size !== undefined)) {
@@ -273,6 +382,16 @@ export class FS {
     return blob;
   }
 
+  /**
+   * Return a StatResult for path (or root if null/undefined).
+   *
+   * Combines fileType, size, oid, nlink, and mtime in a single call --
+   * the hot path for FUSE `getattr`.
+   *
+   * @param path - Path to stat, or null/undefined for root.
+   * @returns StatResult with mode, fileType, size, hash, nlink, and mtime.
+   * @throws {FileNotFoundError} If path does not exist.
+   */
   async stat(path?: string | null): Promise<StatResult> {
     const mtime = await this._getCommitTime();
 
@@ -315,6 +434,15 @@ export class FS {
     };
   }
 
+  /**
+   * List directory entries with name, oid, and mode.
+   *
+   * Like `ls()` but returns WalkEntry objects so callers get entry types
+   * (useful for FUSE `readdir` d_type).
+   *
+   * @param path - Directory path, or null/undefined for root.
+   * @returns Array of WalkEntry objects.
+   */
   async listdir(path?: string | null): Promise<WalkEntry[]> {
     return listEntriesAtPath(this._fsModule, this._gitdir, this._treeOid, path);
   }
@@ -323,6 +451,16 @@ export class FS {
   // Glob
   // ---------------------------------------------------------------------------
 
+  /**
+   * Expand a glob pattern against the repo tree.
+   *
+   * Supports `*`, `?`, and `**`. `*` and `?` do not match a leading `.`
+   * unless the pattern segment itself starts with `.`. `**` matches zero or
+   * more directory levels, skipping directories whose names start with `.`.
+   *
+   * @param pattern - Glob pattern to match.
+   * @returns Sorted, deduplicated list of matching paths (files and directories).
+   */
   async glob(pattern: string): Promise<string[]> {
     const results: string[] = [];
     for await (const path of this.iglob(pattern)) {
@@ -331,6 +469,18 @@ export class FS {
     return results.sort();
   }
 
+  /**
+   * Expand a glob pattern against the repo tree, yielding unique matches.
+   *
+   * Like `glob()` but returns an unordered async iterator instead of a
+   * sorted list. Useful when you only need to iterate once and don't
+   * need sorted output.
+   *
+   * A `/./` pivot marker (rsync `-R` style) is preserved in the output
+   * so that callers can reconstruct partial source paths.
+   *
+   * @param pattern - Glob pattern to match.
+   */
   async *iglob(pattern: string): AsyncGenerator<string> {
     pattern = pattern.replace(/^\/+|\/+$/g, '');
     if (!pattern) return;
@@ -600,6 +750,18 @@ export class FS {
     return newFs;
   }
 
+  /**
+   * Write data to path and commit, returning a new FS.
+   *
+   * @param path - Destination path in the repo.
+   * @param data - Raw bytes to write.
+   * @param opts - Optional write options.
+   * @param opts.message - Commit message (auto-generated if omitted).
+   * @param opts.mode - File mode override (e.g. `'executable'`).
+   * @returns New FS snapshot with the write committed.
+   * @throws {PermissionError} If this snapshot is read-only.
+   * @throws {StaleSnapshotError} If the branch has advanced since this snapshot.
+   */
   async write(
     path: string,
     data: Uint8Array,
@@ -613,6 +775,18 @@ export class FS {
     return this._commitChanges(writes, new Set(), opts?.message);
   }
 
+  /**
+   * Write text to path and commit, returning a new FS.
+   *
+   * @param path - Destination path in the repo.
+   * @param text - String content (encoded as UTF-8).
+   * @param opts - Optional write options.
+   * @param opts.message - Commit message (auto-generated if omitted).
+   * @param opts.mode - File mode override (e.g. `'executable'`).
+   * @returns New FS snapshot with the write committed.
+   * @throws {PermissionError} If this snapshot is read-only.
+   * @throws {StaleSnapshotError} If the branch has advanced since this snapshot.
+   */
   async writeText(
     path: string,
     text: string,
@@ -622,6 +796,20 @@ export class FS {
     return this.write(path, data, opts);
   }
 
+  /**
+   * Write a local file into the repo and commit, returning a new FS.
+   *
+   * Executable permission is auto-detected from disk unless `mode` is set.
+   *
+   * @param path - Destination path in the repo.
+   * @param localPath - Path to the local file.
+   * @param opts - Optional write options.
+   * @param opts.message - Commit message (auto-generated if omitted).
+   * @param opts.mode - File mode override (e.g. `'executable'`).
+   * @returns New FS snapshot with the write committed.
+   * @throws {PermissionError} If this snapshot is read-only.
+   * @throws {StaleSnapshotError} If the branch has advanced since this snapshot.
+   */
   async writeFromFile(
     path: string,
     localPath: string,
@@ -638,6 +826,17 @@ export class FS {
     return this._commitChanges(writes, new Set(), opts?.message);
   }
 
+  /**
+   * Create a symbolic link entry and commit, returning a new FS.
+   *
+   * @param path - Symlink path in the repo.
+   * @param target - The symlink target string.
+   * @param opts - Optional write options.
+   * @param opts.message - Commit message (auto-generated if omitted).
+   * @returns New FS snapshot with the symlink committed.
+   * @throws {PermissionError} If this snapshot is read-only.
+   * @throws {StaleSnapshotError} If the branch has advanced since this snapshot.
+   */
   async writeSymlink(
     path: string,
     target: string,
@@ -649,6 +848,25 @@ export class FS {
     return this._commitChanges(writes, new Set(), opts?.message);
   }
 
+  /**
+   * Apply multiple writes and removes in a single atomic commit.
+   *
+   * `writes` maps repo paths to content. Values may be:
+   * - `Uint8Array` -- raw blob data
+   * - `string` -- UTF-8 text (encoded automatically)
+   * - `WriteEntry` -- full control over source, mode, and symlinks
+   *
+   * `removes` lists repo paths to delete (string, array, or Set).
+   *
+   * @param writes - Map of repo paths to content.
+   * @param removes - Path(s) to delete.
+   * @param opts - Optional apply options.
+   * @param opts.message - Commit message (auto-generated if omitted).
+   * @param opts.operation - Operation name for auto-generated messages.
+   * @returns New FS snapshot with the changes committed.
+   * @throws {PermissionError} If this snapshot is read-only.
+   * @throws {StaleSnapshotError} If the branch has advanced since this snapshot.
+   */
   async apply(
     writes?: Record<string, WriteEntry | Uint8Array | string> | null,
     removes?: string | string[] | Set<string> | null,
@@ -710,7 +928,13 @@ export class FS {
   }
 
   /**
-   * Create a Batch for accumulating multiple writes before committing.
+   * Return a Batch for accumulating multiple writes in one commit.
+   *
+   * @param opts - Optional batch options.
+   * @param opts.message - Commit message (auto-generated if omitted).
+   * @param opts.operation - Operation name for auto-generated messages.
+   * @returns A Batch instance. Call `batch.commit()` to finalize.
+   * @throws {PermissionError} If this snapshot is read-only.
    */
   batch(opts?: { message?: string; operation?: string }): Batch {
     return new Batch(this, opts?.message, opts?.operation);
@@ -720,6 +944,26 @@ export class FS {
   // Copy / Sync / Remove / Move (delegates to copy module)
   // ---------------------------------------------------------------------------
 
+  /**
+   * Copy local files into the repo.
+   *
+   * Sources must be literal paths; use `diskGlob()` to expand patterns
+   * before calling.
+   *
+   * @param sources - Local path(s). Trailing `/` copies contents; `/./` is a pivot marker.
+   * @param dest - Destination path in the repo.
+   * @param opts - Copy-in options.
+   * @param opts.dryRun - Preview only; returned FS has `.changes` set.
+   * @param opts.followSymlinks - Dereference symlinks on disk.
+   * @param opts.message - Commit message (auto-generated if omitted).
+   * @param opts.mode - Override file mode for all files.
+   * @param opts.ignoreExisting - Skip files that already exist at dest.
+   * @param opts.delete - Remove repo files under dest not in source.
+   * @param opts.ignoreErrors - Collect errors instead of aborting.
+   * @param opts.checksum - Compare by content hash (default true).
+   * @returns New FS with `.changes` set.
+   * @throws {PermissionError} If this snapshot is read-only.
+   */
   async copyIn(
     sources: string | string[],
     dest: string,
@@ -738,6 +982,22 @@ export class FS {
     return copyIn(this, sources, dest, opts);
   }
 
+  /**
+   * Copy repo files to local disk.
+   *
+   * Sources must be literal repo paths; use `glob()` to expand patterns
+   * before calling.
+   *
+   * @param sources - Repo path(s). Trailing `/` copies contents; `/./` is a pivot marker.
+   * @param dest - Local destination directory.
+   * @param opts - Copy-out options.
+   * @param opts.dryRun - Preview only; returned FS has `.changes` set.
+   * @param opts.ignoreExisting - Skip files that already exist at dest.
+   * @param opts.delete - Remove local files under dest not in source.
+   * @param opts.ignoreErrors - Collect errors instead of aborting.
+   * @param opts.checksum - Compare by content hash (default true).
+   * @returns This FS with `.changes` set.
+   */
   async copyOut(
     sources: string | string[],
     dest: string,
@@ -753,6 +1013,19 @@ export class FS {
     return copyOut(this, sources, dest, opts);
   }
 
+  /**
+   * Make repoPath identical to localPath (including deletes).
+   *
+   * @param localPath - Local directory to sync from.
+   * @param repoPath - Repo directory to sync to.
+   * @param opts - Sync-in options.
+   * @param opts.dryRun - Preview only; returned FS has `.changes` set.
+   * @param opts.message - Commit message (auto-generated if omitted).
+   * @param opts.ignoreErrors - Collect errors instead of aborting.
+   * @param opts.checksum - Compare by content hash (default true).
+   * @returns New FS with `.changes` set.
+   * @throws {PermissionError} If this snapshot is read-only.
+   */
   async syncIn(
     localPath: string,
     repoPath: string,
@@ -767,6 +1040,17 @@ export class FS {
     return syncIn(this, localPath, repoPath, opts);
   }
 
+  /**
+   * Make localPath identical to repoPath (including deletes).
+   *
+   * @param repoPath - Repo directory to sync from.
+   * @param localPath - Local directory to sync to.
+   * @param opts - Sync-out options.
+   * @param opts.dryRun - Preview only; returned FS has `.changes` set.
+   * @param opts.ignoreErrors - Collect errors instead of aborting.
+   * @param opts.checksum - Compare by content hash (default true).
+   * @returns This FS with `.changes` set.
+   */
   async syncOut(
     repoPath: string,
     localPath: string,
@@ -780,6 +1064,20 @@ export class FS {
     return syncOut(this, repoPath, localPath, opts);
   }
 
+  /**
+   * Remove files from the repo.
+   *
+   * Sources must be literal paths; use `glob()` to expand patterns before calling.
+   *
+   * @param sources - Repo path(s) to remove.
+   * @param opts - Remove options.
+   * @param opts.recursive - Allow removing directories.
+   * @param opts.dryRun - Preview only; returned FS has `.changes` set.
+   * @param opts.message - Commit message (auto-generated if omitted).
+   * @returns New FS with `.changes` set.
+   * @throws {PermissionError} If this snapshot is read-only.
+   * @throws {FileNotFoundError} If no source paths match.
+   */
   async remove(
     sources: string | string[],
     opts: { recursive?: boolean; dryRun?: boolean; message?: string } = {},
@@ -788,6 +1086,20 @@ export class FS {
     return remove(this, sources, opts);
   }
 
+  /**
+   * Move or rename files within the repo.
+   *
+   * Sources must be literal paths; use `glob()` to expand patterns before calling.
+   *
+   * @param sources - Repo path(s) to move.
+   * @param dest - Destination path in the repo.
+   * @param opts - Move options.
+   * @param opts.recursive - Allow moving directories.
+   * @param opts.dryRun - Preview only; returned FS has `.changes` set.
+   * @param opts.message - Commit message (auto-generated if omitted).
+   * @returns New FS with `.changes` set.
+   * @throws {PermissionError} If this snapshot is read-only.
+   */
   async move(
     sources: string | string[],
     dest: string,
@@ -797,6 +1109,23 @@ export class FS {
     return move(this, sources, dest, opts);
   }
 
+  /**
+   * Copy files from source FS into this branch in a single atomic commit.
+   *
+   * Since both snapshots share the same object store, blobs are referenced
+   * by OID -- no data is read into memory.
+   *
+   * @param source - Any FS (branch, tag, detached commit). Read-only; not modified.
+   * @param srcPath - Subtree in source to copy from. `""` or omitted = root (everything).
+   * @param destPath - Subtree in dest to copy into. Defaults to srcPath when null/undefined.
+   * @param opts - Copy-ref options.
+   * @param opts.delete - Remove dest files under destPath that aren't in source.
+   * @param opts.dryRun - Compute changes but don't commit. Returned FS has `.changes` set.
+   * @param opts.message - Commit message (auto-generated if omitted).
+   * @returns New FS for the dest branch with the commit applied.
+   * @throws {Error} If source belongs to a different repo.
+   * @throws {PermissionError} If this FS is read-only.
+   */
   async copyRef(
     source: FS,
     srcPath?: string,
@@ -854,6 +1183,7 @@ export class FS {
   // History
   // ---------------------------------------------------------------------------
 
+  /** The parent snapshot, or `null` for the initial commit. */
   async getParent(): Promise<FS | null> {
     const { commit } = await git.readCommit({
       fs: this._fsModule,
@@ -864,6 +1194,13 @@ export class FS {
     return FS._fromCommit(this._store, commit.parent[0], this._refName, this._writable);
   }
 
+  /**
+   * Return the FS at the n-th ancestor commit.
+   *
+   * @param n - Number of commits to go back (default 1).
+   * @returns FS at the ancestor commit.
+   * @throws {Error} If n < 0 or history is too short.
+   */
   async back(n = 1): Promise<FS> {
     if (n < 0) throw new Error(`back() requires n >= 0, got ${n}`);
     let fs: FS = this;
@@ -875,6 +1212,18 @@ export class FS {
     return fs;
   }
 
+  /**
+   * Move branch back N commits.
+   *
+   * Walks back through parent commits and updates the branch pointer.
+   * Automatically writes a reflog entry.
+   *
+   * @param steps - Number of commits to undo (default 1).
+   * @returns New FS snapshot at the ancestor commit.
+   * @throws {PermissionError} If called on a read-only snapshot (tag).
+   * @throws {Error} If not enough history exists.
+   * @throws {StaleSnapshotError} If the branch has advanced since this snapshot.
+   */
   async undo(steps = 1): Promise<FS> {
     if (steps < 1) throw new Error(`steps must be >= 1, got ${steps}`);
     if (!this._writable) throw this._readonlyError('undo');
@@ -925,6 +1274,18 @@ export class FS {
     return current;
   }
 
+  /**
+   * Move branch forward N steps using reflog.
+   *
+   * Reads the reflog to find where the branch was before the last N movements.
+   * This can resurrect "orphaned" commits after undo.
+   *
+   * @param steps - Number of reflog entries to go back (default 1).
+   * @returns New FS snapshot at the target position.
+   * @throws {PermissionError} If called on a read-only snapshot (tag).
+   * @throws {Error} If not enough redo history exists.
+   * @throws {StaleSnapshotError} If the branch has advanced since this snapshot.
+   */
   async redo(steps = 1): Promise<FS> {
     if (steps < 1) throw new Error(`steps must be >= 1, got ${steps}`);
     if (!this._writable) throw this._readonlyError('redo');
@@ -1000,6 +1361,16 @@ export class FS {
     return targetFs;
   }
 
+  /**
+   * Walk the commit history, yielding ancestor FS snapshots.
+   *
+   * All filters are optional and combine with AND.
+   *
+   * @param opts - Log filter options.
+   * @param opts.path - Only yield commits that changed this file.
+   * @param opts.match - Message pattern (`*`/`?` wildcards).
+   * @param opts.before - Only yield commits on or before this time.
+   */
   async *log(opts?: {
     path?: string;
     match?: string;
@@ -1073,6 +1444,21 @@ function resolveMode(mode: FileType | string): string {
 
 /**
  * Write data to a branch with automatic retry on concurrent modification.
+ *
+ * Re-fetches the branch FS on each attempt. Uses exponential backoff
+ * with jitter (base 10ms, factor 2x, cap 200ms) to avoid thundering-herd.
+ *
+ * @param store - The GitStore instance.
+ * @param branch - Branch name to write to.
+ * @param path - Destination path in the repo.
+ * @param data - Raw bytes to write.
+ * @param opts - Optional retry-write options.
+ * @param opts.message - Commit message (auto-generated if omitted).
+ * @param opts.mode - File mode override (e.g. `'executable'`).
+ * @param opts.retries - Maximum number of attempts (default 5).
+ * @returns New FS snapshot with the write committed.
+ * @throws {StaleSnapshotError} If all attempts are exhausted.
+ * @throws {Error} If the branch does not exist.
  */
 export async function retryWrite(
   store: GitStore,

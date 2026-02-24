@@ -4,9 +4,13 @@ use std::path::PathBuf;
 // Mode constants
 // ---------------------------------------------------------------------------
 
+/// Regular file mode (non-executable).
 pub const MODE_BLOB: u32 = 0o100644;
+/// Executable file mode.
 pub const MODE_BLOB_EXEC: u32 = 0o100755;
+/// Symbolic link mode.
 pub const MODE_LINK: u32 = 0o120000;
+/// Directory (tree) mode.
 pub const MODE_TREE: u32 = 0o040000;
 
 // ---------------------------------------------------------------------------
@@ -16,9 +20,13 @@ pub const MODE_TREE: u32 = 0o040000;
 /// The type of a git tree entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FileType {
+    /// Regular file (`0o100644`).
     Blob,
+    /// Executable file (`0o100755`).
     Executable,
+    /// Symbolic link (`0o120000`).
     Link,
+    /// Directory / subtree (`0o040000`).
     Tree,
 }
 
@@ -64,15 +72,20 @@ impl FileType {
 // WalkEntry
 // ---------------------------------------------------------------------------
 
-/// An entry yielded when walking a tree.
+/// An entry yielded when walking a tree (by [`Fs::walk`](crate::fs::Fs::walk)
+/// and [`Fs::listdir`](crate::fs::Fs::listdir)).
 #[derive(Debug, Clone)]
 pub struct WalkEntry {
+    /// Entry name (file or directory basename).
     pub name: String,
+    /// Raw git object ID.
     pub oid: gix::ObjectId,
+    /// Git filemode integer (e.g. `0o100644`).
     pub mode: u32,
 }
 
 impl WalkEntry {
+    /// Return the [`FileType`] for this entry, or `None` for unknown modes.
     pub fn file_type(&self) -> Option<FileType> {
         FileType::from_mode(self.mode)
     }
@@ -85,11 +98,17 @@ impl WalkEntry {
 /// Result of a stat() call — single-call getattr for FUSE.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatResult {
+    /// Raw git filemode.
     pub mode: u32,
+    /// Parsed file type.
     pub file_type: FileType,
+    /// Size in bytes (blob length, or number of entries for directories).
     pub size: u64,
+    /// 40-char hex SHA of the object.
     pub hash: String,
+    /// Number of hard links (2 + subdirectory count for dirs, 1 for files).
     pub nlink: u32,
+    /// Commit timestamp (POSIX epoch seconds).
     pub mtime: u64,
 }
 
@@ -224,19 +243,25 @@ impl Ord for FileEntry {
 /// Kinds of change actions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ChangeActionKind {
+    /// A new file was added.
     Add,
+    /// An existing file was modified.
     Update,
+    /// A file was removed.
     Delete,
 }
 
-/// A single change action.
+/// A single change action (kind + path).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChangeAction {
+    /// Whether this is an add, update, or delete.
     pub kind: ChangeActionKind,
+    /// Relative path within the store.
     pub path: String,
 }
 
 impl ChangeAction {
+    /// Create a new change action.
     pub fn new(kind: ChangeActionKind, path: impl Into<String>) -> Self {
         Self {
             kind,
@@ -260,11 +285,14 @@ impl Ord for ChangeAction {
 /// An error encountered during a change operation.
 #[derive(Debug, Clone)]
 pub struct ChangeError {
+    /// Path that caused the error.
     pub path: String,
+    /// Human-readable error description.
     pub error: String,
 }
 
 impl ChangeError {
+    /// Create a new change error.
     pub fn new(path: impl Into<String>, error: impl Into<String>) -> Self {
         Self {
             path: path.into(),
@@ -276,14 +304,20 @@ impl ChangeError {
 /// Report summarising the outcome of a sync / copy / import operation.
 #[derive(Debug, Clone, Default)]
 pub struct ChangeReport {
+    /// Files that were newly added.
     pub add: Vec<FileEntry>,
+    /// Files that were modified in place.
     pub update: Vec<FileEntry>,
+    /// Files that were removed.
     pub delete: Vec<FileEntry>,
+    /// Non-fatal errors encountered during the operation.
     pub errors: Vec<ChangeError>,
+    /// Non-fatal warnings (e.g. overlapping destinations).
     pub warnings: Vec<String>,
 }
 
 impl ChangeReport {
+    /// Create an empty report.
     pub fn new() -> Self {
         Self::default()
     }
@@ -329,10 +363,12 @@ impl ChangeReport {
 // Signature / CommitInfo
 // ---------------------------------------------------------------------------
 
-/// Author/committer identity.
+/// Author/committer identity used for commits.
 #[derive(Debug, Clone)]
 pub struct Signature {
+    /// Author name (e.g. `"gitstore"`).
     pub name: String,
+    /// Author email (e.g. `"gitstore@localhost"`).
     pub email: String,
 }
 
@@ -348,10 +384,15 @@ impl Default for Signature {
 /// Information for creating a commit.
 #[derive(Debug, Clone)]
 pub struct CommitInfo {
+    /// 40-char hex commit SHA.
     pub commit_hash: String,
+    /// Commit message text.
     pub message: String,
+    /// POSIX epoch seconds (defaults to current time if `None`).
     pub time: Option<u64>,
+    /// Override author name (uses store signature if `None`).
     pub author_name: Option<String>,
+    /// Override author email (uses store signature if `None`).
     pub author_email: Option<String>,
 }
 
@@ -359,13 +400,18 @@ pub struct CommitInfo {
 // ReflogEntry
 // ---------------------------------------------------------------------------
 
-/// A single reflog entry.
+/// A single reflog entry recording a branch movement.
 #[derive(Debug, Clone)]
 pub struct ReflogEntry {
+    /// Previous 40-char hex commit SHA.
     pub old_sha: String,
+    /// New 40-char hex commit SHA.
     pub new_sha: String,
+    /// Identity string of the committer (e.g. `"gitstore <gitstore@localhost>"`).
     pub committer: String,
+    /// POSIX epoch seconds of the entry.
     pub timestamp: u64,
+    /// Reflog message (e.g. `"commit: + file.txt"`).
     pub message: String,
 }
 
@@ -376,30 +422,39 @@ pub struct ReflogEntry {
 /// Describes a reference change during backup/restore.
 #[derive(Debug, Clone)]
 pub struct RefChange {
+    /// Full ref name (e.g. `"refs/heads/main"`).
     pub ref_name: String,
+    /// Previous target SHA, or `None` for newly created refs.
     pub old_target: Option<String>,
+    /// New target SHA, or `None` for deleted refs.
     pub new_target: Option<String>,
 }
 
-/// Summary of differences between two repositories (for mirror ops).
+/// Summary of differences between two repositories (for mirror/backup/restore ops).
 #[derive(Debug, Clone, Default)]
 pub struct MirrorDiff {
+    /// Refs that exist only in the source (newly added).
     pub add: Vec<RefChange>,
+    /// Refs that exist in both but point to different commits.
     pub update: Vec<RefChange>,
+    /// Refs that exist only in the destination (will be removed).
     pub delete: Vec<RefChange>,
 }
 
 impl MirrorDiff {
+    /// Create an empty diff.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// `true` when no refs differ between source and destination.
     pub fn in_sync(&self) -> bool {
         self.add.is_empty()
             && self.update.is_empty()
             && self.delete.is_empty()
     }
 
+    /// Total number of ref changes (add + update + delete).
     pub fn total(&self) -> usize {
         self.add.len() + self.update.len() + self.delete.len()
     }
