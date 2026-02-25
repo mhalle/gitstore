@@ -4,6 +4,17 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.59.5 (2026-02-24)
+
+**All languages:**
+
+- Improve `copy_from_ref` docstrings: document subtree-prefix semantics vs rsync trailing-slash conventions, note tree-object splicing internals
+
+**Python:**
+
+- README: add trailing-slash and `/./` pivot examples to CLI cp section
+- README: fix `copy_from_ref` example to show both same-path and different-path usage
+
 ## v0.59.4 (2026-02-24)
 
 **Python:**
