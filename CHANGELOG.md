@@ -4,6 +4,19 @@ All notable changes to vost are documented in this file.
 
 ## Unreleased
 
+## v0.62.0 / TS v0.6.0 / Rust v0.6.0 (2026-02-25)
+
+**Breaking (all languages):**
+
+- Package renamed from `gitstore` to `vost` (Versioned Object STore) — update imports: `from vost import ...`, `use vost::`, `from 'vost'`
+- Rust crate renamed: `gitstore` → `vost` in `Cargo.toml`
+- npm package renamed: `gitstore` → `vost` in `package.json`
+- CLI command renamed: `gitstore` → `vost`
+- Environment variable renamed: `GITSTORE_REPO` → `VOST_REPO`
+- Default author/email changed: `"gitstore"`/`"gitstore@localhost"` → `"vost"`/`"vost@localhost"`
+- Lock file renamed: `gitstore.lock` → `vost.lock`
+- The `GitStore` class name is unchanged
+
 ## v0.61.0 / TS v0.5.0 / Rust v0.5.0 (2025-02-25)
 
 **Breaking (all languages):**
