@@ -4,7 +4,7 @@ import os
 
 import pytest
 
-from gitstore import (
+from vost import (
     GitStore,
     ChangeReport,
     ChangeAction,

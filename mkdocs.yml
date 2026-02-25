@@ -1,0 +1,42 @@
+site_name: vost
+site_url: https://vost.readthedocs.io/
+repo_url: https://github.com/mhalle/vost
+theme:
+  name: material
+  palette:
+    - scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - content.code.copy
+    - navigation.sections
+    - search.highlight
+nav:
+  - Home: index.md
+  - Python API: api.md
+  - CLI Reference: cli.md
+  - Path Syntax: paths.md
+  - Testing: testing.md
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            docstring_style: google
+            show_source: false
+            show_root_heading: true
+            members_order: source
+            merge_init_into_class: true
+            show_signature_annotations: true
+markdown_extensions:
+  - admonition
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - toc:
+      permalink: true

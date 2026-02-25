@@ -4,7 +4,7 @@ from pathlib import PurePosixPath
 
 import pytest
 
-from gitstore import GitStore
+from vost import GitStore
 
 
 @pytest.fixture
@@ -153,28 +153,28 @@ class TestCopyOutRoot:
 class TestFileType:
     def test_type_blob(self, repo_with_files):
         _, fs = repo_with_files
-        from gitstore import FileType
+        from vost import FileType
         assert fs.file_type("hello.txt") == FileType.BLOB
 
     def test_type_tree(self, repo_with_files):
         _, fs = repo_with_files
-        from gitstore import FileType
+        from vost import FileType
         assert fs.file_type("src") == FileType.TREE
 
     def test_type_nested(self, repo_with_files):
         _, fs = repo_with_files
-        from gitstore import FileType
+        from vost import FileType
         assert fs.file_type("src/main.py") == FileType.BLOB
 
     def test_type_executable(self, tmp_path):
-        from gitstore import FileType
+        from vost import FileType
         repo = GitStore.open(tmp_path / "test.git")
         fs = repo.branches["main"]
         fs = fs.write("run.sh", b"#!/bin/sh\n", mode=FileType.EXECUTABLE)
         assert fs.file_type("run.sh") == FileType.EXECUTABLE
 
     def test_type_symlink(self, tmp_path):
-        from gitstore import FileType
+        from vost import FileType
         repo = GitStore.open(tmp_path / "test.git")
         fs = repo.branches["main"]
         fs = fs.write("target.txt", b"content")
@@ -188,7 +188,7 @@ class TestFileType:
 
     def test_type_pathlike(self, repo_with_files):
         _, fs = repo_with_files
-        from gitstore import FileType
+        from vost import FileType
         assert fs.file_type(PurePosixPath("src/main.py")) == FileType.BLOB
 
 

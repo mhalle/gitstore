@@ -1,12 +1,12 @@
 /**
- * gitstore — A versioned filesystem backed by a bare git repository.
+ * vost — A versioned filesystem backed by a bare git repository.
  *
  * TypeScript port using isomorphic-git.
  *
  * @example
  * ```ts
  * import * as fs from 'node:fs';
- * import { GitStore } from 'gitstore';
+ * import { GitStore } from 'vost';
  *
  * const store = await GitStore.open('/tmp/myrepo.git', { fs });
  * const snapshot = await store.branches.get('main');

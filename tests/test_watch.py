@@ -7,13 +7,13 @@ from unittest.mock import MagicMock, patch
 import click
 import pytest
 
-from gitstore.cli._watch import (
+from vost.cli._watch import (
     _format_summary,
     _run_sync_cycle,
     watch_and_sync,
 )
-from gitstore.copy._types import ChangeReport, FileEntry
-from gitstore.exceptions import StaleSnapshotError
+from vost.copy._types import ChangeReport, FileEntry
+from vost.exceptions import StaleSnapshotError
 
 
 # ---------------------------------------------------------------------------
@@ -73,8 +73,8 @@ class TestInitialSync:
         mock_wf = MagicMock()
         mock_wf.watch = fake_watch
 
-        with patch("gitstore.cli._watch.watchfiles", mock_wf):
-            with patch("gitstore.cli._watch._run_sync_cycle") as mock_cycle:
+        with patch("vost.cli._watch.watchfiles", mock_wf):
+            with patch("vost.cli._watch._run_sync_cycle") as mock_cycle:
                 watch_and_sync(store, "main", "/tmp/test", "",
                                debounce=2000, message=None,
                                ignore_errors=False, checksum=False)
@@ -100,8 +100,8 @@ class TestWatchOneCycle:
         mock_wf = MagicMock()
         mock_wf.watch = fake_watch
 
-        with patch("gitstore.cli._watch.watchfiles", mock_wf):
-            with patch("gitstore.cli._watch._run_sync_cycle") as mock_cycle:
+        with patch("vost.cli._watch.watchfiles", mock_wf):
+            with patch("vost.cli._watch._run_sync_cycle") as mock_cycle:
                 watch_and_sync(store, "main", "/tmp/test", "",
                                debounce=2000, message=None,
                                ignore_errors=False, checksum=False)
@@ -131,8 +131,8 @@ class TestCycleErrorHandling:
         mock_wf = MagicMock()
         mock_wf.watch = fake_watch
 
-        with patch("gitstore.cli._watch.watchfiles", mock_wf):
-            with patch("gitstore.cli._watch._run_sync_cycle", side_effect=fake_cycle):
+        with patch("vost.cli._watch.watchfiles", mock_wf):
+            with patch("vost.cli._watch._run_sync_cycle", side_effect=fake_cycle):
                 watch_and_sync(store, "main", "/tmp/test", "",
                                debounce=2000, message=None,
                                ignore_errors=False, checksum=False)
@@ -159,8 +159,8 @@ class TestCycleErrorHandling:
         mock_wf = MagicMock()
         mock_wf.watch = fake_watch
 
-        with patch("gitstore.cli._watch.watchfiles", mock_wf):
-            with patch("gitstore.cli._watch._run_sync_cycle", side_effect=fake_cycle):
+        with patch("vost.cli._watch.watchfiles", mock_wf):
+            with patch("vost.cli._watch._run_sync_cycle", side_effect=fake_cycle):
                 watch_and_sync(store, "main", "/tmp/test", "",
                                debounce=2000, message=None,
                                ignore_errors=False, checksum=False)

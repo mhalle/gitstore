@@ -45,8 +45,8 @@ export class GitStore {
    * @param opts.fs - Node.js `fs` module (or compatible).
    * @param opts.create - Create the repo if it doesn't exist (default: true).
    * @param opts.branch - Initial branch when creating (default: "main"). Null for no branch.
-   * @param opts.author - Default author name (default: "gitstore").
-   * @param opts.email - Default author email (default: "gitstore@localhost").
+   * @param opts.author - Default author name (default: "vost").
+   * @param opts.email - Default author email (default: "vost@localhost").
    */
   static async open(
     path: string,
@@ -61,8 +61,8 @@ export class GitStore {
     const fsModule = opts.fs;
     const create = opts.create ?? true;
     const branch = opts.branch !== undefined ? opts.branch : 'main';
-    const author = opts.author ?? 'gitstore';
-    const email = opts.email ?? 'gitstore@localhost';
+    const author = opts.author ?? 'vost';
+    const email = opts.email ?? 'vost@localhost';
 
     // Check if repo exists
     let exists = false;

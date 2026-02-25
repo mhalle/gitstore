@@ -4,8 +4,8 @@ import stat
 
 import pytest
 
-from gitstore import GitStore, StaleSnapshotError, retry_write
-from gitstore.copy._types import FileType
+from vost import GitStore, StaleSnapshotError, retry_write
+from vost.copy._types import FileType
 
 
 @pytest.fixture
@@ -112,7 +112,7 @@ class TestRemove:
 class TestLog:
     def test_filemode_only_change_detected(self, repo_fs):
         """log(at=path) should detect filemode-only changes (no content change)."""
-        from gitstore.copy._types import FileType
+        from vost.copy._types import FileType
         _, fs = repo_fs
         # Write a file with default mode (644)
         fs2 = fs.write("script.sh", b"#!/bin/sh\necho hi")
@@ -704,7 +704,7 @@ class TestRetryWrite:
         def always_stale(self, path, data, *, message=None, mode=None):
             raise StaleSnapshotError("always stale")
 
-        from gitstore.fs import FS
+        from vost.fs import FS
         with unittest.mock.patch.object(FS, 'write', always_stale):
             with pytest.raises(StaleSnapshotError):
                 retry_write(repo, "main", "x.txt", b"x", retries=2)

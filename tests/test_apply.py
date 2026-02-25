@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from gitstore import GitStore, FileType, StaleSnapshotError, WriteEntry
+from vost import GitStore, FileType, StaleSnapshotError, WriteEntry
 
 
 @pytest.fixture

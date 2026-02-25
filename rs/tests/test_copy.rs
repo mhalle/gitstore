@@ -1,6 +1,6 @@
 mod common;
 
-use gitstore::*;
+use vost::*;
 use std::path::Path;
 
 fn create_disk_files(dir: &Path) {

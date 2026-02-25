@@ -348,12 +348,12 @@ def serve(ctx, host, port, branch, ref, at_path, match_pattern, before, back,
 
     \b
     Examples:
-        gitstore serve -r data.git
-        gitstore serve -r data.git -b dev
-        gitstore serve -r data.git --ref v1.0
-        gitstore serve -r data.git --all --cors
-        gitstore serve -r data.git --base-path /data -p 9000
-        gitstore serve -r data.git --open --no-cache
+        vost serve -r data.git
+        vost serve -r data.git -b dev
+        vost serve -r data.git --ref v1.0
+        vost serve -r data.git --all --cors
+        vost serve -r data.git --base-path /data -p 9000
+        vost serve -r data.git --open --no-cache
     """
     from wsgiref.simple_server import make_server, WSGIRequestHandler
 

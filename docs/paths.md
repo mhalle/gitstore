@@ -1,6 +1,6 @@
 # Path Syntax
 
-gitstore paths identify files on disk, files in the repo, or files on a
+vost paths identify files on disk, files in the repo, or files on a
 specific branch/tag/commit.  This document describes the full syntax, how each
 command interprets it, and how paths interact with flags.
 
@@ -108,20 +108,20 @@ The colon prefix is what distinguishes them.
 ### ls
 
 ```
-gitstore ls [PATH...]
+vost ls [PATH...]
 ```
 
 Each PATH is parsed independently.  Different paths may reference different
 branches, tags, or ancestors.  Results are coalesced and deduplicated.
 
 ```bash
-gitstore ls                          # root of current branch
-gitstore ls :src                     # subdirectory
-gitstore ls main:src                 # subdirectory on main
-gitstore ls main:src dev:docs        # from two branches at once
-gitstore ls main: --back 2           # main, two commits back
-gitstore ls -R main~3:src            # recursive listing, 3 back on main
-gitstore ls '*.py'                   # glob expansion
+vost ls                          # root of current branch
+vost ls :src                     # subdirectory
+vost ls main:src                 # subdirectory on main
+vost ls main:src dev:docs        # from two branches at once
+vost ls main: --back 2           # main, two commits back
+vost ls -R main~3:src            # recursive listing, 3 back on main
+vost ls '*.py'                   # glob expansion
 ```
 
 Glob patterns (`*`, `?`, `**`) are expanded within the resolved repo tree.
@@ -134,18 +134,18 @@ Quote them to prevent shell expansion.
 ### cat
 
 ```
-gitstore cat PATH [PATH...]
+vost cat PATH [PATH...]
 ```
 
 Each PATH is parsed independently.  File contents are written to stdout in
 argument order, concatenated with no separator (like UNIX `cat`).
 
 ```bash
-gitstore cat :file.txt
-gitstore cat main:config.json
-gitstore cat v1.0:data/file.txt
-gitstore cat main:file.txt --back 1       # one commit back on main
-gitstore cat ~1:file.txt                  # one commit back on current branch
+vost cat :file.txt
+vost cat main:config.json
+vost cat v1.0:data/file.txt
+vost cat main:file.txt --back 1       # one commit back on main
+vost cat ~1:file.txt                  # one commit back on current branch
 ```
 
 ---
@@ -153,7 +153,7 @@ gitstore cat ~1:file.txt                  # one commit back on current branch
 ### rm
 
 ```
-gitstore rm PATH [PATH...]
+vost rm PATH [PATH...]
 ```
 
 Each PATH is parsed.  All paths **must target the same branch** -- you cannot
@@ -161,16 +161,16 @@ remove files from different branches in a single command.  When a path has an
 explicit ref, it determines the target branch.
 
 ```bash
-gitstore rm :old.txt                     # remove from current branch
-gitstore rm dev:old.txt                  # remove from dev
-gitstore rm dev:a.txt dev:b.txt          # ok -- same branch
-gitstore rm dev:a.txt main:b.txt         # ERROR -- different branches
+vost rm :old.txt                     # remove from current branch
+vost rm dev:old.txt                  # remove from dev
+vost rm dev:a.txt dev:b.txt          # ok -- same branch
+vost rm dev:a.txt main:b.txt         # ERROR -- different branches
 ```
 
 Tags and commit hashes are not writable:
 
 ```bash
-gitstore rm v1.0:file.txt               # ERROR -- cannot write to tag
+vost rm v1.0:file.txt               # ERROR -- cannot write to tag
 ```
 
 Accepts glob patterns and `-R` for directories.
@@ -180,25 +180,25 @@ Accepts glob patterns and `-R` for directories.
 ### mv
 
 ```
-gitstore mv SOURCE... DEST
+vost mv SOURCE... DEST
 ```
 
 All arguments must be repo paths (colon prefix required). All paths **must
 target the same branch** — cross-branch moves are not supported.
 
 ```bash
-gitstore mv :old.txt :new.txt               # rename
-gitstore mv ':*.txt' :archive/              # glob move
-gitstore mv -R :data :backup                # rename directory
-gitstore mv dev:old.txt dev:new.txt         # explicit branch
-gitstore mv main:a.txt dev:b.txt            # ERROR — cross-branch
+vost mv :old.txt :new.txt               # rename
+vost mv ':*.txt' :archive/              # glob move
+vost mv -R :data :backup                # rename directory
+vost mv dev:old.txt dev:new.txt         # explicit branch
+vost mv main:a.txt dev:b.txt            # ERROR — cross-branch
 ```
 
 Tags and ancestors are not writable:
 
 ```bash
-gitstore mv v1.0:a.txt v1.0:b.txt          # ERROR — cannot write to tag
-gitstore mv :a.txt main~1:b.txt            # ERROR — can't write to history
+vost mv v1.0:a.txt v1.0:b.txt          # ERROR — cannot write to tag
+vost mv :a.txt main~1:b.txt            # ERROR — can't write to history
 ```
 
 Accepts glob patterns and `-R` for directories.
@@ -208,7 +208,7 @@ Accepts glob patterns and `-R` for directories.
 ### write
 
 ```
-gitstore write PATH
+vost write PATH
 ```
 
 Reads stdin and writes it as a single file.  The PATH is parsed:
@@ -231,7 +231,7 @@ echo "x" | gitstore write dev:f.txt              # writes to dev
 ### cp
 
 ```
-gitstore cp SOURCE... DEST
+vost cp SOURCE... DEST
 ```
 
 The last argument is the destination.  Direction is determined by which
@@ -246,19 +246,19 @@ arguments are repo paths:
 
 ```bash
 # disk -> repo
-gitstore cp file.txt :
-gitstore cp file.txt :dest/file.txt
-gitstore cp dir/ :dest
+vost cp file.txt :
+vost cp file.txt :dest/file.txt
+vost cp dir/ :dest
 
 # repo -> disk
-gitstore cp :file.txt ./local.txt
-gitstore cp main:file.txt ./local.txt
-gitstore cp main~1:file.txt ./out/
+vost cp :file.txt ./local.txt
+vost cp main:file.txt ./local.txt
+vost cp main~1:file.txt ./out/
 
 # repo -> repo (cross-branch copy)
-gitstore cp session:/ :                          # overlay session onto current branch
-gitstore cp main:a.txt :backup/                  # copy file from main to backup/ on current branch
-gitstore cp main~1:a.txt dev:b.txt :dest/        # ERROR -- mixed local+repo (just kidding, all repo is fine)
+vost cp session:/ :                          # overlay session onto current branch
+vost cp main:a.txt :backup/                  # copy file from main to backup/ on current branch
+vost cp main~1:a.txt dev:b.txt :dest/        # ERROR -- mixed local+repo (just kidding, all repo is fine)
 ```
 
 **Per-source ref resolution:** each source can specify its own ref.  Sources
@@ -266,18 +266,18 @@ without an explicit ref use the default (set by `-b` / `--ref` / snapshot
 filters, or the repo default branch).
 
 ```bash
-gitstore cp main:a.txt :backup/a.txt             # source from main
-gitstore cp main:a.txt dev:b.txt :merged/         # two sources, two branches
+vost cp main:a.txt :backup/a.txt             # source from main
+vost cp main:a.txt dev:b.txt :merged/         # two sources, two branches
 ```
 
 **Destination ref resolution:** the destination ref determines which branch
 is written to.
 
 ```bash
-gitstore cp file.txt :                            # write to current branch (from -b or default)
-gitstore cp file.txt dev:                         # write to dev branch
-gitstore cp file.txt dev~1:path                   # ERROR -- can't write to history
-gitstore cp file.txt v1.0:path                    # ERROR -- can't write to tag
+vost cp file.txt :                            # write to current branch (from -b or default)
+vost cp file.txt dev:                         # write to dev branch
+vost cp file.txt dev~1:path                   # ERROR -- can't write to history
+vost cp file.txt v1.0:path                    # ERROR -- can't write to tag
 ```
 
 ---
@@ -285,8 +285,8 @@ gitstore cp file.txt v1.0:path                    # ERROR -- can't write to tag
 ### sync
 
 ```
-gitstore sync PATH                    # 1-arg: local dir -> repo root
-gitstore sync SOURCE DEST            # 2-arg: direction from colon prefix
+vost sync PATH                    # 1-arg: local dir -> repo root
+vost sync SOURCE DEST            # 2-arg: direction from colon prefix
 ```
 
 Sync makes the destination identical to the source (like rsync `--delete`).
@@ -302,13 +302,13 @@ Sync makes the destination identical to the source (like rsync `--delete`).
 | `ref:...` | `:...` or `ref:...` | repo -> repo |
 
 ```bash
-gitstore sync ./dir                              # dir -> repo root
-gitstore sync ./local :data                      # disk -> repo
-gitstore sync :data ./local                      # repo -> disk
-gitstore sync main:data ./local                  # explicit source ref
-gitstore sync main: dev:                         # repo -> repo (main overwrites dev)
-gitstore sync main~1: dev:                       # from one commit back on main
-gitstore sync main: dev: --back 2                # ERROR if -b is also given
+vost sync ./dir                              # dir -> repo root
+vost sync ./local :data                      # disk -> repo
+vost sync :data ./local                      # repo -> disk
+vost sync main:data ./local                  # explicit source ref
+vost sync main: dev:                         # repo -> repo (main overwrites dev)
+vost sync main~1: dev:                       # from one commit back on main
+vost sync main: dev: --back 2                # ERROR if -b is also given
 ```
 
 ---
@@ -316,28 +316,28 @@ gitstore sync main: dev: --back 2                # ERROR if -b is also given
 ### log
 
 ```
-gitstore log [TARGET]
+vost log [TARGET]
 ```
 
 The optional TARGET is parsed with ref:path syntax.  It sets the starting ref,
 ancestor depth, and/or path filter:
 
 ```bash
-gitstore log                                      # all commits on current branch
-gitstore log main:config.json                     # log of config.json on main
-gitstore log ~3:                                  # starting 3 back on current branch
-gitstore log main~3:                              # starting 3 back on main
-gitstore log config.json                          # plain path (no colon) -> --path filter
+vost log                                      # all commits on current branch
+vost log main:config.json                     # log of config.json on main
+vost log ~3:                                  # starting 3 back on current branch
+vost log main~3:                              # starting 3 back on main
+vost log config.json                          # plain path (no colon) -> --path filter
 ```
 
 The positional TARGET merges with flags.  If both specify the same thing, it's
 an error:
 
 ```bash
-gitstore log main: --ref main                    # ERROR -- ref specified twice
-gitstore log main~3: --back 1                    # ERROR -- ancestor specified twice
-gitstore log main:file.txt --path file.txt       # ERROR -- path specified twice
-gitstore log main: -b dev                        # ERROR -- branch conflicts with ref
+vost log main: --ref main                    # ERROR -- ref specified twice
+vost log main~3: --back 1                    # ERROR -- ancestor specified twice
+vost log main:file.txt --path file.txt       # ERROR -- path specified twice
+vost log main: -b dev                        # ERROR -- branch conflicts with ref
 ```
 
 ---
@@ -345,17 +345,17 @@ gitstore log main: -b dev                        # ERROR -- branch conflicts wit
 ### diff
 
 ```
-gitstore diff [BASELINE]
+vost diff [BASELINE]
 ```
 
 The optional BASELINE selects what to compare against HEAD.  Parsed with
 ref:path syntax:
 
 ```bash
-gitstore diff                                     # needs --back, --ref, etc.
-gitstore diff ~3:                                 # HEAD vs 3 commits back
-gitstore diff dev:                                # HEAD vs dev branch
-gitstore diff main~2:                             # HEAD vs main, 2 back
+vost diff                                     # needs --back, --ref, etc.
+vost diff ~3:                                 # HEAD vs 3 commits back
+vost diff dev:                                # HEAD vs dev branch
+vost diff main~2:                             # HEAD vs main, 2 back
 ```
 
 Same conflict rules as `log`.
@@ -373,17 +373,17 @@ path, `-b` determines which branch is used.
 ref (non-empty string before `:`), `-b` is an error:
 
 ```bash
-gitstore ls main: -b dev                         # ERROR
-gitstore cat main:file.txt -b main               # ERROR
-gitstore cp main:a.txt : -b dev                  # ERROR
-gitstore sync main: dev: -b main                 # ERROR
+vost ls main: -b dev                         # ERROR
+vost cat main:file.txt -b main               # ERROR
+vost cp main:a.txt : -b dev                  # ERROR
+vost sync main: dev: -b main                 # ERROR
 ```
 
 Bare-colon paths (`:path`) do **not** conflict with `-b`:
 
 ```bash
-gitstore ls :src -b dev                          # ok -- :src uses the -b branch
-gitstore cp :file.txt ./out -b dev               # ok -- reads from dev
+vost ls :src -b dev                          # ok -- :src uses the -b branch
+vost cp :file.txt ./out -b dev               # ok -- reads from dev
 ```
 
 ### `--ref`
@@ -395,14 +395,14 @@ specify the source ref.
 `--ref` is an error:
 
 ```bash
-gitstore ls main: --ref main                     # ERROR
-gitstore cp main:a.txt ./out --ref v1.0          # ERROR
+vost ls main: --ref main                     # ERROR
+vost cp main:a.txt ./out --ref v1.0          # ERROR
 ```
 
 Bare-colon paths do not conflict -- `--ref` fills in the ref for `:` paths:
 
 ```bash
-gitstore cp :a.txt ./out --ref v1.0              # ok -- reads a.txt from v1.0
+vost cp :a.txt ./out --ref v1.0              # ok -- reads a.txt from v1.0
 ```
 
 ### `--back N`
@@ -413,16 +413,16 @@ Walk back N parent commits from the resolved ref.
 `--back` is an error:
 
 ```bash
-gitstore cat ~1:file.txt --back 1                # ERROR
-gitstore cat main~2:file.txt --back 1            # ERROR
+vost cat ~1:file.txt --back 1                # ERROR
+vost cat main~2:file.txt --back 1            # ERROR
 ```
 
 When there is no `~N` in any path, `--back` applies to the resolved ref
 (whether from explicit `ref:` or from `-b`/`--ref`/default):
 
 ```bash
-gitstore cat main:file.txt --back 2              # ok -- main, 2 commits back
-gitstore ls main: --back 1                       # ok -- main, 1 commit back
+vost cat main:file.txt --back 2              # ok -- main, 2 commits back
+vost ls main: --back 1                       # ok -- main, 1 commit back
 ```
 
 ### `--before`, `--path`, `--match`
@@ -431,9 +431,9 @@ These snapshot filters narrow the commit selection.  They always apply to the
 resolved ref and work alongside `--back` and explicit `ref:`:
 
 ```bash
-gitstore ls main: --before 2024-06-01            # main as of June 1
-gitstore cat main:config.json --before 2024-01-01  # config.json on main before Jan 1
-gitstore log main: --match "deploy*"             # deploy commits on main
+vost ls main: --before 2024-06-01            # main as of June 1
+vost cat main:config.json --before 2024-01-01  # config.json on main before Jan 1
+vost log main: --match "deploy*"             # deploy commits on main
 ```
 
 ### Multiple different refs with filters
@@ -443,20 +443,20 @@ filters (`--back`, `--before`, `--path`, `--match`) are ambiguous -- which ref
 do they apply to?
 
 ```bash
-gitstore ls main: dev: --back 1                  # ERROR -- different refs + filter
-gitstore cp main:a.txt dev:b.txt : --back 1      # ERROR -- different source refs + filter
+vost ls main: dev: --back 1                  # ERROR -- different refs + filter
+vost cp main:a.txt dev:b.txt : --back 1      # ERROR -- different source refs + filter
 ```
 
 Paths targeting the **same** explicit ref are fine:
 
 ```bash
-gitstore ls main:src main:docs --back 1          # ok -- both from main, 1 back
+vost ls main:src main:docs --back 1          # ok -- both from main, 1 back
 ```
 
 And bare-colon paths mixed with a single explicit ref are unambiguous:
 
 ```bash
-gitstore ls main:src :docs --back 1              # ok -- main:src gets --back 1,
+vost ls main:src :docs --back 1              # ok -- main:src gets --back 1,
                                                  #        :docs uses default + --back 1
 ```
 
@@ -525,27 +525,27 @@ transaction system.  A typical pattern:
 
 ```bash
 # 1. Create a temporary working branch
-gitstore branch set session
+vost branch set session
 
 # 2. Make changes on the temporary branch
 echo "data" | gitstore write session:file.txt
-gitstore cp ./new-files/ session:data/
+vost cp ./new-files/ session:data/
 
 # 3. Copy results to the main branch
-gitstore cp session:/ :
+vost cp session:/ :
 
 # 4. Clean up
-gitstore branch delete session
+vost branch delete session
 ```
 
 Or sync an entire branch:
 
 ```bash
 # Make dev identical to main
-gitstore sync main: dev:
+vost sync main: dev:
 
 # Sync from a historical snapshot
-gitstore sync main~5: dev:
+vost sync main~5: dev:
 ```
 
 ---

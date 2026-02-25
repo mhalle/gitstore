@@ -9,7 +9,7 @@ Gitstore includes an intuitive Python API and an optional command line interface
 ## Installation
 
 ```
-pip install gitstore            # core library (dulwich only)
+pip install vost            # core library (dulwich only)
 pip install "gitstore[cli]"    # adds the gitstore command-line tool
 ```
 
@@ -27,7 +27,7 @@ Requires Python 3.10+.
 ## Quick start
 
 ```python
-from gitstore import GitStore
+from vost import GitStore
 
 # Create (or open) a repository with a "main" branch
 repo = GitStore.open("data.git")
@@ -123,7 +123,7 @@ header = fs.read("data.bin", offset=0, size=4)
 Every write auto-commits and returns a new snapshot:
 
 ```python
-from gitstore import FileType
+from vost import FileType
 
 fs = fs.write_text("config.json", '{"key": "value"}')
 fs = fs.write_text("script.sh", "#!/bin/sh\n", mode=FileType.EXECUTABLE)
@@ -227,7 +227,7 @@ fs = fs.sync_in("./local", "data")
 fs.sync_out("data", "./local")
 
 # Expand globs on disk (same dotfile rules as fs.glob)
-from gitstore import disk_glob
+from vost import disk_glob
 files = disk_glob("./data/**/*.csv")
 
 # Remove and move within repo
@@ -240,7 +240,7 @@ fs = fs.move(["old.txt"], "new.txt")
 Apply multiple writes and removes in a single commit without a context manager:
 
 ```python
-from gitstore import WriteEntry
+from vost import WriteEntry
 
 fs = fs.apply(
     writes={
@@ -275,10 +275,10 @@ diff = repo.backup(url, dry_run=True)                      # preview only
 
 ## Concurrency safety
 
-gitstore uses an advisory file lock (`gitstore.lock` in the repo directory) to make the stale-snapshot check and ref update atomic on a single machine. If a branch advances after you obtain a snapshot, attempting to write from the stale snapshot raises `StaleSnapshotError`:
+vost uses an advisory file lock (`gitstore.lock` in the repo directory) to make the stale-snapshot check and ref update atomic on a single machine. If a branch advances after you obtain a snapshot, attempting to write from the stale snapshot raises `StaleSnapshotError`:
 
 ```python
-from gitstore import StaleSnapshotError
+from vost import StaleSnapshotError
 
 fs = repo.branches["main"]
 _ = fs.write("a.txt", b"a")     # advances the branch
@@ -292,7 +292,7 @@ except StaleSnapshotError:
 For single-file writes, `retry_write` handles the re-fetch-and-retry loop automatically with exponential backoff:
 
 ```python
-from gitstore import retry_write
+from vost import retry_write
 fs = retry_write(repo, "main", "file.txt", data)
 ```
 
@@ -320,7 +320,7 @@ fs = retry_write(repo, "main", "file.txt", data)
 
 ## CLI
 
-gitstore includes a command-line interface. Install with `pip install "gitstore[cli]"` or `uv tool install "gitstore[cli]"`.
+vost includes a command-line interface. Install with `pip install "gitstore[cli]"` or `uv tool install "gitstore[cli]"`.
 
 ```bash
 export GITSTORE_REPO=/path/to/repo.git    # or pass --repo/-r per command
@@ -340,74 +340,74 @@ main~3:file.txt        3 commits back on main
 
 This applies to `cp`, `sync`, `rm`, `mv`, `ls`, `cat`, and other commands. For `ls`, `cat`, `rm`, and `write` the `:` is optional (arguments are always repo paths), but it is **required** for `cp`, `sync`, and `mv` to distinguish repo paths from local paths.
 
-For full details on path parsing, ancestor syntax (`~N`), and interaction with flags, see [Path Syntax](https://github.com/mhalle/gitstore/blob/master/docs/paths.md).
+For full details on path parsing, ancestor syntax (`~N`), and interaction with flags, see [Path Syntax](https://github.com/mhalle/vost/blob/master/docs/paths.md).
 
 ```bash
 # Repository management
-gitstore init
-gitstore destroy -f
-gitstore gc
+vost init
+vost destroy -f
+vost gc
 
 # Copy files (disk <-> repo, repo <-> repo)
-gitstore cp local-file.txt :                        # disk to repo root
-gitstore cp ./mydir :dest                            # copy mydir into dest/mydir
-gitstore cp ./mydir/ :dest                           # trailing / = contents only
-gitstore cp '/data/./logs/app' :backup               # /./  pivot: → backup/logs/app/...
-gitstore cp './src/*.py' :backup                     # glob
-gitstore cp :file.txt ./local.txt                    # repo to disk
-gitstore cp -n ./mydir :dest                         # dry run
+vost cp local-file.txt :                        # disk to repo root
+vost cp ./mydir :dest                            # copy mydir into dest/mydir
+vost cp ./mydir/ :dest                           # trailing / = contents only
+vost cp '/data/./logs/app' :backup               # /./  pivot: → backup/logs/app/...
+vost cp './src/*.py' :backup                     # glob
+vost cp :file.txt ./local.txt                    # repo to disk
+vost cp -n ./mydir :dest                         # dry run
 
 # Sync (make identical, including deletes)
-gitstore sync ./local :repo_path
-gitstore sync :repo_path ./local
-gitstore sync --watch ./dir :data                    # continuous watch mode
+vost sync ./local :repo_path
+vost sync :repo_path ./local
+vost sync --watch ./dir :data                    # continuous watch mode
 
 # Browse
-gitstore ls
-gitstore ls -R :src
-gitstore cat file.txt
+vost ls
+vost ls -R :src
+vost cat file.txt
 
 # Write stdin
 echo "hello" | gitstore write file.txt
 cmd | gitstore write log.txt -p | grep error         # passthrough (tee)
 
 # Remove and move within repo
-gitstore rm old-file.txt
-gitstore rm -R :dir
-gitstore mv :old.txt :new.txt
-gitstore mv ':*.txt' :archive/
+vost rm old-file.txt
+vost rm -R :dir
+vost mv :old.txt :new.txt
+vost mv ':*.txt' :archive/
 
 # History
-gitstore log
-gitstore log --path file.txt --format jsonl
-gitstore diff --back 3
-gitstore undo
-gitstore redo
+vost log
+vost log --path file.txt --format jsonl
+vost diff --back 3
+vost undo
+vost redo
 
 # Branches and tags
-gitstore branch set dev --ref main
-gitstore branch exists dev
-gitstore tag set v1.0
-gitstore tag delete v1.0
+vost branch set dev --ref main
+vost branch exists dev
+vost tag set v1.0
+vost tag delete v1.0
 
 # Archives
-gitstore archive_out out.zip
-gitstore archive_in data.tar.gz
+vost archive_out out.zip
+vost archive_in data.tar.gz
 
 # Mirror (backup/restore all refs)
-gitstore backup https://github.com/user/repo.git
-gitstore restore https://github.com/user/repo.git
-gitstore backup -n https://github.com/user/repo.git  # dry run
+vost backup https://github.com/user/repo.git
+vost restore https://github.com/user/repo.git
+vost backup -n https://github.com/user/repo.git  # dry run
 
 # Serve files over HTTP
-gitstore serve                                        # single branch
-gitstore serve --all --cors                           # all refs with CORS
+vost serve                                        # single branch
+vost serve --all --cors                           # all refs with CORS
 
 # Serve repo over Git protocol (read-only)
-gitstore gitserve
+vost gitserve
 ```
 
-For full CLI documentation, see [CLI Reference](https://github.com/mhalle/gitstore/blob/master/docs/cli.md).
+For full CLI documentation, see [CLI Reference](https://github.com/mhalle/vost/blob/master/docs/cli.md).
 
 ## Git notes
 
@@ -440,11 +440,11 @@ for commit_hash, text in ns.items():
 
 ## Documentation
 
-- [Documentation hub](https://github.com/mhalle/gitstore/blob/master/docs/index.md) -- quick start and navigation
-- [Python API Reference](https://github.com/mhalle/gitstore/blob/master/docs/api.md) -- classes, methods, and data types
-- [CLI Reference](https://github.com/mhalle/gitstore/blob/master/docs/cli.md) -- the `gitstore` command-line tool
-- [Path Syntax](https://github.com/mhalle/gitstore/blob/master/docs/paths.md) -- how `ref:path` works across commands
-- [GitHub Repository](https://github.com/mhalle/gitstore) -- source code, issues, and releases
+- [Documentation hub](https://github.com/mhalle/vost/blob/master/docs/index.md) -- quick start and navigation
+- [Python API Reference](https://github.com/mhalle/vost/blob/master/docs/api.md) -- classes, methods, and data types
+- [CLI Reference](https://github.com/mhalle/vost/blob/master/docs/cli.md) -- the `gitstore` command-line tool
+- [Path Syntax](https://github.com/mhalle/vost/blob/master/docs/paths.md) -- how `ref:path` works across commands
+- [GitHub Repository](https://github.com/mhalle/vost) -- source code, issues, and releases
 
 ## Development
 

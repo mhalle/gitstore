@@ -1,6 +1,6 @@
 # Testing
 
-gitstore has three implementations — Python (primary), TypeScript, and Rust — with
+vost has three implementations — Python (primary), TypeScript, and Rust — with
 shared test coverage, a cross-language interop suite, and Deno compatibility tests
 for the TypeScript port.
 

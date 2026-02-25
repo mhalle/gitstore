@@ -4,7 +4,7 @@ import os
 
 import pytest
 
-from gitstore import GitStore, disk_glob
+from vost import GitStore, disk_glob
 
 
 @pytest.fixture
@@ -166,7 +166,7 @@ class TestGlobDoublestar:
 
     def test_doublestar_empty_repo(self, tmp_path):
         """** returns [] for empty repo."""
-        from gitstore import GitStore
+        from vost import GitStore
         repo = GitStore.open(tmp_path / "empty.git")
         fs = repo.branches["main"]
         result = fs.glob("**")

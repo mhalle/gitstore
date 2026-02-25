@@ -1,12 +1,12 @@
 [package]
-name = "gitstore"
+name = "vost"
 version = "0.5.0"
 edition = "2021"
 rust-version = "1.75"
 description = "A versioned filesystem backed by a bare git repository"
 license = "Apache-2.0"
-repository = "https://github.com/mhalle/gitstore"
-homepage = "https://github.com/mhalle/gitstore/tree/master/rs"
+repository = "https://github.com/mhalle/vost"
+homepage = "https://github.com/mhalle/vost/tree/master/rs"
 readme = "README.md"
 keywords = ["git", "filesystem", "versioned", "storage"]
 categories = ["filesystem", "database-implementations"]

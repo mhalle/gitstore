@@ -544,25 +544,25 @@ def _expand_sources_disk(sources: list[str]) -> list[str]:
 # ---------------------------------------------------------------------------
 
 @click.group()
-@click.version_option(package_name="gitstore")
+@click.version_option(package_name="vost")
 @click.option("--repo", "-r", type=click.Path(), envvar="GITSTORE_REPO",
               help="Path to bare git repository (or set GITSTORE_REPO).",
               expose_value=False, callback=_store_repo, is_eager=True)
 @click.option("-v", "--verbose", is_flag=True, help="Verbose output on stderr.")
 @click.pass_context
 def main(ctx, verbose):
-    """gitstore — a git-backed file store.
+    """vost — a git-backed file store.
 
     Store and retrieve files in bare git repositories with automatic
     versioning, branching, and tagging. No working tree required.
 
     \b
     Quick start:
-      gitstore init -r data.git
+      vost init -r data.git
       export GITSTORE_REPO=data.git
-      gitstore cp file.txt :file.txt
-      gitstore cat :file.txt
-      gitstore ls
+      vost cp file.txt :file.txt
+      vost cat :file.txt
+      vost ls
 
     \b
     Common workflows:

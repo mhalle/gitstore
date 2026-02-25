@@ -35,7 +35,7 @@ pub fn normalize_path(path: &str) -> Result<String> {
 
 /// Validate a git reference name.
 ///
-/// Rejects colons (conflict with gitstore's `ref:path` syntax), spaces,
+/// Rejects colons (conflict with vost's `ref:path` syntax), spaces,
 /// tabs, control characters, `..`, `@{`, trailing `.`, and `.lock` suffix
 /// per git's `check-ref-format` rules.
 ///

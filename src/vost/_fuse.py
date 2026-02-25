@@ -1,4 +1,4 @@
-"""Read-only FUSE mount for gitstore."""
+"""Read-only FUSE mount for vost."""
 
 from __future__ import annotations
 
@@ -38,7 +38,7 @@ def _git_mode_to_stat(git_mode: int) -> int:
 
 
 def _fuse_path(path: str) -> str | None:
-    """Convert FUSE path (``/foo/bar``) to gitstore path (``foo/bar``).
+    """Convert FUSE path (``/foo/bar``) to vost path (``foo/bar``).
 
     Returns ``None`` for the root directory.
     """
@@ -47,7 +47,7 @@ def _fuse_path(path: str) -> str | None:
 
 
 class GitStoreOperations(mfusepy.Operations):
-    """Read-only FUSE operations backed by a gitstore FS snapshot."""
+    """Read-only FUSE operations backed by a vost FS snapshot."""
 
     def __init__(self, fs: FS):
         self._fs = fs
@@ -169,7 +169,7 @@ def mount(
     nothreads: bool = False,
     allow_other: bool = False,
 ) -> None:
-    """Mount a gitstore FS snapshot as a read-only FUSE filesystem.
+    """Mount a vost FS snapshot as a read-only FUSE filesystem.
 
     Blocks until the filesystem is unmounted (Ctrl-C or ``umount``).
     """
@@ -180,8 +180,8 @@ def mount(
         "ro": True,
         "attr_timeout": 3600,
         "entry_timeout": 3600,
-        "fsname": f"gitstore:{ref_label}",
-        "subtype": "gitstore",
+        "fsname": f"vost:{ref_label}",
+        "subtype": "vost",
     }
 
     if allow_other:
@@ -190,7 +190,7 @@ def mount(
     if sys.platform == "darwin":
         fuse_kwargs["noappledouble"] = True
         fuse_kwargs["noapplexattr"] = True
-        fuse_kwargs["volname"] = f"gitstore ({ref_label})"
+        fuse_kwargs["volname"] = f"vost ({ref_label})"
 
     mfusepy.FUSE(
         ops,

@@ -8,7 +8,7 @@ import zipfile
 import pytest
 from click.testing import CliRunner
 
-from gitstore.cli import main
+from vost.cli import main
 
 
 @pytest.fixture

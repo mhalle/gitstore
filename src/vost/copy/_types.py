@@ -103,7 +103,7 @@ class ChangeError:
 class ChangeReport:
     """Result of a copy, sync, move, or remove operation.
 
-    Available on the :attr:`~gitstore.FS.changes` property of the
+    Available on the :attr:`~vost.FS.changes` property of the
     resulting snapshot (both dry-run and real).
 
     Attributes:

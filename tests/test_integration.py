@@ -1,6 +1,6 @@
 """End-to-end integration test."""
 
-from gitstore import GitStore
+from vost import GitStore
 
 
 def test_full_workflow(tmp_path):

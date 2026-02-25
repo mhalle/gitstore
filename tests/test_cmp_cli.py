@@ -1,11 +1,11 @@
-"""Tests for the gitstore cmp CLI command."""
+"""Tests for the vost cmp CLI command."""
 
 import os
 import pytest
 from click.testing import CliRunner
 
-from gitstore.cli import main
-from gitstore.repo import GitStore
+from vost.cli import main
+from vost.repo import GitStore
 
 
 @pytest.fixture

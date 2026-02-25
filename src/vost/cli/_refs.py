@@ -18,7 +18,7 @@ from ._helpers import (
     _resolve_ref,
     _snapshot_options,
 )
-import gitstore.cli._helpers as _helpers
+import vost.cli._helpers as _helpers
 
 
 # ---------------------------------------------------------------------------

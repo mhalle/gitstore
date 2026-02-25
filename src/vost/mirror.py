@@ -1,4 +1,4 @@
-"""Mirror (backup/restore) operations for gitstore.
+"""Mirror (backup/restore) operations for vost.
 
 Ref-level mirroring: push all local refs to a remote (backup) or fetch
 all remote refs to local (restore).  Extracted from repo.py and cli.py.
@@ -40,7 +40,7 @@ class RefChange:
 
 @dataclass
 class MirrorDiff:
-    """Result of a :meth:`~gitstore.GitStore.backup` or :meth:`~gitstore.GitStore.restore` operation.
+    """Result of a :meth:`~vost.GitStore.backup` or :meth:`~vost.GitStore.restore` operation.
 
     Attributes:
         add: Refs to create.

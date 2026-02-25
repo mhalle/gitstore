@@ -1,7 +1,7 @@
 """API-level tests for FS.move() — portable to TypeScript."""
 
 import pytest
-from gitstore import GitStore
+from vost import GitStore
 
 
 @pytest.fixture

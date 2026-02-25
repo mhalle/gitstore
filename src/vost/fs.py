@@ -44,7 +44,7 @@ __all__ = ["FS", "StatResult", "WriteEntry", "retry_write"]
 
 @dataclass(frozen=True, slots=True)
 class StatResult:
-    """POSIX-like stat result for a gitstore path.
+    """POSIX-like stat result for a vost path.
 
     Attributes:
         mode: Raw git filemode (e.g. ``0o100644``, ``0o040000``).
@@ -889,7 +889,7 @@ class FS:
     ) -> FS:
         """Copy local files into the repo.
 
-        Sources must be literal paths; use :func:`~gitstore.disk_glob` to
+        Sources must be literal paths; use :func:`~vost.disk_glob` to
         expand patterns before calling.
 
         Args:

@@ -1,4 +1,4 @@
-"""Low-level tree manipulation for gitstore.
+"""Low-level tree manipulation for vost.
 
 Provides recursive tree rebuild and path-based read helpers
 using dulwich's tree objects.
@@ -59,7 +59,7 @@ class TreeBuilder:
 
 
 class WalkEntry(NamedTuple):
-    """A file entry yielded by :meth:`~gitstore.FS.walk` and :meth:`~gitstore.FS.listdir`.
+    """A file entry yielded by :meth:`~vost.FS.walk` and :meth:`~vost.FS.listdir`.
 
     Attributes:
         name: Entry name (file or directory basename).
@@ -73,7 +73,7 @@ class WalkEntry(NamedTuple):
 
     @property
     def file_type(self):
-        """Return the :class:`~gitstore.copy._types.FileType` for this entry."""
+        """Return the :class:`~vost.copy._types.FileType` for this entry."""
         from .copy._types import FileType
         return FileType.from_filemode(self.mode)
 

@@ -2,8 +2,8 @@
 
 import pytest
 
-from gitstore import GitStore
-from gitstore._objsize import ObjectSizer
+from vost import GitStore
+from vost._objsize import ObjectSizer
 
 
 @pytest.fixture

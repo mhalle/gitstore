@@ -40,10 +40,10 @@ Commands like `cp` and `sync` work with both local files and files inside the re
 The `:` prefix on each argument determines the copy direction:
 
 ```bash
-gitstore cp file.txt :             # local  -> repo  (disk to repo)
-gitstore cp :file.txt ./out        # :repo  -> local (repo to disk)
-gitstore cp :a.txt :backup/        # :repo  -> :repo (repo to repo)
-gitstore cp main:a.txt dev:backup/ # cross-branch repo to repo
+vost cp file.txt :             # local  -> repo  (disk to repo)
+vost cp :file.txt ./out        # :repo  -> local (repo to disk)
+vost cp :a.txt :backup/        # :repo  -> :repo (repo to repo)
+vost cp main:a.txt dev:backup/ # cross-branch repo to repo
 ```
 
 ### Writing to refs
@@ -51,9 +51,9 @@ gitstore cp main:a.txt dev:backup/ # cross-branch repo to repo
 Only branches are writable. Tags, commit hashes, and historical commits (`~N`) are read-only:
 
 ```bash
-gitstore cp file.txt dev:          # OK -- writes to dev branch
-gitstore cp file.txt v1.0:         # ERROR -- cannot write to a tag
-gitstore cp file.txt main~1:       # ERROR -- cannot write to history
+vost cp file.txt dev:          # OK -- writes to dev branch
+vost cp file.txt v1.0:         # ERROR -- cannot write to a tag
+vost cp file.txt main~1:       # ERROR -- cannot write to history
 ```
 
 For the full path syntax specification, see [Path Syntax](paths.md).
@@ -65,9 +65,9 @@ For the full path syntax specification, see [Path Syntax](paths.md).
 Create a new bare git repository.
 
 ```bash
-gitstore init                    # or --repo <path>
-gitstore init --branch dev
-gitstore init -f                 # destroy and recreate
+vost init                    # or --repo <path>
+vost init --branch dev
+vost init -f                 # destroy and recreate
 ```
 
 | Option | Description |
@@ -80,8 +80,8 @@ gitstore init -f                 # destroy and recreate
 Remove a bare git repository.
 
 ```bash
-gitstore destroy                 # fails if repo has data
-gitstore destroy -f              # force
+vost destroy                 # fails if repo has data
+vost destroy -f              # force
 ```
 
 ### gc
@@ -89,7 +89,7 @@ gitstore destroy -f              # force
 Run garbage collection on the repository. Removes unreachable objects (orphaned blobs, etc.) and repacks the object store. Requires `git` to be installed.
 
 ```bash
-gitstore gc
+vost gc
 ```
 
 ---
@@ -102,31 +102,31 @@ Copy files and directories between disk and repo. The last argument is the desti
 
 ```bash
 # Disk to repo
-gitstore cp file.txt :                        # keep name at repo root
-gitstore cp file.txt :dest/file.txt           # explicit dest
-gitstore cp f1.txt f2.txt :dir                # multiple files
-gitstore cp ./mydir :dest                     # directory (name preserved)
-gitstore cp ./mydir/ :dest                    # contents mode (trailing /)
-gitstore cp './src/*.py' :backup              # glob
+vost cp file.txt :                        # keep name at repo root
+vost cp file.txt :dest/file.txt           # explicit dest
+vost cp f1.txt f2.txt :dir                # multiple files
+vost cp ./mydir :dest                     # directory (name preserved)
+vost cp ./mydir/ :dest                    # contents mode (trailing /)
+vost cp './src/*.py' :backup              # glob
 
 # Pivot (/./): preserve partial source path
-gitstore cp /data/./logs/app :backup          # → backup/logs/app/...
-gitstore cp /data/./logs/app/ :backup         # → backup/logs/...
-gitstore cp /home/user/./projects/f.txt :bak  # → bak/projects/f.txt
+vost cp /data/./logs/app :backup          # → backup/logs/app/...
+vost cp /data/./logs/app/ :backup         # → backup/logs/...
+vost cp /home/user/./projects/f.txt :bak  # → bak/projects/f.txt
 
 # Repo to disk
-gitstore cp :file.txt ./local.txt
-gitstore cp ':docs/*.md' ./local-docs
+vost cp :file.txt ./local.txt
+vost cp ':docs/*.md' ./local-docs
 
 # Pivot (/./): preserve partial repo path
-gitstore cp ':data/./logs/app' ./backup          # → backup/logs/app/...
-gitstore cp ':data/./logs/app/' ./backup         # → backup/logs/...
-gitstore cp ':src/./lib/utils.py' ./dest         # → dest/lib/utils.py
+vost cp ':data/./logs/app' ./backup          # → backup/logs/app/...
+vost cp ':data/./logs/app/' ./backup         # → backup/logs/...
+vost cp ':src/./lib/utils.py' ./dest         # → dest/lib/utils.py
 
 # Options
-gitstore cp -n ./mydir :dest                  # dry run
-gitstore cp --delete ./src/ :code             # remove extra repo files
-gitstore cp --ref v1.0 :data ./local          # from tag/branch/hash
+vost cp -n ./mydir :dest                  # dry run
+vost cp --delete ./src/ :code             # remove extra repo files
+vost cp --ref v1.0 :data ./local          # from tag/branch/hash
 ```
 
 | Option | Description |
@@ -176,11 +176,11 @@ Glob patterns (`*`, `?`, `**`) in the segment after `/./` are not supported — 
 Make one path identical to another (like rsync `--delete`).
 
 ```bash
-gitstore sync ./dir                           # sync dir to repo root
-gitstore sync ./local :repo_path              # disk → repo
-gitstore sync :repo_path ./local              # repo → disk
-gitstore sync -n ./local :repo_path           # dry run
-gitstore sync :data ./local --ref v1.0        # from tag
+vost sync ./dir                           # sync dir to repo root
+vost sync ./local :repo_path              # disk → repo
+vost sync :repo_path ./local              # repo → disk
+vost sync -n ./local :repo_path           # dry run
+vost sync :data ./local --ref v1.0        # from tag
 ```
 
 | Option | Description |
@@ -209,30 +209,30 @@ gitstore sync :data ./local --ref v1.0        # from tag
 With `--watch`, continuously watches the local directory and syncs on changes:
 
 ```bash
-gitstore sync --watch ./dir :data
-gitstore sync --watch --debounce 5000 ./dir
-gitstore sync --watch -c ./src :code       # checksum mode
+vost sync --watch ./dir :data
+vost sync --watch --debounce 5000 ./dir
+vost sync --watch -c ./src :code       # checksum mode
 ```
 
-Requires: `pip install gitstore[cli]`
+Requires: `pip install vost[cli]`
 
 ### ls
 
 List files and directories. Accepts multiple paths and glob patterns — results are coalesced and deduplicated.
 
 ```bash
-gitstore ls                                   # root
-gitstore ls subdir                            # subdirectory
-gitstore ls --ref v1.0                        # at a tag
-gitstore ls '*.txt'                           # glob (quote to avoid shell expansion)
-gitstore ls 'src/*.py'                        # glob in subdirectory
-gitstore ls '**/*.py'                         # ** matches all depths
-gitstore ls 'src/**/*.txt'                    # ** under a prefix
-gitstore ls '*.txt' '*.py'                    # multiple globs
-gitstore ls :src :docs                        # multiple directories
-gitstore ls -R                                # all files recursively
-gitstore ls -R :src :docs                     # recursive under multiple dirs
-gitstore ls -R 'src/*'                        # glob + recursive expansion
+vost ls                                   # root
+vost ls subdir                            # subdirectory
+vost ls --ref v1.0                        # at a tag
+vost ls '*.txt'                           # glob (quote to avoid shell expansion)
+vost ls 'src/*.py'                        # glob in subdirectory
+vost ls '**/*.py'                         # ** matches all depths
+vost ls 'src/**/*.txt'                    # ** under a prefix
+vost ls '*.txt' '*.py'                    # multiple globs
+vost ls :src :docs                        # multiple directories
+vost ls -R                                # all files recursively
+vost ls -R :src :docs                     # recursive under multiple dirs
+vost ls -R 'src/*'                        # glob + recursive expansion
 ```
 
 | Option | Description |
@@ -250,8 +250,8 @@ gitstore ls -R 'src/*'                        # glob + recursive expansion
 Print file contents to stdout.
 
 ```bash
-gitstore cat file.txt
-gitstore cat file.txt --ref v1.0
+vost cat file.txt
+vost cat file.txt --ref v1.0
 ```
 
 | Option | Description |
@@ -264,12 +264,12 @@ gitstore cat file.txt --ref v1.0
 Remove files from the repo. Accepts multiple paths and glob patterns. Directories require `-R`.
 
 ```bash
-gitstore rm old-file.txt
-gitstore rm old-file.txt -m "Clean up"
-gitstore rm ':*.txt'                     # glob (quote for shell)
-gitstore rm -R :dir                      # directory
-gitstore rm -n :file.txt                 # dry run
-gitstore rm :a.txt :b.txt               # multiple
+vost rm old-file.txt
+vost rm old-file.txt -m "Clean up"
+vost rm ':*.txt'                     # glob (quote for shell)
+vost rm -R :dir                      # directory
+vost rm -n :file.txt                 # dry run
+vost rm :a.txt :b.txt               # multiple
 ```
 
 | Option | Description |
@@ -286,12 +286,12 @@ gitstore rm :a.txt :b.txt               # multiple
 Move/rename files within the repo. All arguments are repo paths (colon prefix required). The last argument is the destination.
 
 ```bash
-gitstore mv :old.txt :new.txt               # rename
-gitstore mv ':*.txt' :archive/              # glob move
-gitstore mv -R :src :dest                   # move directory
-gitstore mv :a.txt :b.txt :dest/            # multiple -> dir
-gitstore mv -n :old.txt :new.txt            # dry run
-gitstore mv dev:old.txt dev:new.txt         # explicit branch
+vost mv :old.txt :new.txt               # rename
+vost mv ':*.txt' :archive/              # glob move
+vost mv -R :src :dest                   # move directory
+vost mv :a.txt :b.txt :dest/            # multiple -> dir
+vost mv -n :old.txt :new.txt            # dry run
+vost mv dev:old.txt dev:new.txt         # explicit branch
 ```
 
 | Option | Description |
@@ -337,11 +337,11 @@ tail -f /var/log/app.log | gitstore write log.txt --passthrough
 Show commit history.
 
 ```bash
-gitstore log
-gitstore log --path file.txt
-gitstore log --match "deploy*"
-gitstore log --before 2024-06-01
-gitstore log --format json                    # or jsonl
+vost log
+vost log --path file.txt
+vost log --match "deploy*"
+vost log --before 2024-06-01
+vost log --format json                    # or jsonl
 ```
 
 | Option | Description |
@@ -367,11 +367,11 @@ D  removed-file.txt      # Deleted since baseline
 ```
 
 ```bash
-gitstore diff --back 3                    # what changed in last 3 commits
-gitstore diff --ref other-branch          # what's different vs another branch
-gitstore diff --before 2025-01-01         # what changed since Jan 1
-gitstore diff --ref feature --back 2      # vs feature~2
-gitstore diff --back 3 --reverse          # swap direction (new → old)
+vost diff --back 3                    # what changed in last 3 commits
+vost diff --ref other-branch          # what's different vs another branch
+vost diff --before 2025-01-01         # what changed since Jan 1
+vost diff --ref feature --back 2      # vs feature~2
+vost diff --back 3 --reverse          # swap direction (new → old)
 ```
 
 | Option | Description |
@@ -385,12 +385,12 @@ gitstore diff --back 3 --reverse          # swap direction (new → old)
 Compare two files by content hash. Files can be repo paths, local disk paths, or a mix. Exit code follows POSIX `cmp` convention: 0 = identical, 1 = different.
 
 ```bash
-gitstore cmp :file1.txt :file2.txt           # two repo files
-gitstore cmp main:f.txt dev:f.txt             # cross-branch
-gitstore cmp main~3:f.txt main:f.txt          # ancestor
-gitstore cmp :data.bin /tmp/data.bin           # repo vs disk
-gitstore cmp /tmp/a.txt /tmp/b.txt             # two disk files
-gitstore -v cmp :old.txt :new.txt             # verbose — show hashes on stderr
+vost cmp :file1.txt :file2.txt           # two repo files
+vost cmp main:f.txt dev:f.txt             # cross-branch
+vost cmp main~3:f.txt main:f.txt          # ancestor
+vost cmp :data.bin /tmp/data.bin           # repo vs disk
+vost cmp /tmp/a.txt /tmp/b.txt             # two disk files
+vost -v cmp :old.txt :new.txt             # verbose — show hashes on stderr
 ```
 
 | Option | Description |
@@ -414,9 +414,9 @@ With `-v` (verbose, before the subcommand), both hashes are printed to stderr.
 ### undo
 
 ```bash
-gitstore undo                                 # back 1 commit
-gitstore undo 3                               # back 3 commits
-gitstore undo -b dev                          # undo on 'dev' branch
+vost undo                                 # back 1 commit
+vost undo 3                               # back 3 commits
+vost undo -b dev                          # undo on 'dev' branch
 ```
 
 | Option | Description |
@@ -426,9 +426,9 @@ gitstore undo -b dev                          # undo on 'dev' branch
 ### redo
 
 ```bash
-gitstore redo                                 # forward 1 reflog step
-gitstore redo 2                               # forward 2 steps
-gitstore redo -b dev                          # redo on 'dev' branch
+vost redo                                 # forward 1 reflog step
+vost redo 2                               # forward 2 steps
+vost redo -b dev                          # redo on 'dev' branch
 ```
 
 | Option | Description |
@@ -438,10 +438,10 @@ gitstore redo -b dev                          # redo on 'dev' branch
 ### reflog
 
 ```bash
-gitstore reflog
-gitstore reflog -n 10                         # last 10 entries
-gitstore reflog -b dev                        # entries for 'dev' branch
-gitstore reflog --format json
+vost reflog
+vost reflog -n 10                         # last 10 entries
+vost reflog -b dev                        # entries for 'dev' branch
+vost reflog --format json
 ```
 
 | Option | Description |
@@ -457,20 +457,20 @@ gitstore reflog --format json
 ### branch
 
 ```bash
-gitstore branch                               # list
-gitstore branch list                          # same
-gitstore branch set dev                       # fork from default branch
-gitstore branch set dev --ref main            # fork from specific ref
-gitstore branch set dev --ref main --path config.json
-gitstore branch set dev -f                    # overwrite existing
-gitstore branch set dev --empty               # empty orphan branch
-gitstore branch exists dev                    # exit 0 if exists, 1 if not
-gitstore branch current                       # show current branch
-gitstore branch current -b dev                # set current branch
-gitstore branch delete dev
-gitstore branch hash main                     # tip commit SHA
-gitstore branch hash main --back 3            # 3 commits before tip
-gitstore branch hash main --path config.json  # last commit that changed file
+vost branch                               # list
+vost branch list                          # same
+vost branch set dev                       # fork from default branch
+vost branch set dev --ref main            # fork from specific ref
+vost branch set dev --ref main --path config.json
+vost branch set dev -f                    # overwrite existing
+vost branch set dev --empty               # empty orphan branch
+vost branch exists dev                    # exit 0 if exists, 1 if not
+vost branch current                       # show current branch
+vost branch current -b dev                # set current branch
+vost branch delete dev
+vost branch hash main                     # tip commit SHA
+vost branch hash main --back 3            # 3 commits before tip
+vost branch hash main --path config.json  # last commit that changed file
 ```
 
 #### branch set options
@@ -495,15 +495,15 @@ Exits with code 0 if the branch exists, 1 if it does not. No output.
 ### tag
 
 ```bash
-gitstore tag                                  # list
-gitstore tag list                             # same
-gitstore tag set v1.0                         # tag from default branch
-gitstore tag set v1.0 --ref main              # tag from specific ref
-gitstore tag set v1.0 --before 2024-06-01     # tag a historical commit
-gitstore tag set v1.0 -f                      # overwrite existing tag
-gitstore tag exists v1.0                      # exit 0 if exists, 1 if not
-gitstore tag hash v1.0                        # commit SHA
-gitstore tag delete v1.0
+vost tag                                  # list
+vost tag list                             # same
+vost tag set v1.0                         # tag from default branch
+vost tag set v1.0 --ref main              # tag from specific ref
+vost tag set v1.0 --before 2024-06-01     # tag a historical commit
+vost tag set v1.0 -f                      # overwrite existing tag
+vost tag exists v1.0                      # exit 0 if exists, 1 if not
+vost tag hash v1.0                        # commit SHA
+vost tag delete v1.0
 ```
 
 #### tag set options
@@ -523,12 +523,12 @@ Exits with code 0 if the tag exists, 1 if it does not. No output.
 Manage git notes on commits. Notes are stored in namespaces (default: `commits`).
 
 ```bash
-gitstore note get HASH                        # get note for a commit
-gitstore note set HASH "text"                 # set note for a commit
-gitstore note delete HASH                     # delete note for a commit
-gitstore note list                            # list commits that have notes
-gitstore note get-current                     # get note for HEAD commit
-gitstore note set-current "text"              # set note for HEAD commit
+vost note get HASH                        # get note for a commit
+vost note set HASH "text"                 # set note for a commit
+vost note delete HASH                     # delete note for a commit
+vost note list                            # list commits that have notes
+vost note get-current                     # get note for HEAD commit
+vost note set-current "text"              # set note for HEAD commit
 ```
 
 #### note get / set / delete
@@ -564,12 +564,12 @@ Shorthand for operating on the current branch's HEAD commit.
 Format auto-detected from extension (`.zip`, `.tar`, `.tar.gz`, `.tar.bz2`, `.tar.xz`).
 
 ```bash
-gitstore archive_out out.zip
-gitstore archive_out out.tar.gz
-gitstore archive_out - --format tar | gzip > a.tar.gz   # stdout
-gitstore archive_in data.zip
-gitstore archive_in data.tar.gz
-gitstore archive_in --format tar < archive.tar           # stdin
+vost archive_out out.zip
+vost archive_out out.tar.gz
+vost archive_out - --format tar | gzip > a.tar.gz   # stdout
+vost archive_in data.zip
+vost archive_in data.tar.gz
+vost archive_in --format tar < archive.tar           # stdin
 ```
 
 #### archive_out options
@@ -596,10 +596,10 @@ gitstore archive_in --format tar < archive.tar           # stdin
 Aliases with a fixed format. Same options as archive_out/archive_in (including `--tag` / `--force-tag` for import commands).
 
 ```bash
-gitstore zip out.zip                          # = archive_out --format zip
-gitstore unzip data.zip                       # = archive_in --format zip
-gitstore tar out.tar.gz                       # = archive_out --format tar
-gitstore untar data.tar.gz                    # = archive_in --format tar
+vost zip out.zip                          # = archive_out --format zip
+vost unzip data.zip                       # = archive_in --format zip
+vost tar out.tar.gz                       # = archive_out --format tar
+vost untar data.tar.gz                    # = archive_in --format tar
 ```
 
 ---
@@ -611,9 +611,9 @@ gitstore untar data.tar.gz                    # = archive_in --format tar
 Push all refs to a remote URL, creating an exact mirror. Remote-only refs are deleted.
 
 ```bash
-gitstore backup https://github.com/user/repo.git
-gitstore backup /path/to/other.git
-gitstore backup -n https://github.com/user/repo.git   # dry run
+vost backup https://github.com/user/repo.git
+vost backup /path/to/other.git
+vost backup -n https://github.com/user/repo.git   # dry run
 ```
 
 ### restore
@@ -621,8 +621,8 @@ gitstore backup -n https://github.com/user/repo.git   # dry run
 Fetch all refs from a remote URL, overwriting local state. Local-only refs are deleted.
 
 ```bash
-gitstore restore https://github.com/user/repo.git
-gitstore restore -n https://github.com/user/repo.git  # dry run
+vost restore https://github.com/user/repo.git
+vost restore -n https://github.com/user/repo.git  # dry run
 ```
 
 | Option | Description |
@@ -639,15 +639,15 @@ gitstore restore -n https://github.com/user/repo.git  # dry run
 Serve repository files over HTTP with content negotiation. Content is resolved live on each request — new commits are visible immediately. Browsers see HTML directory listings and raw file contents; API clients requesting `Accept: application/json` get JSON metadata.
 
 ```bash
-gitstore serve                                   # serve HEAD branch at http://127.0.0.1:8000/
-gitstore serve -b dev                            # serve a different branch
-gitstore serve --ref v1.0                        # serve a tag snapshot
-gitstore serve --back 3                          # serve 3 commits before tip
-gitstore serve --all                             # multi-ref: /<branch-or-tag>/<path>
-gitstore serve --all --cors                      # multi-ref with CORS headers
-gitstore serve --base-path /data -p 9000         # mount under /data on port 9000
-gitstore serve --open --no-cache                 # open browser, disable caching
-gitstore serve -q                                # suppress per-request log output
+vost serve                                   # serve HEAD branch at http://127.0.0.1:8000/
+vost serve -b dev                            # serve a different branch
+vost serve --ref v1.0                        # serve a tag snapshot
+vost serve --back 3                          # serve 3 commits before tip
+vost serve --all                             # multi-ref: /<branch-or-tag>/<path>
+vost serve --all --cors                      # multi-ref with CORS headers
+vost serve --base-path /data -p 9000         # mount under /data on port 9000
+vost serve --open --no-cache                 # open browser, disable caching
+vost serve -q                                # suppress per-request log output
 ```
 
 | Option | Description |
@@ -688,9 +688,9 @@ gitstore serve -q                                # suppress per-request log outp
 Serve the repository read-only over HTTP. Standard git clients can clone and fetch from the URL. Pushes are rejected.
 
 ```bash
-gitstore gitserve                                # serve at 127.0.0.1:8000
-gitstore gitserve -p 9000                        # custom port
-gitstore gitserve --host 0.0.0.0 -p 8080         # bind all interfaces
+vost gitserve                                # serve at 127.0.0.1:8000
+vost gitserve -p 9000                        # custom port
+vost gitserve --host 0.0.0.0 -p 8080         # bind all interfaces
 git clone http://127.0.0.1:8000/                 # clone from another terminal
 ```
 
@@ -701,14 +701,14 @@ git clone http://127.0.0.1:8000/                 # clone from another terminal
 
 ### mount
 
-Mount a branch or tag as a read-only FUSE filesystem. Requires `pip install gitstore[fuse]`.
+Mount a branch or tag as a read-only FUSE filesystem. Requires `pip install vost[fuse]`.
 
 ```bash
-gitstore mount /tmp/mnt                          # mount current branch
-gitstore mount /tmp/mnt -b dev                   # mount a different branch
-gitstore mount /tmp/mnt --ref v1.0               # mount a tag
-gitstore mount /tmp/mnt --back 2                 # mount 2 commits before tip
-gitstore mount /tmp/mnt -f                       # run in foreground
+vost mount /tmp/mnt                          # mount current branch
+vost mount /tmp/mnt -b dev                   # mount a different branch
+vost mount /tmp/mnt --ref v1.0               # mount a tag
+vost mount /tmp/mnt --back 2                 # mount 2 commits before tip
+vost mount /tmp/mnt -f                       # run in foreground
 ```
 
 | Option | Description |
@@ -764,8 +764,8 @@ The `-m` option accepts placeholders that expand at commit time:
 | `{op}` | Operation name (`cp`, `ar`, or empty). |
 
 ```bash
-gitstore cp dir/ :dest -m "Deploy: {default}"
-gitstore sync ./src :code -m "Sync {total_count} files"
+vost cp dir/ :dest -m "Deploy: {default}"
+vost sync ./src :code -m "Sync {total_count} files"
 ```
 
 A message without `{` is used as-is. Unknown placeholders raise an error.

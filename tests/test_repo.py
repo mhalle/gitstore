@@ -2,8 +2,8 @@
 
 import pytest
 
-from gitstore import GitStore
-from gitstore.repo import _Repository
+from vost import GitStore
+from vost.repo import _Repository
 
 
 class TestGitStoreOpen:
@@ -261,7 +261,7 @@ class TestRefDictCurrent:
             repo.tags.current_name
 
     def test_current_returns_fs(self, tmp_path):
-        from gitstore.fs import FS
+        from vost.fs import FS
         repo = GitStore.open(tmp_path / "test.git")
         fs = repo.branches.current
         assert isinstance(fs, FS)

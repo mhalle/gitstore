@@ -1,5 +1,5 @@
 /**
- * Mirror (backup/restore) operations for gitstore.
+ * Mirror (backup/restore) operations for vost.
  *
  * Uses isomorphic-git's push/fetch for HTTP transport.
  * Each ref is pushed/fetched individually to achieve mirror semantics.

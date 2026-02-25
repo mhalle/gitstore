@@ -2,7 +2,7 @@
 
 A versioned filesystem backed by a bare git repository.
 
-This is the TypeScript port of [gitstore](https://github.com/mhalle/gitstore), using [isomorphic-git](https://isomorphic-git.org/) as the git backend.
+This is the TypeScript port of [gitstore](https://github.com/mhalle/vost), using [isomorphic-git](https://isomorphic-git.org/) as the git backend.
 
 ## Usage
 

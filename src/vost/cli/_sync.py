@@ -63,13 +63,13 @@ def sync(ctx, args, branch, ref, at_path, match_pattern, before, back, message, 
 
     With one argument, syncs a local directory to the repo root:
 
-        gitstore --repo path/to/repo.git sync ./dir
+        vost --repo path/to/repo.git sync ./dir
 
     \b
     With two arguments, direction is determined by the ':' prefix:
-        gitstore sync ./local :repo_path   (disk → repo)
-        gitstore sync :repo_path ./local   (repo → disk)
-        gitstore sync session:/ :          (repo → repo, cross-branch)
+        vost sync ./local :repo_path   (disk → repo)
+        vost sync :repo_path ./local   (repo → disk)
+        vost sync session:/ :          (repo → repo, cross-branch)
     """
     from ..copy import ExcludeFilter
 

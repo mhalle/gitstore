@@ -1,6 +1,6 @@
 mod common;
 
-use gitstore::*;
+use vost::*;
 
 fn store_with_glob_files(dir: &std::path::Path) -> (GitStore, Fs) {
     let store = common::create_store(dir, "main");

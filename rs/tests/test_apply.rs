@@ -1,6 +1,6 @@
 mod common;
 
-use gitstore::*;
+use vost::*;
 
 // ---------------------------------------------------------------------------
 // WriteEntry construction

@@ -1,5 +1,5 @@
 /**
- * Deno compatibility tests for gitstore.
+ * Deno compatibility tests for vost.
  *
  * Run: deno test tests/deno_compat_test.ts --allow-read --allow-write
  *
@@ -43,7 +43,7 @@ function fromBytes(b: Uint8Array): string {
 }
 
 function makeTmpDir(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'gitstore-deno-'));
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'vost-deno-'));
 }
 
 async function freshStore(opts?: {

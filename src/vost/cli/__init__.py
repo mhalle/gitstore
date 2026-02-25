@@ -1,4 +1,4 @@
-"""gitstore CLI — copy files into/out of bare git repos."""
+"""vost CLI — copy files into/out of bare git repos."""
 
 from ._helpers import main  # noqa: F401 — entry point
 

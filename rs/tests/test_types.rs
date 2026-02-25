@@ -1,4 +1,4 @@
-use gitstore::*;
+use vost::*;
 
 // ---------------------------------------------------------------------------
 // FileType
@@ -238,8 +238,8 @@ fn ref_change_fields() {
 #[test]
 fn signature_default() {
     let s = Signature::default();
-    assert_eq!(s.name, "gitstore");
-    assert_eq!(s.email, "gitstore@localhost");
+    assert_eq!(s.name, "vost");
+    assert_eq!(s.email, "vost@localhost");
 }
 
 // ---------------------------------------------------------------------------

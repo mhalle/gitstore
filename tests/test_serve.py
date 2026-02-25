@@ -7,8 +7,8 @@ import threading
 import pytest
 from click.testing import CliRunner
 
-from gitstore.cli import main
-from gitstore.repo import GitStore
+from vost.cli import main
+from vost.repo import GitStore
 
 
 # ---------------------------------------------------------------------------
@@ -34,7 +34,7 @@ def _make_app(repo_path):
     """Build the WSGI app the same way gitserve does."""
     from dulwich.server import DictBackend, UploadPackHandler
     from dulwich.web import HTTPGitApplication, GunzipFilter, LimitedInputFilter
-    from gitstore.cli._serve import _fix_head
+    from vost.cli._serve import _fix_head
 
     store = GitStore.open(repo_path, create=False)
     _fix_head(store)

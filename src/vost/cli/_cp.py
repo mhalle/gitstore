@@ -80,11 +80,11 @@ def cp(ctx, args, branch, ref, at_path, match_pattern, before, back, message, fi
     \b
     Prefix repo-side paths with ':' (current branch) or 'ref:' (explicit ref).
     Examples:
-        gitstore cp file.txt :               # disk → repo
-        gitstore cp :file.txt ./             # repo → disk
-        gitstore cp '*.jpg' :images/         # disk → repo with glob
-        gitstore cp session:/ :              # repo → repo (cross-branch)
-        gitstore cp main~1:a.txt :backup/    # from 1 commit back on main
+        vost cp file.txt :               # disk → repo
+        vost cp :file.txt ./             # repo → disk
+        vost cp '*.jpg' :images/         # disk → repo with glob
+        vost cp session:/ :              # repo → repo (cross-branch)
+        vost cp main~1:a.txt :backup/    # from 1 commit back on main
     """
     from ..copy import ExcludeFilter
     from ..copy._resolve import _resolve_repo_sources, _enum_repo_to_repo

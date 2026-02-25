@@ -1,7 +1,7 @@
 mod common;
 
-use gitstore::*;
-use gitstore::fs::CopyOutOptions;
+use vost::*;
+use vost::fs::CopyOutOptions;
 
 // ---------------------------------------------------------------------------
 // read

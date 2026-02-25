@@ -16,9 +16,9 @@ try:
 except (ImportError, OSError):
     pytest.skip("mfusepy/libfuse not available", allow_module_level=True)
 
-from gitstore import GitStore
-from gitstore._fuse import GitStoreOperations, _fuse_path, _git_mode_to_stat
-from gitstore.tree import (
+from vost import GitStore
+from vost._fuse import GitStoreOperations, _fuse_path, _git_mode_to_stat
+from vost.tree import (
     GIT_FILEMODE_BLOB,
     GIT_FILEMODE_BLOB_EXECUTABLE,
     GIT_FILEMODE_LINK,
@@ -50,7 +50,7 @@ def fuse_fs(tmp_path):
     fs = fs.write("src/main.py", b"print('hello')")
 
     # Force read-only
-    from gitstore.fs import FS
+    from vost.fs import FS
     fs = FS(store, fs._commit_oid, ref_name=fs.ref_name, writable=False)
 
     ops = GitStoreOperations(fs)

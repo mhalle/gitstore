@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "gitstore"
+name = "vost"
 version = "0.61.0"
 description = "A versioned filesystem backed by bare Git repositories"
 readme = "README.md"
@@ -27,10 +27,10 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/mhalle/gitstore"
-Repository = "https://github.com/mhalle/gitstore"
-Issues = "https://github.com/mhalle/gitstore/issues"
-Changelog = "https://github.com/mhalle/gitstore/blob/master/CHANGELOG.md"
+Homepage = "https://github.com/mhalle/vost"
+Repository = "https://github.com/mhalle/vost"
+Issues = "https://github.com/mhalle/vost/issues"
+Changelog = "https://github.com/mhalle/vost/blob/master/CHANGELOG.md"
 
 [project.optional-dependencies]
 cli = [
@@ -41,18 +41,18 @@ fuse = [
     "mfusepy>=3.0",
 ]
 dev = [
-    "gitstore[cli]",
+    "vost[cli]",
     "pytest>=8.0",
 ]
 
 [project.scripts]
-gitstore = "gitstore.cli:main"
+vost = "vost.cli:main"
 
 [tool.hatch.build.targets.sdist]
 exclude = ["rs/target", "ts/node_modules", "site", "tmp"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/gitstore"]
+packages = ["src/vost"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

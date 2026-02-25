@@ -1,11 +1,11 @@
-"""Tests for the gitstore CLI — core commands (init, destroy, rm, write, log, sync, diff, undo, redo, reflog)."""
+"""Tests for the vost CLI — core commands (init, destroy, rm, write, log, sync, diff, undo, redo, reflog)."""
 
 import os
 import time
 import pytest
 from click.testing import CliRunner
 
-from gitstore.cli import main
+from vost.cli import main
 
 
 # ---------------------------------------------------------------------------
@@ -747,7 +747,7 @@ class TestDiff:
 
     def test_diff_mixed(self, runner, repo_with_files, tmp_path):
         """Add + modify + delete in one commit shows all three prefixes."""
-        from gitstore import GitStore
+        from vost import GitStore
         store = GitStore.open(repo_with_files, create=False)
         fs = store.branches["main"]
         fs = fs.write("hello.txt", b"changed")
@@ -975,7 +975,7 @@ class TestSnapshotFilterCombined:
         runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":a.txt", "-m", "deploy v2"])
 
         # Get timestamp between the two commits
-        from gitstore import GitStore
+        from vost import GitStore
         store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         entries = list(fs.log())

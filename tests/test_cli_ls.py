@@ -1,11 +1,11 @@
-"""Tests for the gitstore CLI — ls and cat commands."""
+"""Tests for the vost CLI — ls and cat commands."""
 
 import json
 
 import pytest
 from click.testing import CliRunner
 
-from gitstore.cli import main
+from vost.cli import main
 
 
 class TestLs:
@@ -339,7 +339,7 @@ class TestLsLong:
         assert "readme.txt" in names
 
     def test_ls_l_symlink_text(self, runner, repo_with_tree):
-        from gitstore.repo import GitStore
+        from vost.repo import GitStore
         store = GitStore.open(repo_with_tree, create=False)
         fs = store.branches["main"]
         fs.write_symlink("shortcut", "readme.txt")
@@ -350,7 +350,7 @@ class TestLsLong:
         assert "shortcut -> readme.txt" in result.output
 
     def test_ls_l_symlink_json(self, runner, repo_with_tree):
-        from gitstore.repo import GitStore
+        from vost.repo import GitStore
         store = GitStore.open(repo_with_tree, create=False)
         fs = store.branches["main"]
         fs.write_symlink("shortcut", "readme.txt")

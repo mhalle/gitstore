@@ -4,8 +4,8 @@ import os
 
 import pytest
 
-from gitstore._exclude import ExcludeFilter
-from gitstore.copy._resolve import _walk_local_paths
+from vost._exclude import ExcludeFilter
+from vost.copy._resolve import _walk_local_paths
 
 
 # ---------------------------------------------------------------------------

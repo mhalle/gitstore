@@ -366,17 +366,17 @@ impl ChangeReport {
 /// Author/committer identity used for commits.
 #[derive(Debug, Clone)]
 pub struct Signature {
-    /// Author name (e.g. `"gitstore"`).
+    /// Author name (e.g. `"vost"`).
     pub name: String,
-    /// Author email (e.g. `"gitstore@localhost"`).
+    /// Author email (e.g. `"vost@localhost"`).
     pub email: String,
 }
 
 impl Default for Signature {
     fn default() -> Self {
         Self {
-            name: "gitstore".into(),
-            email: "gitstore@localhost".into(),
+            name: "vost".into(),
+            email: "vost@localhost".into(),
         }
     }
 }
@@ -407,7 +407,7 @@ pub struct ReflogEntry {
     pub old_sha: String,
     /// New 40-char hex commit SHA.
     pub new_sha: String,
-    /// Identity string of the committer (e.g. `"gitstore <gitstore@localhost>"`).
+    /// Identity string of the committer (e.g. `"vost <vost@localhost>"`).
     pub committer: String,
     /// POSIX epoch seconds of the entry.
     pub timestamp: u64,

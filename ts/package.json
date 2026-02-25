@@ -1,5 +1,5 @@
 {
-  "name": "gitstore",
+  "name": "vost",
   "version": "0.5.0",
   "description": "A versioned filesystem backed by a bare git repository",
   "type": "module",
@@ -26,12 +26,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/mhalle/gitstore.git",
+    "url": "git+https://github.com/mhalle/vost.git",
     "directory": "ts"
   },
-  "homepage": "https://github.com/mhalle/gitstore/tree/master/ts",
+  "homepage": "https://github.com/mhalle/vost/tree/master/ts",
   "bugs": {
-    "url": "https://github.com/mhalle/gitstore/issues"
+    "url": "https://github.com/mhalle/vost/issues"
   },
   "keywords": [
     "git",

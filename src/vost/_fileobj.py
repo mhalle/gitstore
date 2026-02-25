@@ -1,4 +1,4 @@
-"""File-like objects for gitstore."""
+"""File-like objects for vost."""
 
 from __future__ import annotations
 

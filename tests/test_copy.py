@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from gitstore import GitStore, ChangeReport, FileEntry, disk_glob
+from vost import GitStore, ChangeReport, FileEntry, disk_glob
 
 
 def paths(entries):

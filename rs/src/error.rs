@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-/// All errors produced by gitstore.
+/// All errors produced by vost.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     /// A file or directory path was not found in the repository tree.

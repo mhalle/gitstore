@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use gitstore::*;
+use vost::*;
 
 pub fn create_store(dir: &Path, branch: &str) -> GitStore {
     GitStore::open(dir.join("test.git"), OpenOptions {

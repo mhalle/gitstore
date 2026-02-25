@@ -15,7 +15,7 @@ export function fromBytes(b: Uint8Array): string {
 }
 
 export function makeTmpDir(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'gitstore-test-'));
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'vost-test-'));
 }
 
 export function rmTmpDir(dir: string): void {

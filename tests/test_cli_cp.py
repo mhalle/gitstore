@@ -1,11 +1,11 @@
-"""Tests for the gitstore CLI — cp command and related operations."""
+"""Tests for the vost CLI — cp command and related operations."""
 
 import os
 
 import pytest
 from click.testing import CliRunner
 
-from gitstore.cli import main
+from vost.cli import main
 
 
 class TestCp:
@@ -64,8 +64,8 @@ class TestCp:
         ])
         assert result.exit_code == 0, result.output
         # Verify mode via library
-        from gitstore import GitStore
-        from gitstore.copy._types import FileType
+        from vost import GitStore
+        from vost.copy._types import FileType
         store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         assert fs.file_type("script.sh") == FileType.EXECUTABLE
@@ -77,8 +77,8 @@ class TestCp:
             "cp", "--repo", initialized_repo, str(f), ":plain.txt", "--type", "blob"
         ])
         assert result.exit_code == 0, result.output
-        from gitstore import GitStore
-        from gitstore.copy._types import FileType
+        from vost import GitStore
+        from vost.copy._types import FileType
         store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         assert fs.file_type("plain.txt") == FileType.BLOB
@@ -90,8 +90,8 @@ class TestCp:
             "cp", "--repo", initialized_repo, str(f), ":default.txt"
         ])
         assert result.exit_code == 0, result.output
-        from gitstore import GitStore
-        from gitstore.copy._types import FileType
+        from vost import GitStore
+        from vost.copy._types import FileType
         store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         assert fs.file_type("default.txt") == FileType.BLOB
@@ -103,8 +103,8 @@ class TestCp:
             "cp", "--repo", initialized_repo, str(f), ":legacy.sh", "--mode", "755"
         ])
         assert result.exit_code == 0, result.output
-        from gitstore import GitStore
-        from gitstore.copy._types import FileType
+        from vost import GitStore
+        from vost.copy._types import FileType
         store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         assert fs.file_type("legacy.sh") == FileType.EXECUTABLE
@@ -485,7 +485,7 @@ class TestCpTree:
 class TestSymlinks:
     def test_cp_repo_to_disk_symlink(self, runner, initialized_repo, tmp_path):
         """cp repo→disk creates a symlink on disk for symlink entries."""
-        from gitstore import GitStore
+        from vost import GitStore
         store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         fs = fs.write("target.txt", b"content")
@@ -499,8 +499,8 @@ class TestSymlinks:
 
     def test_cp_dir_disk_to_repo_preserves_symlinks(self, runner, initialized_repo, tmp_path):
         """cp dir/ :stuff preserves file symlinks by default."""
-        from gitstore import GitStore
-        from gitstore.copy._types import FileType
+        from vost import GitStore
+        from vost.copy._types import FileType
 
         src = tmp_path / "treesrc"
         src.mkdir()
@@ -517,8 +517,8 @@ class TestSymlinks:
 
     def test_cp_dir_disk_to_repo_symlink_to_dir(self, runner, initialized_repo, tmp_path):
         """cp dir/ :stuff preserves symlinked directories as symlink entries."""
-        from gitstore import GitStore
-        from gitstore.copy._types import FileType
+        from vost import GitStore
+        from vost.copy._types import FileType
 
         src = tmp_path / "treesrc"
         src.mkdir()
@@ -537,8 +537,8 @@ class TestSymlinks:
 
     def test_cp_dir_disk_to_repo_follow_symlinks(self, runner, initialized_repo, tmp_path):
         """cp dir/ :stuff --follow-symlinks dereferences file symlinks."""
-        from gitstore import GitStore
-        from gitstore.copy._types import FileType
+        from vost import GitStore
+        from vost.copy._types import FileType
 
         src = tmp_path / "treesrc"
         src.mkdir()
@@ -558,8 +558,8 @@ class TestSymlinks:
 
     def test_cp_dir_disk_to_repo_follow_symlinks_dir(self, runner, initialized_repo, tmp_path):
         """cp dir/ :stuff --follow-symlinks follows symlinked directories."""
-        from gitstore import GitStore
-        from gitstore.copy._types import FileType
+        from vost import GitStore
+        from vost.copy._types import FileType
 
         src = tmp_path / "treesrc"
         src.mkdir()
@@ -598,7 +598,7 @@ class TestSymlinks:
         ])
         assert result.exit_code == 0, result.output
 
-        from gitstore import GitStore
+        from vost import GitStore
         store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         assert fs.read("cyc/file.txt") == b"ok"
@@ -606,7 +606,7 @@ class TestSymlinks:
 
     def test_cp_dir_repo_to_disk_symlink(self, runner, initialized_repo, tmp_path):
         """cp :dir/ dest creates symlinks on disk for symlink entries."""
-        from gitstore import GitStore
+        from vost import GitStore
         store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         fs = fs.write("dir/target.txt", b"content")
@@ -645,15 +645,15 @@ class TestNonUtf8Symlink:
     def test_zip_export_non_utf8_symlink(self, runner, initialized_repo, tmp_path):
         """Non-UTF-8 symlink targets produce a clear error on zip export."""
         import zipfile
-        from gitstore import GitStore
-        from gitstore.copy._types import FileType
+        from vost import GitStore
+        from vost.copy._types import FileType
         store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         # Write a symlink with non-UTF-8 target bytes directly
         repo = store._repo
         bad_target = b"caf\xe9"  # not valid UTF-8
         blob_oid = repo.create_blob(bad_target)
-        from gitstore.tree import rebuild_tree
+        from vost.tree import rebuild_tree
         new_tree = rebuild_tree(repo, fs._tree_oid, {"bad-link": (blob_oid, FileType.LINK.filemode)}, set())
         sig = store._signature
         commit_oid = repo.create_commit(
@@ -666,14 +666,14 @@ class TestNonUtf8Symlink:
 
     def test_tar_export_non_utf8_symlink(self, runner, initialized_repo, tmp_path):
         """Non-UTF-8 symlink targets produce a clear error on tar export."""
-        from gitstore import GitStore
-        from gitstore.copy._types import FileType
+        from vost import GitStore
+        from vost.copy._types import FileType
         store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         repo = store._repo
         bad_target = b"caf\xe9"
         blob_oid = repo.create_blob(bad_target)
-        from gitstore.tree import rebuild_tree
+        from vost.tree import rebuild_tree
         new_tree = rebuild_tree(repo, fs._tree_oid, {"bad-link": (blob_oid, FileType.LINK.filemode)}, set())
         sig = store._signature
         commit_oid = repo.create_commit(
@@ -706,7 +706,7 @@ class TestCpRepoPivot:
 
     def test_cp_repo_pivot_dir(self, runner, initialized_repo, tmp_path):
         """cp :base/./sub/dir ./dest preserves sub/dir structure."""
-        from gitstore import GitStore
+        from vost import GitStore
         store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         fs = fs.write("base/sub/mydir/x.txt", b"xxx")
@@ -723,7 +723,7 @@ class TestCpRepoPivot:
 
     def test_cp_repo_pivot_dry_run(self, runner, initialized_repo, tmp_path):
         """cp -n :base/./sub/file.txt ./dest shows pivot structure."""
-        from gitstore import GitStore
+        from vost import GitStore
         store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         fs.write("base/sub/file.txt", b"hello")
@@ -1161,8 +1161,8 @@ class TestSingleFileCpBugfixes:
 
     def test_single_file_disk_to_repo_preserves_symlink(self, runner, initialized_repo, tmp_path):
         """Single-file cp from disk to repo should preserve symlinks (not dereference)."""
-        from gitstore import GitStore
-        from gitstore.copy._types import FileType
+        from vost import GitStore
+        from vost.copy._types import FileType
 
         target = tmp_path / "target.txt"
         target.write_text("content")
@@ -1179,8 +1179,8 @@ class TestSingleFileCpBugfixes:
 
     def test_single_file_disk_to_repo_follow_symlinks_dereferences(self, runner, initialized_repo, tmp_path):
         """Single-file cp with --follow-symlinks should dereference."""
-        from gitstore import GitStore
-        from gitstore.copy._types import FileType
+        from vost import GitStore
+        from vost.copy._types import FileType
 
         target = tmp_path / "target.txt"
         target.write_text("content")
@@ -1199,7 +1199,7 @@ class TestSingleFileCpBugfixes:
 
     def test_single_file_repo_to_disk_overwrites_existing(self, runner, initialized_repo, tmp_path):
         """Single-file cp from repo to disk should overwrite existing files."""
-        from gitstore import GitStore
+        from vost import GitStore
 
         store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
@@ -1214,7 +1214,7 @@ class TestSingleFileCpBugfixes:
 
     def test_single_file_repo_to_disk_overwrites_existing_symlink(self, runner, initialized_repo, tmp_path):
         """Single-file cp from repo to disk should overwrite existing symlinks."""
-        from gitstore import GitStore
+        from vost import GitStore
 
         store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]

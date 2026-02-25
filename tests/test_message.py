@@ -2,7 +2,7 @@
 
 import pytest
 
-from gitstore.copy._types import ChangeReport, FileEntry, FileType, format_commit_message
+from vost.copy._types import ChangeReport, FileEntry, FileType, format_commit_message
 
 
 def _report(add=0, update=0, delete=0):

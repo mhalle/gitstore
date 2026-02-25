@@ -34,18 +34,18 @@ def mount(ctx, mountpoint, branch, ref, at_path, match_pattern, before, back,
 
     \b
     Examples:
-        gitstore mount /tmp/mnt -r data.git
-        gitstore mount /tmp/mnt -r data.git -b dev
-        gitstore mount /tmp/mnt -r data.git --ref v1.0
-        gitstore mount /tmp/mnt -r data.git --back 2
-        gitstore mount /tmp/mnt -r data.git --before 2025-01-01
-        gitstore mount /tmp/mnt -r data.git --match "release*"
+        vost mount /tmp/mnt -r data.git
+        vost mount /tmp/mnt -r data.git -b dev
+        vost mount /tmp/mnt -r data.git --ref v1.0
+        vost mount /tmp/mnt -r data.git --back 2
+        vost mount /tmp/mnt -r data.git --before 2025-01-01
+        vost mount /tmp/mnt -r data.git --match "release*"
     """
     try:
         from .._fuse import mount as fuse_mount
     except ImportError:
         raise click.ClickException(
-            "FUSE support not installed. Install with: pip install gitstore[fuse]"
+            "FUSE support not installed. Install with: pip install vost[fuse]"
         )
 
     repo_path = _require_repo(ctx)

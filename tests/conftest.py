@@ -1,10 +1,10 @@
-"""Shared fixtures for gitstore tests."""
+"""Shared fixtures for vost tests."""
 
 import pytest
 from click.testing import CliRunner
 
-from gitstore.cli import main
-from gitstore.repo import init_repository
+from vost.cli import main
+from vost.repo import init_repository
 
 
 @pytest.fixture

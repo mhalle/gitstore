@@ -34,8 +34,8 @@ def gitserve(ctx, host, port):
 
     \b
     Examples:
-        gitstore gitserve -r data.git
-        gitstore gitserve -r data.git -p 9000
+        vost gitserve -r data.git
+        vost gitserve -r data.git -p 9000
         git clone http://127.0.0.1:8000/
     """
     from dulwich.server import DictBackend, UploadPackHandler

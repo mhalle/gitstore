@@ -4,9 +4,9 @@ import os
 
 import pytest
 
-from gitstore import GitStore
-from gitstore.copy._types import FileType
-from gitstore.fs import FS
+from vost import GitStore
+from vost.copy._types import FileType
+from vost.fs import FS
 
 
 def paths(entries):
@@ -297,7 +297,7 @@ class TestCopyRefPathNormalization:
 
 class TestCopyRefStale:
     def test_stale_snapshot_propagates(self, store):
-        from gitstore.exceptions import StaleSnapshotError
+        from vost.exceptions import StaleSnapshotError
 
         main = store.branches["main"]
         worker = store.branches["worker"]

@@ -1,4 +1,4 @@
-"""Copy and sync files between local disk and a gitstore repo.
+"""Copy and sync files between local disk and a vost repo.
 
 Supports files, directories, and trailing-slash "contents" mode.
 

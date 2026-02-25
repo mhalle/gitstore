@@ -1,5 +1,5 @@
 /**
- * Glob matching utilities for gitstore.
+ * Glob matching utilities for vost.
  *
  * Provides fnmatch-style matching with dotfile-aware semantics:
  * `*` and `?` do not match a leading `.` unless the pattern itself starts with `.`.

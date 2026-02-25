@@ -2,7 +2,7 @@
 
 import pytest
 
-from gitstore import FileType, GitStore, StatResult
+from vost import FileType, GitStore, StatResult
 
 
 @pytest.fixture
@@ -118,7 +118,7 @@ class TestListdir:
 
     def test_listdir_returns_walk_entries(self, repo_with_types):
         _, fs = repo_with_types
-        from gitstore import WalkEntry
+        from vost import WalkEntry
         entries = fs.listdir()
         assert all(isinstance(e, WalkEntry) for e in entries)
 

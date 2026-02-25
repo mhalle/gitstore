@@ -31,7 +31,7 @@ try:
 
     def _lock_path(repo_path: str) -> str:
         if os.path.isdir(repo_path):
-            return os.path.join(repo_path, "gitstore.lock")
+            return os.path.join(repo_path, "vost.lock")
         return repo_path + ".lock"
 
     @contextmanager
@@ -55,7 +55,7 @@ except ImportError:
 
     def _lock_path(repo_path: str) -> str:
         if os.path.isdir(repo_path):
-            return os.path.join(repo_path, "gitstore.lock")
+            return os.path.join(repo_path, "vost.lock")
         return repo_path + ".lock"
 
     @contextmanager

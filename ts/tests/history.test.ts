@@ -138,11 +138,11 @@ describe('commit metadata', () => {
 
   it('author name', async () => {
     const name = await snap.getAuthorName();
-    expect(name).toBe('gitstore');
+    expect(name).toBe('vost');
   });
 
   it('author email', async () => {
     const email = await snap.getAuthorEmail();
-    expect(email).toBe('gitstore@localhost');
+    expect(email).toBe('vost@localhost');
   });
 });

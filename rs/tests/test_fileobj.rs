@@ -2,7 +2,7 @@ mod common;
 
 use std::io::Write;
 
-use gitstore::*;
+use vost::*;
 
 #[test]
 fn fs_writer_write_all_and_close() {

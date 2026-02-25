@@ -2,7 +2,7 @@
 
 A versioned filesystem backed by a bare git repository.
 
-This is the Rust port of [gitstore](https://github.com/mhalle/gitstore), using [gitoxide (gix)](https://github.com/GitoxideLabs/gitoxide) as the git backend.
+This is the Rust port of [gitstore](https://github.com/mhalle/vost), using [gitoxide (gix)](https://github.com/GitoxideLabs/gitoxide) as the git backend.
 
 ## Usage
 

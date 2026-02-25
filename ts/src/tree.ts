@@ -1,5 +1,5 @@
 /**
- * Low-level tree manipulation for gitstore.
+ * Low-level tree manipulation for vost.
  *
  * Provides recursive tree rebuild and path-based read helpers
  * on top of isomorphic-git's readTree/writeTree/writeBlob.

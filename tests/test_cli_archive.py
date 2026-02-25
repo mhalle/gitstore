@@ -1,4 +1,4 @@
-"""Tests for the gitstore CLI — zip, unzip, tar, untar, archive, unarchive."""
+"""Tests for the vost CLI — zip, unzip, tar, untar, archive, unarchive."""
 
 import io
 import time
@@ -7,7 +7,7 @@ import zipfile
 import pytest
 from click.testing import CliRunner
 
-from gitstore.cli import main
+from vost.cli import main
 
 
 class TestZip:
@@ -90,7 +90,7 @@ class TestZip:
 
     def test_zip_preserves_symlink(self, runner, initialized_repo, tmp_path):
         """Symlinks in the repo are exported as symlinks in the zip."""
-        from gitstore import GitStore
+        from vost import GitStore
         store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         fs = fs.write("target.txt", b"content")
@@ -107,7 +107,7 @@ class TestZip:
 
     def test_zip_create_system_unix(self, runner, initialized_repo, tmp_path):
         """Zip entries have create_system=3 (Unix) for correct external_attr."""
-        from gitstore import GitStore
+        from vost import GitStore
         store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         fs = fs.write("file.txt", b"data")
@@ -175,8 +175,8 @@ class TestUnzip:
         result = runner.invoke(main, ["unzip", "--repo", initialized_repo, zpath])
         assert result.exit_code == 0, result.output
 
-        from gitstore import GitStore
-        from gitstore.copy._types import FileType
+        from vost import GitStore
+        from vost.copy._types import FileType
         store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         assert fs.file_type("script.sh") == FileType.EXECUTABLE
@@ -200,8 +200,8 @@ class TestUnzip:
         result = runner.invoke(main, ["unzip", "--repo", p2, archive])
         assert result.exit_code == 0, result.output
 
-        from gitstore import GitStore
-        from gitstore.copy._types import FileType
+        from vost import GitStore
+        from vost.copy._types import FileType
         store = GitStore.open(p2, create=False)
         fs = store.branches["main"]
         assert fs.file_type("run.sh") == FileType.EXECUTABLE
@@ -233,8 +233,8 @@ class TestUnzip:
         result = runner.invoke(main, ["unzip", "--repo", initialized_repo, zpath])
         assert result.exit_code == 0, result.output
 
-        from gitstore import GitStore
-        from gitstore.copy._types import FileType
+        from vost import GitStore
+        from vost.copy._types import FileType
         store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         assert fs.file_type("link.txt") == FileType.LINK
@@ -242,8 +242,8 @@ class TestUnzip:
 
     def test_unzip_roundtrip_symlinks(self, runner, initialized_repo, tmp_path):
         """Zip then unzip preserves symlinks."""
-        from gitstore import GitStore
-        from gitstore.copy._types import FileType
+        from vost import GitStore
+        from vost.copy._types import FileType
         store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         fs = fs.write("target.txt", b"content")
@@ -378,7 +378,7 @@ class TestTar:
     def test_tar_preserves_symlink(self, runner, initialized_repo, tmp_path):
         """Symlinks in the repo are exported as symlinks in the tar."""
         import tarfile
-        from gitstore import GitStore
+        from vost import GitStore
         store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         fs = fs.write("target.txt", b"content")
@@ -472,8 +472,8 @@ class TestUntar:
         result = runner.invoke(main, ["untar", "--repo", initialized_repo, tpath])
         assert result.exit_code == 0, result.output
 
-        from gitstore import GitStore
-        from gitstore.copy._types import FileType
+        from vost import GitStore
+        from vost.copy._types import FileType
         store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         assert fs.file_type("script.sh") == FileType.EXECUTABLE
@@ -497,8 +497,8 @@ class TestUntar:
         result = runner.invoke(main, ["untar", "--repo", p2, archive])
         assert result.exit_code == 0, result.output
 
-        from gitstore import GitStore
-        from gitstore.copy._types import FileType
+        from vost import GitStore
+        from vost.copy._types import FileType
         store = GitStore.open(p2, create=False)
         fs = store.branches["main"]
         assert fs.file_type("run.sh") == FileType.EXECUTABLE
@@ -564,8 +564,8 @@ class TestUntar:
         result = runner.invoke(main, ["untar", "--repo", initialized_repo, tpath])
         assert result.exit_code == 0, result.output
 
-        from gitstore import GitStore
-        from gitstore.copy._types import FileType
+        from vost import GitStore
+        from vost.copy._types import FileType
         store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         assert fs.file_type("link.txt") == FileType.LINK
@@ -574,8 +574,8 @@ class TestUntar:
     def test_untar_roundtrip_symlinks(self, runner, initialized_repo, tmp_path):
         """Tar then untar preserves symlinks."""
         import tarfile
-        from gitstore import GitStore
-        from gitstore.copy._types import FileType
+        from vost import GitStore
+        from vost.copy._types import FileType
         store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         fs = fs.write("target.txt", b"content")
@@ -655,8 +655,8 @@ class TestUntar:
             tf.addfile(link_info)
         result = runner.invoke(main, ["untar", "--repo", initialized_repo, tpath])
         assert result.exit_code == 0, result.output
-        from gitstore import GitStore
-        from gitstore.copy._types import FileType
+        from vost import GitStore
+        from vost.copy._types import FileType
         store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         assert fs.file_type("link.sh") == FileType.EXECUTABLE
@@ -846,7 +846,7 @@ class TestBefore:
         f.write_text("v2")
         runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":a.txt", "-m", "second"])
 
-        from gitstore import GitStore
+        from vost import GitStore
         store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         entries = list(fs.log())
@@ -883,7 +883,7 @@ class TestBefore:
         f.write_text("v1")
         runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":a.txt", "-m", "add a"])
 
-        from gitstore import GitStore
+        from vost import GitStore
         store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         cutoff = fs.time  # time of "add a" commit
@@ -907,7 +907,7 @@ class TestBefore:
         f.write_text("v1")
         runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":a.txt", "-m", "deploy v1"])
 
-        from gitstore import GitStore
+        from vost import GitStore
         store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         cutoff = fs.time
@@ -931,7 +931,7 @@ class TestBefore:
         f.write_text("v1")
         runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":a.txt", "-m", "add a"])
 
-        from gitstore import GitStore
+        from vost import GitStore
         store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         cutoff = fs.time
@@ -958,7 +958,7 @@ class TestBefore:
         f.write_text("v1")
         runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":a.txt", "-m", "add a"])
 
-        from gitstore import GitStore
+        from vost import GitStore
         store = GitStore.open(initialized_repo, create=False)
         fs = store.branches["main"]
         cutoff = fs.time

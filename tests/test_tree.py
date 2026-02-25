@@ -1,11 +1,11 @@
-"""Tests for gitstore.tree module."""
+"""Tests for vost.tree module."""
 
 import os
 from pathlib import PurePosixPath
 
 import pytest
 
-from gitstore.tree import (
+from vost.tree import (
     _normalize_path,
     rebuild_tree,
     read_blob_at_path,

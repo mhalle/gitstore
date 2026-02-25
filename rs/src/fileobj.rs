@@ -21,7 +21,7 @@ use crate::fs::{Fs, WriteOptions};
 ///
 /// ```rust,no_run
 /// use std::io::Write;
-/// use gitstore::{GitStore, Fs};
+/// use vost::{GitStore, Fs};
 ///
 /// let store = GitStore::open("/tmp/repo").unwrap();
 /// let fs = store.branches().get("main").unwrap();
@@ -101,8 +101,8 @@ impl Drop for FsWriter {
 ///
 /// ```rust,no_run
 /// use std::io::Write;
-/// use gitstore::{GitStore, Fs};
-/// use gitstore::fs::BatchOptions;
+/// use vost::{GitStore, Fs};
+/// use vost::fs::BatchOptions;
 ///
 /// let store = GitStore::open("/tmp/repo").unwrap();
 /// let fs = store.branches().get("main").unwrap();

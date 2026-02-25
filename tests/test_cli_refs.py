@@ -1,11 +1,11 @@
-"""Tests for the gitstore CLI — branch, tag, hash, and resolve-ref commands."""
+"""Tests for the vost CLI — branch, tag, hash, and resolve-ref commands."""
 
 import zipfile
 
 import pytest
 from click.testing import CliRunner
 
-from gitstore.cli import main
+from vost.cli import main
 
 
 class TestBranch:
@@ -32,7 +32,7 @@ class TestBranch:
         assert "not found" in result.output.lower()
 
     def test_hash(self, runner, repo_with_files):
-        from gitstore import GitStore
+        from vost import GitStore
         store = GitStore.open(repo_with_files, create=False)
         expected = store.branches["main"].commit_hash
         result = runner.invoke(main, ["branch", "--repo", repo_with_files, "hash", "main"])
@@ -42,7 +42,7 @@ class TestBranch:
         assert out == expected
 
     def test_hash_back(self, runner, repo_with_files):
-        from gitstore import GitStore
+        from vost import GitStore
         store = GitStore.open(repo_with_files, create=False)
         expected = store.branches["main"].parent.commit_hash
         result = runner.invoke(main, [
@@ -59,7 +59,7 @@ class TestBranch:
         assert "history too short" in result.output.lower()
 
     def test_hash_path(self, runner, repo_with_files):
-        from gitstore import GitStore
+        from vost import GitStore
         store = GitStore.open(repo_with_files, create=False)
         fs = store.branches["main"]
         expected = next(fs.log(path="hello.txt")).commit_hash
@@ -279,7 +279,7 @@ class TestTag:
         short_hash = first_line.split()[0]
 
         # Get the full hash via the library
-        from gitstore import GitStore
+        from vost import GitStore
         store = GitStore.open(repo_with_files, create=False)
         fs = store.branches["main"]
         full_hash = fs.commit_hash
@@ -296,7 +296,7 @@ class TestTag:
 
     def test_hash(self, runner, initialized_repo):
         runner.invoke(main, ["tag", "--repo", initialized_repo, "set", "v1"])
-        from gitstore import GitStore
+        from vost import GitStore
         store = GitStore.open(initialized_repo, create=False)
         expected = store.tags["v1"].commit_hash
         result = runner.invoke(main, ["tag", "--repo", initialized_repo, "hash", "v1"])
@@ -435,7 +435,7 @@ class TestTagOption:
         )
         assert result.exit_code == 0, result.output
         # Tag should point at the second commit
-        from gitstore import GitStore
+        from vost import GitStore
         store = GitStore.open(initialized_repo, create=False)
         fs = store.tags["rel"]
         assert fs.read("b.txt") == b"two"
@@ -471,7 +471,7 @@ class TestTagOption:
 class TestResolveRef:
     def test_non_commit_hash_rejected(self, runner, repo_with_files):
         """Passing a tree/blob hash should produce a clear error."""
-        from gitstore import GitStore
+        from vost import GitStore
         store = GitStore.open(repo_with_files, create=False)
         fs = store.branches["main"]
         # Get the tree OID (not a commit)
@@ -489,7 +489,7 @@ class TestHash:
     @staticmethod
     def _get_commit_hash(repo_path):
         """Get the full commit hash of HEAD on main."""
-        from gitstore import GitStore
+        from vost import GitStore
         store = GitStore.open(repo_path, create=False)
         fs = store.branches["main"]
         return fs.commit_hash
@@ -497,7 +497,7 @@ class TestHash:
     @staticmethod
     def _get_parent_hash(repo_path):
         """Get the full commit hash of HEAD~1 on main."""
-        from gitstore import GitStore
+        from vost import GitStore
         store = GitStore.open(repo_path, create=False)
         fs = store.branches["main"]
         return fs.parent.commit_hash

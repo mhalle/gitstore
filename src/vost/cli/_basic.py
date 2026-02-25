@@ -258,14 +258,14 @@ def ls(ctx, paths, branch, recursive, long_, full_hash, fmt, no_glob, ref, at_pa
 
     \b
     Examples:
-        gitstore ls                         # root listing
-        gitstore ls :src                    # subdirectory
-        gitstore ls '*.txt' '*.py'          # multiple globs
-        gitstore ls :src :docs              # multiple directories
-        gitstore ls -R                      # all files recursively
-        gitstore ls -R :src :docs           # recursive under multiple dirs
-        gitstore ls -l                      # long listing with sizes and hashes
-        gitstore ls --format json           # JSON output
+        vost ls                         # root listing
+        vost ls :src                    # subdirectory
+        vost ls '*.txt' '*.py'          # multiple globs
+        vost ls :src :docs              # multiple directories
+        vost ls -R                      # all files recursively
+        vost ls -R :src :docs           # recursive under multiple dirs
+        vost ls -l                      # long listing with sizes and hashes
+        vost ls --format json           # JSON output
     """
     store = _open_store(_require_repo(ctx))
 
@@ -454,11 +454,11 @@ def rm(ctx, paths, recursive, dry_run, no_glob, branch, message, tag, force_tag)
 
     \b
     Examples:
-        gitstore rm :file.txt
-        gitstore rm ':*.txt'
-        gitstore rm -R :dir
-        gitstore rm -n :file.txt         # dry run
-        gitstore rm :a.txt :b.txt        # multiple
+        vost rm :file.txt
+        vost rm ':*.txt'
+        vost rm -R :dir
+        vost rm -n :file.txt         # dry run
+        vost rm :a.txt :b.txt        # multiple
     """
     store = _open_store(_require_repo(ctx))
     branch = branch or _current_branch(store)
@@ -521,11 +521,11 @@ def mv(ctx, args, recursive, dry_run, no_glob, branch, message, tag, force_tag):
 
     \b
     Examples:
-        gitstore mv :old.txt :new.txt               # rename
-        gitstore mv ':*.txt' :archive/               # move into dir
-        gitstore mv -R :src :backup/src              # move directory
-        gitstore mv :a.txt :b.txt :dest/             # multiple -> dir
-        gitstore mv -n :old.txt :new.txt             # dry run
+        vost mv :old.txt :new.txt               # rename
+        vost mv ':*.txt' :archive/               # move into dir
+        vost mv -R :src :backup/src              # move directory
+        vost mv :a.txt :b.txt :dest/             # multiple -> dir
+        vost mv -n :old.txt :new.txt             # dry run
     """
     if len(args) < 2:
         raise click.ClickException("mv requires at least two arguments (SRC... DEST)")
@@ -683,9 +683,9 @@ def log(ctx, target, at_path, deprecated_at, match_pattern, before, branch, ref,
 
     \b
     An optional TARGET argument supports ref:path syntax:
-        gitstore log main:config.json   →  --ref main --path config.json
-        gitstore log main~3:            →  --ref main --back 3
-        gitstore log ~3:config.json     →  --back 3 --path config.json
+        vost log main:config.json   →  --ref main --path config.json
+        vost log main~3:            →  --ref main --back 3
+        vost log ~3:config.json     →  --back 3 --path config.json
     """
     at_path = at_path or deprecated_at
 
@@ -752,8 +752,8 @@ def diff(ctx, baseline, branch, ref, at_path, match_pattern, before, back, rever
 
     \b
     An optional BASELINE argument supports ref:path syntax:
-        gitstore diff ~3:     →  --back 3
-        gitstore diff dev:    →  --ref dev
+        vost diff ~3:     →  --back 3
+        vost diff dev:    →  --ref dev
     """
     # Parse optional positional baseline
     if baseline is not None:
@@ -838,11 +838,11 @@ def cmp(ctx, file1, file2, branch, ref, at_path, match_pattern, before, back):
 
     \b
     Examples:
-        gitstore cmp :file1.txt :file2.txt           # two repo files
-        gitstore cmp main:f.txt dev:f.txt             # cross-branch
-        gitstore cmp main~3:f.txt main:f.txt          # ancestor
-        gitstore cmp :data.bin /tmp/data.bin           # repo vs disk
-        gitstore cmp /tmp/a.txt /tmp/b.txt             # two disk files
+        vost cmp :file1.txt :file2.txt           # two repo files
+        vost cmp main:f.txt dev:f.txt             # cross-branch
+        vost cmp main~3:f.txt main:f.txt          # ancestor
+        vost cmp :data.bin /tmp/data.bin           # repo vs disk
+        vost cmp /tmp/a.txt /tmp/b.txt             # two disk files
     """
     rp1 = _parse_ref_path(file1)
     rp2 = _parse_ref_path(file2)
@@ -901,9 +901,9 @@ def undo(ctx, branch, steps):
     Creates a reflog entry so you can redo later.
 
     Examples:
-        gitstore --repo data.git undo       # Back 1 commit
-        gitstore --repo data.git undo 3     # Back 3 commits
-        gitstore --repo data.git undo -b dev 2  # Undo 2 on 'dev' branch
+        vost --repo data.git undo       # Back 1 commit
+        vost --repo data.git undo 3     # Back 3 commits
+        vost --repo data.git undo -b dev 2  # Undo 2 on 'dev' branch
     """
     repo_path = _require_repo(ctx)
     repo = _open_store(repo_path)
@@ -944,9 +944,9 @@ def redo(ctx, branch, steps):
     there. Can resurrect commits after undo or divergence.
 
     Examples:
-        gitstore --repo data.git redo       # Forward 1 step
-        gitstore --repo data.git redo 2     # Forward 2 steps
-        gitstore --repo data.git redo -b dev  # Redo on 'dev' branch
+        vost --repo data.git redo       # Forward 1 step
+        vost --repo data.git redo 2     # Forward 2 steps
+        vost --repo data.git redo -b dev  # Redo on 'dev' branch
     """
     repo_path = _require_repo(ctx)
     repo = _open_store(repo_path)
@@ -1003,11 +1003,11 @@ def reflog(ctx, branch, limit, fmt):
     'log' which shows the commit tree.
 
     Examples:
-        gitstore --repo data.git reflog              # Show all entries (text)
-        gitstore --repo data.git reflog -n 10        # Show last 10
-        gitstore --repo data.git reflog -b dev       # Show for 'dev' branch
-        gitstore --repo data.git reflog --format json   # JSON output
-        gitstore --repo data.git reflog --format jsonl  # JSON Lines output
+        vost --repo data.git reflog              # Show all entries (text)
+        vost --repo data.git reflog -n 10        # Show last 10
+        vost --repo data.git reflog -b dev       # Show for 'dev' branch
+        vost --repo data.git reflog --format json   # JSON output
+        vost --repo data.git reflog --format jsonl  # JSON Lines output
     """
     repo_path = _require_repo(ctx)
     repo = _open_store(repo_path)

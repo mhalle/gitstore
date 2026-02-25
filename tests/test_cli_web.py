@@ -1,13 +1,13 @@
-"""Tests for the gitstore serve command (WSGI app)."""
+"""Tests for the vost serve command (WSGI app)."""
 
 import json
 
 import pytest
 from click.testing import CliRunner
 
-from gitstore.cli import main
-from gitstore.cli._web import _make_app
-from gitstore.repo import GitStore
+from vost.cli import main
+from vost.cli._web import _make_app
+from vost.repo import GitStore
 
 
 # ---------------------------------------------------------------------------

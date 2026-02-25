@@ -1,4 +1,4 @@
-"""Batch context manager for gitstore."""
+"""Batch context manager for vost."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ class Batch:
     committed if an exception occurs inside the ``with`` block.
 
     Attributes:
-        fs: The resulting :class:`~gitstore.FS` after commit, or ``None``
+        fs: The resulting :class:`~vost.FS` after commit, or ``None``
             if uncommitted or aborted.
     """
 

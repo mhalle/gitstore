@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use base64::Engine;
 use serde::Deserialize;
 
-use gitstore::{FileType, GitStore, OpenOptions};
+use vost::{FileType, GitStore, OpenOptions};
 
 #[derive(Deserialize)]
 struct Fixture {
@@ -35,7 +35,7 @@ struct CommitStep {
     removes: Vec<String>,
 }
 
-fn check_basic(fs: &gitstore::Fs, spec: &Fixture, name: &str) -> u32 {
+fn check_basic(fs: &vost::Fs, spec: &Fixture, name: &str) -> u32 {
     let mut failures = 0u32;
 
     // Text files

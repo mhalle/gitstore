@@ -3,9 +3,9 @@
 import pytest
 import click
 
-from gitstore.cli import main
-from gitstore.cli._helpers import RefPath, _parse_ref_path
-from gitstore.repo import _validate_ref_name
+from vost.cli import main
+from vost.cli._helpers import RefPath, _parse_ref_path
+from vost.repo import _validate_ref_name
 
 
 class TestParseRefPath:

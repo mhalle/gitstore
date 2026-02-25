@@ -2,7 +2,7 @@
 
 import pytest
 
-from gitstore import GitStore
+from vost import GitStore
 
 
 @pytest.fixture

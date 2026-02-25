@@ -3,8 +3,8 @@
 import pytest
 from dulwich.repo import Repo as DulwichRepo
 
-from gitstore import GitStore, MirrorDiff, RefChange
-from gitstore.mirror import _diff_refs
+from vost import GitStore, MirrorDiff, RefChange
+from vost.mirror import _diff_refs
 
 
 # ---------------------------------------------------------------------------

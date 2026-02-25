@@ -1,6 +1,6 @@
 //! A git-backed file store library.
 //!
-//! `gitstore` provides a high-level API for using bare git repositories as
+//! `vost` provides a high-level API for using bare git repositories as
 //! persistent, versioned key-value stores. Every write is an atomic commit,
 //! giving you full history, branching, and rollback for free.
 //!
@@ -17,8 +17,8 @@
 //! # Quick example
 //!
 //! ```rust,no_run
-//! use gitstore::{GitStore, Fs};
-//! use gitstore::fs::WriteOptions;
+//! use vost::{GitStore, Fs};
+//! use vost::fs::WriteOptions;
 //!
 //! let store = GitStore::open("/tmp/my-repo").unwrap();
 //! let fs = store.branches().get("main").unwrap();

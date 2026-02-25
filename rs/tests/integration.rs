@@ -1,5 +1,5 @@
-use gitstore::types::*;
-use gitstore::paths;
+use vost::types::*;
+use vost::paths;
 
 // ---------------------------------------------------------------------------
 // Pure-data type construction
@@ -20,8 +20,8 @@ fn types_are_constructible() {
 
     // Signature default
     let sig = Signature::default();
-    assert_eq!(sig.name, "gitstore");
-    assert_eq!(sig.email, "gitstore@localhost");
+    assert_eq!(sig.name, "vost");
+    assert_eq!(sig.email, "vost@localhost");
 
     // OpenOptions default
     let opts = OpenOptions::default();
@@ -188,7 +188,7 @@ fn store_open_and_fs() {
     let repo_path = dir.path().join("test.git");
 
     // Create with branch
-    let store = gitstore::GitStore::open(&repo_path, gitstore::OpenOptions {
+    let store = vost::GitStore::open(&repo_path, vost::OpenOptions {
         create: true,
         branch: Some("main".into()),
         ..Default::default()
@@ -212,7 +212,7 @@ fn store_open_and_fs() {
     assert_eq!(entries[0].0, "hello.txt");
 
     // Open existing (no create)
-    let store2 = gitstore::GitStore::open(&repo_path, gitstore::OpenOptions {
+    let store2 = vost::GitStore::open(&repo_path, vost::OpenOptions {
         create: false,
         ..Default::default()
     })
@@ -221,7 +221,7 @@ fn store_open_and_fs() {
     assert_eq!(fs3.read_text("hello.txt").unwrap(), "world");
 
     // Open missing without create → error
-    let result = gitstore::GitStore::open(dir.path().join("missing.git"), gitstore::OpenOptions {
+    let result = vost::GitStore::open(dir.path().join("missing.git"), vost::OpenOptions {
         create: false,
         ..Default::default()
     });

@@ -1,11 +1,11 @@
 # gitstore Documentation
 
-gitstore is a versioned key-value filesystem backed by bare Git repositories. Every write produces a new commit, and old snapshots remain accessible forever.
+vost is a versioned key-value filesystem backed by bare Git repositories. Every write produces a new commit, and old snapshots remain accessible forever.
 
 ## Quick install
 
 ```
-pip install gitstore
+pip install vost
 ```
 
 Requires Python 3.10+ and [dulwich](https://www.dulwich.io/).
@@ -13,7 +13,7 @@ Requires Python 3.10+ and [dulwich](https://www.dulwich.io/).
 ## Hello world
 
 ```python
-from gitstore import GitStore
+from vost import GitStore
 
 repo = GitStore.open("data.git")
 fs = repo.branches["main"]

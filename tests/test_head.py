@@ -5,8 +5,8 @@ from __future__ import annotations
 import pytest
 from click.testing import CliRunner
 
-from gitstore.cli import main
-from gitstore.repo import GitStore
+from vost.cli import main
+from vost.repo import GitStore
 
 
 # ---------------------------------------------------------------------------

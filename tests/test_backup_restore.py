@@ -1,10 +1,10 @@
-"""Tests for the gitstore backup/restore CLI commands."""
+"""Tests for the vost backup/restore CLI commands."""
 
 import pytest
 from click.testing import CliRunner
 from dulwich.repo import Repo as DulwichRepo
 
-from gitstore.cli import main
+from vost.cli import main
 
 
 # ---------------------------------------------------------------------------

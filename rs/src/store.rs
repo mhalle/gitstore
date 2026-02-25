@@ -45,8 +45,8 @@ impl GitStore {
         let path = path.as_ref().to_path_buf();
 
         let sig = Signature {
-            name: options.author.unwrap_or_else(|| "gitstore".into()),
-            email: options.email.unwrap_or_else(|| "gitstore@localhost".into()),
+            name: options.author.unwrap_or_else(|| "vost".into()),
+            email: options.email.unwrap_or_else(|| "vost@localhost".into()),
         };
 
         let repo = if path.exists() {

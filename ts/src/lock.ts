@@ -1,7 +1,7 @@
 /**
  * Advisory repo lock for serializing ref mutations.
  *
- * Uses an atomic lockfile (`gitstore.lock`) for cross-process coordination
+ * Uses an atomic lockfile (`vost.lock`) for cross-process coordination
  * and an in-process Promise-based mutex (JS is single-threaded, but
  * async operations interleave).
  */
@@ -33,7 +33,7 @@ export async function withRepoLock<T>(
   // Wait for previous operation on this repo
   await prev;
 
-  const lockPath = `${gitdir}/gitstore.lock`;
+  const lockPath = `${gitdir}/vost.lock`;
 
   // Acquire lockfile (atomic create with exclusive flag)
   let acquired = false;

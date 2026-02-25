@@ -351,7 +351,7 @@ All notable changes to gitstore are documented in this file.
   - `SyncDiff` → `MirrorDiff`
   - `remove_from_repo()` → `remove_in_repo()` (param `patterns` → `sources`)
   - `move_from_repo()` → `move_in_repo()`
-- CLI is now an optional dependency — `pip install gitstore` installs the core library only (`dulwich`); `pip install gitstore[cli]` adds `click` and `watchfiles`
+- CLI is now an optional dependency — `pip install vost` installs the core library only (`dulwich`); `pip install vost[cli]` adds `click` and `watchfiles`
 
 **New features:**
 
@@ -518,7 +518,7 @@ All notable changes to gitstore are documented in this file.
 
 **New features:**
 
-- Add `--watch` flag to `sync` command — continuously monitors a local directory for filesystem changes and auto-syncs to repo after a debounce delay (default 2s); uses `watchfiles` (Rust-based FSEvents/inotify); install via `pip install gitstore[watch]`
+- Add `--watch` flag to `sync` command — continuously monitors a local directory for filesystem changes and auto-syncs to repo after a debounce delay (default 2s); uses `watchfiles` (Rust-based FSEvents/inotify); install via `pip install vost[watch]`
 - Add `--debounce` option to `sync --watch` — configurable debounce delay in milliseconds (minimum 100ms)
 
 **Tests:**

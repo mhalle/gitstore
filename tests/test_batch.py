@@ -3,11 +3,11 @@
 import os
 import stat
 
-from gitstore.tree import BlobOid
+from vost.tree import BlobOid
 import pytest
 
-from gitstore import GitStore, StaleSnapshotError
-from gitstore.copy._types import FileType
+from vost import GitStore, StaleSnapshotError
+from vost.copy._types import FileType
 
 
 @pytest.fixture

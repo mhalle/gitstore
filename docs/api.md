@@ -1,18 +1,18 @@
 # Python API Reference
 
 ```python
-from gitstore import GitStore, FS, Batch, WriteEntry, StaleSnapshotError, retry_write
-from gitstore import ChangeReport, ChangeAction, ChangeActionKind, ChangeError, FileEntry, FileType
-from gitstore import MirrorDiff, RefChange, ReflogEntry, Signature, WalkEntry
-from gitstore import NoteDict, NoteNamespace, NotesBatch
-from gitstore import ExcludeFilter, BlobOid, StatResult, disk_glob
+from vost import GitStore, FS, Batch, WriteEntry, StaleSnapshotError, retry_write
+from vost import ChangeReport, ChangeAction, ChangeActionKind, ChangeError, FileEntry, FileType
+from vost import MirrorDiff, RefChange, ReflogEntry, Signature, WalkEntry
+from vost import NoteDict, NoteNamespace, NotesBatch
+from vost import ExcludeFilter, BlobOid, StatResult, disk_glob
 ```
 
 ---
 
 ## GitStore
 
-::: gitstore.GitStore
+::: vost.GitStore
     options:
       members:
         - open
@@ -26,7 +26,7 @@ from gitstore import ExcludeFilter, BlobOid, StatResult, disk_glob
 
 ## Operations Overview
 
-gitstore has four ways to move data. They differ in **what** they transfer and **how much** they replace at the destination.
+vost has four ways to move data. They differ in **what** they transfer and **how much** they replace at the destination.
 
 | Operation | What it transfers | Destination behavior | Scope |
 |-----------|-------------------|---------------------|-------|
@@ -52,13 +52,13 @@ gitstore has four ways to move data. They differ in **what** they transfer and *
 
 ## FS (Snapshot)
 
-::: gitstore.FS
+::: vost.FS
     options:
       members: false
 
 ### Snapshot Properties
 
-::: gitstore.FS
+::: vost.FS
     options:
       show_root_heading: false
       members:
@@ -74,7 +74,7 @@ gitstore has four ways to move data. They differ in **what** they transfer and *
 
 ### Querying Files
 
-::: gitstore.FS
+::: vost.FS
     options:
       show_root_heading: false
       members:
@@ -87,7 +87,7 @@ gitstore has four ways to move data. They differ in **what** they transfer and *
 
 ### Reading Files
 
-::: gitstore.FS
+::: vost.FS
     options:
       show_root_heading: false
       members:
@@ -98,7 +98,7 @@ gitstore has four ways to move data. They differ in **what** they transfer and *
 
 ### Listing & Search
 
-::: gitstore.FS
+::: vost.FS
     options:
       show_root_heading: false
       members:
@@ -110,7 +110,7 @@ gitstore has four ways to move data. They differ in **what** they transfer and *
 
 ### Writing Files
 
-::: gitstore.FS
+::: vost.FS
     options:
       show_root_heading: false
       members:
@@ -123,7 +123,7 @@ gitstore has four ways to move data. They differ in **what** they transfer and *
 
 ### Bulk Operations
 
-::: gitstore.FS
+::: vost.FS
     options:
       show_root_heading: false
       members:
@@ -138,7 +138,7 @@ gitstore has four ways to move data. They differ in **what** they transfer and *
 
 ### History & Navigation
 
-::: gitstore.FS
+::: vost.FS
     options:
       show_root_heading: false
       members:
@@ -150,7 +150,7 @@ gitstore has four ways to move data. They differ in **what** they transfer and *
 
 ### Lifecycle
 
-::: gitstore.FS
+::: vost.FS
     options:
       show_root_heading: false
       members:
@@ -160,7 +160,7 @@ gitstore has four ways to move data. They differ in **what** they transfer and *
 
 ## Batch
 
-::: gitstore.Batch
+::: vost.Batch
     options:
       members:
         - write
@@ -175,7 +175,7 @@ gitstore has four ways to move data. They differ in **what** they transfer and *
 
 ## Branches & Tags
 
-::: gitstore.RefDict
+::: vost.RefDict
     options:
       members:
         - set
@@ -183,19 +183,19 @@ gitstore has four ways to move data. They differ in **what** they transfer and *
         - current_name
         - reflog
 
-::: gitstore.Signature
+::: vost.Signature
 
-::: gitstore.ReflogEntry
+::: vost.ReflogEntry
 
 ---
 
 ## Notes
 
-::: gitstore.NoteDict
+::: vost.NoteDict
 
-::: gitstore.NoteNamespace
+::: vost.NoteNamespace
 
-::: gitstore.NotesBatch
+::: vost.NotesBatch
 
 ---
 
@@ -207,23 +207,23 @@ See `GitStore.backup()` and `GitStore.restore()`.
 
 ## Exclude Filter
 
-::: gitstore.ExcludeFilter
+::: vost.ExcludeFilter
 
 ---
 
 ## Exceptions
 
-::: gitstore.StaleSnapshotError
+::: vost.StaleSnapshotError
 
 ---
 
 ## Utility Functions
 
-::: gitstore.retry_write
+::: vost.retry_write
 
-::: gitstore.resolve_credentials
+::: vost.resolve_credentials
 
-::: gitstore.disk_glob
+::: vost.disk_glob
 
 ---
 
@@ -231,26 +231,26 @@ See `GitStore.backup()` and `GitStore.restore()`.
 
 Types returned by API methods. Most are opaque — you rarely need to construct or import them directly.
 
-::: gitstore.StatResult
+::: vost.StatResult
 
-::: gitstore.WalkEntry
+::: vost.WalkEntry
 
-::: gitstore.FileType
+::: vost.FileType
 
-::: gitstore.FileEntry
+::: vost.FileEntry
 
-::: gitstore.BlobOid
+::: vost.BlobOid
 
-::: gitstore.WriteEntry
+::: vost.WriteEntry
 
-::: gitstore.ChangeReport
+::: vost.ChangeReport
 
-::: gitstore.ChangeAction
+::: vost.ChangeAction
 
-::: gitstore.ChangeActionKind
+::: vost.ChangeActionKind
 
-::: gitstore.ChangeError
+::: vost.ChangeError
 
-::: gitstore.MirrorDiff
+::: vost.MirrorDiff
 
-::: gitstore.RefChange
+::: vost.RefChange

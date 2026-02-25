@@ -1,6 +1,6 @@
 mod common;
 
-use gitstore::*;
+use vost::*;
 
 // ---------------------------------------------------------------------------
 // Open / create
@@ -82,8 +82,8 @@ fn path_accessor() {
 fn signature_accessor() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
-    assert_eq!(store.signature().name, "gitstore");
-    assert_eq!(store.signature().email, "gitstore@localhost");
+    assert_eq!(store.signature().name, "vost");
+    assert_eq!(store.signature().email, "vost@localhost");
 }
 
 // ---------------------------------------------------------------------------

@@ -4,8 +4,8 @@ import pytest
 from dulwich.objects import Blob as DBlob, Tree as DTree
 from dulwich.repo import Repo as DulwichRepo
 
-from gitstore import GitStore, NoteDict, NoteNamespace
-from gitstore.tree import GIT_FILEMODE_BLOB, GIT_FILEMODE_TREE
+from vost import GitStore, NoteDict, NoteNamespace
+from vost.tree import GIT_FILEMODE_BLOB, GIT_FILEMODE_TREE
 
 
 # ---------------------------------------------------------------------------

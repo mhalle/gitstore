@@ -33,8 +33,8 @@ class Signature:
     """Author/committer identity used for commits.
 
     Attributes:
-        name: Author name (e.g. ``"gitstore"``).
-        email: Author email (e.g. ``"gitstore@localhost"``).
+        name: Author name (e.g. ``"vost"``).
+        email: Author email (e.g. ``"vost@localhost"``).
     """
 
     name: str
@@ -71,7 +71,7 @@ class _Reference:
         if message is None:
             message = b"update ref"
         if committer is None:
-            committer = b"gitstore <gitstore@localhost>"
+            committer = b"vost <vost@localhost>"
         ok = self._refs.set_if_equals(
             self._name, old_sha, oid,
             committer=committer, message=message,
@@ -106,7 +106,7 @@ class _References:
         if message is None:
             message = b"create ref"
         if committer is None:
-            committer = b"gitstore <gitstore@localhost>"
+            committer = b"vost <vost@localhost>"
         ok = self._refs.set_if_equals(
             ref_bytes, None, oid,
             committer=committer, message=message,
@@ -285,7 +285,7 @@ def _validate_ref_name(name: str) -> None:
     """Reject ref names that don't conform to Git's rules."""
     from dulwich.refs import check_ref_format
 
-    # Colon check (gitstore-specific: colons conflict with ref:path syntax)
+    # Colon check (vost-specific: colons conflict with ref:path syntax)
     if ":" in name:
         raise ValueError(f"Invalid ref name {name!r}: contains colon")
     ref_bytes = f"refs/heads/{name}".encode()
@@ -317,8 +317,8 @@ class GitStore:
         *,
         create: bool = True,
         branch: str | None = "main",
-        author: str = "gitstore",
-        email: str = "gitstore@localhost",
+        author: str = "vost",
+        email: str = "vost@localhost",
     ) -> GitStore:
         """Open or create a bare git repository.
 

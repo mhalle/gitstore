@@ -1,6 +1,6 @@
 mod common;
 
-use gitstore::*;
+use vost::*;
 
 // ---------------------------------------------------------------------------
 // Helper: create a note in 2/38 fanout layout directly via gix

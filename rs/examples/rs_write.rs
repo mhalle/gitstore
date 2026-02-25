@@ -7,8 +7,8 @@ use std::path::PathBuf;
 use base64::Engine;
 use serde::Deserialize;
 
-use gitstore::fs::BatchOptions;
-use gitstore::{GitStore, OpenOptions, MODE_BLOB_EXEC};
+use vost::fs::BatchOptions;
+use vost::{GitStore, OpenOptions, MODE_BLOB_EXEC};
 
 #[derive(Deserialize)]
 struct Fixture {

@@ -1,7 +1,7 @@
 /**
  * Copy/sync/remove/move operations between local disk and git repo.
  *
- * Ports the Python gitstore copy/ subpackage into a single module.
+ * Ports the Python vost copy/ subpackage into a single module.
  */
 
 import { createHash } from 'node:crypto';

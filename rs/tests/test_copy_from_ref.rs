@@ -1,6 +1,6 @@
 mod common;
 
-use gitstore::*;
+use vost::*;
 use std::collections::HashSet;
 
 fn paths(entries: &[FileEntry]) -> HashSet<String> {

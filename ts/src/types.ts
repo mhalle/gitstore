@@ -1,5 +1,5 @@
 /**
- * Shared types, constants, enums, and error classes for gitstore.
+ * Shared types, constants, enums, and error classes for vost.
  */
 
 // ---------------------------------------------------------------------------
@@ -99,7 +99,7 @@ export function fileModeFromType(ft: FileType): string {
 // Error classes
 // ---------------------------------------------------------------------------
 
-/** Base error class for all gitstore errors. */
+/** Base error class for all vost errors. */
 export class GitStoreError extends Error {
   constructor(message: string) {
     super(message);
@@ -171,7 +171,7 @@ export interface WalkEntry {
 }
 
 /**
- * POSIX-like stat result for a gitstore path.
+ * POSIX-like stat result for a vost path.
  *
  * Combines file type, size, OID, nlink, and mtime in a single structure,
  * optimized for the FUSE `getattr` hot path.
@@ -450,7 +450,7 @@ export interface ReflogEntry {
 // ---------------------------------------------------------------------------
 
 /**
- * The filesystem interface expected by gitstore.
+ * The filesystem interface expected by vost.
  * Compatible with Node.js `fs` module and isomorphic-git's FsClient.
  */
 export interface FsModule {
@@ -497,9 +497,9 @@ export interface HttpClient {
 
 /** Author/committer identity used for commits. */
 export interface Signature {
-  /** Author name (e.g. 'gitstore'). */
+  /** Author name (e.g. 'vost'). */
   name: string;
-  /** Author email (e.g. 'gitstore@localhost'). */
+  /** Author email (e.g. 'vost@localhost'). */
   email: string;
 }
 
