@@ -88,10 +88,10 @@ Once the repo path is extracted:
 ### Commands where the `:` prefix is optional
 
 For `ls`, `cat`, `rm`, and `write`, arguments are always repo paths, so the
-colon is optional.  `gitstore cat file.txt` and `gitstore cat :file.txt` are
+colon is optional.  `vost cat file.txt` and `vost cat :file.txt` are
 equivalent.  However, the colon is **required** to use explicit ref syntax:
-`gitstore cat main:file.txt` reads from the `main` branch, while
-`gitstore cat main:file.txt` without the colon would look for a local file
+`vost cat main:file.txt` reads from the `main` branch, while
+`vost cat main:file.txt` without the colon would look for a local file
 named `main:file.txt` -- but since there's no `/` or `\` before the colon, the
 parser treats it as a ref:path anyway.  In practice, the `:` matters only for
 distinguishing `ref:path` from plain filenames that happen to contain colons
@@ -214,16 +214,16 @@ vost write PATH
 Reads stdin and writes it as a single file.  The PATH is parsed:
 
 ```bash
-echo "data" | gitstore write :file.txt          # current branch
-echo "data" | gitstore write dev:file.txt        # write to dev
-echo "data" | gitstore write ~1:file.txt         # ERROR -- can't write to history
+echo "data" | vost write :file.txt          # current branch
+echo "data" | vost write dev:file.txt        # write to dev
+echo "data" | vost write ~1:file.txt         # ERROR -- can't write to history
 ```
 
 When the path has an explicit ref, it overrides `-b`:
 
 ```bash
-echo "x" | gitstore write dev:f.txt -b main     # ERROR -- conflicting
-echo "x" | gitstore write dev:f.txt              # writes to dev
+echo "x" | vost write dev:f.txt -b main     # ERROR -- conflicting
+echo "x" | vost write dev:f.txt              # writes to dev
 ```
 
 ---
@@ -528,7 +528,7 @@ transaction system.  A typical pattern:
 vost branch set session
 
 # 2. Make changes on the temporary branch
-echo "data" | gitstore write session:file.txt
+echo "data" | vost write session:file.txt
 vost cp ./new-files/ session:data/
 
 # 3. Copy results to the main branch

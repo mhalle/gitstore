@@ -2,9 +2,9 @@
 
 ## Background
 
-`_compat.py` exists to mimic pygit2's API so gitstore could switch backends by changing one import. gitstore now only uses dulwich. The compat layer wraps every dulwich type in a pygit2-shaped wrapper — `Oid`, `_WrappedCommit`, `_Reference`, `Repository`, etc. These wrappers add indirection without value.
+`_compat.py` exists to mimic pygit2's API so vost could switch backends by changing one import. vost now only uses dulwich. The compat layer wraps every dulwich type in a pygit2-shaped wrapper — `Oid`, `_WrappedCommit`, `_Reference`, `Repository`, etc. These wrappers add indirection without value.
 
-Removing the compat layer lets gitstore accept any `BaseRepo` subclass directly — `Repo` (disk), `SqliteRepo` (SQLite), `MemoryRepo` (in-memory) — with no adapter code.
+Removing the compat layer lets vost accept any `BaseRepo` subclass directly — `Repo` (disk), `SqliteRepo` (SQLite), `MemoryRepo` (in-memory) — with no adapter code.
 
 ## What to delete
 
@@ -42,7 +42,7 @@ repo.object_store[sha]
 sha
 ```
 
-Anywhere gitstore stores, compares, or passes an `Oid`, it becomes plain `bytes`.
+Anywhere vost stores, compares, or passes an `Oid`, it becomes plain `bytes`.
 
 ### Object access
 
@@ -263,7 +263,7 @@ class GitStore:
 
 ```python
 if os.path.isdir(repo_path):
-    lock_path = os.path.join(repo_path, "gitstore.lock")
+    lock_path = os.path.join(repo_path, "vost.lock")
 else:
     lock_path = repo_path + ".lock"
 ```

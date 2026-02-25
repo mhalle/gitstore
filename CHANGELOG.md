@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to gitstore are documented in this file.
+All notable changes to vost are documented in this file.
 
 ## Unreleased
 
@@ -180,7 +180,7 @@ All notable changes to gitstore are documented in this file.
 
 - Rename `WalkEntry.filemode` → `.mode` for cross-language consistency (TS/Rust already use `mode`) **[breaking]**
 - Add `Batch.commit()` method for explicit commit without context manager (matches TS/Rust API)
-- Export `Batch`, `Signature`, `RefDict`, `BlobOid`, `GitError` from top-level `gitstore` package
+- Export `Batch`, `Signature`, `RefDict`, `BlobOid`, `GitError` from top-level `vost` package
 
 **CLI changes:**
 
@@ -220,7 +220,7 @@ All notable changes to gitstore are documented in this file.
 
 **Python changes:**
 
-- Replace internal dulwich access in tests with public gitstore API (`fs.file_type()`)
+- Replace internal dulwich access in tests with public vost API (`fs.file_type()`)
 - Guard `_Repository.path` trailing slash with `os.path.isdir`
 - Add `tests/test_move.py` with 13 tests for move/rename operations
 
@@ -244,7 +244,7 @@ All notable changes to gitstore are documented in this file.
 
 - Add `WriteEntry` dataclass for describing file writes (bytes, str, Path, or symlink target with optional mode)
 - Add `FS.apply()` method for atomic multi-write + multi-remove in a single commit
-- `WriteEntry` and `FS.apply()` exported from top-level `gitstore` package
+- `WriteEntry` and `FS.apply()` exported from top-level `vost` package
 
 ## v0.53.1 (2026-02-13)
 
@@ -258,7 +258,7 @@ All notable changes to gitstore are documented in this file.
 **Breaking changes:**
 
 - Remove `glob` parameter from `copy_in()`, `copy_out()`, `remove()`, and `move()` — callers now expand patterns before calling these methods using `fs.glob()` or `disk_glob()`
-- Rename `_expand_disk_glob` to `disk_glob` and export from top-level `gitstore` package
+- Rename `_expand_disk_glob` to `disk_glob` and export from top-level `vost` package
 
 **Enhancements:**
 
@@ -322,7 +322,7 @@ All notable changes to gitstore are documented in this file.
 - All methods return `FS` with `.changes` set (dry-run variants previously returned `ChangeReport | None`)
 - `fs.remove()` now accepts glob patterns, `recursive`, and `dry_run` (replaces the old single-file-only `fs.remove(path)`)
 - `fs.export_tree()` renamed to `fs.export()`
-- Standalone functions removed from `gitstore` and `gitstore.copy` public exports
+- Standalone functions removed from `vost` and `vost.copy` public exports
 
 **New features:**
 
@@ -370,7 +370,7 @@ All notable changes to gitstore are documented in this file.
 
 - Rewrite `docs/api.md` to match current v0.50 API (all names, signatures, data types)
 - Rewrite `README.md` — updated API examples, trimmed CLI section, added new features
-- Update `docs/cli.md` install instructions for `gitstore[cli]`
+- Update `docs/cli.md` install instructions for `vost[cli]`
 
 ## v0.49.1 (2026-02-12)
 
@@ -398,7 +398,7 @@ All notable changes to gitstore are documented in this file.
 - Repo-to-repo `cp` and `sync` — copy files between branches without touching disk
 - Per-path ref resolution in `ls` and `cat` — list/read from multiple branches in one command
 - `write` and `rm` accept explicit `ref:path` to target a specific branch
-- `log` and `diff` accept positional `ref:path` target (e.g., `gitstore log main~3:config.json`)
+- `log` and `diff` accept positional `ref:path` target (e.g., `vost log main~3:config.json`)
 - Snapshot filters (`--back`, `--before`, `--path`, `--match`) work with explicit `ref:path`
 - Ref name validation — branch/tag names containing `:`, space, tab, or newline are rejected
 
@@ -487,7 +487,7 @@ All notable changes to gitstore are documented in this file.
 
 **New features:**
 
-- Add `gitstore serve` command — HTTP file server for repo contents using stdlib `wsgiref`
+- Add `vost serve` command — HTTP file server for repo contents using stdlib `wsgiref`
 - Content negotiation: `Accept: application/json` returns JSON metadata, otherwise raw bytes with MIME types or HTML directory listings
 - Default: single-ref mode on HEAD branch, with shared `--branch`/`--ref`/`--back`/`--before`/`--match`/`--path` snapshot options
 - `--all` flag enables multi-ref mode exposing all branches and tags via `/<ref>/<path>`
@@ -503,7 +503,7 @@ All notable changes to gitstore are documented in this file.
 - Add `--exclude PATTERN` option to `cp` and `sync` — gitignore-style pattern matching, repeatable (disk→repo only)
 - Add `--exclude-from FILE` option to `cp` and `sync` — read exclude patterns from a file (disk→repo only)
 - Add `--gitignore` flag to `sync` — auto-reads `.gitignore` files from source tree with nested directory scoping; `.gitignore` files themselves are excluded (disk→repo only)
-- New `ExcludeFilter` class in public API (`gitstore.copy.ExcludeFilter`) using `dulwich.ignore.IgnoreFilter`
+- New `ExcludeFilter` class in public API (`vost.copy.ExcludeFilter`) using `dulwich.ignore.IgnoreFilter`
 
 **Tests:**
 
@@ -570,7 +570,7 @@ All notable changes to gitstore are documented in this file.
 
 **New features:**
 
-- Add `--passthrough`/`-p` flag to `write` CLI command — tee mode that echoes stdin to stdout for pipeline use (`cmd | gitstore write log.txt -p | grep error`)
+- Add `--passthrough`/`-p` flag to `write` CLI command — tee mode that echoes stdin to stdout for pipeline use (`cmd | vost write log.txt -p | grep error`)
 - Add `retry_write()` library function — writes a single file to a branch with automatic retry on concurrent modification (exponential backoff + jitter, 5 attempts by default)
 - `write` command now uses two-stage open: reads stdin before fetching the branch FS, minimizing the staleness window for long-running pipes
 
@@ -597,7 +597,7 @@ All notable changes to gitstore are documented in this file.
 
 **New features:**
 
-- Add `branch default` subcommand — show or set the repo's default branch (`gitstore branch default`, `gitstore branch default -b dev`)
+- Add `branch default` subcommand — show or set the repo's default branch (`vost branch default`, `vost branch default -b dev`)
 - HEAD is now set at repo creation to match the initial branch, fixing `git clone` and tools that read HEAD
 - All CLI `--branch/-b` and `--ref` options now default to the repo's HEAD branch instead of hardcoded "main"
 
@@ -759,7 +759,7 @@ All notable changes to gitstore are documented in this file.
 
 **Documentation:**
 
-- Expand `gitstore --help` with quick-start examples, grouped command reference, and usage tips
+- Expand `vost --help` with quick-start examples, grouped command reference, and usage tips
 
 ## v0.31.0 (2026-02-09)
 
@@ -828,7 +828,7 @@ All notable changes to gitstore are documented in this file.
   - `fs.undo(steps=1)` - Move branch back N commits
   - `fs.redo(steps=1)` - Move branch forward using reflog
   - `repo.branches.reflog(name)` - Read branch movement history
-  - CLI commands: `gitstore undo`, `gitstore redo`, `gitstore reflog`
+  - CLI commands: `vost undo`, `vost redo`, `vost reflog`
   - Reflog supports text, JSON, and JSONL output formats
 - Add `repo.branches.set(name, fs)` method to solve chained assignment footgun
   - Returns writable FS bound to the branch (unlike bracket assignment)
@@ -849,7 +849,7 @@ All notable changes to gitstore are documented in this file.
 - Add `FS.report` property to access operation report without tuple unpacking
 - Fix `fs.report` to match tuple return value (both now reference same object with source tracking)
 - **API simplification:** `copy_to_repo()` and `sync_to_repo()` return `FS` only; report via `fs.report`
-- Export `FileEntry` from `gitstore` package
+- Export `FileEntry` from `vost` package
 - Update documentation for new API
 
 ## v0.26.2 (2026-02-09)
@@ -974,7 +974,7 @@ All notable changes to gitstore are documented in this file.
 
 ## v0.6.0 (2026-02-08)
 
-- Keep CLI as a core dependency (reverted experiment with optional `gitstore[cli]` extra)
+- Keep CLI as a core dependency (reverted experiment with optional `vost[cli]` extra)
 
 ## v0.5.0 (2026-02-08)
 

@@ -33,7 +33,7 @@ Commands like `cp` and `sync` work with both local files and files inside the re
 ### When is `:` required?
 
 - **`cp`, `sync`, `mv`** -- the `:` is how the command knows which arguments are repo paths and which are local paths. It is required.
-- **`ls`, `cat`, `rm`, `write`** -- arguments are always repo paths, so the `:` is optional. `gitstore cat file.txt` and `gitstore cat :file.txt` are equivalent. However, the `:` is required to use explicit ref syntax (`main:file.txt`).
+- **`ls`, `cat`, `rm`, `write`** -- arguments are always repo paths, so the `:` is optional. `vost cat file.txt` and `vost cat :file.txt` are equivalent. However, the `:` is required to use explicit ref syntax (`main:file.txt`).
 
 ### Direction detection in `cp`
 
@@ -310,13 +310,13 @@ All paths must target the same branch. Cross-branch moves are not supported — 
 Write stdin to a file in the repo.
 
 ```bash
-echo "hello" | gitstore write file.txt
-cat data.json | gitstore write :config.json
-cat image.png | gitstore write :assets/logo.png -m "Add logo"
+echo "hello" | vost write file.txt
+cat data.json | vost write :config.json
+cat image.png | vost write :assets/logo.png -m "Add logo"
 
 # Passthrough (tee mode) — data flows to stdout AND into the repo
-cmd | gitstore write log.txt -p | grep error
-tail -f /var/log/app.log | gitstore write log.txt --passthrough
+cmd | vost write log.txt -p | grep error
+tail -f /var/log/app.log | vost write log.txt --passthrough
 ```
 
 | Option | Description |

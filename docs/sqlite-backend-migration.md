@@ -2,7 +2,7 @@
 
 ## Problem
 
-gitstore bypasses dulwich's reflog machinery. It writes reflog entries by manually appending to filesystem files (`_write_reflog_entry` in `_compat.py`), and reads them by opening those files directly (`RefDict.reflog` in `repo.py`, `FS.redo` in `fs.py`).
+vost bypasses dulwich's reflog machinery. It writes reflog entries by manually appending to filesystem files (`_write_reflog_entry` in `_compat.py`), and reads them by opening those files directly (`RefDict.reflog` in `repo.py`, `FS.redo` in `fs.py`).
 
 dulwich already handles all of this. `dulwich.repo.Repo` has `_write_reflog()` and `read_reflog()` methods. Its `DiskRefsContainer` calls a `logger` callback on every ref mutation (`set_if_equals`, `add_if_new`, `remove_if_equals`) when a `message` is provided. The logger is wired to `Repo._write_reflog` at init time:
 
@@ -13,7 +13,7 @@ self.refs = DiskRefsContainer(
 )
 ```
 
-gitstore currently sidesteps this by setting refs via `self._refs[name] = sha` (which calls `set_if_equals` with `message=None`, so no reflog is written), then manually writing the reflog entry afterward. The fix is to pass the message through the ref mutation call so dulwich writes the reflog itself.
+vost currently sidesteps this by setting refs via `self._refs[name] = sha` (which calls `set_if_equals` with `message=None`, so no reflog is written), then manually writing the reflog entry afterward. The fix is to pass the message through the ref mutation call so dulwich writes the reflog itself.
 
 ## Changes
 
@@ -32,7 +32,7 @@ def set_target(self, oid, message=None, committer=None):
     if message is None:
         message = b"update ref"
     if committer is None:
-        committer = b"gitstore <gitstore@localhost>"
+        committer = b"vost <vost@localhost>"
     _write_reflog_entry(
         self._repo.path, self._name,
         old_sha, oid.raw,
@@ -50,7 +50,7 @@ def set_target(self, oid, message=None, committer=None):
     if message is None:
         message = b"update ref"
     if committer is None:
-        committer = b"gitstore <gitstore@localhost>"
+        committer = b"vost <vost@localhost>"
     self._refs.set_if_equals(
         self._name, old_sha, oid.raw,
         committer=committer, message=message,
@@ -67,7 +67,7 @@ def create(self, name, oid, message=None, committer=None):
     if message is None:
         message = b"create ref"
     if committer is None:
-        committer = b"gitstore <gitstore@localhost>"
+        committer = b"vost <vost@localhost>"
     _write_reflog_entry(
         self._dulwich_repo.path, ref_bytes,
         _ZERO_SHA, oid.raw,
@@ -82,7 +82,7 @@ def create(self, name, oid, message=None, committer=None):
     if message is None:
         message = b"create ref"
     if committer is None:
-        committer = b"gitstore <gitstore@localhost>"
+        committer = b"vost <vost@localhost>"
     self._refs.set_if_equals(
         ref_bytes, None, oid.raw,
         committer=committer, message=message,
@@ -184,4 +184,4 @@ The rest of `redo()` uses `entries[i].old_sha` and `entries[i].new_sha` — thes
 
 ## Why this matters
 
-This change makes gitstore's reflog handling backend-agnostic. `Repo.read_reflog()` and `DiskRefsContainer._log()` are dulwich's internal contracts. Any dulwich `BaseRepo` subclass that implements `read_reflog()` and wires a logger to its refs container will work — including `dulwich-sqlite`'s `SqliteRepo`, which stores reflogs in a database table and already implements both.
+This change makes vost's reflog handling backend-agnostic. `Repo.read_reflog()` and `DiskRefsContainer._log()` are dulwich's internal contracts. Any dulwich `BaseRepo` subclass that implements `read_reflog()` and wires a logger to its refs container will work — including `dulwich-sqlite`'s `SqliteRepo`, which stores reflogs in a database table and already implements both.

@@ -1,4 +1,4 @@
-# gitstore Documentation
+# vost Documentation
 
 vost is a versioned key-value filesystem backed by bare Git repositories. Every write produces a new commit, and old snapshots remain accessible forever.
 
@@ -24,7 +24,7 @@ print(fs.read("hello.txt"))  # b'Hello, world!'
 ## Reference docs
 
 - [Python API Reference](api.md) -- classes, methods, and data types
-- [CLI Reference](cli.md) -- the `gitstore` command-line tool
+- [CLI Reference](cli.md) -- the `vost` command-line tool
 - [Path Syntax](paths.md) -- how `ref:path` works across commands
 
 ## More
