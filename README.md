@@ -201,8 +201,9 @@ dev = dev.copy_in(["./features/"], "src")
 
 # Copy between branches (atomic, no disk I/O)
 main = repo.branches["main"]
-dev = dev.copy_from_ref(main, "config")              # copy config/ from main into dev
-dev = dev.copy_from_ref(main, "config", "imported")  # copy main's config/ into dev's imported/
+dev = dev.copy_from_ref(main, "config")               # dir mode: config/ → config/
+dev = dev.copy_from_ref(main, "config/", "imported")  # contents mode: config/* → imported/
+dev = dev.copy_from_ref(main, "config", "imported")   # dir mode: config/ → imported/config/
 
 # Sync (make identical, including deletes)
 fs = fs.sync_in("./local", "data")

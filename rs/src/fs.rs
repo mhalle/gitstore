@@ -149,7 +149,7 @@ pub struct MoveOptions {
 /// Options for [`Fs::copy_from_ref`].
 #[derive(Debug, Clone, Default)]
 pub struct CopyFromRefOptions {
-    /// Remove dest files under `dest_path` that are not in the source.
+    /// Remove dest files under the target that are not in the source.
     pub delete: bool,
     /// Preview only; when `true` the store is not modified but the returned
     /// `Fs` has its `changes` field set.
