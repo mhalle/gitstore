@@ -559,6 +559,7 @@ def main(ctx, verbose):
     \b
     Quick start:
       gitstore init -r data.git
+      export GITSTORE_REPO=data.git
       gitstore cp file.txt :file.txt
       gitstore cat :file.txt
       gitstore ls
