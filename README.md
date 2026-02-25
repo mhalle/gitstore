@@ -1,23 +1,23 @@
-# gitstore
+# vost
 
-Gitstore is a versioned filesystem backed by bare Git repositories. Store, retrieve, and version directory trees of files with text and binary data using an immutable-snapshot API. Unlike Git, every write (or batch of writes and deletes) produces a new commit. Old snapshots remain accessible forever.
+vost is a versioned filesystem backed by bare Git repositories. Store, retrieve, and version directory trees of files with text and binary data using an immutable-snapshot API. Unlike Git, every write (or batch of writes and deletes) produces a new commit. Old snapshots remain accessible forever.
 
 The repositories are standard Git repositories that can be manipulated with Git tools as well.
 
-Gitstore includes an intuitive Python API and an optional command line interface. The CLI includes operations to create repositories, copy and write into or out of them using rsync-like syntax, archive to zip or tar files, even act as an HTTP or Git server for a given snapshot or branch.
+vost includes an intuitive Python API and an optional command line interface. The CLI includes operations to create repositories, copy and write into or out of them using rsync-like syntax, archive to zip or tar files, even act as an HTTP or Git server for a given snapshot or branch.
 
 ## Installation
 
 ```
 pip install vost            # core library (dulwich only)
-pip install "gitstore[cli]"    # adds the gitstore command-line tool
+pip install "vost[cli]"    # adds the vost command-line tool
 ```
 
 Or run the CLI without installing:
 
 ```
-uvx "gitstore[cli]" -r myrepo.git ls : # run via uvx
-uv tool install "gitstore[cli]"       # or install as a persistent tool
+uvx "vost[cli]" -r myrepo.git ls : # run via uvx
+uv tool install "vost[cli]"       # or install as a persistent tool
 ```
 
 Requires Python 3.10+.
@@ -48,7 +48,7 @@ print(fs.message)               # '+ hello.txt'
 
 ## Core concepts
 
-**Bare repository.** gitstore uses a *bare* Git repository -- one that contains only Git's internal object database, with no working directory or checked-out files. You won't see your stored files by browsing the repo directory; all data lives inside Git's content-addressable object store and is accessed exclusively through the gitstore API. This is by design: it avoids filesystem conflicts, keeps the storage compact, and lets Git handle deduplication and integrity.
+**Bare repository.** vost uses a *bare* Git repository -- one that contains only Git's internal object database, with no working directory or checked-out files. You won't see your stored files by browsing the repo directory; all data lives inside Git's content-addressable object store and is accessed exclusively through the vost API. This is by design: it avoids filesystem conflicts, keeps the storage compact, and lets Git handle deduplication and integrity.
 
 **`GitStore`** opens or creates a bare repository. It exposes `branches` and `tags` as [`MutableMapping`](https://docs.python.org/3/library/collections.abc.html#collections.abc.MutableMapping) objects (supporting `.get`, `.keys`, `.values`, `.items`, etc.).
 
@@ -275,7 +275,7 @@ diff = repo.backup(url, dry_run=True)                      # preview only
 
 ## Concurrency safety
 
-vost uses an advisory file lock (`gitstore.lock` in the repo directory) to make the stale-snapshot check and ref update atomic on a single machine. If a branch advances after you obtain a snapshot, attempting to write from the stale snapshot raises `StaleSnapshotError`:
+vost uses an advisory file lock (`vost.lock` in the repo directory) to make the stale-snapshot check and ref update atomic on a single machine. If a branch advances after you obtain a snapshot, attempting to write from the stale snapshot raises `StaleSnapshotError`:
 
 ```python
 from vost import StaleSnapshotError
@@ -302,7 +302,7 @@ fs = retry_write(repo, "main", "file.txt", data)
 - When a stale write is rejected, the commit object is created but unreferenced. These dangling objects are harmless and will be cleaned up by `git gc`.
 - Cross-machine coordination (e.g. NFS-mounted repos) is not supported -- file locks are not reliable over network filesystems.
 
-**Maintenance:** gitstore repos are standard bare Git repositories. Run `gitstore gc` (or `git gc` directly) to repack loose objects and prune unreferenced data. This is optional but can reduce disk usage for long-lived repos.
+**Maintenance:** vost repos are standard bare Git repositories. Run `vost gc` (or `git gc` directly) to repack loose objects and prune unreferenced data. This is optional but can reduce disk usage for long-lived repos.
 
 ## Error handling
 
@@ -320,7 +320,7 @@ fs = retry_write(repo, "main", "file.txt", data)
 
 ## CLI
 
-vost includes a command-line interface. Install with `pip install "gitstore[cli]"` or `uv tool install "gitstore[cli]"`.
+vost includes a command-line interface. Install with `pip install "vost[cli]"` or `uv tool install "vost[cli]"`.
 
 ```bash
 export VOST_REPO=/path/to/repo.git    # or pass --repo/-r per command
@@ -328,7 +328,7 @@ export VOST_REPO=/path/to/repo.git    # or pass --repo/-r per command
 
 ### Repo paths and the `:` prefix
 
-Because gitstore commands work with both local files and files stored in the repo, you need a way to tell them apart. **A leading `:` marks a repo path.** Without it, the argument is a local filesystem path.
+Because vost commands work with both local files and files stored in the repo, you need a way to tell them apart. **A leading `:` marks a repo path.** Without it, the argument is a local filesystem path.
 
 ```
 :file.txt              repo path on the current branch
@@ -368,8 +368,8 @@ vost ls -R :src
 vost cat file.txt
 
 # Write stdin
-echo "hello" | gitstore write file.txt
-cmd | gitstore write log.txt -p | grep error         # passthrough (tee)
+echo "hello" | vost write file.txt
+cmd | vost write log.txt -p | grep error         # passthrough (tee)
 
 # Remove and move within repo
 vost rm old-file.txt
@@ -442,7 +442,7 @@ for commit_hash, text in ns.items():
 
 - [Documentation hub](https://github.com/mhalle/vost/blob/master/docs/index.md) -- quick start and navigation
 - [Python API Reference](https://github.com/mhalle/vost/blob/master/docs/api.md) -- classes, methods, and data types
-- [CLI Reference](https://github.com/mhalle/vost/blob/master/docs/cli.md) -- the `gitstore` command-line tool
+- [CLI Reference](https://github.com/mhalle/vost/blob/master/docs/cli.md) -- the `vost` command-line tool
 - [Path Syntax](https://github.com/mhalle/vost/blob/master/docs/paths.md) -- how `ref:path` works across commands
 - [GitHub Repository](https://github.com/mhalle/vost) -- source code, issues, and releases
 
