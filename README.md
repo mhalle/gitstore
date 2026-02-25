@@ -323,7 +323,7 @@ fs = retry_write(repo, "main", "file.txt", data)
 vost includes a command-line interface. Install with `pip install "gitstore[cli]"` or `uv tool install "gitstore[cli]"`.
 
 ```bash
-export GITSTORE_REPO=/path/to/repo.git    # or pass --repo/-r per command
+export VOST_REPO=/path/to/repo.git    # or pass --repo/-r per command
 ```
 
 ### Repo paths and the `:` prefix

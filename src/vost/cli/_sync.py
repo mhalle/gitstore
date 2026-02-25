@@ -59,7 +59,7 @@ from ._helpers import (
 def sync(ctx, args, branch, ref, at_path, match_pattern, before, back, message, dry_run, exclude, exclude_from, use_gitignore, ignore_errors, checksum, no_create, tag, force_tag, watch, debounce):
     """Make one path identical to another (like rsync --delete).
 
-    Requires --repo or GITSTORE_REPO environment variable.
+    Requires --repo or VOST_REPO environment variable.
 
     With one argument, syncs a local directory to the repo root:
 

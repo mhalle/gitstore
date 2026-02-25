@@ -5,7 +5,7 @@
 Set the repository once per shell session:
 
 ```bash
-export GITSTORE_REPO=/path/to/repo.git
+export VOST_REPO=/path/to/repo.git
 ```
 
 Or pass `--repo`/`-r` per command. Use `--branch`/`-b` to target a branch (default: repo's current branch).

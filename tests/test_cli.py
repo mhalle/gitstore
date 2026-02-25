@@ -361,14 +361,14 @@ class TestErrorPaths:
         assert "not found" in result.output.lower()
 
     def test_missing_repo_error(self, runner):
-        """Running a command with no --repo and no GITSTORE_REPO should fail."""
+        """Running a command with no --repo and no VOST_REPO should fail."""
         result = runner.invoke(main, ["ls"])
         assert result.exit_code != 0
-        assert "GITSTORE_REPO" in result.output
+        assert "VOST_REPO" in result.output
 
     def test_env_var_fallback(self, runner, initialized_repo):
-        """GITSTORE_REPO env var should work as fallback for --repo."""
-        result = runner.invoke(main, ["ls"], env={"GITSTORE_REPO": initialized_repo})
+        """VOST_REPO env var should work as fallback for --repo."""
+        result = runner.invoke(main, ["ls"], env={"VOST_REPO": initialized_repo})
         assert result.exit_code == 0
 
 

@@ -137,8 +137,8 @@ def _store_repo(ctx, param, value):
 def _repo_option(f):
     """Shared --repo/-r option decorator for all commands."""
     return click.option(
-        "--repo", "-r", type=click.Path(), envvar="GITSTORE_REPO",
-        help="Path to bare git repository (or set GITSTORE_REPO).",
+        "--repo", "-r", type=click.Path(), envvar="VOST_REPO",
+        help="Path to bare git repository (or set VOST_REPO).",
         expose_value=False, callback=_store_repo, is_eager=True,
     )(f)
 
@@ -148,7 +148,7 @@ def _require_repo(ctx) -> str:
     repo = ctx.obj.get("repo_path")
     if not repo:
         raise click.ClickException(
-            "No repository specified. Use --repo or set GITSTORE_REPO."
+            "No repository specified. Use --repo or set VOST_REPO."
         )
     return repo
 
@@ -545,8 +545,8 @@ def _expand_sources_disk(sources: list[str]) -> list[str]:
 
 @click.group()
 @click.version_option(package_name="vost")
-@click.option("--repo", "-r", type=click.Path(), envvar="GITSTORE_REPO",
-              help="Path to bare git repository (or set GITSTORE_REPO).",
+@click.option("--repo", "-r", type=click.Path(), envvar="VOST_REPO",
+              help="Path to bare git repository (or set VOST_REPO).",
               expose_value=False, callback=_store_repo, is_eager=True)
 @click.option("-v", "--verbose", is_flag=True, help="Verbose output on stderr.")
 @click.pass_context
@@ -559,7 +559,7 @@ def main(ctx, verbose):
     \b
     Quick start:
       vost init -r data.git
-      export GITSTORE_REPO=data.git
+      export VOST_REPO=data.git
       vost cp file.txt :file.txt
       vost cat :file.txt
       vost ls
@@ -577,7 +577,7 @@ def main(ctx, verbose):
 
     \b
     Repo paths are prefixed with ':' (e.g. :path/to/file).
-    Set GITSTORE_REPO to avoid passing --repo on every call.
+    Set VOST_REPO to avoid passing --repo on every call.
     """
     ctx.ensure_object(dict)
     ctx.obj["verbose"] = verbose

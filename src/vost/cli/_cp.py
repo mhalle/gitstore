@@ -70,7 +70,7 @@ from ._helpers import (
 def cp(ctx, args, branch, ref, at_path, match_pattern, before, back, message, file_type, deprecated_mode, follow_symlinks, dry_run, ignore_existing, delete, ignore_errors, checksum, no_glob, no_create, tag, force_tag, exclude, exclude_from):
     """Copy files and directories between disk and repo, or between repo refs.
 
-    Requires --repo or GITSTORE_REPO environment variable.
+    Requires --repo or VOST_REPO environment variable.
 
     The last argument is the destination; all preceding arguments are sources.
     Directories are copied recursively with their name preserved.
