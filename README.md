@@ -1,8 +1,10 @@
 # gitstore
 
-A versioned key-value filesystem backed by bare Git repositories. Store, retrieve, and version binary data using an immutable-snapshot API -- every write produces a new commit, and old snapshots remain accessible forever.
+Gitstore is a versioned filesystem backed by bare Git repositories. Store, retrieve, and version directory trees of files with text and binary data using an immutable-snapshot API. Unlike Git, every write (or batch of writes and deletes) produces a new commit. Old snapshots remain accessible forever.
 
-Built on [dulwich](https://www.dulwich.io/), gitstore gives you Git's content-addressable storage, branching, tagging, and history without touching the working directory or the `git` CLI.
+The repositories are standard Git repositories that can be manipulated with Git tools as well.
+
+Gitstore includes an intuitive Python API and an optional command line interface. The CLI includes operations to create repositories, copy and write into or out of them using rsync-like syntax, archive to zip or tar files, even act as an HTTP or Git server for a given snapshot or branch.
 
 ## Installation
 
@@ -14,7 +16,7 @@ pip install "gitstore[cli]"    # adds the gitstore command-line tool
 Or run the CLI without installing:
 
 ```
-uvx "gitstore[cli]" ls myrepo.git :   # run via uvx
+uvx "gitstore[cli]" -r myrepo.git ls : # run via uvx
 uv tool install "gitstore[cli]"       # or install as a persistent tool
 ```
 
