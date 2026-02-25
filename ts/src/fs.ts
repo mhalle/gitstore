@@ -1112,8 +1112,11 @@ export class FS {
   /**
    * Copy files from source FS into this branch in a single atomic commit.
    *
-   * Since both snapshots share the same object store, blobs are referenced
-   * by OID -- no data is read into memory.
+   * Unlike `copyIn`/`copyOut` (which follow rsync trailing-slash conventions),
+   * paths here are always subtree prefixes -- `"config"` means the *contents*
+   * of the `config/` subtree, never the directory name itself.  Internally the
+   * operation splices Git tree objects by OID, so no blob data is read into
+   * memory regardless of file size.
    *
    * @param source - Any FS (branch, tag, detached commit). Read-only; not modified.
    * @param srcPath - Subtree in source to copy from. `""` or omitted = root (everything).

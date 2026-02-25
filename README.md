@@ -201,7 +201,8 @@ dev = dev.copy_in(["./features/"], "src")
 
 # Copy between branches (atomic, no disk I/O)
 main = repo.branches["main"]
-dev = dev.copy_from_ref(main, "config", "config")  # copy config/ from main into dev
+dev = dev.copy_from_ref(main, "config")              # copy config/ from main into dev
+dev = dev.copy_from_ref(main, "config", "imported")  # copy main's config/ into dev's imported/
 
 # Sync (make identical, including deletes)
 fs = fs.sync_in("./local", "data")
@@ -331,7 +332,9 @@ gitstore gc
 
 # Copy files (disk <-> repo, repo <-> repo)
 gitstore cp local-file.txt :                        # disk to repo root
-gitstore cp ./mydir/ :dest                           # contents mode
+gitstore cp ./mydir :dest                            # copy mydir into dest/mydir
+gitstore cp ./mydir/ :dest                           # trailing / = contents only
+gitstore cp '/data/./logs/app' :backup               # /./  pivot: → backup/logs/app/...
 gitstore cp './src/*.py' :backup                     # glob
 gitstore cp :file.txt ./local.txt                    # repo to disk
 gitstore cp -n ./mydir :dest                         # dry run

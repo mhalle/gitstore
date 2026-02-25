@@ -1146,8 +1146,12 @@ impl Fs {
     /// Copy files from another branch, tag, or detached commit into this
     /// branch in a single atomic commit.
     ///
-    /// Both snapshots must belong to the same repository so blobs are
-    /// referenced by OID -- no data is read into memory.
+    /// Unlike [`copy_in`](Fs::copy_in)/[`copy_out`](Fs::copy_out) (which
+    /// follow rsync trailing-slash conventions), paths here are always subtree
+    /// prefixes — `"config"` means the *contents* of the `config/` subtree,
+    /// never the directory name itself.  Internally the operation splices Git
+    /// tree objects by OID, so no blob data is read into memory regardless of
+    /// file size.
     ///
     /// # Arguments
     /// * `source` - Any `Fs` (branch, tag, detached). Read-only; not modified.
