@@ -4,6 +4,12 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.60.1 (2026-02-24)
+
+**Python:**
+
+- Fix CLI help: add `export GITSTORE_REPO=data.git` to quick start examples so they work as a copy-paste sequence
+
 ## v0.60.0 / TS v0.4.0 / Rust v0.4.0 (2026-02-24)
 
 **Breaking (all languages):**
