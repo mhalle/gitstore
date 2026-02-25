@@ -4,6 +4,12 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.60.2 (2026-02-24)
+
+**All languages:**
+
+- Fix `copy_from_ref` docs: update Rust `CopyFromRefOptions` field doc and README examples for rsync semantics
+
 ## v0.60.1 (2026-02-24)
 
 **Python:**
