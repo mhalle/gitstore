@@ -4,6 +4,13 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.59.4 (2026-02-24)
+
+**Python:**
+
+- README: rewrite intro to highlight API, CLI, and Git compatibility
+- README: fix `uvx` CLI syntax example
+
 ## v0.59.3 (2026-02-24)
 
 **Python:**
