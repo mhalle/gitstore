@@ -6,6 +6,7 @@ import {
   FileType,
   StaleSnapshotError,
   PermissionError,
+  FileNotFoundError,
 } from '../src/index.js';
 
 let store: GitStore;
@@ -37,7 +38,7 @@ beforeEach(async () => {
 afterEach(() => rmTmpDir(tmpDir));
 
 describe('copyFromRef basic', () => {
-  it('copies subtree and adds files', async () => {
+  it('copies subtree and adds files (dir mode)', async () => {
     let main = await store.branches.get('main');
     const worker = await store.branches.get('worker');
 
@@ -48,7 +49,7 @@ describe('copyFromRef basic', () => {
     expect(fromBytes(await main.read('readme.txt'))).toBe('hello');
   });
 
-  it('copies with updates', async () => {
+  it('copies with updates (dir mode)', async () => {
     let main = await store.branches.get('main');
     const worker = await store.branches.get('worker');
 
@@ -57,7 +58,7 @@ describe('copyFromRef basic', () => {
     expect(fromBytes(await main.read('data/y.txt'))).toBe('y-worker');
   });
 
-  it('defaults dest to src path', async () => {
+  it('defaults dest to root', async () => {
     let main = await store.branches.get('main');
     const worker = await store.branches.get('worker');
 
@@ -66,11 +67,11 @@ describe('copyFromRef basic', () => {
     expect(await main.exists('results/b.json')).toBe(true);
   });
 
-  it('copies to different dest', async () => {
+  it('copies contents to different dest', async () => {
     let main = await store.branches.get('main');
     const worker = await store.branches.get('worker');
 
-    main = await main.copyFromRef(worker, 'results', 'backup/results');
+    main = await main.copyFromRef(worker, 'results/', 'backup/results');
     expect(fromBytes(await main.read('backup/results/a.json'))).toBe('{"a":1}');
     expect(fromBytes(await main.read('backup/results/b.json'))).toBe('{"b":2}');
     // Original path untouched
@@ -104,7 +105,12 @@ describe('copyFromRef delete', () => {
     worker = await store.branches.get('worker');
     worker = await worker.remove('data/y.txt');
     main = await store.branches.get('main');
-    main = await main.copyFromRef(worker, 'data', null, { delete: true });
+    main = await main.copyFromRef(
+      await store.branches.get('worker'),
+      'data',
+      '',
+      { delete: true },
+    );
     expect(await main.exists('data/x.txt')).toBe(true);
     expect(await main.exists('data/y.txt')).toBe(false);
   });
@@ -113,9 +119,26 @@ describe('copyFromRef delete', () => {
     let main = await store.branches.get('main');
     const worker = await store.branches.get('worker');
 
-    main = await main.copyFromRef(worker, 'results', null, { delete: true });
+    main = await main.copyFromRef(worker, 'results', '', { delete: true });
     // readme.txt is outside dest_path, should be untouched
     expect(fromBytes(await main.read('readme.txt'))).toBe('hello');
+  });
+
+  it('delete with dir mode', async () => {
+    let main = await store.branches.get('main');
+    let worker = await store.branches.get('worker');
+
+    // First copy results into main
+    main = await main.copyFromRef(worker, 'results');
+    // Add an extra file under results/
+    main = await main.write('results/extra.txt', toBytes('extra'));
+
+    // Now copy again with delete — extra.txt should be removed
+    worker = await store.branches.get('worker');
+    main = await main.copyFromRef(worker, 'results', '', { delete: true });
+    expect(await main.exists('results/a.json')).toBe(true);
+    expect(await main.exists('results/b.json')).toBe(true);
+    expect(await main.exists('results/extra.txt')).toBe(false);
   });
 });
 
@@ -125,7 +148,7 @@ describe('copyFromRef dryRun', () => {
     const worker = await store.branches.get('worker');
     const originalHash = main.commitHash;
 
-    const result = await main.copyFromRef(worker, 'results', null, { dryRun: true });
+    const result = await main.copyFromRef(worker, 'results', '', { dryRun: true });
     expect(result.commitHash).toBe(originalHash);
     expect(result.changes).not.toBeNull();
     expect(result.changes!.add.length).toBe(2);
@@ -137,7 +160,7 @@ describe('copyFromRef dryRun', () => {
     const main = await store.branches.get('main');
     const worker = await store.branches.get('worker');
 
-    const result = await main.copyFromRef(worker, 'data', null, { dryRun: true });
+    const result = await main.copyFromRef(worker, 'data', '', { dryRun: true });
     expect(result.changes).not.toBeNull();
     expect(paths(result.changes!.update)).toEqual(new Set(['data/x.txt']));
     expect(paths(result.changes!.add)).toEqual(new Set(['data/y.txt']));
@@ -150,7 +173,7 @@ describe('copyFromRef dryRun', () => {
     // Put extra file in main's results
     main = await main.write('results/extra.txt', toBytes('extra'));
 
-    const result = await main.copyFromRef(worker, 'results', null, {
+    const result = await main.copyFromRef(worker, 'results', '', {
       delete: true,
       dryRun: true,
     });
@@ -215,13 +238,11 @@ describe('copyFromRef validation', () => {
     await expect(readonly.copyFromRef(worker, 'results')).rejects.toThrow(PermissionError);
   });
 
-  it('nonexistent src path is noop', async () => {
+  it('nonexistent src raises FileNotFoundError', async () => {
     let main = await store.branches.get('main');
     const worker = await store.branches.get('worker');
-    const originalHash = main.commitHash;
 
-    main = await main.copyFromRef(worker, 'nonexistent');
-    expect(main.commitHash).toBe(originalHash);
+    await expect(main.copyFromRef(worker, 'nonexistent')).rejects.toThrow(FileNotFoundError);
   });
 });
 
@@ -253,7 +274,7 @@ describe('copyFromRef message', () => {
     let main = await store.branches.get('main');
     const worker = await store.branches.get('worker');
 
-    main = await main.copyFromRef(worker, 'results', null, {
+    main = await main.copyFromRef(worker, 'results', '', {
       message: 'Import results from worker',
     });
     expect(await main.getMessage()).toBe('Import results from worker');
@@ -270,12 +291,21 @@ describe('copyFromRef message', () => {
 });
 
 describe('copyFromRef path normalization', () => {
-  it('normalizes slashed src and dest paths', async () => {
+  it('trailing slash = contents mode', async () => {
     let main = await store.branches.get('main');
     const worker = await store.branches.get('worker');
 
-    // Use slashed paths — should not produce invalid tree entries
-    main = await main.copyFromRef(worker, '/results/', '/imported/');
+    // Trailing slash → contents mode: pour into root
+    main = await main.copyFromRef(worker, 'results/');
+    expect(fromBytes(await main.read('a.json'))).toBe('{"a":1}');
+    expect(fromBytes(await main.read('b.json'))).toBe('{"b":2}');
+  });
+
+  it('contents mode to explicit dest', async () => {
+    let main = await store.branches.get('main');
+    const worker = await store.branches.get('worker');
+
+    main = await main.copyFromRef(worker, 'results/', 'imported');
     const entries = await main.ls('imported');
     expect(entries).toContain('a.json');
     expect(entries).toContain('b.json');
@@ -304,5 +334,79 @@ describe('copyFromRef stale', () => {
     await main2.write('conflict.txt', toBytes('conflict'));
 
     await expect(main.copyFromRef(worker, 'results')).rejects.toThrow(StaleSnapshotError);
+  });
+});
+
+describe('copyFromRef single file', () => {
+  it('single file to root', async () => {
+    let main = await store.branches.get('main');
+    const worker = await store.branches.get('worker');
+
+    main = await main.copyFromRef(worker, 'results/a.json');
+    expect(fromBytes(await main.read('a.json'))).toBe('{"a":1}');
+  });
+
+  it('single file to dest', async () => {
+    let main = await store.branches.get('main');
+    const worker = await store.branches.get('worker');
+
+    main = await main.copyFromRef(worker, 'results/a.json', 'backup');
+    expect(fromBytes(await main.read('backup/a.json'))).toBe('{"a":1}');
+  });
+
+  it('single file dry run', async () => {
+    const main = await store.branches.get('main');
+    const worker = await store.branches.get('worker');
+
+    const result = await main.copyFromRef(worker, 'results/a.json', '', { dryRun: true });
+    expect(result.changes).not.toBeNull();
+    expect(result.changes!.add.length).toBe(1);
+    expect(result.changes!.add[0].path).toBe('a.json');
+  });
+});
+
+describe('copyFromRef dir vs contents mode', () => {
+  it('dir mode to explicit dest preserves dirname', async () => {
+    let main = await store.branches.get('main');
+    const worker = await store.branches.get('worker');
+
+    main = await main.copyFromRef(worker, 'results', 'backup');
+    expect(fromBytes(await main.read('backup/results/a.json'))).toBe('{"a":1}');
+    expect(fromBytes(await main.read('backup/results/b.json'))).toBe('{"b":2}');
+  });
+
+  it('contents mode to explicit dest omits dirname', async () => {
+    let main = await store.branches.get('main');
+    const worker = await store.branches.get('worker');
+
+    main = await main.copyFromRef(worker, 'results/', 'backup');
+    expect(fromBytes(await main.read('backup/a.json'))).toBe('{"a":1}');
+    expect(fromBytes(await main.read('backup/b.json'))).toBe('{"b":2}');
+    expect(await main.exists('backup/results')).toBe(false);
+  });
+});
+
+describe('copyFromRef multiple sources', () => {
+  it('multiple mixed sources', async () => {
+    let main = await store.branches.get('main');
+    const worker = await store.branches.get('worker');
+
+    main = await main.copyFromRef(worker, ['results', 'data/x.txt']);
+    // Dir mode: results/ → results/
+    expect(fromBytes(await main.read('results/a.json'))).toBe('{"a":1}');
+    expect(fromBytes(await main.read('results/b.json'))).toBe('{"b":2}');
+    // File mode: data/x.txt → x.txt at root
+    expect(fromBytes(await main.read('x.txt'))).toBe('x-worker');
+  });
+
+  it('multiple sources to dest', async () => {
+    let main = await store.branches.get('main');
+    const worker = await store.branches.get('worker');
+
+    main = await main.copyFromRef(worker, ['results/', 'data/x.txt'], 'backup');
+    // Contents: results/ contents poured into backup/
+    expect(fromBytes(await main.read('backup/a.json'))).toBe('{"a":1}');
+    // File: x.txt placed in backup/
+    expect(fromBytes(await main.read('backup/x.txt'))).toBe('x-worker');
   });
 });

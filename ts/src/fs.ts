@@ -1112,17 +1112,21 @@ export class FS {
   /**
    * Copy files from source FS into this branch in a single atomic commit.
    *
-   * Unlike `copyIn`/`copyOut` (which follow rsync trailing-slash conventions),
-   * paths here are always subtree prefixes -- `"config"` means the *contents*
-   * of the `config/` subtree, never the directory name itself.  Internally the
-   * operation splices Git tree objects by OID, so no blob data is read into
-   * memory regardless of file size.
+   * Follows the same rsync trailing-slash conventions as `copyIn`/`copyOut`:
+   *
+   * - `"config"` → directory mode — copies `config/` *as* `config/` under dest.
+   * - `"config/"` → contents mode — pours the *contents* of `config/` into dest.
+   * - `"file.txt"` → file mode — copies the single file into dest.
+   * - `""` or `"/"` → root contents mode — copies everything.
+   *
+   * Since both snapshots share the same object store, blobs are referenced
+   * by OID — no data is read into memory regardless of file size.
    *
    * @param source - Any FS (branch, tag, detached commit). Read-only; not modified.
-   * @param srcPath - Subtree in source to copy from. `""` or omitted = root (everything).
-   * @param destPath - Subtree in dest to copy into. Defaults to srcPath when null/undefined.
+   * @param sources - Source path(s) in source. Accepts a single string or array. Defaults to `""` (root).
+   * @param dest - Destination path in this branch. Defaults to `""` (root).
    * @param opts - Copy-ref options.
-   * @param opts.delete - Remove dest files under destPath that aren't in source.
+   * @param opts.delete - Remove dest files under the target that aren't in source.
    * @param opts.dryRun - Compute changes but don't commit. Returned FS has `.changes` set.
    * @param opts.message - Commit message (auto-generated if omitted).
    * @returns New FS for the dest branch with the commit applied.
@@ -1131,8 +1135,8 @@ export class FS {
    */
   async copyFromRef(
     source: FS,
-    srcPath?: string,
-    destPath?: string | null,
+    sources?: string | string[],
+    dest?: string,
     opts?: { delete?: boolean; dryRun?: boolean; message?: string },
   ): Promise<FS> {
     if (!this._writable) throw this._readonlyError('write to');
@@ -1144,30 +1148,97 @@ export class FS {
       throw new Error('source must belong to the same repo as self');
     }
 
-    const src = srcPath && !isRootPath(srcPath) ? normalizePath(srcPath) : '';
-    const dest = destPath !== undefined && destPath !== null
-      ? (destPath && !isRootPath(destPath) ? normalizePath(destPath) : '')
-      : src;
+    // Normalize sources to list
+    const sourcesList: string[] = sources === undefined || sources === null
+      ? ['']
+      : typeof sources === 'string' ? [sources] : sources;
 
-    const { walkRepo } = await import('./copy.js');
-    const srcFiles = await walkRepo(source, src);
-    const destFiles = await walkRepo(this, dest);
+    // Normalize dest
+    const destNorm = dest !== undefined && dest !== null && dest !== ''
+      ? (isRootPath(dest) ? '' : normalizePath(dest))
+      : '';
 
+    const { resolveRepoSources, walkRepo } = await import('./copy.js');
+
+    // Resolve sources using rsync conventions
+    const resolved = await resolveRepoSources(source, sourcesList);
+
+    // Enumerate source files → Map<dest_path, {oid, mode}>
+    const srcMapped = new Map<string, { oid: string; mode: string }>();
+
+    for (const { repoPath, mode, prefix } of resolved) {
+      const _dest = [destNorm, prefix].filter(Boolean).join('/');
+
+      if (mode === 'file') {
+        const name = repoPath.includes('/') ? repoPath.split('/').pop()! : repoPath;
+        const destFile = _dest ? `${_dest}/${name}` : name;
+        const entry = await entryAtPath(this._fsModule, this._gitdir, source._treeOid!, repoPath);
+        if (entry) {
+          srcMapped.set(normalizePath(destFile), { oid: entry.oid, mode: entry.mode });
+        }
+      } else if (mode === 'dir') {
+        const dirName = repoPath.includes('/') ? repoPath.split('/').pop()! : repoPath;
+        const target = _dest ? `${_dest}/${dirName}` : dirName;
+        for await (const [dirpath, , files] of source.walk(repoPath)) {
+          for (const fe of files) {
+            const storePath = dirpath ? `${dirpath}/${fe.name}` : fe.name;
+            const rel = repoPath && storePath.startsWith(repoPath + '/')
+              ? storePath.slice(repoPath.length + 1)
+              : storePath;
+            srcMapped.set(normalizePath(`${target}/${rel}`), { oid: fe.oid, mode: fe.mode });
+          }
+        }
+      } else {
+        // contents
+        const walkPath = repoPath || null;
+        for await (const [dirpath, , files] of source.walk(walkPath)) {
+          for (const fe of files) {
+            const storePath = dirpath ? `${dirpath}/${fe.name}` : fe.name;
+            const rel = repoPath && storePath.startsWith(repoPath + '/')
+              ? storePath.slice(repoPath.length + 1)
+              : storePath;
+            const destFile = _dest ? `${_dest}/${rel}` : rel;
+            srcMapped.set(normalizePath(destFile), { oid: fe.oid, mode: fe.mode });
+          }
+        }
+      }
+    }
+
+    // Determine dest subtree(s) to walk for diff/delete
+    const destPrefixes = new Set<string>();
+    for (const { repoPath, mode, prefix } of resolved) {
+      const _dest = [destNorm, prefix].filter(Boolean).join('/');
+      if (mode === 'dir') {
+        const dirName = repoPath.includes('/') ? repoPath.split('/').pop()! : repoPath;
+        destPrefixes.add(_dest ? `${_dest}/${dirName}` : dirName);
+      } else {
+        destPrefixes.add(_dest);
+      }
+    }
+
+    const destFiles = new Map<string, { oid: string; mode: string }>();
+    for (const dp of destPrefixes) {
+      const walked = await walkRepo(this, dp);
+      for (const [rel, entry] of walked) {
+        const full = dp ? `${dp}/${rel}` : rel;
+        destFiles.set(full, entry);
+      }
+    }
+
+    // Build writes and removes
     const writes = new Map<string, TreeWrite>();
     const removes = new Set<string>();
 
-    for (const [rel, srcEntry] of srcFiles) {
-      const full = dest ? `${dest}/${rel}` : rel;
-      const destEntry = destFiles.get(rel);
+    for (const [destPath, srcEntry] of srcMapped) {
+      const destEntry = destFiles.get(destPath);
       if (!destEntry || destEntry.oid !== srcEntry.oid || destEntry.mode !== srcEntry.mode) {
-        writes.set(full, { oid: srcEntry.oid, mode: srcEntry.mode });
+        writes.set(destPath, { oid: srcEntry.oid, mode: srcEntry.mode });
       }
     }
 
     if (opts?.delete) {
-      for (const rel of destFiles.keys()) {
-        if (!srcFiles.has(rel)) {
-          const full = dest ? `${dest}/${rel}` : rel;
+      for (const full of destFiles.keys()) {
+        if (!srcMapped.has(full)) {
           removes.add(full);
         }
       }

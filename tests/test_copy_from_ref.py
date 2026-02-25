@@ -37,6 +37,7 @@ def store(tmp_path):
 
 class TestCopyRefBasic:
     def test_copy_subtree_adds_files(self, store):
+        """Dir mode: 'results' copies results/ as results/ into root."""
         main = store.branches["main"]
         worker = store.branches["worker"]
 
@@ -47,6 +48,7 @@ class TestCopyRefBasic:
         assert main.read("readme.txt") == b"hello"
 
     def test_copy_with_updates(self, store):
+        """Dir mode: 'data' copies data/ as data/ — updates existing files."""
         main = store.branches["main"]
         worker = store.branches["worker"]
 
@@ -54,7 +56,7 @@ class TestCopyRefBasic:
         assert main.read("data/x.txt") == b"x-worker"
         assert main.read("data/y.txt") == b"y-worker"
 
-    def test_dest_defaults_to_src_path(self, store):
+    def test_dest_defaults_to_root(self, store):
         main = store.branches["main"]
         worker = store.branches["worker"]
 
@@ -62,11 +64,12 @@ class TestCopyRefBasic:
         assert main.exists("results/a.json")
         assert main.exists("results/b.json")
 
-    def test_copy_to_different_dest(self, store):
+    def test_copy_to_different_dest_contents_mode(self, store):
+        """Contents mode with explicit dest: pour results/ contents into backup/results."""
         main = store.branches["main"]
         worker = store.branches["worker"]
 
-        main = main.copy_from_ref(worker, "results", "backup/results")
+        main = main.copy_from_ref(worker, "results/", "backup/results")
         assert main.read("backup/results/a.json") == b'{"a":1}'
         assert main.read("backup/results/b.json") == b'{"b":2}'
         # Original path untouched
@@ -112,6 +115,23 @@ class TestCopyRefDelete:
         main = main.copy_from_ref(worker, "results", delete=True)
         # readme.txt is outside dest_path, should be untouched
         assert main.read("readme.txt") == b"hello"
+
+    def test_delete_with_dir_mode(self, store):
+        """Delete only removes files under the dir-mode target."""
+        main = store.branches["main"]
+        worker = store.branches["worker"]
+
+        # First copy results into main
+        main = main.copy_from_ref(worker, "results")
+        # Add an extra file under results/
+        main = main.write("results/extra.txt", b"extra")
+
+        # Now copy again with delete — extra.txt should be removed
+        worker = store.branches["worker"]
+        main = main.copy_from_ref(worker, "results", delete=True)
+        assert main.exists("results/a.json")
+        assert main.exists("results/b.json")
+        assert not main.exists("results/extra.txt")
 
 
 class TestCopyRefDryRun:
@@ -203,14 +223,13 @@ class TestCopyRefValidation:
         with pytest.raises(PermissionError):
             readonly.copy_from_ref(worker, "results")
 
-    def test_nonexistent_src_path_is_noop(self, store):
-        """Copying from a nonexistent subtree should be a noop."""
+    def test_nonexistent_src_raises(self, store):
+        """Copying from a nonexistent path raises FileNotFoundError."""
         main = store.branches["main"]
         worker = store.branches["worker"]
-        original_hash = main.commit_hash
 
-        main = main.copy_from_ref(worker, "nonexistent")
-        assert main.commit_hash == original_hash
+        with pytest.raises(FileNotFoundError):
+            main.copy_from_ref(worker, "nonexistent")
 
 
 class TestCopyRefMode:
@@ -250,36 +269,28 @@ class TestCopyRefMessage:
 
 
 class TestCopyRefPathNormalization:
-    """Fix 1: copy_from_ref normalizes leading/trailing slashes."""
+    """copy_from_ref follows rsync conventions for trailing slashes."""
 
-    def test_leading_slash_src_path(self, store):
-        main = store.branches["main"]
-        worker = store.branches["worker"]
-        main = main.copy_from_ref(worker, "/results")
-        assert main.read("results/a.json") == b'{"a":1}'
-
-    def test_trailing_slash_src_path(self, store):
+    def test_contents_mode_trailing_slash(self, store):
+        """Trailing slash = contents mode: pour contents into dest."""
         main = store.branches["main"]
         worker = store.branches["worker"]
         main = main.copy_from_ref(worker, "results/")
-        assert main.read("results/a.json") == b'{"a":1}'
+        # Contents mode at root → files land at root
+        assert main.read("a.json") == b'{"a":1}'
+        assert main.read("b.json") == b'{"b":2}'
 
-    def test_leading_and_trailing_slashes(self, store):
+    def test_contents_mode_to_dest(self, store):
         main = store.branches["main"]
         worker = store.branches["worker"]
-        main = main.copy_from_ref(worker, "/results/", "/backup/results/")
+        main = main.copy_from_ref(worker, "results/", "backup/results")
         assert main.read("backup/results/a.json") == b'{"a":1}'
+        assert main.read("backup/results/b.json") == b'{"b":2}'
 
-    def test_dest_path_trailing_slash(self, store):
+    def test_dry_run_with_trailing_slash(self, store):
         main = store.branches["main"]
         worker = store.branches["worker"]
-        main = main.copy_from_ref(worker, "results", "backup/")
-        assert main.read("backup/a.json") == b'{"a":1}'
-
-    def test_dry_run_with_slashes(self, store):
-        main = store.branches["main"]
-        worker = store.branches["worker"]
-        result = main.copy_from_ref(worker, "/results/", dry_run=True)
+        result = main.copy_from_ref(worker, "results/", dry_run=True)
         assert result.changes is not None
         assert len(result.changes.add) == 2
 
@@ -297,3 +308,82 @@ class TestCopyRefStale:
 
         with pytest.raises(StaleSnapshotError):
             main.copy_from_ref(worker, "results")
+
+
+class TestCopyRefSingleFile:
+    """New: single file copy support."""
+
+    def test_single_file_to_root(self, store):
+        """Copying a single file places it at the root."""
+        main = store.branches["main"]
+        worker = store.branches["worker"]
+
+        main = main.copy_from_ref(worker, "results/a.json")
+        assert main.read("a.json") == b'{"a":1}'
+
+    def test_single_file_to_dest(self, store):
+        """Copying a single file into a dest directory."""
+        main = store.branches["main"]
+        worker = store.branches["worker"]
+
+        main = main.copy_from_ref(worker, "results/a.json", "backup")
+        assert main.read("backup/a.json") == b'{"a":1}'
+
+    def test_single_file_dry_run(self, store):
+        main = store.branches["main"]
+        worker = store.branches["worker"]
+
+        result = main.copy_from_ref(worker, "results/a.json", dry_run=True)
+        assert result.changes is not None
+        assert len(result.changes.add) == 1
+        assert result.changes.add[0].path == "a.json"
+
+
+class TestCopyRefDirMode:
+    """New: dir mode (no trailing slash) preserves directory name."""
+
+    def test_dir_mode_to_explicit_dest(self, store):
+        """Dir mode copies dirname into dest."""
+        main = store.branches["main"]
+        worker = store.branches["worker"]
+
+        main = main.copy_from_ref(worker, "results", "backup")
+        assert main.read("backup/results/a.json") == b'{"a":1}'
+        assert main.read("backup/results/b.json") == b'{"b":2}'
+
+    def test_contents_mode_to_explicit_dest(self, store):
+        """Contents mode pours files directly into dest (no dirname)."""
+        main = store.branches["main"]
+        worker = store.branches["worker"]
+
+        main = main.copy_from_ref(worker, "results/", "backup")
+        assert main.read("backup/a.json") == b'{"a":1}'
+        assert main.read("backup/b.json") == b'{"b":2}'
+        # Should NOT have backup/results/
+        assert not main.exists("backup/results")
+
+
+class TestCopyRefMultipleSources:
+    """New: multiple sources in a single call."""
+
+    def test_multiple_mixed_sources(self, store):
+        """Mix of dir and file sources in one call."""
+        main = store.branches["main"]
+        worker = store.branches["worker"]
+
+        main = main.copy_from_ref(worker, ["results", "data/x.txt"])
+        # Dir mode: results/ → results/
+        assert main.read("results/a.json") == b'{"a":1}'
+        assert main.read("results/b.json") == b'{"b":2}'
+        # File mode: data/x.txt → x.txt at root
+        assert main.read("x.txt") == b"x-worker"
+
+    def test_multiple_sources_to_dest(self, store):
+        main = store.branches["main"]
+        worker = store.branches["worker"]
+
+        main = main.copy_from_ref(worker, ["results/", "data/x.txt"], "backup")
+        # Contents: results/ contents poured into backup/
+        assert main.read("backup/a.json") == b'{"a":1}'
+        # File: x.txt placed in backup/
+        assert main.read("backup/x.txt") == b"x-worker"

@@ -4,6 +4,27 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.60.0 / TS v0.4.0 / Rust v0.4.0 (2026-02-24)
+
+**Breaking (all languages):**
+
+- `copy_from_ref` now follows rsync trailing-slash conventions (matching `copy_in`/`copy_out`):
+  - `"config"` = directory mode (copies `config/` *as* `config/` under dest)
+  - `"config/"` = contents mode (pours contents into dest)
+  - `"file.txt"` = file mode (copies the single file)
+  - `""` or `"/"` = root contents mode (copies everything)
+- New signature accepts multiple sources:
+  - Python: `copy_from_ref(source, sources="", dest="", *, delete, dry_run, message)`
+  - TypeScript: `copyFromRef(source, sources?, dest?, opts?)`
+  - Rust: `copy_from_ref(&self, source, sources: &[&str], dest: &str, opts)`
+- `sources` replaces old `src_path`; accepts `str | list[str]` (Python/TS) or `&[&str]` (Rust)
+- `dest` replaces old `dest_path`; defaults to `""` (root) instead of mirroring src_path
+- Nonexistent source paths now raise `FileNotFoundError` / `Error::NotFound` (previously silent noop)
+
+**TypeScript:**
+
+- Export `resolveRepoSources` and `ResolvedRepoSource` from `copy.ts`
+
 ## v0.59.5 (2026-02-24)
 
 **All languages:**

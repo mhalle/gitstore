@@ -92,7 +92,7 @@ wheels = [
 
 [[package]]
 name = "gitstore"
-version = "0.58.3"
+version = "0.60.0"
 source = { editable = "." }
 dependencies = [
     { name = "dulwich" },
@@ -115,7 +115,7 @@ fuse = [
 [package.metadata]
 requires-dist = [
     { name = "click", marker = "extra == 'cli'", specifier = ">=8.0" },
-    { name = "dulwich", specifier = ">=0.22.0" },
+    { name = "dulwich", specifier = ">=1.0.0" },
     { name = "gitstore", extras = ["cli"], marker = "extra == 'dev'" },
     { name = "mfusepy", marker = "extra == 'fuse'", specifier = ">=3.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },

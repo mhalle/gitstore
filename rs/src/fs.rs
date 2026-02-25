@@ -1146,28 +1146,32 @@ impl Fs {
     /// Copy files from another branch, tag, or detached commit into this
     /// branch in a single atomic commit.
     ///
-    /// Unlike [`copy_in`](Fs::copy_in)/[`copy_out`](Fs::copy_out) (which
-    /// follow rsync trailing-slash conventions), paths here are always subtree
-    /// prefixes — `"config"` means the *contents* of the `config/` subtree,
-    /// never the directory name itself.  Internally the operation splices Git
-    /// tree objects by OID, so no blob data is read into memory regardless of
-    /// file size.
+    /// Follows the same rsync trailing-slash conventions as
+    /// [`copy_in`](Fs::copy_in)/[`copy_out`](Fs::copy_out):
+    ///
+    /// - `"config"` → directory mode — copies `config/` *as* `config/` under dest.
+    /// - `"config/"` → contents mode — pours the *contents* of `config/` into dest.
+    /// - `"file.txt"` → file mode — copies the single file into dest.
+    /// - `""` or `"/"` → root contents mode — copies everything.
+    ///
+    /// Since both snapshots share the same object store, blobs are referenced
+    /// by OID — no data is read into memory regardless of file size.
     ///
     /// # Arguments
     /// * `source` - Any `Fs` (branch, tag, detached). Read-only; not modified.
-    /// * `src_path` - Subtree in source to copy from. `""` = root (everything).
-    /// * `dest_path` - Subtree in dest to copy into. Defaults to `src_path`
-    ///   when `None`.
+    /// * `sources` - Source path(s) in *source*. Follows rsync conventions.
+    /// * `dest` - Destination path in this branch. `""` = root.
     /// * `opts` - [`CopyFromRefOptions`] for delete, dry-run, and message.
     ///
     /// # Errors
     /// Returns an error if `source` belongs to a different repo.
+    /// Returns [`Error::NotFound`] if a source path does not exist.
     /// Returns [`Error::Permission`] if this `Fs` is read-only.
     pub fn copy_from_ref(
         &self,
         source: &Fs,
-        src_path: &str,
-        dest_path: Option<&str>,
+        sources: &[&str],
+        dest: &str,
         opts: CopyFromRefOptions,
     ) -> Result<Fs> {
         self.require_writable("write to")?;
@@ -1184,39 +1188,127 @@ impl Fs {
             ));
         }
 
-        let src_norm = crate::paths::normalize_path(src_path)?;
-        let dest_norm = match dest_path {
-            Some(p) => crate::paths::normalize_path(p)?,
-            None => src_norm.clone(),
-        };
-
+        let dest_norm = crate::paths::normalize_path(dest)?;
         let src_tree = source.require_tree()?;
         let dest_tree = self.require_tree()?;
 
-        // Walk both subtrees
-        let (src_files, dest_files) = self.with_repo(|repo| {
-            let src_files = walk_subtree(repo, src_tree, &src_norm)?;
-            let dest_files = walk_subtree(repo, dest_tree, &dest_norm)?;
-            Ok((src_files, dest_files))
+        // Resolve sources and enumerate files → BTreeMap<dest_path, (oid, mode)>
+        let mut src_mapped = std::collections::BTreeMap::<String, (gix::ObjectId, u32)>::new();
+        // Track dest prefixes for walking the dest tree
+        let mut dest_prefixes = std::collections::BTreeSet::<String>::new();
+
+        self.with_repo(|repo| {
+            for &src in sources {
+                let contents_mode = src.ends_with('/');
+                let stripped = src.trim_end_matches('/');
+                let normalized = if stripped.is_empty() {
+                    String::new()
+                } else {
+                    crate::paths::normalize_path(stripped)?
+                };
+
+                // Determine mode: file, dir, or contents
+                enum SrcMode { File(gix::ObjectId, u32), Dir, Contents }
+
+                let mode = if contents_mode {
+                    // Trailing slash or root
+                    if !normalized.is_empty() {
+                        let entry = tree::entry_at_path(repo, src_tree, &normalized)?;
+                        match entry {
+                            Some(e) if e.mode == MODE_TREE => {},
+                            Some(_) => return Err(Error::not_a_directory(
+                                format!("Not a directory in repo: {}", normalized),
+                            )),
+                            None => return Err(Error::not_found(
+                                format!("File not found in repo: {}", normalized),
+                            )),
+                        }
+                    }
+                    SrcMode::Contents
+                } else if normalized.is_empty() {
+                    SrcMode::Contents
+                } else {
+                    let entry = tree::entry_at_path(repo, src_tree, &normalized)?;
+                    match entry {
+                        Some(e) if e.mode == MODE_TREE => SrcMode::Dir,
+                        Some(e) => SrcMode::File(e.oid, e.mode),
+                        None => return Err(Error::not_found(
+                            format!("File not found in repo: {}", normalized),
+                        )),
+                    }
+                };
+
+                match mode {
+                    SrcMode::File(oid, fmode) => {
+                        let name = normalized.rsplit('/').next().unwrap_or(&normalized);
+                        let dest_file = if dest_norm.is_empty() {
+                            name.to_string()
+                        } else {
+                            format!("{}/{}", dest_norm, name)
+                        };
+                        src_mapped.insert(dest_file, (oid, fmode));
+                        dest_prefixes.insert(dest_norm.clone());
+                    }
+                    SrcMode::Dir => {
+                        let dirname = normalized.rsplit('/').next().unwrap_or(&normalized);
+                        let target = if dest_norm.is_empty() {
+                            dirname.to_string()
+                        } else {
+                            format!("{}/{}", dest_norm, dirname)
+                        };
+                        let entries = walk_subtree(repo, src_tree, &normalized)?;
+                        for (rel, (oid, fmode)) in entries {
+                            let dest_file = format!("{}/{}", target, rel);
+                            src_mapped.insert(dest_file, (oid, fmode));
+                        }
+                        dest_prefixes.insert(target);
+                    }
+                    SrcMode::Contents => {
+                        let entries = walk_subtree(repo, src_tree, &normalized)?;
+                        for (rel, (oid, fmode)) in entries {
+                            let dest_file = if dest_norm.is_empty() {
+                                rel
+                            } else {
+                                format!("{}/{}", dest_norm, rel)
+                            };
+                            src_mapped.insert(dest_file, (oid, fmode));
+                        }
+                        dest_prefixes.insert(dest_norm.clone());
+                    }
+                }
+            }
+            Ok(())
+        })?;
+
+        // Walk dest subtree(s)
+        let dest_files = self.with_repo(|repo| {
+            let mut dest_files = std::collections::BTreeMap::<String, (gix::ObjectId, u32)>::new();
+            for dp in &dest_prefixes {
+                let walked = walk_subtree(repo, dest_tree, dp)?;
+                for (rel, entry) in walked {
+                    let full = if dp.is_empty() {
+                        rel
+                    } else {
+                        format!("{}/{}", dp, rel)
+                    };
+                    dest_files.insert(full, entry);
+                }
+            }
+            Ok(dest_files)
         })?;
 
         // Build writes and removes
         let mut writes: Vec<(String, Option<TreeWrite>)> = Vec::new();
         let mut report = ChangeReport::new();
 
-        for (rel, (src_oid, src_mode)) in &src_files {
-            let full = if dest_norm.is_empty() {
-                rel.clone()
-            } else {
-                format!("{}/{}", dest_norm, rel)
-            };
-            let dest_entry = dest_files.get(rel);
+        for (dest_path, (src_oid, src_mode)) in &src_mapped {
+            let dest_entry = dest_files.get(dest_path);
             match dest_entry {
                 None => {
                     let ft = FileType::from_mode(*src_mode).unwrap_or(FileType::Blob);
-                    report.add.push(FileEntry::new(&full, ft));
+                    report.add.push(FileEntry::new(dest_path, ft));
                     writes.push((
-                        full,
+                        dest_path.clone(),
                         Some(TreeWrite {
                             data: vec![],
                             oid: *src_oid,
@@ -1226,9 +1318,9 @@ impl Fs {
                 }
                 Some((d_oid, d_mode)) if d_oid != src_oid || d_mode != src_mode => {
                     let ft = FileType::from_mode(*src_mode).unwrap_or(FileType::Blob);
-                    report.update.push(FileEntry::new(&full, ft));
+                    report.update.push(FileEntry::new(dest_path, ft));
                     writes.push((
-                        full,
+                        dest_path.clone(),
                         Some(TreeWrite {
                             data: vec![],
                             oid: *src_oid,
@@ -1241,17 +1333,11 @@ impl Fs {
         }
 
         if opts.delete {
-            for rel in dest_files.keys() {
-                if !src_files.contains_key(rel) {
-                    let full = if dest_norm.is_empty() {
-                        rel.clone()
-                    } else {
-                        format!("{}/{}", dest_norm, rel)
-                    };
-                    let (_, mode) = dest_files[rel];
-                    let ft = FileType::from_mode(mode).unwrap_or(FileType::Blob);
-                    report.delete.push(FileEntry::new(&full, ft));
-                    writes.push((full, None));
+            for (full, (_, mode)) in &dest_files {
+                if !src_mapped.contains_key(full) {
+                    let ft = FileType::from_mode(*mode).unwrap_or(FileType::Blob);
+                    report.delete.push(FileEntry::new(full, ft));
+                    writes.push((full.clone(), None));
                 }
             }
         }

@@ -1080,8 +1080,8 @@ class FS:
     def copy_from_ref(
         self,
         source: FS,
-        src_path: str = "",
-        dest_path: str | None = None,
+        sources: str | list[str] = "",
+        dest: str = "",
         *,
         delete: bool = False,
         dry_run: bool = False,
@@ -1089,20 +1089,25 @@ class FS:
     ) -> FS:
         """Copy files from *source* into this branch in a single atomic commit.
 
-        Since both snapshots share the same object store, blobs are referenced
-        by OID — no data is read into memory.
+        Follows the same rsync trailing-slash conventions as
+        ``copy_in``/``copy_out``:
 
-        Unlike ``copy_in``/``copy_out`` (which follow rsync trailing-slash
-        conventions), paths here are always subtree prefixes — ``"config"``
-        means the *contents* of the ``config/`` subtree, never the directory
-        name itself.  Internally the operation splices Git tree objects by
-        OID, so no blob data is read into memory regardless of file size.
+        - ``"config"``  → directory mode — copies ``config/`` *as* ``config/``
+          under *dest*.
+        - ``"config/"`` → contents mode — pours the *contents* of ``config/``
+          into *dest*.
+        - ``"file.txt"`` → file mode — copies the single file into *dest*.
+        - ``""`` or ``"/"`` → root contents mode — copies everything.
+
+        Since both snapshots share the same object store, blobs are referenced
+        by OID — no data is read into memory regardless of file size.
 
         Args:
             source: Any FS (branch, tag, detached commit). Read-only; not modified.
-            src_path: Subtree in source to copy from. ``""`` = root (everything).
-            dest_path: Subtree in dest to copy into. Defaults to *src_path* when ``None``.
-            delete: Remove dest files under *dest_path* that aren't in source.
+            sources: Source path(s) in *source*. Accepts a single string or a
+                list of strings.  Defaults to ``""`` (root = everything).
+            dest: Destination path in this branch.  Defaults to ``""`` (root).
+            delete: Remove dest files under the target that aren't in source.
             dry_run: Compute changes but don't commit. Returned FS has ``.changes`` set.
             message: Commit message (auto-generated if ``None``).
 
@@ -1111,10 +1116,11 @@ class FS:
 
         Raises:
             ValueError: If *source* belongs to a different repo.
+            FileNotFoundError: If a source path does not exist.
             PermissionError: If this FS is read-only.
         """
-        from .copy._resolve import _walk_repo
-        from .copy._types import ChangeReport, FileEntry, _finalize_changes
+        from .copy._resolve import _resolve_repo_sources, _walk_repo
+        from .copy._types import _finalize_changes
         from .tree import BlobOid
 
         # Validate same repo
@@ -1125,35 +1131,87 @@ class FS:
         if not same:
             raise ValueError("source must belong to the same repo as self")
 
-        if src_path:
-            src_path = _normalize_path(src_path)
-        if dest_path is None:
-            dest_path = src_path
-        if dest_path:
-            dest_path = _normalize_path(dest_path)
+        # Normalize sources to list
+        if isinstance(sources, str):
+            sources_list = [sources]
+        else:
+            sources_list = list(sources)
 
-        # Walk both subtrees
-        src_files = _walk_repo(source, src_path)
-        dest_files = _walk_repo(self, dest_path)
+        # Normalize dest
+        if dest:
+            dest = _normalize_path(dest)
+
+        # Resolve sources using rsync conventions
+        resolved = _resolve_repo_sources(source, sources_list)
+
+        # Enumerate source files → {dest_path: (oid, mode)}
+        src_mapped: dict[str, tuple[bytes, int]] = {}
+        for repo_path, mode, prefix in resolved:
+            _dest = "/".join(p for p in (dest, prefix) if p)
+
+            if mode == "file":
+                name = repo_path.rsplit("/", 1)[-1]
+                dest_file = f"{_dest}/{name}" if _dest else name
+                dest_file = _normalize_path(dest_file)
+                entry = source.stat(repo_path)
+                src_mapped[dest_file] = (entry.hash.encode(), entry.mode)
+            elif mode == "dir":
+                dirname = repo_path.rsplit("/", 1)[-1]
+                target = f"{_dest}/{dirname}" if _dest else dirname
+                for dirpath, _dirs, files in source.walk(repo_path):
+                    for fe in files:
+                        store_path = f"{dirpath}/{fe.name}" if dirpath else fe.name
+                        if repo_path and store_path.startswith(repo_path + "/"):
+                            rel = store_path[len(repo_path) + 1:]
+                        else:
+                            rel = store_path
+                        dest_file = _normalize_path(f"{target}/{rel}")
+                        src_mapped[dest_file] = (fe.oid, fe.mode)
+            elif mode == "contents":
+                walk_path = repo_path or None
+                for dirpath, _dirs, files in source.walk(walk_path):
+                    for fe in files:
+                        store_path = f"{dirpath}/{fe.name}" if dirpath else fe.name
+                        if repo_path and store_path.startswith(repo_path + "/"):
+                            rel = store_path[len(repo_path) + 1:]
+                        else:
+                            rel = store_path
+                        dest_file = f"{_dest}/{rel}" if _dest else rel
+                        dest_file = _normalize_path(dest_file)
+                        src_mapped[dest_file] = (fe.oid, fe.mode)
+
+        # Determine the dest subtree(s) to walk for delete support.
+        # For delete mode we need to know what's currently under the dest
+        # area(s) so we can remove files not present in source.
+        dest_files: dict[str, tuple[bytes, int]] = {}
+        if delete or src_mapped:
+            # Walk all destination areas that are covered by source mappings
+            dest_prefixes: set[str] = set()
+            for repo_path, mode, prefix in resolved:
+                _dest = "/".join(p for p in (dest, prefix) if p)
+                if mode == "dir":
+                    dirname = repo_path.rsplit("/", 1)[-1]
+                    dest_prefixes.add(f"{_dest}/{dirname}" if _dest else dirname)
+                else:
+                    dest_prefixes.add(_dest)
+
+            for dp in dest_prefixes:
+                for rel, entry in _walk_repo(self, dp).items():
+                    full = f"{dp}/{rel}" if dp else rel
+                    dest_files[full] = entry
 
         # Build writes and removes
         writes: dict[str, tuple[bytes, int]] = {}
         removes: set[str] = set()
 
-        for rel, (oid, mode) in src_files.items():
-            full = f"{dest_path}/{rel}" if dest_path else rel
-            dest_entry = dest_files.get(rel)
-            if dest_entry is None:
-                # add
-                writes[full] = (BlobOid(oid), mode)
-            elif dest_entry != (oid, mode):
-                # update
-                writes[full] = (BlobOid(oid), mode)
+        for dest_path, (oid, mode) in src_mapped.items():
+            dest_entry = dest_files.get(dest_path)
+            if dest_entry is None or dest_entry != (oid, mode):
+                writes[dest_path] = (BlobOid(oid), mode)
 
         if delete:
-            for rel in dest_files:
-                if rel not in src_files:
-                    full = f"{dest_path}/{rel}" if dest_path else rel
+            for full in dest_files:
+                if full not in src_mapped:
                     removes.add(full)
 
         if dry_run:

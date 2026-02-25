@@ -420,7 +420,7 @@ Deno.test('copyFromRef dry run reports changes', async () => {
     main = await main.write('new/f.txt', toBytes('fff'));
 
     const dev = await store.branches.get('dev');
-    const result = await dev.copyFromRef(main, 'new', null, { dryRun: true });
+    const result = await dev.copyFromRef(main, 'new', '', { dryRun: true });
     const changes = result.changes;
     assert(changes !== null);
     assert((changes as any).add.length > 0);

@@ -250,7 +250,7 @@ async function diskGlobWalk(
 // ---------------------------------------------------------------------------
 
 type ResolvedSource = { localPath: string; mode: 'file' | 'dir' | 'contents'; prefix: string };
-type ResolvedRepoSource = { repoPath: string; mode: 'file' | 'dir' | 'contents'; prefix: string };
+export type ResolvedRepoSource = { repoPath: string; mode: 'file' | 'dir' | 'contents'; prefix: string };
 
 async function resolveDiskSources(
   fsModule: FsModule,
@@ -287,7 +287,7 @@ async function resolveDiskSources(
   return resolved;
 }
 
-async function resolveRepoSources(
+export async function resolveRepoSources(
   fs: FS,
   sources: string[],
 ): Promise<ResolvedRepoSource[]> {
