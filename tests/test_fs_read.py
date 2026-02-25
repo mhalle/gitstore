@@ -284,10 +284,9 @@ class TestPathLikeSupport:
         fs2 = fs.remove(PurePosixPath("hello.txt"))
         assert not fs2.exists("hello.txt")
 
-    def test_open_with_path(self, repo_with_files):
+    def test_read_with_path(self, repo_with_files):
         _, fs = repo_with_files
-        with fs.open(PurePosixPath("hello.txt"), "rb") as f:
-            assert f.read() == b"Hello!"
+        assert fs.read(PurePosixPath("hello.txt")) == b"Hello!"
 
 
 class TestProperties:

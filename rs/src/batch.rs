@@ -82,6 +82,16 @@ impl Batch {
         Ok(())
     }
 
+    /// Return a buffered [`BatchWriter`](crate::fileobj::BatchWriter) that
+    /// stages to this batch on close.
+    ///
+    /// The writer implements [`std::io::Write`], so you can use `write_all` etc.
+    pub fn writer(&mut self, path: &str) -> Result<crate::fileobj::BatchWriter<'_>> {
+        self.require_open()?;
+        let normalized = crate::paths::normalize_path(path)?;
+        Ok(crate::fileobj::BatchWriter::new(self, normalized))
+    }
+
     /// Mark `path` for removal.
     pub fn remove(&mut self, path: &str) -> Result<()> {
         self.require_open()?;

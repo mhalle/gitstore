@@ -29,6 +29,7 @@
 export { GitStore } from './gitstore.js';
 export { FS, retryWrite } from './fs.js';
 export { Batch } from './batch.js';
+export { FsWriter, BatchWriter } from './fileobj.js';
 export { RefDict } from './refdict.js';
 export { NoteDict, NoteNamespace, NotesBatch } from './notes.js';
 

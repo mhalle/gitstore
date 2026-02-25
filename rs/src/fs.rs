@@ -820,6 +820,19 @@ impl Fs {
         }
     }
 
+    /// Return a buffered [`FsWriter`](crate::fileobj::FsWriter) that commits
+    /// on close.
+    ///
+    /// The writer implements [`std::io::Write`], so you can use `write_all` etc.
+    ///
+    /// # Errors
+    /// Returns [`Error::Permission`] if this snapshot is read-only.
+    pub fn writer(&self, path: &str) -> Result<crate::fileobj::FsWriter> {
+        self.require_writable("write to")?;
+        let normalized = crate::paths::normalize_path(path)?;
+        Ok(crate::fileobj::FsWriter::new(self.clone(), normalized))
+    }
+
     // -- Copy / sync --------------------------------------------------------
 
     /// Copy local files from disk into the repo.

@@ -34,6 +34,7 @@
 pub mod batch;
 pub mod copy;
 pub mod error;
+pub mod fileobj;
 pub mod fs;
 pub mod glob;
 pub mod lock;
@@ -53,5 +54,6 @@ pub use fs::Fs;
 pub use batch::Batch;
 pub use refdict::RefDict;
 pub use notes::{NoteDict, NoteNamespace, NotesBatch};
+pub use fileobj::{FsWriter, BatchWriter};
 pub use types::*;
 pub use copy::disk_glob;

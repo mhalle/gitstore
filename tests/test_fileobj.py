@@ -13,59 +13,17 @@ def repo_fs(tmp_path):
     return repo, fs
 
 
-class TestReadableFile:
-    def test_read_context_manager(self, repo_fs):
-        _, fs = repo_fs
-        with fs.open("hello.txt", "rb") as f:
-            data = f.read()
-        assert data == b"Hello World"
-
-    def test_read_partial(self, repo_fs):
-        _, fs = repo_fs
-        with fs.open("hello.txt", "rb") as f:
-            assert f.read(5) == b"Hello"
-            assert f.read(6) == b" World"
-
-    def test_seek_tell(self, repo_fs):
-        _, fs = repo_fs
-        with fs.open("hello.txt", "rb") as f:
-            f.seek(6)
-            assert f.tell() == 6
-            assert f.read() == b"World"
-
-    def test_read_missing_raises(self, repo_fs):
-        _, fs = repo_fs
-        with pytest.raises(FileNotFoundError):
-            fs.open("nope.txt", "rb")
-
-    def test_readable_properties(self, repo_fs):
-        _, fs = repo_fs
-        with fs.open("hello.txt", "rb") as f:
-            assert f.readable()
-            assert not f.writable()
-            assert f.seekable()
-            assert not f.closed
-        assert f.closed
-
-    def test_read_after_close_raises(self, repo_fs):
-        _, fs = repo_fs
-        f = fs.open("hello.txt", "rb")
-        f.close()
-        with pytest.raises(ValueError):
-            f.read()
-
-
 class TestWritableFile:
     def test_write_context_manager(self, repo_fs):
         _, fs = repo_fs
-        with fs.open("new.txt", "wb") as f:
+        with fs.writer("new.txt") as f:
             f.write(b"New content")
         assert f.fs is not None
         assert f.fs.read("new.txt") == b"New content"
 
     def test_fs_attribute(self, repo_fs):
         _, fs = repo_fs
-        with fs.open("x.txt", "wb") as f:
+        with fs.writer("x.txt") as f:
             f.write(b"x")
         new_fs = f.fs
         assert new_fs.exists("x.txt")
@@ -74,7 +32,7 @@ class TestWritableFile:
     def test_exception_no_commit(self, repo_fs):
         _, fs = repo_fs
         try:
-            with fs.open("fail.txt", "wb") as f:
+            with fs.writer("fail.txt") as f:
                 f.write(b"data")
                 raise RuntimeError("oops")
         except RuntimeError:
@@ -87,16 +45,16 @@ class TestWritableFile:
         repo.tags["v1"] = fs
         tag_fs = repo.tags["v1"]
         with pytest.raises(PermissionError):
-            tag_fs.open("x.txt", "wb")
+            tag_fs.writer("x.txt")
 
-    def test_invalid_open_mode(self, repo_fs):
+    def test_invalid_writer_mode(self, repo_fs):
         _, fs = repo_fs
         with pytest.raises(ValueError):
-            fs.open("hello.txt", "a")
+            fs.writer("hello.txt", "a")
 
     def test_close_commits(self, repo_fs):
         _, fs = repo_fs
-        f = fs.open("closed.txt", "wb")
+        f = fs.writer("closed.txt")
         f.write(b"via close")
         f.close()
         assert f.fs is not None
@@ -104,7 +62,7 @@ class TestWritableFile:
 
     def test_write_after_close_raises(self, repo_fs):
         _, fs = repo_fs
-        f = fs.open("closed.txt", "wb")
+        f = fs.writer("closed.txt")
         f.write(b"data")
         f.close()
         with pytest.raises(ValueError):
@@ -112,7 +70,7 @@ class TestWritableFile:
 
     def test_double_close_is_idempotent(self, repo_fs):
         _, fs = repo_fs
-        f = fs.open("closed.txt", "wb")
+        f = fs.writer("closed.txt")
         f.write(b"data")
         f.close()
         first_hash = f.fs.commit_hash
@@ -121,10 +79,29 @@ class TestWritableFile:
 
     def test_writable_properties(self, repo_fs):
         _, fs = repo_fs
-        f = fs.open("new.txt", "wb")
+        f = fs.writer("new.txt")
         assert not f.readable()
         assert f.writable()
         assert not f.seekable()
         assert not f.closed
         f.close()
         assert f.closed
+
+    def test_writer_text_mode(self, repo_fs):
+        _, fs = repo_fs
+        with fs.writer("x.txt", "w") as f:
+            f.write("hello ")
+            f.write("world")
+        assert f.fs.read("x.txt") == b"hello world"
+
+    def test_writer_text_rejects_bytes(self, repo_fs):
+        _, fs = repo_fs
+        with pytest.raises(TypeError, match="expected str"):
+            with fs.writer("x.txt", "w") as f:
+                f.write(b"oops")
+
+    def test_writer_binary_rejects_str(self, repo_fs):
+        _, fs = repo_fs
+        with pytest.raises(TypeError, match="expected bytes"):
+            with fs.writer("x.txt") as f:
+                f.write("oops")

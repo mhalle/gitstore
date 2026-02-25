@@ -47,6 +47,7 @@ import { globMatch } from './glob.js';
 import { withRepoLock } from './lock.js';
 import { readReflog, writeReflogEntry, ZERO_SHA } from './reflog.js';
 import { Batch } from './batch.js';
+import { FsWriter } from './fileobj.js';
 
 import type { GitStore } from './gitstore.js';
 
@@ -938,6 +939,20 @@ export class FS {
    */
   batch(opts?: { message?: string; operation?: string }): Batch {
     return new Batch(this, opts?.message, opts?.operation);
+  }
+
+  /**
+   * Return a buffered writer that commits on close.
+   *
+   * Accepts `Uint8Array` or `string` via `write()`. Strings are UTF-8 encoded.
+   *
+   * @param path - Destination path in the repo.
+   * @returns An FsWriter instance. Call `close()` to flush and commit.
+   * @throws {PermissionError} If this snapshot is read-only.
+   */
+  writer(path: string): FsWriter {
+    if (!this._writable) throw this._readonlyError('write to');
+    return new FsWriter(this, path);
   }
 
   // ---------------------------------------------------------------------------

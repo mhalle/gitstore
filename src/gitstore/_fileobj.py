@@ -10,59 +10,14 @@ if TYPE_CHECKING:
     from .batch import Batch
 
 
-class ReadableFile:
-    """Read-only file-like object wrapping bytes."""
-
-    def __init__(self, data: bytes):
-        self._buf = io.BytesIO(data)
-        self._closed = False
-
-    @property
-    def closed(self) -> bool:
-        return self._closed
-
-    def readable(self) -> bool:
-        return True
-
-    def writable(self) -> bool:
-        return False
-
-    def seekable(self) -> bool:
-        return True
-
-    def read(self, size: int = -1) -> bytes:
-        if self._closed:
-            raise ValueError("I/O operation on closed file.")
-        return self._buf.read(size)
-
-    def seek(self, offset: int, whence: int = 0) -> int:
-        if self._closed:
-            raise ValueError("I/O operation on closed file.")
-        return self._buf.seek(offset, whence)
-
-    def tell(self) -> int:
-        if self._closed:
-            raise ValueError("I/O operation on closed file.")
-        return self._buf.tell()
-
-    def close(self) -> None:
-        self._closed = True
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.close()
-        return False
-
-
 class WritableFile:
     """Writable file-like object that commits on close."""
 
-    def __init__(self, fs: FS, path: str):
+    def __init__(self, fs: FS, path: str, encoding: str | None = None):
         self._fs = fs
         self._path = path
         self._buf = io.BytesIO()
+        self._encoding = encoding
         self._closed = False
         self.fs: FS | None = None
 
@@ -79,9 +34,15 @@ class WritableFile:
     def seekable(self) -> bool:
         return False
 
-    def write(self, data: bytes) -> int:
+    def write(self, data: bytes | str) -> int:
         if self._closed:
             raise ValueError("I/O operation on closed file.")
+        if self._encoding:
+            if not isinstance(data, str):
+                raise TypeError("expected str for text mode writer")
+            data = data.encode(self._encoding)
+        elif not isinstance(data, (bytes, bytearray, memoryview)):
+            raise TypeError("expected bytes for binary mode writer")
         return self._buf.write(data)
 
     def close(self) -> None:
@@ -103,10 +64,11 @@ class WritableFile:
 class BatchWritableFile:
     """Writable file-like object that stages to a batch on close."""
 
-    def __init__(self, batch: Batch, path: str):
+    def __init__(self, batch: Batch, path: str, encoding: str | None = None):
         self._batch = batch
         self._path = path
         self._buf = io.BytesIO()
+        self._encoding = encoding
         self._closed = False
 
     @property
@@ -122,9 +84,15 @@ class BatchWritableFile:
     def seekable(self) -> bool:
         return False
 
-    def write(self, data: bytes) -> int:
+    def write(self, data: bytes | str) -> int:
         if self._closed:
             raise ValueError("I/O operation on closed file.")
+        if self._encoding:
+            if not isinstance(data, str):
+                raise TypeError("expected str for text mode writer")
+            data = data.encode(self._encoding)
+        elif not isinstance(data, (bytes, bytearray, memoryview)):
+            raise TypeError("expected bytes for binary mode writer")
         return self._buf.write(data)
 
     def close(self) -> None:

@@ -95,7 +95,6 @@ gitstore has four ways to move data. They differ in **what** they transfer and *
         - read_text
         - read_by_hash
         - readlink
-        - open
 
 ### Listing & Search
 
@@ -119,6 +118,7 @@ gitstore has four ways to move data. They differ in **what** they transfer and *
         - write_text
         - write_from_file
         - write_symlink
+        - writer
         - batch
 
 ### Bulk Operations
@@ -168,7 +168,7 @@ gitstore has four ways to move data. They differ in **what** they transfer and *
         - write_text
         - write_symlink
         - remove
-        - open
+        - writer
         - commit
 
 ---

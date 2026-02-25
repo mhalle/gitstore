@@ -102,7 +102,6 @@ Some Python modules have no TypeScript counterpart by design:
 | `auto_create` | CLI auto-create repo feature |
 | `backup_restore` | requires local HTTP transport |
 | `exclude` | `ExcludeFilter` not implemented in TS |
-| `fileobj` | `.open()` file objects (sync context manager) |
 | `objsize` | dulwich-specific `ObjectSizer` |
 | `ref_path` | CLI `ref:path` parsing |
 

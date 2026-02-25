@@ -114,9 +114,8 @@ for dirpath, dirnames, file_entries in fs.walk():
 # Glob
 matches = fs.glob("**/*.py")                 # sorted list of matching paths
 
-# File-like object
-with fs.open("data.bin", "rb") as f:
-    header = f.read(4)
+# Partial read (offset + size)
+header = fs.read("data.bin", offset=0, size=4)
 ```
 
 ### Writing
@@ -133,6 +132,24 @@ fs = fs.write("image.png", raw_bytes)                       # binary data
 fs = fs.write_from_file("big.bin", "/data/big.bin")         # from disk
 fs = fs.write_symlink("link", "target")                     # symlink
 fs = fs.remove("old-file.txt")
+
+# Buffered write (commits on close)
+with fs.writer("big.bin") as f:
+    f.write(chunk1)
+    f.write(chunk2)
+fs = f.fs
+
+# Text mode
+with fs.writer("log.txt", "w") as f:
+    f.write("line 1\n")
+    f.write("line 2\n")
+fs = f.fs
+
+# Inside a batch
+with fs.batch() as b:
+    with b.writer("streamed.bin") as f:
+        for chunk in source:
+            f.write(chunk)
 ```
 
 The original `FS` is never mutated:

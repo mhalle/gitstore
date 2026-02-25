@@ -131,18 +131,31 @@ class Batch:
         if exists_in_base:
             self._removes.add(path)
 
-    def open(self, path: str | os.PathLike[str], mode: str = "wb"):
-        """Open a writable file-like that stages on close.
+    def writer(self, path: str | os.PathLike[str], mode: str = "wb"):
+        """Return a writable file-like that stages to the batch on close.
+
+        ``"wb"`` accepts bytes; ``"w"`` accepts strings (UTF-8 encoded).
+
+        Example::
+
+            with fs.batch() as b:
+                with b.writer("log.txt", "w") as f:
+                    f.write("line 1\\n")
+                    f.write("line 2\\n")
 
         Args:
             path: Destination path in the repo.
-            mode: Only ``"wb"`` is supported.
+            mode: ``"wb"`` (binary, default) or ``"w"`` (text).
         """
         self._check_open()
-        if mode != "wb":
-            raise ValueError(f"Batch open only supports 'wb' mode, got {mode!r}")
-        from ._fileobj import BatchWritableFile
-        return BatchWritableFile(self, path)
+        if mode == "wb":
+            from ._fileobj import BatchWritableFile
+            return BatchWritableFile(self, path)
+        elif mode == "w":
+            from ._fileobj import BatchWritableFile
+            return BatchWritableFile(self, path, encoding="utf-8")
+        else:
+            raise ValueError(f"writer() mode must be 'wb' or 'w', got {mode!r}")
 
     def commit(self) -> FS:
         """Explicitly commit the batch, like ``__exit__`` with no exception.

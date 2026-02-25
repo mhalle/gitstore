@@ -4,6 +4,21 @@ All notable changes to gitstore are documented in this file.
 
 ## Unreleased
 
+## v0.61.0 / TS v0.5.0 / Rust v0.5.0 (2025-02-25)
+
+**Breaking (all languages):**
+
+- Remove `FS.open()` and `Batch.open()` — use `FS.writer()` / `Batch.writer()` instead
+- Remove `ReadableFile` class (Python) — use `fs.read()` with `offset`/`size` for partial reads
+
+**Added (all languages):**
+
+- `FS.writer(path)` — returns a buffered writer that commits on close
+- `Batch.writer(path)` — returns a buffered writer that stages to the batch on close
+- Python: text mode support via `writer(path, "w")` (UTF-8); binary mode via `writer(path, "wb")` (default)
+- TypeScript: `FsWriter` and `BatchWriter` classes accept `Uint8Array` or `string`
+- Rust: `FsWriter` and `BatchWriter` implement `std::io::Write`; auto-commit/stage on `Drop`
+
 ## v0.60.2 (2026-02-24)
 
 **All languages:**

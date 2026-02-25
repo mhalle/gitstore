@@ -15,6 +15,7 @@ import {
 import { normalizePath } from './paths.js';
 import { modeFromDisk, walkTo, existsAtPath, type TreeWrite } from './tree.js';
 
+import { BatchWriter } from './fileobj.js';
 import type { FS } from './fs.js';
 import type { GitStore } from './gitstore.js';
 
@@ -147,6 +148,19 @@ export class Batch {
     if (existsInBase) {
       this._removes.add(normalized);
     }
+  }
+
+  /**
+   * Return a buffered writer that stages to this batch on close.
+   *
+   * Accepts `Uint8Array` or `string` via `write()`. Strings are UTF-8 encoded.
+   *
+   * @param path - Destination path in the repo.
+   * @returns A BatchWriter instance. Call `close()` to flush and stage.
+   */
+  writer(path: string): BatchWriter {
+    this._checkOpen();
+    return new BatchWriter(this, path);
   }
 
   /**

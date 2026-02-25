@@ -92,18 +92,18 @@ class TestBatch:
             b.write("a.txt", b"rewritten")
         assert b.fs.read("a.txt") == b"rewritten"
 
-    def test_batch_open(self, repo_fs):
+    def test_batch_writer(self, repo_fs):
         _, fs = repo_fs
         with fs.batch() as b:
-            with b.open("via_file.txt", "wb") as f:
+            with b.writer("via_file.txt") as f:
                 f.write(b"file data")
         assert b.fs.read("via_file.txt") == b"file data"
 
-    def test_invalid_batch_open_mode(self, repo_fs):
+    def test_invalid_batch_writer_mode(self, repo_fs):
         _, fs = repo_fs
         with fs.batch() as b:
             with pytest.raises(ValueError):
-                b.open("x.txt", "rb")
+                b.writer("x.txt", "rb")
 
     def test_write_after_exit_raises(self, repo_fs):
         _, fs = repo_fs
@@ -119,20 +119,28 @@ class TestBatch:
         with pytest.raises(RuntimeError):
             b.remove("a.txt")
 
-    def test_open_after_exit_raises(self, repo_fs):
+    def test_writer_after_exit_raises(self, repo_fs):
         _, fs = repo_fs
         with fs.batch() as b:
             pass
         with pytest.raises(RuntimeError):
-            b.open("x.txt")
+            b.writer("x.txt")
 
-    def test_batch_file_close_outside_context(self, repo_fs):
+    def test_batch_writer_close_outside_context(self, repo_fs):
         _, fs = repo_fs
         with fs.batch() as b:
-            f = b.open("via_close.txt", "wb")
+            f = b.writer("via_close.txt")
             f.write(b"closed data")
             f.close()
         assert b.fs.read("via_close.txt") == b"closed data"
+
+    def test_batch_writer_text_mode(self, repo_fs):
+        _, fs = repo_fs
+        with fs.batch() as b:
+            with b.writer("log.txt", "w") as f:
+                f.write("line 1\n")
+                f.write("line 2\n")
+        assert b.fs.read("log.txt") == b"line 1\nline 2\n"
 
     def test_remove_directory_raises(self, repo_fs):
         _, fs = repo_fs

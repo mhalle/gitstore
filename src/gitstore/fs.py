@@ -520,29 +520,35 @@ class FS:
             raise ValueError(f"Not a symlink: {path}")
         return self._store._repo[_oid].data.decode()
 
-    def open(self, path: str | os.PathLike[str], mode: str = "rb"):
-        """Open a file-like object for reading or writing.
+    def writer(self, path: str | os.PathLike[str], mode: str = "wb"):
+        """Return a writable file-like that commits on close.
 
-        ``"rb"`` returns a readable, seekable file.  ``"wb"`` returns a
-        writable file that commits on close (new FS available via ``f.fs``).
+        ``"wb"`` accepts bytes; ``"w"`` accepts strings (UTF-8 encoded).
+
+        Example::
+
+            with fs.writer("output.bin") as f:
+                f.write(b"chunk1")
+                f.write(b"chunk2")
+            fs = f.fs  # new snapshot
 
         Args:
-            path: File path in the repo.
-            mode: ``"rb"`` (default) or ``"wb"``.
+            path: Destination path in the repo.
+            mode: ``"wb"`` (binary, default) or ``"w"`` (text).
 
         Raises:
-            PermissionError: If *mode* is ``"wb"`` and the snapshot is read-only.
+            PermissionError: If the snapshot is read-only.
         """
-        if mode == "rb":
-            from ._fileobj import ReadableFile
-            return ReadableFile(self.read(path))
-        elif mode == "wb":
-            if not self._writable:
-                raise self._readonly_error("write to")
+        if not self._writable:
+            raise self._readonly_error("write to")
+        if mode == "wb":
             from ._fileobj import WritableFile
-            return WritableFile(self, path)
+            return WritableFile(self, str(path))
+        elif mode == "w":
+            from ._fileobj import WritableFile
+            return WritableFile(self, str(path), encoding="utf-8")
         else:
-            raise ValueError(f"Unsupported mode: {mode!r}")
+            raise ValueError(f"writer() mode must be 'wb' or 'w', got {mode!r}")
 
     # --- Write operations ---
 
