@@ -682,7 +682,8 @@ class Fs internal constructor(
         dest: String,
         message: String? = null,
         delete: Boolean = false,
-    ): Fs = CopyOps.copyIn(this, sources, dest, message = message, delete = delete)
+        exclude: ExcludeFilter? = null,
+    ): Fs = CopyOps.copyIn(this, sources, dest, message = message, delete = delete, exclude = exclude)
 
     /**
      * Copy repo files to local disk.
@@ -705,7 +706,8 @@ class Fs internal constructor(
         localPath: String,
         repoPath: String,
         message: String? = null,
-    ): Fs = CopyOps.syncIn(this, localPath, repoPath, message = message)
+        exclude: ExcludeFilter? = null,
+    ): Fs = CopyOps.syncIn(this, localPath, repoPath, message = message, exclude = exclude)
 
     /**
      * Make local_path identical to repo_path (including deletes).

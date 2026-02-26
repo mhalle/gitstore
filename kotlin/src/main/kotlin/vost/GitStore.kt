@@ -33,6 +33,26 @@ class GitStore private constructor(
         repo.close()
     }
 
+    /**
+     * Push all refs to url, creating an exact mirror (backup).
+     *
+     * @param url Destination URL (local path or remote).
+     * @param dryRun If true, compute diff but don't push.
+     * @return MirrorDiff describing what changed (or would change).
+     */
+    fun backup(url: String, dryRun: Boolean = false): MirrorDiff =
+        MirrorOps.backup(this, url, dryRun)
+
+    /**
+     * Fetch all refs from url, overwriting local state (restore).
+     *
+     * @param url Source URL (local path or remote).
+     * @param dryRun If true, compute diff but don't fetch.
+     * @return MirrorDiff describing what changed (or would change).
+     */
+    fun restore(url: String, dryRun: Boolean = false): MirrorDiff =
+        MirrorOps.restore(this, url, dryRun)
+
     companion object {
         /**
          * Open or create a bare git repository.

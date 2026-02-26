@@ -26,15 +26,15 @@ class BatchTest {
     }
 
     @Test
-    fun `batch result is set after commit`() {
+    fun `batch fs is set after commit`() {
         val store = createStore()
         store.use {
             val fs = it.branches["main"]
             val batch = fs.batch()
-            assertNull(batch.result)
+            assertNull(batch.fs)
             batch.write("file.txt", "data".toByteArray())
             batch.commit()
-            assertNotNull(batch.result)
+            assertNotNull(batch.fs)
         }
     }
 
@@ -46,8 +46,8 @@ class BatchTest {
             val batch = fs.batch()
             batch.write("file.txt", "data".toByteArray())
             batch.close()
-            assertNotNull(batch.result)
-            assertEquals("data", batch.result!!.readText("file.txt"))
+            assertNotNull(batch.fs)
+            assertEquals("data", batch.fs!!.readText("file.txt"))
         }
     }
 

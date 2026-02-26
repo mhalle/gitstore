@@ -211,7 +211,13 @@ data class MirrorDiff(
     val add: List<RefChange> = emptyList(),
     val update: List<RefChange> = emptyList(),
     val delete: List<RefChange> = emptyList(),
-)
+) {
+    /** True if there are no changes. */
+    val inSync: Boolean get() = add.isEmpty() && update.isEmpty() && delete.isEmpty()
+
+    /** Total number of ref changes. */
+    val total: Int get() = add.size + update.size + delete.size
+}
 
 /**
  * A single ref change in a mirror operation.

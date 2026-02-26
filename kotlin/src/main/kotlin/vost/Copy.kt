@@ -17,21 +17,28 @@ internal object CopyOps {
     /**
      * Walk local files recursively, returning relative paths.
      */
-    private fun walkLocalPaths(dir: String): Set<String> {
+    private fun walkLocalPaths(dir: String, exclude: ExcludeFilter? = null): Set<String> {
         val base = File(dir)
         if (!base.isDirectory) return emptySet()
         val result = mutableSetOf<String>()
-        walkLocalRecursive(base, base, result)
+        walkLocalRecursive(base, base, result, exclude)
         return result
     }
 
-    private fun walkLocalRecursive(base: File, current: File, result: MutableSet<String>) {
+    private fun walkLocalRecursive(
+        base: File,
+        current: File,
+        result: MutableSet<String>,
+        exclude: ExcludeFilter? = null,
+    ) {
         val entries = current.listFiles() ?: return
         for (f in entries) {
+            val rel = f.relativeTo(base).path.replace(File.separatorChar, '/')
             if (f.isDirectory) {
-                walkLocalRecursive(base, f, result)
+                if (exclude != null && exclude.active && exclude.isExcluded(rel, isDir = true)) continue
+                walkLocalRecursive(base, f, result, exclude)
             } else {
-                val rel = f.relativeTo(base).path.replace(File.separatorChar, '/')
+                if (exclude != null && exclude.active && exclude.isExcluded(rel, isDir = false)) continue
                 result.add(rel)
             }
         }
@@ -68,6 +75,7 @@ internal object CopyOps {
     private fun resolveDiskToRepo(
         sources: List<String>,
         dest: String,
+        exclude: ExcludeFilter? = null,
     ): List<Pair<String, String>> {
         val destNorm = if (dest.isNotEmpty()) normalizePath(dest.trimEnd('/')) else ""
         val pairs = mutableListOf<Pair<String, String>>()
@@ -83,7 +91,7 @@ internal object CopyOps {
             } else if (srcPath.isDirectory) {
                 if (isContents) {
                     // Contents mode: pour contents into dest
-                    walkLocalRecursiveFiles(srcPath) { relPath ->
+                    walkLocalRecursiveFiles(srcPath, exclude) { relPath ->
                         val repoPath = if (destNorm.isEmpty()) relPath else "$destNorm/$relPath"
                         pairs.add(Pair(File(srcPath, relPath).absolutePath, repoPath))
                     }
@@ -91,7 +99,7 @@ internal object CopyOps {
                     // Directory mode: place dir inside dest
                     val dirName = srcPath.name
                     val targetBase = if (destNorm.isEmpty()) dirName else "$destNorm/$dirName"
-                    walkLocalRecursiveFiles(srcPath) { relPath ->
+                    walkLocalRecursiveFiles(srcPath, exclude) { relPath ->
                         pairs.add(Pair(File(srcPath, relPath).absolutePath, "$targetBase/$relPath"))
                     }
                 }
@@ -100,17 +108,28 @@ internal object CopyOps {
         return pairs
     }
 
-    private fun walkLocalRecursiveFiles(dir: File, handler: (String) -> Unit) {
-        walkLocalFilesInner(dir, dir, handler)
+    private fun walkLocalRecursiveFiles(
+        dir: File,
+        exclude: ExcludeFilter? = null,
+        handler: (String) -> Unit,
+    ) {
+        walkLocalFilesInner(dir, dir, exclude, handler)
     }
 
-    private fun walkLocalFilesInner(base: File, current: File, handler: (String) -> Unit) {
+    private fun walkLocalFilesInner(
+        base: File,
+        current: File,
+        exclude: ExcludeFilter? = null,
+        handler: (String) -> Unit,
+    ) {
         val entries = current.listFiles()?.sortedBy { it.name } ?: return
         for (f in entries) {
+            val rel = f.relativeTo(base).path.replace(File.separatorChar, '/')
             if (f.isDirectory) {
-                walkLocalFilesInner(base, f, handler)
+                if (exclude != null && exclude.active && exclude.isExcluded(rel, isDir = true)) continue
+                walkLocalFilesInner(base, f, exclude, handler)
             } else {
-                val rel = f.relativeTo(base).path.replace(File.separatorChar, '/')
+                if (exclude != null && exclude.active && exclude.isExcluded(rel, isDir = false)) continue
                 handler(rel)
             }
         }
@@ -124,8 +143,9 @@ internal object CopyOps {
         dest: String,
         message: String? = null,
         delete: Boolean = false,
+        exclude: ExcludeFilter? = null,
     ): Fs {
-        val pairs = resolveDiskToRepo(sources, dest)
+        val pairs = resolveDiskToRepo(sources, dest, exclude)
 
         if (delete) {
             val destNorm = if (dest.isNotEmpty()) normalizePath(dest.trimEnd('/')) else ""
@@ -277,9 +297,10 @@ internal object CopyOps {
         localPath: String,
         repoPath: String,
         message: String? = null,
+        exclude: ExcludeFilter? = null,
     ): Fs {
         val src = if (localPath.endsWith("/")) localPath else "$localPath/"
-        return copyIn(fs, listOf(src), repoPath, message = message, delete = true)
+        return copyIn(fs, listOf(src), repoPath, message = message, delete = true, exclude = exclude)
     }
 
     // ── Sync Out ─────────────────────────────────────────────────────

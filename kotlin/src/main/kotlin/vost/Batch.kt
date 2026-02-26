@@ -10,7 +10,7 @@ import org.eclipse.jgit.lib.FileMode
  * if an exception occurs.
  */
 class Batch internal constructor(
-    private val fs: Fs,
+    private val _fs: Fs,
     private val message: String?,
     private val operation: String?,
 ) : AutoCloseable {
@@ -20,11 +20,8 @@ class Batch internal constructor(
     private var closed = false
 
     /** The resulting Fs after commit, or null if uncommitted or aborted. */
-    var result: Fs? = null
+    var fs: Fs? = null
         private set
-
-    /** Alias for result — the resulting Fs after commit. */
-    val resultFs: Fs? get() = result
 
     private fun checkOpen() {
         if (closed) throw IllegalStateException("Batch is closed")
@@ -35,7 +32,7 @@ class Batch internal constructor(
         checkOpen()
         val normalized = normalizePath(path)
         val filemode = mode?.filemode() ?: GIT_FILEMODE_BLOB
-        val inserter = fs.store.repo.newObjectInserter()
+        val inserter = _fs.store.repo.newObjectInserter()
         try {
             val blobId = inserter.insert(Constants.OBJ_BLOB, data)
             inserter.flush()
@@ -59,7 +56,7 @@ class Batch internal constructor(
     fun writeSymlink(path: String, target: String) {
         checkOpen()
         val normalized = normalizePath(path)
-        val inserter = fs.store.repo.newObjectInserter()
+        val inserter = _fs.store.repo.newObjectInserter()
         try {
             val blobId = inserter.insert(Constants.OBJ_BLOB, target.toByteArray(Charsets.UTF_8))
             inserter.flush()
@@ -81,14 +78,14 @@ class Batch internal constructor(
         checkOpen()
         val normalized = normalizePath(path)
         val pendingWrite = writes.any { it.first == normalized }
-        val existsInBase = existsAtPath(fs.store.repo, fs.treeId, normalized)
+        val existsInBase = existsAtPath(_fs.store.repo, _fs.treeId, normalized)
 
         if (!pendingWrite && !existsInBase) {
             throw java.io.FileNotFoundException(normalized)
         }
 
         if (existsInBase) {
-            val (_, mode) = walkTo(fs.store.repo, fs.treeId, normalized)
+            val (_, mode) = walkTo(_fs.store.repo, _fs.treeId, normalized)
             if (mode == FileMode.TREE.bits) throw IsADirectoryException(normalized)
         }
 
@@ -119,24 +116,24 @@ class Batch internal constructor(
         checkOpen()
 
         if (writes.isEmpty()) {
-            result = fs
+            fs = _fs
             closed = true
-            return fs
+            return _fs
         }
 
-        result = fs.commitChanges(writes, message, operation)
+        fs = _fs.commitChanges(writes, message, operation)
         closed = true
-        return result!!
+        return fs!!
     }
 
     override fun close() {
         if (closed) return
         if (writes.isEmpty()) {
-            result = fs
+            fs = _fs
             closed = true
             return
         }
-        result = fs.commitChanges(writes, message, operation)
+        fs = _fs.commitChanges(writes, message, operation)
         closed = true
     }
 }
