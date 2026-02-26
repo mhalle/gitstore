@@ -3,5 +3,15 @@ __pycache__/
 .venv/
 *.egg-info/
 
+# C++ build
+cpp/build/
+
+# Kotlin build
+kotlin/build/
+kotlin/.gradle/
+
+# Generated site
+site/
+
 # JediDB
 .jedidb/
