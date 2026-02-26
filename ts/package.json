@@ -1,6 +1,6 @@
 {
   "name": "vost",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "A versioned filesystem backed by a bare git repository",
   "type": "module",
   "main": "dist/index.js",

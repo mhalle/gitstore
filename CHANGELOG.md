@@ -4,6 +4,39 @@ All notable changes to vost are documented in this file.
 
 ## Unreleased
 
+## v0.63.0 / TS v0.7.0 / Rust v0.7.0 (2026-02-25)
+
+**Breaking (TypeScript):**
+
+- Rename `Batch.result` → `Batch.fs` and `FsWriter.result` → `FsWriter.fs` to match Python/C++/Rust naming
+
+**Breaking (C++):**
+
+- Rename `NoteNamespace::get_current()`/`set_current()` → `get_for_current_branch()`/`set_for_current_branch()`
+- Rename `Fs::move_paths()` → `Fs::move()`
+
+**Breaking (C++ + Rust):**
+
+- `ls()` now returns name strings (`vector<string>` / `Vec<String>`); use `listdir()` for `WalkEntry` objects
+- `walk()` now returns os.walk-style `WalkDirEntry` structs with `(dirpath, dirnames, files)` instead of flat `(path, entry)` pairs
+
+**Breaking (Rust):**
+
+- `RefDict::set_and_get()` now returns the new writable `Fs` (was `Option<Fs>` of the old value); `set_to()` deprecated
+
+**Added (C++ + Rust):**
+
+- `operation` parameter on `BatchOptions` and `ApplyOptions` — prefix for auto-generated commit messages
+- `WalkDirEntry` type for os.walk-style directory traversal
+
+**Added (C++):**
+
+- `Batch::fs()` accessor — retrieve the resulting `Fs` after `commit()`
+
+**Fixed (C++ + Rust):**
+
+- `ChangeReport.warnings` type corrected from `string` to `ChangeError`
+
 ## v0.62.0 / TS v0.6.0 / Rust v0.6.0 (2026-02-25)
 
 **Breaking (all languages):**
