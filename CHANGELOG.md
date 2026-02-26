@@ -4,6 +4,13 @@ All notable changes to vost are documented in this file.
 
 ## Unreleased
 
+## v0.67.1 / TS v0.8.2 (2026-02-26)
+
+**Docs (TypeScript):**
+
+- Rewrite ts/README.md with correct `@mhalle/vost` imports, full API examples, and Deno usage
+- Add ts/docs/api.md — complete TypeScript API reference covering all classes, methods, types, and error classes
+
 ## v0.67.0 (2026-02-26)
 
 **Added (all ports):**
