@@ -5,7 +5,7 @@ import json
 import sys
 from pathlib import Path
 
-from gitstore import GitStore, FileType
+from vost import GitStore, FileType
 
 
 def write_scenario(store, branch, spec):

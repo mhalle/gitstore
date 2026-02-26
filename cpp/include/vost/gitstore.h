@@ -1,0 +1,158 @@
+#pragma once
+
+#include "error.h"
+#include "notes.h"
+#include "types.h"
+
+#include <filesystem>
+#include <memory>
+#include <mutex>
+#include <string>
+
+// Forward-declare libgit2 types to avoid pulling the header into every TU.
+struct git_repository;
+
+namespace vost {
+
+class Fs;
+class RefDict;
+
+// ---------------------------------------------------------------------------
+// GitStoreInner — shared state (analogous to Rust's Arc<GitStoreInner>)
+// ---------------------------------------------------------------------------
+
+/// Internal state shared via shared_ptr across Fs copies.
+/// Not part of the public API.
+struct GitStoreInner {
+    git_repository*      repo;      ///< Raw libgit2 handle (owned).
+    std::filesystem::path path;     ///< Path to the bare repository.
+    Signature             signature; ///< Default commit signature.
+    std::mutex            mutex;    ///< Thread-level serialization.
+
+    // Non-copyable / non-movable — always accessed via shared_ptr.
+    GitStoreInner(const GitStoreInner&) = delete;
+    GitStoreInner& operator=(const GitStoreInner&) = delete;
+
+    ~GitStoreInner();
+    GitStoreInner(git_repository* r, std::filesystem::path p, Signature sig);
+};
+
+// ---------------------------------------------------------------------------
+// GitStore
+// ---------------------------------------------------------------------------
+
+/// A versioned filesystem backed by a bare git repository.
+///
+/// Cheap to copy — internally holds a shared_ptr<GitStoreInner>.
+///
+/// Usage:
+/// @code
+///     auto store = vost::GitStore::open("/path/to/repo.git");
+///     auto fs    = store.branches()["main"];
+///     auto text  = fs.read_text("README.md");
+/// @endcode
+class GitStore {
+public:
+    // -- Construction -------------------------------------------------------
+
+    /// Open (or create) a bare git repository at `path`.
+    ///
+    /// @param path  Path to the bare repository directory.
+    /// @param opts  OpenOptions controlling creation and defaults.
+    /// @throws NotFoundError if the repo does not exist and opts.create is false.
+    /// @throws GitError on libgit2 failures.
+    static GitStore open(const std::filesystem::path& path,
+                         OpenOptions opts = {});
+
+    // -- Navigation ---------------------------------------------------------
+
+    /// Return a RefDict for branches (refs/heads/).
+    RefDict branches();
+
+    /// Return a RefDict for tags (refs/tags/).
+    RefDict tags();
+
+    /// Return a detached (read-only) Fs for a commit identified by hex SHA.
+    Fs fs(const std::string& hash);
+
+    /// Return a NoteDict for accessing git notes.
+    NoteDict notes();
+
+    // -- Metadata -----------------------------------------------------------
+
+    /// Path to the bare repository on disk.
+    const std::filesystem::path& path() const;
+
+    /// The default signature used for commits.
+    const Signature& signature() const;
+
+    // -- Internal -----------------------------------------------------------
+
+    /// Access the shared inner state (used by Fs, RefDict, Batch).
+    std::shared_ptr<GitStoreInner> inner() const { return inner_; }
+
+private:
+    explicit GitStore(std::shared_ptr<GitStoreInner> inner);
+
+    std::shared_ptr<GitStoreInner> inner_;
+};
+
+// ---------------------------------------------------------------------------
+// RefDict
+// ---------------------------------------------------------------------------
+
+/// A transient view over a set of git references sharing a common prefix
+/// (e.g. refs/heads/ or refs/tags/).
+///
+/// Obtained via store.branches() or store.tags().
+class RefDict {
+public:
+    /// Get the Fs snapshot for the named branch or tag.
+    /// @throws NotFoundError if the ref does not exist.
+    Fs get(const std::string& name);
+
+    /// Convenience: same as get().
+    Fs operator[](const std::string& name);
+
+    /// Point the named ref at the commit of `fs`.
+    /// @throws InvalidRefNameError for bad ref names.
+    /// @throws KeyExistsError when overwriting a tag.
+    void set(const std::string& name, const Fs& fs);
+
+    /// Delete the named ref.
+    /// @throws KeyNotFoundError if the ref does not exist.
+    void del(const std::string& name);
+
+    /// Return true if the named ref exists.
+    bool contains(const std::string& name);
+
+    /// Return all ref names under this prefix (without prefix).
+    std::vector<std::string> keys();
+
+    /// Return all Fs snapshots under this prefix.
+    std::vector<Fs> values();
+
+    /// Get the current branch name (HEAD), or nullopt if not set.
+    /// Only meaningful for branches().
+    std::optional<std::string> current_name();
+
+    /// Get the current branch Fs (HEAD), or nullopt if not set.
+    std::optional<Fs> current();
+
+    /// Set HEAD to point at `name`. Only valid for branches().
+    void set_current(const std::string& name);
+
+    /// Return the reflog for the named ref (most-recent first).
+    std::vector<ReflogEntry> reflog(const std::string& name);
+
+    // -- Internal -----------------------------------------------------------
+    RefDict(std::shared_ptr<GitStoreInner> inner, std::string prefix,
+            bool writable);
+
+private:
+    std::shared_ptr<GitStoreInner> inner_;
+    std::string                    prefix_;   ///< e.g. "refs/heads/"
+    bool                           writable_; ///< true for branches
+};
+
+} // namespace vost

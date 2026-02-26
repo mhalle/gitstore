@@ -5,7 +5,7 @@ import json
 import sys
 from pathlib import Path
 
-from gitstore import GitStore, FileType
+from vost import GitStore, FileType
 
 
 def check_basic(fs, spec, name):
