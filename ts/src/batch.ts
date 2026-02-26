@@ -38,7 +38,7 @@ export class Batch {
   private _closed = false;
 
   /** The resulting FS snapshot after commit. Null until commit() completes. */
-  result: FS | null = null;
+  fs: FS | null = null;
 
   constructor(fs: FS, message?: string | null, operation?: string | null) {
     if (!fs._writable) {
@@ -176,16 +176,16 @@ export class Batch {
     this._closed = true;
 
     if (this._writes.size === 0 && this._removes.size === 0) {
-      this.result = this._fs;
+      this.fs = this._fs;
       return this._fs;
     }
 
-    this.result = await this._fs._commitChanges(
+    this.fs = await this._fs._commitChanges(
       this._writes,
       this._removes,
       this._message,
       this._operation,
     );
-    return this.result;
+    return this.fs;
   }
 }

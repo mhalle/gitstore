@@ -22,8 +22,8 @@ describe('FsWriter', () => {
     w.write(new Uint8Array([1, 2, 3]));
     w.write(new Uint8Array([4, 5]));
     await w.close();
-    expect(w.result).not.toBeNull();
-    const data = await w.result!.read('out.bin');
+    expect(w.fs).not.toBeNull();
+    const data = await w.fs!.read('out.bin');
     expect(data).toEqual(new Uint8Array([1, 2, 3, 4, 5]));
   });
 
@@ -32,14 +32,14 @@ describe('FsWriter', () => {
     w.write('hello ');
     w.write('world');
     await w.close();
-    expect(fromBytes(await w.result!.read('text.txt'))).toBe('hello world');
+    expect(fromBytes(await w.fs!.read('text.txt'))).toBe('hello world');
   });
 
   it('result is new snapshot', async () => {
     const w = snap.writer('new.txt');
     w.write(toBytes('data'));
     await w.close();
-    expect(w.result!.commitHash).not.toBe(snap.commitHash);
+    expect(w.fs!.commitHash).not.toBe(snap.commitHash);
   });
 
   it('on tag throws PermissionError', async () => {
@@ -52,7 +52,7 @@ describe('FsWriter', () => {
     const w = snap.writer('x.txt');
     w.write(toBytes('data'));
     // don't close
-    expect(w.result).toBeNull();
+    expect(w.fs).toBeNull();
   });
 
   it('write after close throws', async () => {
@@ -66,9 +66,9 @@ describe('FsWriter', () => {
     const w = snap.writer('x.txt');
     w.write(toBytes('data'));
     await w.close();
-    const hash = w.result!.commitHash;
+    const hash = w.fs!.commitHash;
     await w.close();
-    expect(w.result!.commitHash).toBe(hash);
+    expect(w.fs!.commitHash).toBe(hash);
   });
 
   it('closed property', async () => {

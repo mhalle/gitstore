@@ -31,7 +31,7 @@ function concatChunks(chunks: Uint8Array[]): Uint8Array {
  * const w = fs.writer('output.bin');
  * w.write(new Uint8Array([1, 2, 3]));
  * await w.close();
- * const newFs = w.result!;
+ * const newFs = w.fs!;
  * ```
  */
 export class FsWriter {
@@ -41,7 +41,7 @@ export class FsWriter {
   private _closed = false;
 
   /** The resulting FS snapshot after close. Null until `close()` completes. */
-  result: FS | null = null;
+  fs: FS | null = null;
 
   /** @internal */
   constructor(fs: FS, path: string) {
@@ -69,11 +69,11 @@ export class FsWriter {
   /**
    * Flush buffered data and commit.
    *
-   * After close, the resulting snapshot is available via `result`.
+   * After close, the resulting snapshot is available via `fs`.
    */
   async close(): Promise<void> {
     if (!this._closed) {
-      this.result = await this._fs.write(this._path, concatChunks(this._chunks));
+      this.fs = await this._fs.write(this._path, concatChunks(this._chunks));
       this._closed = true;
     }
   }
