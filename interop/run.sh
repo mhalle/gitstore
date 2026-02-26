@@ -18,6 +18,12 @@ if [[ -x cpp/build/cpp_write && -x cpp/build/cpp_read ]]; then
     HAS_CPP=true
 fi
 
+HAS_KOTLIN=false
+KT_JAR="kotlin/build/libs/vost-interop.jar"
+if [[ -f "$KT_JAR" ]]; then
+    HAS_KOTLIN=true
+fi
+
 echo "=== Interop tests (workdir: $TMPDIR) ==="
 
 # --- Write phase ---
@@ -40,6 +46,12 @@ if $HAS_CPP; then
     echo ""
     echo "--- C++ writes ---"
     cpp/build/cpp_write "$FIXTURES" "$TMPDIR"
+fi
+
+if $HAS_KOTLIN; then
+    echo ""
+    echo "--- Kotlin writes ---"
+    java -jar "$KT_JAR" write "$FIXTURES" "$TMPDIR"
 fi
 
 # --- Cross-read phase ---
@@ -95,6 +107,44 @@ if $HAS_CPP; then
         echo ""
         echo "--- C++ reads Rust repos ---"
         cpp/build/cpp_read "$FIXTURES" "$TMPDIR" rs
+    fi
+fi
+
+if $HAS_KOTLIN; then
+    echo ""
+    echo "--- Kotlin reads Python repos ---"
+    java -jar "$KT_JAR" read "$FIXTURES" "$TMPDIR" py
+
+    echo ""
+    echo "--- Kotlin reads TypeScript repos ---"
+    java -jar "$KT_JAR" read "$FIXTURES" "$TMPDIR" ts
+
+    echo ""
+    echo "--- Python reads Kotlin repos ---"
+    uv run python interop/py_read_test.py "$FIXTURES" "$TMPDIR" kt
+
+    echo ""
+    echo "--- TypeScript reads Kotlin repos ---"
+    cd ts && npx tsx ../interop/ts_read.test.ts "../$FIXTURES" "$TMPDIR" kt && cd ..
+
+    if $HAS_RUST; then
+        echo ""
+        echo "--- Rust reads Kotlin repos ---"
+        cargo run --manifest-path rs/Cargo.toml --example rs_read -- "$FIXTURES" "$TMPDIR" kt
+
+        echo ""
+        echo "--- Kotlin reads Rust repos ---"
+        java -jar "$KT_JAR" read "$FIXTURES" "$TMPDIR" rs
+    fi
+
+    if $HAS_CPP; then
+        echo ""
+        echo "--- C++ reads Kotlin repos ---"
+        cpp/build/cpp_read "$FIXTURES" "$TMPDIR" kt
+
+        echo ""
+        echo "--- Kotlin reads C++ repos ---"
+        java -jar "$KT_JAR" read "$FIXTURES" "$TMPDIR" cpp
     fi
 fi
 
