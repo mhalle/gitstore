@@ -78,6 +78,27 @@ public:
     /// Return a NoteDict for accessing git notes.
     NoteDict notes();
 
+    // -- Mirror -------------------------------------------------------------
+
+    /// Push all local refs to @p dest, creating an exact mirror.
+    ///
+    /// Supports local paths and remote URLs. Auto-creates a bare repo
+    /// at local destinations that don't yet exist.
+    ///
+    /// @param dest    Destination URL or local path.
+    /// @param dry_run If true, compute diff but do not push.
+    /// @return MirrorDiff describing what changed (or would change).
+    MirrorDiff backup(const std::string& dest, bool dry_run = false);
+
+    /// Fetch all refs from @p src, overwriting local state.
+    ///
+    /// Supports local paths and remote URLs.
+    ///
+    /// @param src     Source URL or local path.
+    /// @param dry_run If true, compute diff but do not fetch.
+    /// @return MirrorDiff describing what changed (or would change).
+    MirrorDiff restore(const std::string& src, bool dry_run = false);
+
     // -- Metadata -----------------------------------------------------------
 
     /// Path to the bare repository on disk.

@@ -7,6 +7,99 @@ import org.eclipse.jgit.lib.Repository
 import org.eclipse.jgit.storage.file.FileRepositoryBuilder
 import org.eclipse.jgit.transport.*
 import java.io.File
+import java.util.concurrent.TimeUnit
+
+// ---------------------------------------------------------------------------
+// Credentials
+// ---------------------------------------------------------------------------
+
+/**
+ * Percent-encode a string for use in URL userinfo.
+ */
+private fun percentEncode(s: String): String {
+    val sb = StringBuilder()
+    for (b in s.toByteArray(Charsets.UTF_8)) {
+        val c = b.toInt() and 0xFF
+        if (c in 'A'.code..'Z'.code || c in 'a'.code..'z'.code ||
+            c in '0'.code..'9'.code || c == '-'.code || c == '_'.code ||
+            c == '.'.code || c == '~'.code
+        ) {
+            sb.append(c.toChar())
+        } else {
+            sb.append(String.format("%%%02X", c))
+        }
+    }
+    return sb.toString()
+}
+
+/**
+ * Inject credentials into an HTTPS URL if available.
+ *
+ * Tries `git credential fill` first (works with any configured helper:
+ * osxkeychain, wincred, libsecret, `gh auth setup-git`, etc.).  Falls
+ * back to `gh auth token` for GitHub hosts.  Non-HTTPS URLs and URLs
+ * that already contain credentials are returned unchanged.
+ *
+ * @param url The URL to resolve credentials for.
+ * @return The URL with credentials injected, or the original URL.
+ */
+fun resolveCredentials(url: String): String {
+    if (!url.startsWith("https://")) return url
+
+    val afterScheme = url.substring(8) // after "https://"
+    val pathStart = afterScheme.indexOf('/').let { if (it < 0) afterScheme.length else it }
+    val authority = afterScheme.substring(0, pathStart)
+
+    // Already has credentials
+    if ("@" in authority) return url
+
+    val host = authority // may include :port
+    val hostname = host.split(":").first()
+    val pathAndRest = afterScheme.substring(pathStart)
+
+    // Try git credential fill
+    try {
+        val proc = ProcessBuilder("git", "credential", "fill")
+            .redirectErrorStream(false)
+            .start()
+        proc.outputStream.write("protocol=https\nhost=$hostname\n\n".toByteArray())
+        proc.outputStream.close()
+        val output = proc.inputStream.bufferedReader().readText()
+        if (proc.waitFor(5, TimeUnit.SECONDS) && proc.exitValue() == 0) {
+            val creds = mutableMapOf<String, String>()
+            for (line in output.trim().lines()) {
+                val eq = line.indexOf('=')
+                if (eq > 0) {
+                    creds[line.substring(0, eq)] = line.substring(eq + 1).trim()
+                }
+            }
+            val username = creds["username"]
+            val password = creds["password"]
+            if (username != null && password != null) {
+                return "https://${percentEncode(username)}:${percentEncode(password)}@$host$pathAndRest"
+            }
+        } else {
+            proc.destroyForcibly()
+        }
+    } catch (_: Exception) {
+    }
+
+    // Fallback: gh auth token (GitHub-specific)
+    try {
+        val proc = ProcessBuilder("gh", "auth", "token", "--hostname", hostname)
+            .redirectErrorStream(false)
+            .start()
+        val token = proc.inputStream.bufferedReader().readText().trim()
+        if (proc.waitFor(5, TimeUnit.SECONDS) && proc.exitValue() == 0 && token.isNotEmpty()) {
+            return "https://x-access-token:$token@$host$pathAndRest"
+        } else {
+            proc.destroyForcibly()
+        }
+    } catch (_: Exception) {
+    }
+
+    return url
+}
 
 /**
  * Mirror (backup/restore) operations for vost.

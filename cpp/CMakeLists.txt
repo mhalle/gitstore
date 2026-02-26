@@ -21,6 +21,7 @@ add_library(vost
     src/glob.cpp
     src/copy.cpp
     src/notes.cpp
+    src/mirror.cpp
 )
 
 target_include_directories(vost

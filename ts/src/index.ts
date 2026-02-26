@@ -84,6 +84,9 @@ export {
   mirrorDiffTotal,
 } from './types.js';
 
+// Mirror utilities
+export { resolveCredentials } from './mirror.js';
+
 // Copy operations (usable standalone)
 export { diskGlob } from './copy.js';
 export { ExcludeFilter } from './exclude.js';

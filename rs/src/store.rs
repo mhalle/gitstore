@@ -197,15 +197,24 @@ impl GitStore {
 
     /// Push all refs to `dest`, creating an exact mirror.
     ///
-    /// **Not yet implemented** -- delegates to [`crate::mirror::backup`].
-    pub fn backup(&self, dest: impl AsRef<Path>) -> Result<MirrorDiff> {
-        crate::mirror::backup(&self.inner.path, dest.as_ref())
+    /// Supports local paths and remote URLs (SSH, HTTPS, git).
+    /// Auto-creates a bare repository at local destinations.
+    ///
+    /// # Arguments
+    /// * `dest` - Destination URL or local path.
+    /// * `dry_run` - If true, compute diff but do not push.
+    pub fn backup(&self, dest: &str, dry_run: bool) -> Result<MirrorDiff> {
+        crate::mirror::backup(&self.inner.path, dest, dry_run)
     }
 
     /// Fetch all refs from `src`, overwriting local state.
     ///
-    /// **Not yet implemented** -- delegates to [`crate::mirror::restore`].
-    pub fn restore(&self, src: impl AsRef<Path>) -> Result<MirrorDiff> {
-        crate::mirror::restore(src.as_ref(), &self.inner.path)
+    /// Supports local paths and remote URLs (SSH, HTTPS, git).
+    ///
+    /// # Arguments
+    /// * `src` - Source URL or local path.
+    /// * `dry_run` - If true, compute diff but do not fetch.
+    pub fn restore(&self, src: &str, dry_run: bool) -> Result<MirrorDiff> {
+        crate::mirror::restore(&self.inner.path, src, dry_run)
     }
 }

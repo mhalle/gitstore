@@ -10,6 +10,82 @@ import type { MirrorDiff, RefChange, HttpClient } from './types.js';
 import type { GitStore } from './gitstore.js';
 
 /**
+ * Inject credentials into an HTTPS URL if available.
+ *
+ * Tries `git credential fill` first (works with any configured helper:
+ * osxkeychain, wincred, libsecret, `gh auth setup-git`, etc.).  Falls
+ * back to `gh auth token` for GitHub hosts.  Non-HTTPS URLs and URLs
+ * that already contain credentials are returned unchanged.
+ *
+ * Requires Node.js — returns the original URL unchanged in browser
+ * environments where `child_process` is not available.
+ *
+ * @param url - The URL to resolve credentials for.
+ * @returns The URL with credentials injected, or the original URL.
+ */
+export async function resolveCredentials(url: string): Promise<string> {
+  if (!url.startsWith('https://')) return url;
+
+  const parsed = new URL(url);
+  if (parsed.username) return url; // already has credentials
+
+  const hostname = parsed.hostname;
+
+  let execFileSync: typeof import('node:child_process').execFileSync;
+  try {
+    const cp = await import('node:child_process');
+    execFileSync = cp.execFileSync;
+  } catch {
+    return url; // Not in Node.js
+  }
+
+  // Try git credential fill
+  try {
+    const input = `protocol=https\nhost=${hostname}\n\n`;
+    const output = execFileSync('git', ['credential', 'fill'], {
+      input,
+      timeout: 5000,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'ignore'],
+    });
+    const creds: Record<string, string> = {};
+    for (const line of output.trim().split('\n')) {
+      const eq = line.indexOf('=');
+      if (eq > 0) creds[line.slice(0, eq)] = line.slice(eq + 1);
+    }
+    if (creds.username && creds.password) {
+      parsed.username = creds.username;
+      parsed.password = creds.password;
+      return parsed.toString();
+    }
+  } catch {
+    // git credential fill failed or not available
+  }
+
+  // Fallback: gh auth token (GitHub-specific)
+  try {
+    const token = execFileSync(
+      'gh',
+      ['auth', 'token', '--hostname', hostname],
+      {
+        timeout: 5000,
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      },
+    ).trim();
+    if (token) {
+      parsed.username = 'x-access-token';
+      parsed.password = token;
+      return parsed.toString();
+    }
+  } catch {
+    // gh not available or not authenticated
+  }
+
+  return url;
+}
+
+/**
  * Push all local refs to url, creating an exact mirror.
  * Remote-only refs are deleted.
  *

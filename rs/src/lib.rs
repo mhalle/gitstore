@@ -59,3 +59,4 @@ pub use fileobj::{FsWriter, BatchWriter};
 pub use types::*;
 pub use copy::disk_glob;
 pub use exclude::ExcludeFilter;
+pub use mirror::resolve_credentials;

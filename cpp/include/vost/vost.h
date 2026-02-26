@@ -9,6 +9,7 @@
 #include "fs.h"
 #include "batch.h"
 #include "notes.h"
+#include "mirror.h"
 
 #include <algorithm>
 #include <chrono>
