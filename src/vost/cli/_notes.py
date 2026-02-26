@@ -21,18 +21,18 @@ def note():
 
 @note.command("get")
 @_repo_option
-@click.argument("hash")
+@click.argument("target")
 @click.option("-N", "--namespace", default="commits",
               help="Notes namespace (default: commits).")
 @click.pass_context
-def note_get(ctx, hash, namespace):
-    """Get the note for a commit HASH."""
+def note_get(ctx, target, namespace):
+    """Get the note for a commit hash or ref name (branch/tag)."""
     store = _open_store(_require_repo(ctx))
     ns = store.notes[namespace]
     try:
-        text = ns[hash]
+        text = ns[target]
     except KeyError:
-        raise click.ClickException(f"No note for {hash[:7]} in namespace '{namespace}'")
+        raise click.ClickException(f"No note for {target} in namespace '{namespace}'")
     except (TypeError, ValueError) as e:
         raise click.ClickException(str(e))
     click.echo(text, nl=False)
@@ -40,39 +40,39 @@ def note_get(ctx, hash, namespace):
 
 @note.command("set")
 @_repo_option
-@click.argument("hash")
+@click.argument("target")
 @click.argument("text")
 @click.option("-N", "--namespace", default="commits",
               help="Notes namespace (default: commits).")
 @click.pass_context
-def note_set(ctx, hash, text, namespace):
-    """Set the note for a commit HASH."""
+def note_set(ctx, target, text, namespace):
+    """Set the note for a commit hash or ref name (branch/tag)."""
     store = _open_store(_require_repo(ctx))
     ns = store.notes[namespace]
     try:
-        ns[hash] = text
+        ns[target] = text
     except (TypeError, ValueError) as e:
         raise click.ClickException(str(e))
-    _status(ctx, f"Note set for {hash[:7]}")
+    _status(ctx, f"Note set for {target}")
 
 
 @note.command("delete")
 @_repo_option
-@click.argument("hash")
+@click.argument("target")
 @click.option("-N", "--namespace", default="commits",
               help="Notes namespace (default: commits).")
 @click.pass_context
-def note_delete(ctx, hash, namespace):
-    """Delete the note for a commit HASH."""
+def note_delete(ctx, target, namespace):
+    """Delete the note for a commit hash or ref name (branch/tag)."""
     store = _open_store(_require_repo(ctx))
     ns = store.notes[namespace]
     try:
-        del ns[hash]
+        del ns[target]
     except KeyError:
-        raise click.ClickException(f"No note for {hash[:7]} in namespace '{namespace}'")
+        raise click.ClickException(f"No note for {target} in namespace '{namespace}'")
     except (TypeError, ValueError) as e:
         raise click.ClickException(str(e))
-    _status(ctx, f"Note deleted for {hash[:7]}")
+    _status(ctx, f"Note deleted for {target}")
 
 
 @note.command("list")

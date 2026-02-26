@@ -178,20 +178,35 @@ class NoteNamespace internal constructor(
         }
     }
 
+    // ── Target resolution ────────────────────────────────────────────
+
+    /**
+     * Resolve [target] to a 40-char commit hash.
+     * Accepts a 40-char hex hash (returned as-is), a branch name, or a tag name.
+     */
+    internal fun resolveTarget(target: String): String {
+        if (HEX40_RE.matches(target)) return target
+        if (target in store.branches) return store.branches[target].commitHash
+        if (target in store.tags) return store.tags[target].commitHash
+        throw IllegalArgumentException(
+            "Cannot resolve '$target': not a commit hash, branch, or tag"
+        )
+    }
+
     // ── Public API ────────────────────────────────────────────────────
 
-    /** Get the note text for a commit hash. */
-    operator fun get(h: String): String {
-        validateHash(h)
+    /** Get the note text for a commit hash or ref name (branch/tag). */
+    operator fun get(target: String): String {
+        val h = resolveTarget(target)
         val treeOid = treeOid() ?: throw NoSuchElementException(h)
         val blobOid = findNoteInTree(treeOid, h) ?: throw NoSuchElementException(h)
         val loader = store.repo.open(blobOid, Constants.OBJ_BLOB)
         return String(loader.bytes, Charsets.UTF_8)
     }
 
-    /** Set the note text for a commit hash. */
-    operator fun set(h: String, text: String) {
-        validateHash(h)
+    /** Set the note text for a commit hash or ref name (branch/tag). */
+    operator fun set(target: String, text: String) {
+        val h = resolveTarget(target)
 
         // Read existing tree entries into a flat map
         val entries = mutableMapOf<String, ObjectId>()
@@ -216,9 +231,9 @@ class NoteNamespace internal constructor(
         commitNoteTree(newTreeOid, "Notes added by 'git notes' on ${h.substring(0, 7)}")
     }
 
-    /** Delete the note for a commit hash. */
-    fun delete(h: String) {
-        validateHash(h)
+    /** Delete the note for a commit hash or ref name (branch/tag). */
+    fun delete(target: String) {
+        val h = resolveTarget(target)
         val treeOid = treeOid() ?: throw NoSuchElementException(h)
 
         val entries = mutableMapOf<String, ObjectId>()
@@ -233,9 +248,9 @@ class NoteNamespace internal constructor(
         commitNoteTree(newTreeOid, "Notes removed by 'git notes' on ${h.substring(0, 7)}")
     }
 
-    /** Check if a note exists for a commit hash. */
-    operator fun contains(h: String): Boolean {
-        try { validateHash(h) } catch (_: IllegalArgumentException) { return false }
+    /** Check if a note exists for a commit hash or ref name (branch/tag). */
+    operator fun contains(target: String): Boolean {
+        val h = try { resolveTarget(target) } catch (_: IllegalArgumentException) { return false }
         val treeOid = treeOid() ?: return false
         return findNoteInTree(treeOid, h) != null
     }
@@ -297,11 +312,11 @@ class NotesBatch internal constructor(
     /**
      * Stage a note write.
      *
-     * @param h 40-char lowercase hex commit hash.
+     * @param target Commit hash or ref name (branch/tag).
      * @param text Note text to set.
      */
-    operator fun set(h: String, text: String) {
-        validateHash(h)
+    operator fun set(target: String, text: String) {
+        val h = ns.resolveTarget(target)
         deletes.remove(h)
         writes[h] = text
     }
@@ -309,11 +324,11 @@ class NotesBatch internal constructor(
     /**
      * Stage a note deletion.
      *
-     * @param h 40-char lowercase hex commit hash.
+     * @param target Commit hash or ref name (branch/tag).
      * @throws NoSuchElementException If the note does not exist when committed.
      */
-    fun delete(h: String) {
-        validateHash(h)
+    fun delete(target: String) {
+        val h = ns.resolveTarget(target)
         writes.remove(h)
         deletes.add(h)
     }

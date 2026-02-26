@@ -429,7 +429,7 @@ describe('batch', () => {
     const h2 = snap2.commitHash;
 
     const b = store.notes.commits.batch();
-    b.delete(commitHash);
+    await b.delete(commitHash);
     await b.set(h2, 'new');
     await b.commit();
 
@@ -439,7 +439,7 @@ describe('batch', () => {
 
   it('delete missing raises', async () => {
     const b = store.notes.commits.batch();
-    b.delete(commitHash);
+    await b.delete(commitHash);
     await expect(b.commit()).rejects.toThrow(GitStoreError);
   });
 
@@ -471,7 +471,7 @@ describe('batch', () => {
   it('set then delete same hash no prior', async () => {
     const b = store.notes.commits.batch();
     await b.set(commitHash, 'will be deleted');
-    b.delete(commitHash);
+    await b.delete(commitHash);
     await expect(b.commit()).rejects.toThrow(GitStoreError);
   });
 
@@ -480,7 +480,7 @@ describe('batch', () => {
 
     const b = store.notes.commits.batch();
     await b.set(commitHash, 'overwritten');
-    b.delete(commitHash);
+    await b.delete(commitHash);
     await b.commit();
 
     expect(await store.notes.commits.has(commitHash)).toBe(false);
@@ -490,7 +490,7 @@ describe('batch', () => {
     await store.notes.commits.set(commitHash, 'original');
 
     const b = store.notes.commits.batch();
-    b.delete(commitHash);
+    await b.delete(commitHash);
     await b.set(commitHash, 'restored');
     await b.commit();
 
@@ -539,5 +539,66 @@ describe('mapping extras', () => {
 
     const hashes = await store.notes.commits.list();
     expect(new Set(hashes)).toEqual(new Set([h1, h2]));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Ref-based targets
+// ---------------------------------------------------------------------------
+
+describe('ref-based targets', () => {
+  it('set and get by branch name', async () => {
+    const ns = store.notes.commits;
+    await ns.set('main', 'note for main');
+    expect(await ns.get('main')).toBe('note for main');
+  });
+
+  it('set and get by tag name', async () => {
+    const snap = await store.branches.get('main');
+    await store.tags.set('v1.0', snap);
+    const ns = store.notes.commits;
+    await ns.set('v1.0', 'note for tag');
+    expect(await ns.get('v1.0')).toBe('note for tag');
+  });
+
+  it('ref and hash access same note', async () => {
+    const snap = await store.branches.get('main');
+    const ns = store.notes.commits;
+    await ns.set('main', 'via ref');
+    expect(await ns.get(snap.commitHash)).toBe('via ref');
+  });
+
+  it('has by ref', async () => {
+    const ns = store.notes.commits;
+    expect(await ns.has('main')).toBe(false);
+    await ns.set('main', 'note');
+    expect(await ns.has('main')).toBe(true);
+  });
+
+  it('delete by ref', async () => {
+    const ns = store.notes.commits;
+    await ns.set('main', 'note');
+    expect(await ns.has('main')).toBe(true);
+    await ns.delete('main');
+    expect(await ns.has('main')).toBe(false);
+  });
+
+  it('batch with ref targets', async () => {
+    const snap = await store.branches.get('main');
+    await store.branches.setAndGet('dev', snap);
+    // Advance main so the two branches have different tips
+    await snap.write('a.txt', toBytes('a'));
+
+    const batch = store.notes.commits.batch();
+    await batch.set('main', 'note for main');
+    await batch.set('dev', 'note for dev');
+    await batch.commit();
+
+    expect(await store.notes.commits.get('main')).toBe('note for main');
+    expect(await store.notes.commits.get('dev')).toBe('note for dev');
+  });
+
+  it('nonexistent ref raises', async () => {
+    await expect(store.notes.commits.set('nonexistent', 'note')).rejects.toThrow('Cannot resolve');
   });
 });

@@ -347,7 +347,7 @@ class NotesTest {
     }
 
     @Test
-    fun `invalid hash too short throws`() {
+    fun `invalid target too short throws`() {
         val store = createStore()
         store.use {
             assertThrows<IllegalArgumentException> {
@@ -362,6 +362,100 @@ class NotesTest {
         store.use {
             assertThrows<IllegalArgumentException> {
                 it.notes.commits["zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"] = "note"
+            }
+        }
+    }
+
+    // ── Ref-based target resolution ─────────────────────────────────
+
+    @Test
+    fun `set and get by branch name`() {
+        val store = createStore()
+        store.use {
+            it.notes.commits["main"] = "note for main"
+            assertEquals("note for main", it.notes.commits["main"])
+        }
+    }
+
+    @Test
+    fun `set and get by tag name`() {
+        val store = createStore()
+        store.use {
+            val fs = it.branches["main"]
+            it.tags["v1.0"] = fs
+            it.notes.commits["v1.0"] = "note for tag"
+            assertEquals("note for tag", it.notes.commits["v1.0"])
+        }
+    }
+
+    @Test
+    fun `ref and hash access same note`() {
+        val store = createStore()
+        store.use {
+            val fs = it.branches["main"]
+            it.notes.commits["main"] = "via ref"
+            assertEquals("via ref", it.notes.commits[fs.commitHash])
+        }
+    }
+
+    @Test
+    fun `contains by ref`() {
+        val store = createStore()
+        store.use {
+            assertFalse("main" in it.notes.commits)
+            it.notes.commits["main"] = "note"
+            assertTrue("main" in it.notes.commits)
+        }
+    }
+
+    @Test
+    fun `delete by ref`() {
+        val store = createStore()
+        store.use {
+            it.notes.commits["main"] = "note"
+            assertTrue("main" in it.notes.commits)
+            it.notes.commits.delete("main")
+            assertFalse("main" in it.notes.commits)
+        }
+    }
+
+    @Test
+    fun `batch with ref targets`() {
+        val store = createStore()
+        store.use {
+            val fs = it.branches["main"]
+            it.branches["dev"] = fs
+            // Advance main so the two branches have different tips
+            fs.write("a.txt", "a".toByteArray())
+
+            it.notes.commits.batch().use { batch ->
+                batch["main"] = "note for main"
+                batch["dev"] = "note for dev"
+            }
+
+            assertEquals("note for main", it.notes.commits["main"])
+            assertEquals("note for dev", it.notes.commits["dev"])
+        }
+    }
+
+    @Test
+    fun `batch delete by ref`() {
+        val store = createStore()
+        store.use {
+            it.notes.commits["main"] = "note"
+            it.notes.commits.batch().use { batch ->
+                batch.delete("main")
+            }
+            assertFalse("main" in it.notes.commits)
+        }
+    }
+
+    @Test
+    fun `nonexistent ref raises`() {
+        val store = createStore()
+        store.use {
+            assertThrows<IllegalArgumentException> {
+                it.notes.commits["nonexistent"] = "note"
             }
         }
     }

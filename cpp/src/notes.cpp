@@ -59,6 +59,14 @@ struct SigGuard {
     git_signature* s = nullptr;
     ~SigGuard() { if (s) git_signature_free(s); }
 };
+struct RefGuard {
+    git_reference* r = nullptr;
+    ~RefGuard() { if (r) git_reference_free(r); }
+};
+struct ObjGuard {
+    git_object* o = nullptr;
+    ~ObjGuard() { if (o) git_object_free(o); }
+};
 
 bool is_hex40(const std::string& s) {
     if (s.size() != 40) return false;
@@ -86,6 +94,38 @@ NoteNamespace::NoteNamespace(std::shared_ptr<GitStoreInner> inner,
     , namespace_(std::move(ns_name))
     , ref_name_("refs/notes/" + namespace_)
 {}
+
+std::string NoteNamespace::resolve_target(const std::string& target) const {
+    if (is_hex40(target)) return target;
+
+    std::lock_guard<std::mutex> lk(inner_->mutex);
+
+    // Try as branch
+    {
+        std::string ref = "refs/heads/" + target;
+        RefGuard rg;
+        if (git_reference_lookup(&rg.r, inner_->repo, ref.c_str()) == 0) {
+            ObjGuard og;
+            if (git_reference_peel(&og.o, rg.r, GIT_OBJECT_COMMIT) == 0) {
+                return oid_to_hex(git_object_id(og.o));
+            }
+        }
+    }
+
+    // Try as tag
+    {
+        std::string ref = "refs/tags/" + target;
+        RefGuard rg;
+        if (git_reference_lookup(&rg.r, inner_->repo, ref.c_str()) == 0) {
+            ObjGuard og;
+            if (git_reference_peel(&og.o, rg.r, GIT_OBJECT_COMMIT) == 0) {
+                return oid_to_hex(git_object_id(og.o));
+            }
+        }
+    }
+
+    throw InvalidHashError(target);
+}
 
 std::optional<std::string> NoteNamespace::tip_oid() const {
     git_reference* ref = nullptr;
@@ -393,14 +433,14 @@ void NoteNamespace::commit_note_tree(const std::string& new_tree_hex,
 // ---------------------------------------------------------------------------
 
 std::string NoteNamespace::get(const std::string& hash) const {
-    validate_hash(hash);
+    auto h = resolve_target(hash);
     std::lock_guard<std::mutex> lk(inner_->mutex);
 
     auto t = tree_oid();
-    if (!t) throw KeyNotFoundError(hash);
+    if (!t) throw KeyNotFoundError(h);
 
-    auto blob_hex = find_note(*t, hash);
-    if (!blob_hex) throw KeyNotFoundError(hash);
+    auto blob_hex = find_note(*t, h);
+    if (!blob_hex) throw KeyNotFoundError(h);
 
     // Read blob
     git_oid blob_oid = hex_to_oid(*blob_hex);
@@ -414,7 +454,7 @@ std::string NoteNamespace::get(const std::string& hash) const {
 }
 
 void NoteNamespace::set(const std::string& hash, const std::string& text) {
-    validate_hash(hash);
+    auto h = resolve_target(hash);
 
     std::string blob_hex;
     std::optional<std::string> base_tree;
@@ -435,14 +475,14 @@ void NoteNamespace::set(const std::string& hash, const std::string& text) {
     std::string new_tree;
     {
         std::lock_guard<std::mutex> lk(inner_->mutex);
-        new_tree = build_note_tree(base_tree, {{hash, blob_hex}}, {});
+        new_tree = build_note_tree(base_tree, {{h, blob_hex}}, {});
     }
 
     commit_note_tree(new_tree, "Notes updated");
 }
 
 void NoteNamespace::del(const std::string& hash) {
-    validate_hash(hash);
+    auto h = resolve_target(hash);
 
     std::optional<std::string> base_tree;
     {
@@ -451,25 +491,25 @@ void NoteNamespace::del(const std::string& hash) {
     }
 
     if (!base_tree)
-        throw KeyNotFoundError(hash);
+        throw KeyNotFoundError(h);
 
     std::string new_tree;
     {
         std::lock_guard<std::mutex> lk(inner_->mutex);
-        new_tree = build_note_tree(base_tree, {}, {hash});
+        new_tree = build_note_tree(base_tree, {}, {h});
     }
 
     commit_note_tree(new_tree, "Notes updated");
 }
 
 bool NoteNamespace::has(const std::string& hash) const {
-    validate_hash(hash);
+    auto h = resolve_target(hash);
     std::lock_guard<std::mutex> lk(inner_->mutex);
 
     auto t = tree_oid();
     if (!t) return false;
 
-    return find_note(*t, hash).has_value();
+    return find_note(*t, h).has_value();
 }
 
 std::vector<std::string> NoteNamespace::list() const {
@@ -553,35 +593,35 @@ NotesBatch::NotesBatch(NoteNamespace ns)
 
 void NotesBatch::set(const std::string& hash, const std::string& text) {
     if (committed_) throw BatchClosedError();
-    validate_hash(hash);
+    auto h = ns_.resolve_target(hash);
 
     // Remove from deletes if present
     deletes_.erase(
-        std::remove(deletes_.begin(), deletes_.end(), hash),
+        std::remove(deletes_.begin(), deletes_.end(), h),
         deletes_.end());
 
     // Replace existing write for same hash
     writes_.erase(
         std::remove_if(writes_.begin(), writes_.end(),
-                       [&hash](const auto& kv) { return kv.first == hash; }),
+                       [&h](const auto& kv) { return kv.first == h; }),
         writes_.end());
 
-    writes_.emplace_back(hash, text);
+    writes_.emplace_back(h, text);
 }
 
 void NotesBatch::del(const std::string& hash) {
     if (committed_) throw BatchClosedError();
-    validate_hash(hash);
+    auto h = ns_.resolve_target(hash);
 
     // Remove from writes if present
     writes_.erase(
         std::remove_if(writes_.begin(), writes_.end(),
-                       [&hash](const auto& kv) { return kv.first == hash; }),
+                       [&h](const auto& kv) { return kv.first == h; }),
         writes_.end());
 
     // Add to deletes if not already there
-    if (std::find(deletes_.begin(), deletes_.end(), hash) == deletes_.end()) {
-        deletes_.push_back(hash);
+    if (std::find(deletes_.begin(), deletes_.end(), h) == deletes_.end()) {
+        deletes_.push_back(h);
     }
 }
 

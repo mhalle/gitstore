@@ -1,4 +1,4 @@
-"""Git notes support: per-namespace mapping of commit hashes to note text."""
+"""Git notes support: per-namespace mapping of commit hashes/refs to note text."""
 
 from __future__ import annotations
 
@@ -26,7 +26,9 @@ def _validate_hash(h: str) -> None:
 class NoteNamespace(MutableMapping):
     """One git notes namespace, backed by ``refs/notes/<name>``.
 
-    Maps 40-char hex commit hashes to UTF-8 note text.
+    Maps commit hashes to UTF-8 note text.  Keys can be 40-char hex
+    commit hashes or ref names (branch/tag), which are resolved to
+    the tip commit hash.
     Supports ``[]``, ``del``, ``in``, ``len``, and iteration.
     """
 
@@ -37,6 +39,33 @@ class NoteNamespace(MutableMapping):
 
     def __repr__(self) -> str:
         return f"NoteNamespace({self._namespace!r}, len={len(self)})"
+
+    # ------------------------------------------------------------------
+    # Target resolution
+    # ------------------------------------------------------------------
+
+    def _resolve_target(self, target: str) -> str:
+        """Resolve *target* to a 40-char commit hash.
+
+        Accepts a 40-char hex hash (returned as-is), a branch name,
+        or a tag name.
+        """
+        if not isinstance(target, str):
+            raise TypeError(f"Expected str, got {type(target).__name__}")
+        if _HEX40_RE.match(target):
+            return target
+        store = self._store
+        try:
+            return store.branches[target].commit_hash
+        except KeyError:
+            pass
+        try:
+            return store.tags[target].commit_hash
+        except KeyError:
+            pass
+        raise ValueError(
+            f"Cannot resolve '{target}': not a commit hash, branch, or tag"
+        )
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -147,18 +176,18 @@ class NoteNamespace(MutableMapping):
     # MutableMapping interface
     # ------------------------------------------------------------------
 
-    def __getitem__(self, h: str) -> str:
-        _validate_hash(h)
+    def __getitem__(self, key: str) -> str:
+        h = self._resolve_target(key)
         tree_oid = self._tree_oid()
         if tree_oid is None:
-            raise KeyError(h)
+            raise KeyError(key)
         blob_oid = self._find_note_in_tree(tree_oid, h)
         if blob_oid is None:
-            raise KeyError(h)
+            raise KeyError(key)
         return self._store._repo[blob_oid].data.decode()
 
-    def __setitem__(self, h: str, text: str) -> None:
-        _validate_hash(h)
+    def __setitem__(self, key: str, text: str) -> None:
+        h = self._resolve_target(key)
         if not isinstance(text, str):
             raise TypeError(f"Expected str value, got {type(text).__name__}")
 
@@ -205,8 +234,8 @@ class NoteNamespace(MutableMapping):
 
         self._commit_note_tree(new_tree_oid, f"Notes added by 'git notes' on {h[:7]}")
 
-    def __delitem__(self, h: str) -> None:
-        _validate_hash(h)
+    def __delitem__(self, key: str) -> None:
+        h = self._resolve_target(key)
         tree_oid = self._tree_oid()
         if tree_oid is None:
             raise KeyError(h)
@@ -251,11 +280,11 @@ class NoteNamespace(MutableMapping):
 
         raise KeyError(h)
 
-    def __contains__(self, h: object) -> bool:
-        if not isinstance(h, str):
+    def __contains__(self, key: object) -> bool:
+        if not isinstance(key, str):
             return False
         try:
-            _validate_hash(h)
+            h = self._resolve_target(key)
         except (TypeError, ValueError):
             return False
         tree_oid = self._tree_oid()
@@ -331,15 +360,15 @@ class NotesBatch:
             return
         self._flush()
 
-    def __setitem__(self, h: str, text: str) -> None:
-        _validate_hash(h)
+    def __setitem__(self, key: str, text: str) -> None:
+        h = self._ns._resolve_target(key)
         if not isinstance(text, str):
             raise TypeError(f"Expected str value, got {type(text).__name__}")
         self._deletes.discard(h)
         self._writes[h] = text
 
-    def __delitem__(self, h: str) -> None:
-        _validate_hash(h)
+    def __delitem__(self, key: str) -> None:
+        h = self._ns._resolve_target(key)
         if h in self._writes:
             del self._writes[h]
         self._deletes.add(h)

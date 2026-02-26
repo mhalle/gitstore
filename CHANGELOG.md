@@ -4,6 +4,10 @@ All notable changes to vost are documented in this file.
 
 ## Unreleased
 
+**Added (all ports):**
+
+- Notes API (`get`/`set`/`delete`/`has`/`contains` and batch equivalents) now accepts branch or tag names in addition to 40-char hex commit hashes. Ref names are resolved to the tip commit hash internally. Existing hash-based usage is unchanged.
+
 ## v0.66.2 (2026-02-26)
 
 **Fixed:**

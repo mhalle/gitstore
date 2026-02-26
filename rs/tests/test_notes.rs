@@ -752,3 +752,86 @@ fn is_empty_check() {
     store.notes().commits().set(&hash, "note").unwrap();
     assert!(!store.notes().commits().is_empty().unwrap());
 }
+
+// ---------------------------------------------------------------------------
+// Ref-based target resolution
+// ---------------------------------------------------------------------------
+
+#[test]
+fn set_and_get_by_branch_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let ns = store.notes().commits();
+    ns.set("main", "note for main").unwrap();
+    assert_eq!(ns.get("main").unwrap(), "note for main");
+}
+
+#[test]
+fn set_and_get_by_tag_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let snap = store.branches().get("main").unwrap();
+    store.tags().set("v1.0", &snap).unwrap();
+    let ns = store.notes().commits();
+    ns.set("v1.0", "note for tag").unwrap();
+    assert_eq!(ns.get("v1.0").unwrap(), "note for tag");
+}
+
+#[test]
+fn ref_and_hash_access_same_note() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let snap = store.branches().get("main").unwrap();
+    let hash = snap.commit_hash().unwrap();
+    let ns = store.notes().commits();
+    ns.set("main", "via ref").unwrap();
+    assert_eq!(ns.get(&hash).unwrap(), "via ref");
+}
+
+#[test]
+fn has_by_ref() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let ns = store.notes().commits();
+    assert!(!ns.has("main").unwrap());
+    ns.set("main", "note").unwrap();
+    assert!(ns.has("main").unwrap());
+}
+
+#[test]
+fn delete_by_ref() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let ns = store.notes().commits();
+    ns.set("main", "note").unwrap();
+    assert!(ns.has("main").unwrap());
+    ns.delete("main").unwrap();
+    assert!(!ns.has("main").unwrap());
+}
+
+#[test]
+fn batch_with_ref_targets() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let snap = store.branches().get("main").unwrap();
+    store.branches().set_and_get("dev", &snap).unwrap();
+    // Advance main so the two branches have different tips
+    snap.write("a.txt", b"a", Default::default()).unwrap();
+
+    let mut batch = store.notes().commits().batch();
+    batch.set("main", "note for main").unwrap();
+    batch.set("dev", "note for dev").unwrap();
+    batch.commit().unwrap();
+
+    let ns = store.notes().commits();
+    assert_eq!(ns.get("main").unwrap(), "note for main");
+    assert_eq!(ns.get("dev").unwrap(), "note for dev");
+}
+
+#[test]
+fn nonexistent_ref_raises() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let ns = store.notes().commits();
+    assert!(ns.set("nonexistent", "note").is_err());
+}

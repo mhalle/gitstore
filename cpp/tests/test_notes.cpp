@@ -534,3 +534,123 @@ TEST_CASE("Notes: batch invalid hash throws", "[notes]") {
 
     fs::remove_all(path);
 }
+
+// ---------------------------------------------------------------------------
+// Notes: ref-based target resolution
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Notes: set and get by branch name", "[notes]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches()["main"];
+    snap = snap.write_text("test.txt", "data");
+
+    auto ns = store.notes()["commits"];
+    ns.set("main", "branch note");
+    CHECK(ns.get("main") == "branch note");
+
+    fs::remove_all(path);
+}
+
+TEST_CASE("Notes: set and get by tag name", "[notes]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches()["main"];
+    snap = snap.write_text("test.txt", "data");
+
+    store.tags().set("v1.0", snap);
+
+    auto ns = store.notes()["commits"];
+    ns.set("v1.0", "tag note");
+    CHECK(ns.get("v1.0") == "tag note");
+
+    fs::remove_all(path);
+}
+
+TEST_CASE("Notes: ref and hash access same note", "[notes]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches()["main"];
+    snap = snap.write_text("test.txt", "data");
+    auto hash = *snap.commit_hash();
+
+    auto ns = store.notes()["commits"];
+    ns.set("main", "set via ref");
+    CHECK(ns.get(hash) == "set via ref");
+
+    // Also set by hash and get by ref
+    ns.set(hash, "set via hash");
+    CHECK(ns.get("main") == "set via hash");
+
+    fs::remove_all(path);
+}
+
+TEST_CASE("Notes: has by ref", "[notes]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches()["main"];
+    snap = snap.write_text("test.txt", "data");
+
+    auto ns = store.notes()["commits"];
+    CHECK_FALSE(ns.has("main"));
+
+    ns.set("main", "note");
+    CHECK(ns.has("main"));
+
+    fs::remove_all(path);
+}
+
+TEST_CASE("Notes: delete by ref", "[notes]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches()["main"];
+    snap = snap.write_text("test.txt", "data");
+
+    auto ns = store.notes()["commits"];
+    ns.set("main", "to delete");
+    CHECK(ns.has("main"));
+
+    ns.del("main");
+    CHECK_FALSE(ns.has("main"));
+
+    fs::remove_all(path);
+}
+
+TEST_CASE("Notes: batch with ref targets", "[notes]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+
+    // Create two branches with different commits
+    auto snap = store.branches()["main"];
+    snap = snap.write_text("a.txt", "aaa");
+
+    auto dev = store.branches().set_and_get("dev", snap);
+    dev = dev.write_text("b.txt", "bbb");
+
+    auto ns = store.notes()["commits"];
+    auto batch = ns.batch();
+    batch.set("main", "main note");
+    batch.set("dev", "dev note");
+    batch.commit();
+
+    CHECK(ns.get("main") == "main note");
+    CHECK(ns.get("dev") == "dev note");
+    CHECK(ns.size() == 2);
+
+    fs::remove_all(path);
+}
+
+TEST_CASE("Notes: nonexistent ref raises InvalidHashError", "[notes]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches()["main"];
+    snap = snap.write_text("test.txt", "data");
+
+    auto ns = store.notes()["commits"];
+    CHECK_THROWS_AS(ns.set("no_such_branch", "text"), vost::InvalidHashError);
+    CHECK_THROWS_AS(ns.get("no_such_branch"), vost::InvalidHashError);
+    CHECK_THROWS_AS(ns.del("no_such_branch"), vost::InvalidHashError);
+    CHECK_THROWS_AS(ns.has("no_such_branch"), vost::InvalidHashError);
+
+    fs::remove_all(path);
+}

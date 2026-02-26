@@ -523,9 +523,9 @@ Exits with code 0 if the tag exists, 1 if it does not. No output.
 Manage git notes on commits. Notes are stored in namespaces (default: `commits`).
 
 ```bash
-vost note get HASH                        # get note for a commit
-vost note set HASH "text"                 # set note for a commit
-vost note delete HASH                     # delete note for a commit
+vost note get TARGET                      # get note (hash or branch/tag name)
+vost note set TARGET "text"               # set note (hash or branch/tag name)
+vost note delete TARGET                   # delete note (hash or branch/tag name)
 vost note list                            # list commits that have notes
 vost note get-current                     # get note for HEAD commit
 vost note set-current "text"              # set note for HEAD commit
@@ -533,7 +533,7 @@ vost note set-current "text"              # set note for HEAD commit
 
 #### note get / set / delete
 
-Operate on a specific commit hash.
+Operate on a specific commit. TARGET can be a 40-char hex commit hash or a branch/tag name (resolved to its tip commit).
 
 | Option | Description |
 |--------|-------------|

@@ -43,6 +43,38 @@ export class NoteNamespace {
     this._ref = `refs/notes/${namespace}`;
   }
 
+  /**
+   * Resolve a target string to a 40-char hex commit hash.
+   *
+   * If `target` is already a 40-char hex hash, return it as-is.
+   * Otherwise try to resolve it as a branch name, then as a tag name.
+   *
+   * @param target - A commit hash, branch name, or tag name.
+   * @returns The resolved 40-char hex commit hash.
+   * @throws {GitStoreError} If the target cannot be resolved.
+   * @internal
+   */
+  async _resolveTarget(target: string): Promise<string> {
+    if (HEX40_RE.test(target)) {
+      return target;
+    }
+    try {
+      const fs = await this._store.branches.get(target);
+      return fs.commitHash;
+    } catch {
+      // not a branch — try tag
+    }
+    try {
+      const fs = await this._store.tags.get(target);
+      return fs.commitHash;
+    } catch {
+      // not a tag either
+    }
+    throw new GitStoreError(
+      `Cannot resolve '${target}': not a commit hash, branch, or tag`,
+    );
+  }
+
   toString(): string {
     return `NoteNamespace('${this._namespace}')`;
   }
@@ -333,19 +365,19 @@ export class NoteNamespace {
   // -- public API --------------------------------------------------------
 
   /**
-   * Get the note text for a commit hash.
+   * Get the note text for a commit hash or ref name (branch/tag).
    *
-   * @param hash - 40-char lowercase hex commit hash.
+   * @param hash - 40-char lowercase hex commit hash, or a branch/tag name.
    * @returns The note text (UTF-8).
    * @throws {GitStoreError} If no note exists for the hash.
    */
   async get(hash: string): Promise<string> {
-    validateHash(hash);
+    const h = await this._resolveTarget(hash);
     const treeOid = await this._treeOid();
     if (treeOid === null) {
       throw new KeyNotFoundError(`key not found: ${hash}`);
     }
-    const blobOid = await this._findNoteInTree(treeOid, hash);
+    const blobOid = await this._findNoteInTree(treeOid, h);
     if (blobOid === null) {
       throw new KeyNotFoundError(`key not found: ${hash}`);
     }
@@ -358,51 +390,51 @@ export class NoteNamespace {
   }
 
   /**
-   * Set or overwrite the note text for a commit hash.
+   * Set or overwrite the note text for a commit hash or ref name (branch/tag).
    *
    * Creates a commit on the namespace's notes ref.
    *
-   * @param hash - 40-char lowercase hex commit hash.
+   * @param hash - 40-char lowercase hex commit hash, or a branch/tag name.
    * @param text - Note text (UTF-8 string).
    */
   async set(hash: string, text: string): Promise<void> {
-    validateHash(hash);
+    const h = await this._resolveTarget(hash);
     const writes = new Map<string, string>();
-    writes.set(hash, text);
+    writes.set(h, text);
     const treeOid = await this._treeOid();
     const newTreeOid = await this._buildNoteTree(treeOid, writes, new Set());
-    await this._commitNoteTree(newTreeOid, `Notes added by 'git notes' on ${hash.slice(0, 7)}`);
+    await this._commitNoteTree(newTreeOid, `Notes added by 'git notes' on ${h.slice(0, 7)}`);
   }
 
   /**
-   * Delete the note for a commit hash.
+   * Delete the note for a commit hash or ref name (branch/tag).
    *
-   * @param hash - 40-char lowercase hex commit hash.
+   * @param hash - 40-char lowercase hex commit hash, or a branch/tag name.
    * @throws {GitStoreError} If no note exists for the hash.
    */
   async delete(hash: string): Promise<void> {
-    validateHash(hash);
+    const h = await this._resolveTarget(hash);
     const treeOid = await this._treeOid();
     if (treeOid === null) {
       throw new KeyNotFoundError(`key not found: ${hash}`);
     }
     const deletes = new Set<string>();
-    deletes.add(hash);
+    deletes.add(h);
     const newTreeOid = await this._buildNoteTree(treeOid, new Map(), deletes);
-    await this._commitNoteTree(newTreeOid, `Notes removed by 'git notes' on ${hash.slice(0, 7)}`);
+    await this._commitNoteTree(newTreeOid, `Notes removed by 'git notes' on ${h.slice(0, 7)}`);
   }
 
   /**
-   * Check if a note exists for a commit hash.
+   * Check if a note exists for a commit hash or ref name (branch/tag).
    *
-   * @param hash - 40-char lowercase hex commit hash.
+   * @param hash - 40-char lowercase hex commit hash, or a branch/tag name.
    * @returns True if a note exists.
    */
   async has(hash: string): Promise<boolean> {
-    validateHash(hash);
+    const h = await this._resolveTarget(hash);
     const treeOid = await this._treeOid();
     if (treeOid === null) return false;
-    return (await this._findNoteInTree(treeOid, hash)) !== null;
+    return (await this._findNoteInTree(treeOid, h)) !== null;
   }
 
   /**
@@ -486,26 +518,26 @@ export class NotesBatch {
   /**
    * Stage a note write.
    *
-   * @param hash - 40-char lowercase hex commit hash.
+   * @param hash - 40-char lowercase hex commit hash, or a branch/tag name.
    * @param text - Note text (UTF-8 string).
    */
   async set(hash: string, text: string): Promise<void> {
     if (this._closed) throw new BatchClosedError('Batch is closed');
-    validateHash(hash);
-    this._deletes.delete(hash);
-    this._writes.set(hash, text);
+    const h = await this._ns._resolveTarget(hash);
+    this._deletes.delete(h);
+    this._writes.set(h, text);
   }
 
   /**
    * Stage a note deletion.
    *
-   * @param hash - 40-char lowercase hex commit hash.
+   * @param hash - 40-char lowercase hex commit hash, or a branch/tag name.
    */
-  delete(hash: string): void {
+  async delete(hash: string): Promise<void> {
     if (this._closed) throw new BatchClosedError('Batch is closed');
-    validateHash(hash);
-    this._writes.delete(hash);
-    this._deletes.add(hash);
+    const h = await this._ns._resolveTarget(hash);
+    this._writes.delete(h);
+    this._deletes.add(h);
   }
 
   /**

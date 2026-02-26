@@ -18,13 +18,6 @@ use crate::types::{MODE_BLOB, MODE_TREE};
 // Validation
 // ---------------------------------------------------------------------------
 
-fn validate_hash(h: &str) -> Result<()> {
-    if h.len() != 40 || !h.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()) {
-        return Err(Error::invalid_hash(h));
-    }
-    Ok(())
-}
-
 fn is_hex40(s: &str) -> bool {
     s.len() == 40 && s.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
 }
@@ -348,34 +341,62 @@ impl NoteNamespace {
 
     // -- public API ------------------------------------------------------
 
-    /// Get the note text for `hash`.
+    /// Resolve a target to a 40-char hex commit hash.
+    ///
+    /// If `target` is already a valid 40-char lowercase hex string, it is
+    /// returned as-is. Otherwise, it is looked up as a branch name and then
+    /// as a tag name. Returns an error if the target cannot be resolved.
+    fn resolve_target(&self, target: &str) -> Result<String> {
+        if is_hex40(target) {
+            return Ok(target.to_string());
+        }
+        let store = GitStore {
+            inner: Arc::clone(&self.inner),
+        };
+        if let Ok(fs) = store.branches().get(target) {
+            if let Some(hash) = fs.commit_hash() {
+                return Ok(hash);
+            }
+        }
+        if let Ok(fs) = store.tags().get(target) {
+            if let Some(hash) = fs.commit_hash() {
+                return Ok(hash);
+            }
+        }
+        Err(Error::git_msg(format!(
+            "Cannot resolve '{}': not a commit hash, branch, or tag",
+            target
+        )))
+    }
+
+    /// Get the note text for a commit hash or ref name (branch/tag).
     ///
     /// # Errors
-    /// * [`Error::InvalidHash`] if `hash` is not a valid 40-char hex string.
-    /// * [`Error::KeyNotFound`] if no note exists for `hash`.
+    /// * [`Error::Git`] if `hash` cannot be resolved to a commit hash.
+    /// * [`Error::KeyNotFound`] if no note exists for the resolved hash.
     pub fn get(&self, hash: &str) -> Result<String> {
-        validate_hash(hash)?;
+        let hash = self.resolve_target(hash)?;
         self.with_repo(|repo| {
             let tree_oid = self
                 .tree_oid(repo)?
-                .ok_or_else(|| Error::key_not_found(hash))?;
+                .ok_or_else(|| Error::key_not_found(&hash))?;
             let blob_oid = self
-                .find_note_in_tree(repo, tree_oid, hash)?
-                .ok_or_else(|| Error::key_not_found(hash))?;
+                .find_note_in_tree(repo, tree_oid, &hash)?
+                .ok_or_else(|| Error::key_not_found(&hash))?;
             let data = repo.find_object(blob_oid).map_err(Error::git)?;
             String::from_utf8(data.data.to_vec())
                 .map_err(|e| Error::git_msg(e.to_string()))
         })
     }
 
-    /// Set a note on `hash`. Creates or updates the note; each call produces
-    /// one commit on the notes ref.
+    /// Set a note on a commit hash or ref name (branch/tag). Creates or
+    /// updates the note; each call produces one commit on the notes ref.
     ///
     /// # Errors
-    /// * [`Error::InvalidHash`] if `hash` is not a valid 40-char hex string.
+    /// * [`Error::Git`] if `hash` cannot be resolved to a commit hash.
     /// * [`Error::StaleSnapshot`] if the notes ref changed concurrently.
     pub fn set(&self, hash: &str, text: &str) -> Result<()> {
-        validate_hash(hash)?;
+        let hash = self.resolve_target(hash)?;
         let new_tree_oid = self.with_repo(|repo| {
             let tree_oid = self.tree_oid(repo)?;
             self.build_note_tree(repo, tree_oid, &[(hash.to_string(), text.to_string())], &[])
@@ -386,17 +407,17 @@ impl NoteNamespace {
         )
     }
 
-    /// Delete the note for `hash`.
+    /// Delete the note for a commit hash or ref name (branch/tag).
     ///
     /// # Errors
-    /// * [`Error::InvalidHash`] if `hash` is not a valid 40-char hex string.
-    /// * [`Error::KeyNotFound`] if no note exists for `hash`.
+    /// * [`Error::Git`] if `hash` cannot be resolved to a commit hash.
+    /// * [`Error::KeyNotFound`] if no note exists for the resolved hash.
     pub fn delete(&self, hash: &str) -> Result<()> {
-        validate_hash(hash)?;
+        let hash = self.resolve_target(hash)?;
         let new_tree_oid = self.with_repo(|repo| {
             let tree_oid = self
                 .tree_oid(repo)?
-                .ok_or_else(|| Error::key_not_found(hash))?;
+                .ok_or_else(|| Error::key_not_found(&hash))?;
             self.build_note_tree(repo, Some(tree_oid), &[], &[hash.to_string()])
         })?;
         self.commit_note_tree(
@@ -405,18 +426,18 @@ impl NoteNamespace {
         )
     }
 
-    /// Check whether a note exists for `hash`.
+    /// Check whether a note exists for a commit hash or ref name (branch/tag).
     ///
     /// # Errors
-    /// Returns [`Error::InvalidHash`] if `hash` is not a valid 40-char hex string.
+    /// Returns [`Error::Git`] if `hash` cannot be resolved to a commit hash.
     pub fn has(&self, hash: &str) -> Result<bool> {
-        validate_hash(hash)?;
+        let hash = self.resolve_target(hash)?;
         self.with_repo(|repo| {
             let tree_oid = match self.tree_oid(repo)? {
                 Some(oid) => oid,
                 None => return Ok(false),
             };
-            Ok(self.find_note_in_tree(repo, tree_oid, hash)?.is_some())
+            Ok(self.find_note_in_tree(repo, tree_oid, &hash)?.is_some())
         })
     }
 
@@ -514,30 +535,32 @@ pub struct NotesBatch {
 }
 
 impl NotesBatch {
-    /// Stage a note write for `hash`. If the same hash is already staged
-    /// for deletion, the delete is cancelled. Last write wins for duplicate hashes.
+    /// Stage a note write for a commit hash or ref name (branch/tag). If the
+    /// same resolved hash is already staged for deletion, the delete is
+    /// cancelled. Last write wins for duplicate hashes.
     ///
     /// # Errors
-    /// Returns [`Error::InvalidHash`] if `hash` is not a valid 40-char hex string.
+    /// Returns [`Error::Git`] if `hash` cannot be resolved to a commit hash.
     pub fn set(&mut self, hash: &str, text: &str) -> Result<()> {
-        validate_hash(hash)?;
-        self.deletes.retain(|h| h != hash);
+        let hash = self.ns.resolve_target(hash)?;
+        self.deletes.retain(|h| h != &hash);
         // Last-wins for writes
-        self.writes.retain(|(h, _)| h != hash);
-        self.writes.push((hash.to_string(), text.to_string()));
+        self.writes.retain(|(h, _)| h != &hash);
+        self.writes.push((hash, text.to_string()));
         Ok(())
     }
 
-    /// Stage a note deletion for `hash`. If the same hash is already staged
-    /// for writing, the write is cancelled.
+    /// Stage a note deletion for a commit hash or ref name (branch/tag). If
+    /// the same resolved hash is already staged for writing, the write is
+    /// cancelled.
     ///
     /// # Errors
-    /// Returns [`Error::InvalidHash`] if `hash` is not a valid 40-char hex string.
+    /// Returns [`Error::Git`] if `hash` cannot be resolved to a commit hash.
     pub fn delete(&mut self, hash: &str) -> Result<()> {
-        validate_hash(hash)?;
-        self.writes.retain(|(h, _)| h != hash);
-        if !self.deletes.contains(&hash.to_string()) {
-            self.deletes.push(hash.to_string());
+        let hash = self.ns.resolve_target(hash)?;
+        self.writes.retain(|(h, _)| h != &hash);
+        if !self.deletes.contains(&hash) {
+            self.deletes.push(hash);
         }
         Ok(())
     }

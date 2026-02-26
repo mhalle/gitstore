@@ -29,21 +29,21 @@ class NoteNamespace {
 public:
     NoteNamespace(std::shared_ptr<GitStoreInner> inner, std::string ns_name);
 
-    /// Get the note text for a commit hash.
+    /// Get the note text for a commit hash or ref name (branch/tag).
     /// @throws KeyNotFoundError if no note exists.
-    /// @throws InvalidHashError if hash is not valid 40-char hex.
+    /// @throws InvalidHashError if target is not a valid hash or resolvable ref.
     std::string get(const std::string& hash) const;
 
-    /// Set (or overwrite) the note text for a commit hash.
-    /// @throws InvalidHashError if hash is not valid 40-char hex.
+    /// Set (or overwrite) the note text for a commit hash or ref name (branch/tag).
+    /// @throws InvalidHashError if target is not a valid hash or resolvable ref.
     void set(const std::string& hash, const std::string& text);
 
-    /// Delete the note for a commit hash.
+    /// Delete the note for a commit hash or ref name (branch/tag).
     /// @throws KeyNotFoundError if no note exists.
-    /// @throws InvalidHashError if hash is not valid 40-char hex.
+    /// @throws InvalidHashError if target is not a valid hash or resolvable ref.
     void del(const std::string& hash);
 
-    /// Return true if a note exists for this hash.
+    /// Return true if a note exists for this commit hash or ref name (branch/tag).
     bool has(const std::string& hash) const;
 
     /// Return all hashes that have notes (sorted).
@@ -85,6 +85,10 @@ private:
     std::string ref_name_;
 
     // -- Internal helpers ----------------------------------------------------
+
+    /// Resolve target to a 40-char commit hash.
+    /// Accepts a hash (returned as-is), branch name, or tag name.
+    std::string resolve_target(const std::string& target) const;
 
     /// Resolve the notes ref to its commit OID, or nullopt if no notes yet.
     std::optional<std::string> tip_oid() const;
@@ -131,12 +135,12 @@ public:
     explicit NotesBatch(NoteNamespace ns);
 
     /// Stage a note write.
-    /// @param hash 40-char lowercase hex commit hash.
+    /// @param hash Commit hash or ref name (branch/tag).
     /// @param text Note text to set.
     void set(const std::string& hash, const std::string& text);
 
     /// Stage a note deletion.
-    /// @param hash 40-char lowercase hex commit hash.
+    /// @param hash Commit hash or ref name (branch/tag).
     void del(const std::string& hash);
 
     /// Commit all staged changes as a single commit.

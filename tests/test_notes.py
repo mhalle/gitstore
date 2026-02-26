@@ -197,12 +197,12 @@ class TestEdgeCases:
         store.notes.commits[commit_hash] = text
         assert store.notes.commits[commit_hash] == text
 
-    def test_invalid_hash_raises(self, store):
-        with pytest.raises(ValueError, match="40-char"):
+    def test_invalid_target_raises(self, store):
+        with pytest.raises(ValueError, match="Cannot resolve"):
             store.notes.commits["not-a-hash"] = "note"
 
-    def test_invalid_hash_too_short(self, store):
-        with pytest.raises(ValueError):
+    def test_invalid_target_too_short(self, store):
+        with pytest.raises(ValueError, match="Cannot resolve"):
             store.notes.commits["abcd"] = "note"
 
     def test_non_string_value_raises(self, store, commit_hash):
@@ -483,3 +483,66 @@ class TestBatch:
         with pytest.raises(TypeError):
             with store.notes.commits.batch() as b:
                 b["a" * 40] = 42
+
+
+# ---------------------------------------------------------------------------
+# Ref-based target resolution
+# ---------------------------------------------------------------------------
+
+class TestRefTargets:
+    def test_set_and_get_by_branch_name(self, store):
+        ns = store.notes.commits
+        ns["main"] = "note for main"
+        assert ns["main"] == "note for main"
+
+    def test_set_and_get_by_tag_name(self, store):
+        fs = store.branches["main"]
+        store.tags["v1.0"] = fs
+        ns = store.notes.commits
+        ns["v1.0"] = "note for tag"
+        assert ns["v1.0"] == "note for tag"
+
+    def test_ref_and_hash_access_same_note(self, store):
+        fs = store.branches["main"]
+        ns = store.notes.commits
+        ns["main"] = "via ref"
+        assert ns[fs.commit_hash] == "via ref"
+
+    def test_contains_by_ref(self, store):
+        ns = store.notes.commits
+        assert "main" not in ns
+        ns["main"] = "note"
+        assert "main" in ns
+
+    def test_delete_by_ref(self, store):
+        ns = store.notes.commits
+        ns["main"] = "note"
+        assert "main" in ns
+        del ns["main"]
+        assert "main" not in ns
+
+    def test_batch_with_ref_targets(self, store):
+        fs = store.branches["main"]
+        store.branches["dev"] = fs
+        # Advance main so the two branches have different tips
+        fs2 = fs.write("a.txt", b"a")
+
+        with store.notes.commits.batch() as b:
+            b["main"] = "note for main"
+            b["dev"] = "note for dev"
+
+        assert store.notes.commits["main"] == "note for main"
+        assert store.notes.commits["dev"] == "note for dev"
+
+    def test_batch_delete_by_ref(self, store):
+        ns = store.notes.commits
+        ns["main"] = "note"
+
+        with ns.batch() as b:
+            del b["main"]
+
+        assert "main" not in ns
+
+    def test_nonexistent_ref_raises(self, store):
+        with pytest.raises(ValueError, match="Cannot resolve"):
+            store.notes.commits["nonexistent"] = "note"

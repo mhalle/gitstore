@@ -411,18 +411,26 @@ For full CLI documentation, see [CLI Reference](https://github.com/mhalle/vost/b
 
 ## Git notes
 
-Attach metadata to commits without modifying history:
+Attach metadata to commits without modifying history. Notes can be
+addressed by commit hash or ref name (branch/tag):
 
 ```python
 # Default namespace (refs/notes/commits)
 ns = repo.notes.commits
+
+# By commit hash
 ns[fs.commit_hash] = "reviewed by Alice"
 print(ns[fs.commit_hash])                       # "reviewed by Alice"
+
+# By branch or tag name (resolves to tip commit)
+ns["main"] = "deployed to staging"
+print(ns["main"])                                # "deployed to staging"
+
 del ns[fs.commit_hash]
 
 # Custom namespaces
 reviews = repo.notes["reviews"]
-reviews[fs.commit_hash] = "LGTM"
+reviews["main"] = "LGTM"
 
 # Shortcut: note for the current HEAD commit
 ns.for_current_branch = "deployed to staging"
@@ -430,10 +438,10 @@ print(ns.for_current_branch)
 
 # Batch writes (single commit)
 with repo.notes.commits.batch() as b:
-    b[hash1] = "note one"
-    b[hash2] = "note two"
+    b["main"] = "note for main"
+    b["dev"] = "note for dev"
 
-# Iteration
+# Iteration (yields commit hashes)
 for commit_hash, text in ns.items():
     print(commit_hash, text)
 ```
