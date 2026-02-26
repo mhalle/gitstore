@@ -4,6 +4,32 @@ All notable changes to vost are documented in this file.
 
 ## Unreleased
 
+## v0.66.0 / TS v0.8.1 / Rust v0.9.0 / Kotlin v0.9.1 / C++ v0.8.0 (2026-02-26)
+
+**Added (Rust):**
+
+- `backup()` / `restore()` — mirror operations (push/fetch all refs via git CLI, auto-create bare repos, stale ref deletion, dry-run mode)
+- `resolve_credentials()` — inject HTTPS credentials via `git credential fill` / `gh auth token`
+- 9 mirror tests (549 → 558 total)
+
+**Added (C++):**
+
+- `GitStore::backup()` / `GitStore::restore()` — mirror operations using libgit2 native transport (push/fetch all refs, auto-create bare repos, stale ref deletion, dry-run mode)
+- `resolve_credentials()` — inject HTTPS credentials via `git credential fill` / `gh auth token`
+- 9 mirror tests (258 → 267 total)
+
+**Added (TypeScript):**
+
+- `resolveCredentials()` — inject HTTPS credentials via `git credential fill` / `gh auth token` (async, Node.js only — returns original URL in browser)
+
+**Added (Kotlin):**
+
+- `resolveCredentials()` — inject HTTPS credentials via `git credential fill` / `gh auth token`
+
+**Tests:**
+
+- Total: 3,022 tests across 5 ports + full 5-language interop matrix
+
 ## v0.65.1 / TS v0.8.0 / Rust v0.8.0 / Kotlin v0.9.0 / C++ v0.7.2 (2026-02-26)
 
 **Breaking (Kotlin):**
