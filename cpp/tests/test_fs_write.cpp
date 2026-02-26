@@ -867,3 +867,76 @@ TEST_CASE("FsWriter: binary data", "[fs][write][writer]") {
     CHECK(data[3] == 0x43);
     fs::remove_all(path);
 }
+
+// ---------------------------------------------------------------------------
+// FsWriter: text mode
+// ---------------------------------------------------------------------------
+
+TEST_CASE("FsWriter: text mode string writes", "[fs][write][writer]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches().get("main");
+
+    vost::FsWriter w(snap, "log.txt");
+    w.write("line1\n");
+    w.write("line2\n");
+    snap = w.close();
+
+    CHECK(snap.read_text("log.txt") == "line1\nline2\n");
+    fs::remove_all(path);
+}
+
+// ---------------------------------------------------------------------------
+// FsWriter: write after close throws
+// ---------------------------------------------------------------------------
+
+TEST_CASE("FsWriter: write after close throws", "[fs][write][writer]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches().get("main");
+
+    vost::FsWriter w(snap, "file.txt");
+    w.write("data");
+    w.close();
+
+    REQUIRE_THROWS_AS(w.write("more"), vost::BatchClosedError);
+    fs::remove_all(path);
+}
+
+// ---------------------------------------------------------------------------
+// FsWriter: readonly throws
+// ---------------------------------------------------------------------------
+
+TEST_CASE("FsWriter: readonly Fs throws PermissionError on close", "[fs][write][writer]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches().get("main");
+    snap = snap.write_text("f.txt", "data");
+
+    store.tags().set("v1", snap);
+    auto tag_snap = store.tags().get("v1");
+
+    vost::FsWriter w(tag_snap, "file.txt");
+    w.write("data");
+    REQUIRE_THROWS_AS(w.close(), vost::PermissionError);
+    fs::remove_all(path);
+}
+
+// ---------------------------------------------------------------------------
+// FsWriter: result is new commit
+// ---------------------------------------------------------------------------
+
+TEST_CASE("FsWriter: result is new commit with written data", "[fs][write][writer]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches().get("main");
+    auto hash_before = snap.commit_hash();
+
+    vost::FsWriter w(snap, "output.txt");
+    w.write("hello");
+    auto result = w.close();
+
+    CHECK(result.commit_hash() != hash_before);
+    CHECK(result.read_text("output.txt") == "hello");
+    fs::remove_all(path);
+}

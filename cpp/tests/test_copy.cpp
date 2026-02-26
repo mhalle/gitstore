@@ -531,3 +531,291 @@ TEST_CASE("ExcludeFilter: inactive when empty", "[exclude]") {
     CHECK_FALSE(filter.active());
     CHECK_FALSE(filter.is_excluded("anything.txt"));
 }
+
+// ---------------------------------------------------------------------------
+// copy_in: empty file
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Copy: copy_in empty file", "[copy]") {
+    auto repo_path = make_temp_repo();
+    auto store = open_store(repo_path);
+    auto snap = store.branches().get("main");
+
+    auto src = make_src_dir();
+    write_file(src / "empty.txt", "");
+
+    auto [report, new_snap] = snap.copy_in(src);
+    CHECK(new_snap.exists("empty.txt"));
+    CHECK(new_snap.read_text("empty.txt") == "");
+
+    fs::remove_all(repo_path);
+    fs::remove_all(src);
+}
+
+// ---------------------------------------------------------------------------
+// copy_in: binary data
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Copy: copy_in binary data", "[copy]") {
+    auto repo_path = make_temp_repo();
+    auto store = open_store(repo_path);
+    auto snap = store.branches().get("main");
+
+    auto src = make_src_dir();
+    {
+        std::ofstream ofs(src / "data.bin", std::ios::binary);
+        char bytes[] = {0x00, static_cast<char>(0xFF), 0x42};
+        ofs.write(bytes, 3);
+    }
+
+    auto [report, new_snap] = snap.copy_in(src);
+    auto data = new_snap.read("data.bin");
+    REQUIRE(data.size() == 3);
+    CHECK(data[0] == 0x00);
+    CHECK(data[1] == 0xFF);
+    CHECK(data[2] == 0x42);
+
+    fs::remove_all(repo_path);
+    fs::remove_all(src);
+}
+
+// ---------------------------------------------------------------------------
+// copy_out: missing throws
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Copy: copy_out nonexistent source throws", "[copy]") {
+    auto repo_path = make_temp_repo();
+    auto store = open_store(repo_path);
+    auto snap = store.branches().get("main");
+    snap = snap.write_text("a.txt", "data");
+
+    auto dest = make_src_dir();
+    REQUIRE_THROWS_AS(snap.copy_out("nonexistent", dest), vost::NotFoundError);
+
+    fs::remove_all(repo_path);
+    fs::remove_all(dest);
+}
+
+// ---------------------------------------------------------------------------
+// sync_in: idempotent
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Sync: sync_in is idempotent", "[sync]") {
+    auto repo_path = make_temp_repo();
+    auto store = open_store(repo_path);
+    auto snap = store.branches().get("main");
+
+    auto src = make_src_dir();
+    write_file(src / "file.txt", "content");
+
+    auto [r1, snap2] = snap.sync_in(src);
+    CHECK(r1.add.size() == 1);
+
+    // Second sync with identical content
+    auto [r2, snap3] = snap2.sync_in(src);
+    CHECK(r2.in_sync());
+    CHECK(snap2.commit_hash() == snap3.commit_hash());
+
+    fs::remove_all(repo_path);
+    fs::remove_all(src);
+}
+
+// ---------------------------------------------------------------------------
+// sync_out: prunes empty dirs
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Sync: sync_out prunes nested empty directories", "[sync]") {
+    auto repo_path = make_temp_repo();
+    auto store = open_store(repo_path);
+    auto snap = store.branches().get("main");
+    snap = snap.write_text("keep.txt", "kept");
+
+    auto dest = make_src_dir();
+    // Create deep extra directory
+    write_file(dest / "a" / "b" / "extra.txt", "extra");
+
+    snap.sync_out("", dest);
+    CHECK_FALSE(fs::exists(dest / "a" / "b" / "extra.txt"));
+    CHECK_FALSE(fs::exists(dest / "a" / "b"));
+    CHECK_FALSE(fs::exists(dest / "a"));
+
+    fs::remove_all(repo_path);
+    fs::remove_all(dest);
+}
+
+// ---------------------------------------------------------------------------
+// copy_from_ref: contents mode
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Copy: copy_from_ref contents mode trailing slash", "[copy][copy_from_ref]") {
+    auto repo_path = make_temp_repo();
+    auto store = open_store(repo_path);
+    auto snap = store.branches().get("main");
+    snap = snap.write_text("dir/a.txt", "a");
+    snap = snap.write_text("dir/b.txt", "b");
+
+    auto dev = store.branches().set_and_get("dev", snap);
+    dev = dev.write_text("other.txt", "other");
+
+    snap = store.branches().get("main");
+    snap = snap.copy_from_ref(dev, {"dir/"}, "imported");
+    CHECK(snap.read_text("imported/a.txt") == "a");
+    CHECK(snap.read_text("imported/b.txt") == "b");
+
+    fs::remove_all(repo_path);
+}
+
+// ---------------------------------------------------------------------------
+// copy_from_ref: stale error
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Copy: copy_from_ref stale snapshot throws", "[copy][copy_from_ref]") {
+    auto repo_path = make_temp_repo();
+    auto store = open_store(repo_path);
+    auto snap = store.branches().get("main");
+    snap = snap.write_text("a.txt", "data");
+
+    auto dev = store.branches().set_and_get("dev", snap);
+
+    // Advance main to make snap stale
+    auto fresh = store.branches().get("main");
+    fresh.write_text("advance.txt", "advance");
+
+    // snap is now stale
+    REQUIRE_THROWS_AS(snap.copy_from_ref(dev, {"a.txt"}, ""),
+                      vost::StaleSnapshotError);
+    fs::remove_all(repo_path);
+}
+
+// ---------------------------------------------------------------------------
+// copy_from_ref: readonly dest throws
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Copy: copy_from_ref readonly dest throws", "[copy][copy_from_ref]") {
+    auto repo_path = make_temp_repo();
+    auto store = open_store(repo_path);
+    auto snap = store.branches().get("main");
+    snap = snap.write_text("a.txt", "data");
+
+    store.tags().set("v1", snap);
+    auto tag_snap = store.tags().get("v1");
+
+    REQUIRE_THROWS_AS(tag_snap.copy_from_ref(snap, {"a.txt"}, ""),
+                      vost::PermissionError);
+    fs::remove_all(repo_path);
+}
+
+// ---------------------------------------------------------------------------
+// copy_from_ref: custom message
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Copy: copy_from_ref custom message", "[copy][copy_from_ref]") {
+    auto repo_path = make_temp_repo();
+    auto store = open_store(repo_path);
+    auto snap = store.branches().get("main");
+    snap = snap.write_text("a.txt", "data");
+
+    auto dev = store.branches().set_and_get("dev", snap);
+    dev = dev.write_text("new.txt", "new");
+
+    snap = store.branches().get("main");
+    vost::CopyFromRefOptions opts;
+    opts.message = "custom copy message";
+    snap = snap.copy_from_ref(dev, {"new.txt"}, "", opts);
+
+    CHECK(snap.message() == "custom copy message");
+    fs::remove_all(repo_path);
+}
+
+// ---------------------------------------------------------------------------
+// copy_from_ref: noop when identical
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Copy: copy_from_ref identical content preserves tree", "[copy][copy_from_ref]") {
+    auto repo_path = make_temp_repo();
+    auto store = open_store(repo_path);
+    auto snap = store.branches().get("main");
+    snap = snap.write_text("a.txt", "data");
+
+    auto dev = store.branches().set_and_get("dev", snap);
+
+    snap = store.branches().get("main");
+    auto tree_before = snap.tree_hash();
+    snap = snap.copy_from_ref(dev);
+    // Identical content — tree hash should be the same
+    CHECK(snap.tree_hash() == tree_before);
+
+    fs::remove_all(repo_path);
+}
+
+// ---------------------------------------------------------------------------
+// copy_from_ref: preserves executable mode
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Copy: copy_from_ref preserves executable mode", "[copy][copy_from_ref]") {
+    auto repo_path = make_temp_repo();
+    auto store = open_store(repo_path);
+    auto snap = store.branches().get("main");
+
+    vost::WriteOptions wopts;
+    wopts.mode = vost::MODE_BLOB_EXEC;
+    snap = snap.write_text("script.sh", "#!/bin/sh", wopts);
+
+    auto dev = store.branches().set_and_get("dev", snap);
+
+    auto dest = store.branches().set_and_get("dest", snap);
+    dest = dest.remove({"script.sh"});
+    dest = dest.copy_from_ref(dev, {"script.sh"}, "");
+    CHECK(dest.file_type("script.sh") == vost::FileType::Executable);
+
+    fs::remove_all(repo_path);
+}
+
+// ---------------------------------------------------------------------------
+// ExcludeFilter: more patterns
+// ---------------------------------------------------------------------------
+
+TEST_CASE("ExcludeFilter: double star pattern in subdirs", "[exclude]") {
+    vost::ExcludeFilter filter;
+    filter.add_patterns({"**/*.log"});
+
+    CHECK(filter.is_excluded("sub/dir/error.log"));
+    CHECK(filter.is_excluded("dir/debug.log"));
+    CHECK_FALSE(filter.is_excluded("readme.txt"));
+}
+
+TEST_CASE("ExcludeFilter: basename matching", "[exclude]") {
+    vost::ExcludeFilter filter;
+    filter.add_patterns({"*.log"});
+
+    CHECK(filter.is_excluded("debug.log"));
+    CHECK(filter.is_excluded("sub/dir/error.log"));
+    CHECK_FALSE(filter.is_excluded("readme.txt"));
+}
+
+TEST_CASE("ExcludeFilter: question mark wildcard", "[exclude]") {
+    vost::ExcludeFilter filter;
+    filter.add_patterns({"file?.txt"});
+
+    CHECK(filter.is_excluded("file1.txt"));
+    CHECK(filter.is_excluded("fileA.txt"));
+    CHECK_FALSE(filter.is_excluded("file12.txt"));
+}
+
+TEST_CASE("ExcludeFilter: no dotfile protection", "[exclude]") {
+    vost::ExcludeFilter filter;
+    filter.add_patterns({"*"});
+
+    // ExcludeFilter matches everything including dotfiles
+    CHECK(filter.is_excluded("regular.txt"));
+    CHECK(filter.is_excluded(".hidden"));
+}
+
+TEST_CASE("ExcludeFilter: last rule wins", "[exclude]") {
+    vost::ExcludeFilter filter;
+    filter.add_patterns({"*.log", "!important.log", "*.log"});
+
+    // Last *.log re-excludes important.log
+    CHECK(filter.is_excluded("important.log"));
+    CHECK(filter.is_excluded("debug.log"));
+}

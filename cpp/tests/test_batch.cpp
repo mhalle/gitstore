@@ -347,3 +347,215 @@ TEST_CASE("BatchWriter: accumulates writes and stages on close", "[batch][writer
     CHECK(snap.read_text("stream.txt") == "chunk1 chunk2");
     fs::remove_all(path);
 }
+
+// ---------------------------------------------------------------------------
+// Batch: readonly throws PermissionError
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Batch: readonly throws PermissionError on commit", "[batch]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches().get("main");
+    snap = snap.write_text("f.txt", "data");
+
+    store.tags().set("v1", snap);
+    auto tag_snap = store.tags().get("v1");
+
+    auto batch = tag_snap.batch();
+    batch.write_text("new.txt", "data");
+    REQUIRE_THROWS_AS(batch.commit(), vost::PermissionError);
+    fs::remove_all(path);
+}
+
+// ---------------------------------------------------------------------------
+// Batch: remove directory throws IsADirectoryError on commit
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Batch: remove file works correctly", "[batch]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches().get("main");
+    snap = snap.write_text("a.txt", "a");
+    snap = snap.write_text("b.txt", "b");
+
+    auto batch = snap.batch();
+    batch.remove("a.txt");
+    auto result = batch.commit();
+    CHECK_FALSE(result.exists("a.txt"));
+    CHECK(result.exists("b.txt"));
+    fs::remove_all(path);
+}
+
+// ---------------------------------------------------------------------------
+// Batch: changes report after commit
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Batch: commit applies all staged writes", "[batch]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches().get("main");
+    snap = snap.write_text("existing.txt", "v1");
+
+    auto batch = snap.batch();
+    batch.write_text("new.txt", "new");
+    batch.write_text("existing.txt", "v2");
+    auto result = batch.commit();
+
+    CHECK(result.read_text("new.txt") == "new");
+    CHECK(result.read_text("existing.txt") == "v2");
+    CHECK(result.commit_hash() != snap.commit_hash());
+    fs::remove_all(path);
+}
+
+// ---------------------------------------------------------------------------
+// Batch: identical writes no new commit
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Batch: identical writes produce no change in tree", "[batch]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches().get("main");
+    snap = snap.write_text("file.txt", "data");
+
+    auto batch = snap.batch();
+    batch.write_text("file.txt", "data");
+    auto result = batch.commit();
+
+    // Same tree content — tree_hash is same
+    CHECK(result.tree_hash() == snap.tree_hash());
+    fs::remove_all(path);
+}
+
+// ---------------------------------------------------------------------------
+// Batch: double commit throws BatchClosedError
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Batch: double commit throws BatchClosedError", "[batch]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches().get("main");
+
+    auto batch = snap.batch();
+    batch.write_text("f.txt", "data");
+    batch.commit();
+
+    REQUIRE_THROWS_AS(batch.commit(), vost::BatchClosedError);
+    fs::remove_all(path);
+}
+
+// ---------------------------------------------------------------------------
+// Batch: write_from_file preserves executable
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Batch: write_from_file preserves executable mode", "[batch]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches().get("main");
+
+    auto tmp = fs::temp_directory_path() / "vost_batch_exec_test";
+    fs::create_directories(tmp);
+    write_local_file(tmp / "script.sh", "#!/bin/sh");
+    fs::permissions(tmp / "script.sh",
+                    fs::perms::owner_exec | fs::perms::owner_read | fs::perms::owner_write,
+                    fs::perm_options::replace);
+
+    auto batch = snap.batch();
+    batch.write_from_file("script.sh", tmp / "script.sh", vost::MODE_BLOB_EXEC);
+    snap = batch.commit();
+
+    CHECK(snap.file_type("script.sh") == vost::FileType::Executable);
+    fs::remove_all(path);
+    fs::remove_all(tmp);
+}
+
+// ---------------------------------------------------------------------------
+// Batch: write_from_file missing file throws
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Batch: write_from_file missing file throws", "[batch]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches().get("main");
+
+    auto batch = snap.batch();
+    REQUIRE_THROWS_AS(
+        batch.write_from_file("f.txt", "/nonexistent/path/file.txt"),
+        vost::IoError);
+    fs::remove_all(path);
+}
+
+// ---------------------------------------------------------------------------
+// Batch: fs() accessor after commit
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Batch: fs() accessor returns committed snapshot", "[batch]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches().get("main");
+
+    auto batch = snap.batch();
+    batch.write_text("file.txt", "data");
+    auto result = batch.commit();
+
+    CHECK(batch.fs().has_value());
+    CHECK(batch.fs()->commit_hash() == result.commit_hash());
+    CHECK(batch.fs()->read_text("file.txt") == "data");
+    fs::remove_all(path);
+}
+
+// ---------------------------------------------------------------------------
+// Batch: remove nonexistent throws NotFoundError on commit
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Batch: write nested paths creates directories", "[batch]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches().get("main");
+
+    auto batch = snap.batch();
+    batch.write_text("a/b/c.txt", "deep");
+    auto result = batch.commit();
+    CHECK(result.exists("a/b/c.txt"));
+    CHECK(result.read_text("a/b/c.txt") == "deep");
+    fs::remove_all(path);
+}
+
+// ---------------------------------------------------------------------------
+// BatchWriter: text mode
+// ---------------------------------------------------------------------------
+
+TEST_CASE("BatchWriter: text mode via string writes", "[batch][writer]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches().get("main");
+
+    auto batch = snap.batch();
+    {
+        vost::BatchWriter w(batch, "log.txt");
+        w.write("line1\n");
+        w.write("line2\n");
+        w.close();
+    }
+    snap = batch.commit();
+
+    CHECK(snap.read_text("log.txt") == "line1\nline2\n");
+    fs::remove_all(path);
+}
+
+// ---------------------------------------------------------------------------
+// BatchWriter: write after close throws
+// ---------------------------------------------------------------------------
+
+TEST_CASE("BatchWriter: write after close throws", "[batch][writer]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches().get("main");
+
+    auto batch = snap.batch();
+    vost::BatchWriter w(batch, "file.txt");
+    w.write("data");
+    w.close();
+
+    REQUIRE_THROWS_AS(w.write("more"), vost::BatchClosedError);
+    fs::remove_all(path);
+}

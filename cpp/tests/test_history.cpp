@@ -471,3 +471,126 @@ TEST_CASE("History: back(n) throws NotFoundError when history is shorter", "[his
     REQUIRE_THROWS_AS(snap.back(10), vost::NotFoundError);
     fs::remove_all(path);
 }
+
+// ---------------------------------------------------------------------------
+// History: log with path filter - added then removed
+// ---------------------------------------------------------------------------
+
+TEST_CASE("History: log with path filter shows add and remove", "[history][log]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches().get("main");
+    snap = snap.write_text("temp.txt", "data");
+    snap = snap.remove({"temp.txt"});
+
+    vost::LogOptions opts;
+    opts.path = "temp.txt";
+    auto entries = snap.log(opts);
+    // Should have 2 entries: add + remove
+    CHECK(entries.size() == 2);
+    fs::remove_all(path);
+}
+
+// ---------------------------------------------------------------------------
+// History: undo/redo roundtrip
+// ---------------------------------------------------------------------------
+
+TEST_CASE("History: undo then redo restores content", "[history][undo][redo]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches().get("main");
+    snap = snap.write_text("f.txt", "v1");
+    snap = snap.write_text("f.txt", "v2");
+
+    auto undone = snap.undo();
+    CHECK(undone.read_text("f.txt") == "v1");
+
+    auto redone = undone.redo();
+    CHECK(redone.read_text("f.txt") == "v2");
+
+    // Verify branch state
+    auto latest = store.branches().get("main");
+    CHECK(latest.read_text("f.txt") == "v2");
+    fs::remove_all(path);
+}
+
+// ---------------------------------------------------------------------------
+// History: redo on readonly throws
+// ---------------------------------------------------------------------------
+
+TEST_CASE("History: redo on readonly tag throws PermissionError", "[history][redo]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches().get("main");
+    snap = snap.write_text("f.txt", "v1");
+
+    store.tags().set("release", snap);
+    auto tag = store.tags().get("release");
+
+    REQUIRE_THROWS_AS(tag.redo(), vost::PermissionError);
+    fs::remove_all(path);
+}
+
+// ---------------------------------------------------------------------------
+// History: commit metadata
+// ---------------------------------------------------------------------------
+
+TEST_CASE("History: log entries have valid commit metadata", "[history][log]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches().get("main");
+
+    vost::WriteOptions wopts;
+    wopts.message = "test metadata";
+    snap = snap.write_text("f.txt", "data", wopts);
+
+    auto entries = snap.log();
+    REQUIRE(!entries.empty());
+    CHECK(entries[0].message == "test metadata");
+    CHECK(entries[0].commit_hash.size() == 40);
+    REQUIRE(entries[0].author_name.has_value());
+    CHECK(*entries[0].author_name == "vost");
+    REQUIRE(entries[0].author_email.has_value());
+    CHECK(*entries[0].author_email == "vost@localhost");
+    REQUIRE(entries[0].time.has_value());
+    CHECK(*entries[0].time > 0);
+    fs::remove_all(path);
+}
+
+// ---------------------------------------------------------------------------
+// History: undo stale snapshot
+// ---------------------------------------------------------------------------
+
+TEST_CASE("History: undo on stale snapshot throws", "[history][undo]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches().get("main");
+    snap = snap.write_text("f.txt", "v1");
+
+    auto stale = snap;
+    snap.write_text("f.txt", "v2"); // advance branch
+
+    REQUIRE_THROWS_AS(stale.undo(), vost::StaleSnapshotError);
+    fs::remove_all(path);
+}
+
+// ---------------------------------------------------------------------------
+// History: multiple undo then redo
+// ---------------------------------------------------------------------------
+
+TEST_CASE("History: undo multiple then redo restores to before undo", "[history][undo][redo]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches().get("main");
+    snap = snap.write_text("f.txt", "v1");
+    snap = snap.write_text("f.txt", "v2");
+    snap = snap.write_text("f.txt", "v3");
+
+    auto undone = snap.undo(2);
+    CHECK(undone.read_text("f.txt") == "v1");
+
+    // redo reverses the entire undo — goes back to v3 (pre-undo state)
+    auto redone = undone.redo();
+    CHECK(redone.read_text("f.txt") == "v3");
+    fs::remove_all(path);
+}

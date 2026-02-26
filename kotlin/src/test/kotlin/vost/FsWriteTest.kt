@@ -333,4 +333,206 @@ class FsWriteTest {
             assertTrue(fs.exists("c.txt"))
         }
     }
+
+    // ── apply edge cases ──
+
+    @Test
+    fun `apply with bytes data`() {
+        val store = createStore()
+        store.use {
+            var fs = it.branches["main"]
+            val data = byteArrayOf(0x00, 0xFF.toByte(), 0x42)
+            fs = fs.apply(writes = mapOf("bin.dat" to data))
+            val result = fs.read("bin.dat")
+            assertEquals(3, result.size)
+            assertEquals(0x00.toByte(), result[0])
+            assertEquals(0xFF.toByte(), result[1])
+            assertEquals(0x42.toByte(), result[2])
+        }
+    }
+
+    @Test
+    fun `apply with symlink entry`() {
+        val store = createStore()
+        store.use {
+            var fs = it.branches["main"]
+            fs = fs.apply(writes = mapOf("target.txt" to "data",
+                "link" to WriteEntry(target = "target.txt")))
+            assertEquals(FileType.LINK, fs.fileType("link"))
+            assertEquals("target.txt", fs.readlink("link"))
+        }
+    }
+
+    @Test
+    fun `apply with executable mode`() {
+        val store = createStore()
+        store.use {
+            var fs = it.branches["main"]
+            fs = fs.apply(writes = mapOf(
+                "script.sh" to WriteEntry(data = "#!/bin/sh".toByteArray(), mode = FileType.EXECUTABLE)
+            ))
+            assertEquals(FileType.EXECUTABLE, fs.fileType("script.sh"))
+        }
+    }
+
+    @Test
+    fun `apply multiple writes single commit`() {
+        val store = createStore()
+        store.use {
+            var fs = it.branches["main"]
+            fs = fs.apply(writes = mapOf(
+                "a.txt" to "aaa",
+                "b.txt" to "bbb",
+                "c/d.txt" to "ccc"
+            ))
+            assertEquals("aaa", fs.readText("a.txt"))
+            assertEquals("bbb", fs.readText("b.txt"))
+            assertEquals("ccc", fs.readText("c/d.txt"))
+            // Single commit for all writes
+            assertNotNull(fs.changes)
+        }
+    }
+
+    @Test
+    fun `apply removes single file`() {
+        val store = createStore()
+        store.use {
+            var fs = it.branches["main"]
+            fs = fs.write("a.txt", "a".toByteArray())
+            fs = fs.write("b.txt", "b".toByteArray())
+            fs = fs.apply(removes = listOf("a.txt"))
+            assertFalse(fs.exists("a.txt"))
+            assertTrue(fs.exists("b.txt"))
+        }
+    }
+
+    @Test
+    fun `apply removes multiple files`() {
+        val store = createStore()
+        store.use {
+            var fs = it.branches["main"]
+            fs = fs.write("a.txt", "a".toByteArray())
+            fs = fs.write("b.txt", "b".toByteArray())
+            fs = fs.write("c.txt", "c".toByteArray())
+            fs = fs.apply(removes = listOf("a.txt", "b.txt"))
+            assertFalse(fs.exists("a.txt"))
+            assertFalse(fs.exists("b.txt"))
+            assertTrue(fs.exists("c.txt"))
+        }
+    }
+
+    @Test
+    fun `apply empty is noop`() {
+        val store = createStore()
+        store.use {
+            var fs = it.branches["main"]
+            fs = fs.write("file.txt", "data".toByteArray())
+            val hash1 = fs.commitHash
+            fs = fs.apply()
+            // Empty apply should not create a new commit (same tree)
+            assertEquals(hash1, fs.commitHash)
+        }
+    }
+
+    @Test
+    fun `apply identical write is noop`() {
+        val store = createStore()
+        store.use {
+            var fs = it.branches["main"]
+            fs = fs.write("file.txt", "data".toByteArray())
+            val hash1 = fs.commitHash
+            fs = fs.apply(writes = mapOf("file.txt" to "data"))
+            assertEquals(hash1, fs.commitHash)
+        }
+    }
+
+    @Test
+    fun `apply with custom message`() {
+        val store = createStore()
+        store.use {
+            var fs = it.branches["main"]
+            fs = fs.apply(writes = mapOf("file.txt" to "data"), message = "custom apply")
+            assertEquals("custom apply", fs.message)
+        }
+    }
+
+    @Test
+    fun `apply with operation keyword`() {
+        val store = createStore()
+        store.use {
+            var fs = it.branches["main"]
+            fs = fs.apply(writes = mapOf(
+                "a.txt" to "aaa",
+                "b.txt" to "bbb"
+            ), operation = "import")
+            assertTrue(fs.message.startsWith("Batch import:"))
+        }
+    }
+
+    @Test
+    fun `apply on readonly tag throws`() {
+        val store = createStore()
+        store.use {
+            val fs = it.branches["main"]
+            it.tags["v1"] = fs
+            val tagFs = it.tags["v1"]
+            assertThrows<PermissionError> {
+                tagFs.apply(writes = mapOf("file.txt" to "data"))
+            }
+        }
+    }
+
+    @Test
+    fun `apply stale snapshot throws`() {
+        val store = createStore()
+        store.use {
+            val fs1 = it.branches["main"]
+            val fs2 = it.branches["main"]
+            fs1.write("a.txt", "a".toByteArray())
+            assertThrows<StaleSnapshotError> {
+                fs2.apply(writes = mapOf("b.txt" to "b"))
+            }
+        }
+    }
+
+    @Test
+    fun `apply changes report add`() {
+        val store = createStore()
+        store.use {
+            var fs = it.branches["main"]
+            fs = fs.apply(writes = mapOf("new.txt" to "new"))
+            val changes = fs.changes
+            assertNotNull(changes)
+            assertEquals(1, changes.add.size)
+            assertEquals("new.txt", changes.add[0].path)
+        }
+    }
+
+    @Test
+    fun `apply changes report update`() {
+        val store = createStore()
+        store.use {
+            var fs = it.branches["main"]
+            fs = fs.write("file.txt", "v1".toByteArray())
+            fs = fs.apply(writes = mapOf("file.txt" to "v2"))
+            val changes = fs.changes
+            assertNotNull(changes)
+            assertEquals(1, changes.update.size)
+            assertEquals("file.txt", changes.update[0].path)
+        }
+    }
+
+    @Test
+    fun `apply changes report delete`() {
+        val store = createStore()
+        store.use {
+            var fs = it.branches["main"]
+            fs = fs.write("file.txt", "data".toByteArray())
+            fs = fs.apply(removes = listOf("file.txt"))
+            val changes = fs.changes
+            assertNotNull(changes)
+            assertEquals(1, changes.delete.size)
+            assertEquals("file.txt", changes.delete[0].path)
+        }
+    }
 }

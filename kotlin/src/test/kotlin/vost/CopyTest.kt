@@ -1,11 +1,13 @@
 package vost
 
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
 import org.junit.jupiter.api.io.TempDir
 import java.io.File
 import java.nio.file.Path
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
 class CopyTest {
@@ -333,6 +335,236 @@ class CopyTest {
 
             dest = dest.copyFromRef(src, listOf("file.txt"), "")
             assertEquals("source data", dest.readText("file.txt"))
+        }
+    }
+
+    // ── move edge cases ──
+
+    @Test
+    fun `move preserves other files`() {
+        val store = createStore()
+        store.use {
+            var fs = it.branches["main"]
+            fs = fs.write("a.txt", "aaa".toByteArray())
+            fs = fs.write("other.txt", "other".toByteArray())
+            fs = fs.write("dest/placeholder.txt", "p".toByteArray())
+            fs = fs.move(listOf("a.txt"), "dest")
+            assertFalse(fs.exists("a.txt"))
+            assertEquals("aaa", fs.readText("dest/a.txt"))
+            assertEquals("other", fs.readText("other.txt"))
+        }
+    }
+
+    @Test
+    fun `move into directory with trailing slash`() {
+        val store = createStore()
+        store.use {
+            var fs = it.branches["main"]
+            fs = fs.write("file.txt", "data".toByteArray())
+            fs = fs.write("dest/placeholder.txt", "p".toByteArray())
+            fs = fs.move(listOf("file.txt"), "dest/")
+            assertFalse(fs.exists("file.txt"))
+            assertEquals("data", fs.readText("dest/file.txt"))
+        }
+    }
+
+    @Test
+    fun `move is single atomic commit`() {
+        val store = createStore()
+        store.use {
+            var fs = it.branches["main"]
+            fs = fs.write("a.txt", "aaa".toByteArray())
+            fs = fs.write("b.txt", "bbb".toByteArray())
+            val hashBefore = fs.commitHash
+            fs = fs.move(listOf("a.txt"), "c.txt")
+            // Exactly one new commit
+            assertNotEquals(hashBefore, fs.commitHash)
+        }
+    }
+
+    @Test
+    fun `move nonexistent source throws`() {
+        val store = createStore()
+        store.use {
+            val fs = it.branches["main"]
+            assertThrows<java.io.FileNotFoundException> {
+                fs.move(listOf("ghost.txt"), "dest.txt")
+            }
+        }
+    }
+
+    @Test
+    fun `move on readonly tag throws`() {
+        val store = createStore()
+        store.use {
+            var fs = it.branches["main"]
+            fs = fs.write("file.txt", "data".toByteArray())
+            it.tags["v1"] = fs
+            val tagFs = it.tags["v1"]
+            assertThrows<PermissionError> {
+                tagFs.move(listOf("file.txt"), "other.txt")
+            }
+        }
+    }
+
+    @Test
+    fun `move with custom message`() {
+        val store = createStore()
+        store.use {
+            var fs = it.branches["main"]
+            fs = fs.write("a.txt", "data".toByteArray())
+            fs = fs.move(listOf("a.txt"), "b.txt", message = "moved file")
+            assertEquals("moved file", fs.message)
+        }
+    }
+
+    @Test
+    fun `rename preserves content`() {
+        val store = createStore()
+        store.use {
+            var fs = it.branches["main"]
+            val data = byteArrayOf(0x00, 0xFF.toByte(), 0x42)
+            fs = fs.write("binary.dat", data)
+            fs = fs.rename("binary.dat", "renamed.dat")
+            val result = fs.read("renamed.dat")
+            assertEquals(3, result.size)
+            assertEquals(data[0], result[0])
+            assertEquals(data[1], result[1])
+            assertEquals(data[2], result[2])
+        }
+    }
+
+    // ── copy/sync edge cases ──
+
+    @Test
+    fun `copyIn missing file throws`(@TempDir tempDir: Path) {
+        val store = createStore()
+        store.use {
+            val fs = it.branches["main"]
+            assertThrows<java.io.FileNotFoundException> {
+                fs.copyIn(listOf(tempDir.resolve("nonexistent.txt").toString()), "")
+            }
+        }
+    }
+
+    @Test
+    fun `copyIn empty file`(@TempDir tempDir: Path) {
+        val emptyFile = tempDir.resolve("empty.txt").toFile()
+        emptyFile.writeText("")
+        val store = createStore()
+        store.use {
+            var fs = it.branches["main"]
+            fs = fs.copyIn(listOf(emptyFile.absolutePath), "")
+            assertTrue(fs.exists("empty.txt"))
+            assertEquals("", fs.readText("empty.txt"))
+        }
+    }
+
+    @Test
+    fun `copyIn binary data`(@TempDir tempDir: Path) {
+        val binFile = tempDir.resolve("data.bin").toFile()
+        binFile.writeBytes(byteArrayOf(0x00, 0xFF.toByte(), 0x42))
+        val store = createStore()
+        store.use {
+            var fs = it.branches["main"]
+            fs = fs.copyIn(listOf(binFile.absolutePath), "")
+            val content = fs.read("data.bin")
+            assertEquals(3, content.size)
+            assertEquals(0x00.toByte(), content[0])
+        }
+    }
+
+    @Test
+    fun `copyOut missing file throws`(@TempDir tempDir: Path) {
+        val destDir = tempDir.resolve("out").toFile()
+        val store = createStore()
+        store.use {
+            val fs = it.branches["main"]
+            assertThrows<java.io.FileNotFoundException> {
+                fs.copyOut(listOf("nonexistent.txt"), destDir.absolutePath)
+            }
+        }
+    }
+
+    @Test
+    fun `syncIn is idempotent`(@TempDir tempDir: Path) {
+        val srcDir = tempDir.resolve("data").toFile()
+        srcDir.mkdirs()
+        File(srcDir, "file.txt").writeText("content")
+
+        val store = createStore()
+        store.use {
+            var fs = it.branches["main"]
+            fs = fs.syncIn(srcDir.absolutePath, "dest")
+            val hash1 = fs.commitHash
+            fs = fs.syncIn(srcDir.absolutePath, "dest")
+            // Second sync with identical content should be no-op
+            assertEquals(hash1, fs.commitHash)
+        }
+    }
+
+    @Test
+    fun `syncOut prunes empty dirs`(@TempDir tempDir: Path) {
+        val destDir = tempDir.resolve("out").toFile()
+        destDir.mkdirs()
+        val subDir = File(destDir, "sub")
+        subDir.mkdirs()
+        File(subDir, "extra.txt").writeText("extra")
+
+        val store = createStore()
+        store.use {
+            var fs = it.branches["main"]
+            fs = fs.write("root.txt", "root".toByteArray())
+            fs.syncOut("", destDir.absolutePath)
+            assertFalse(File(destDir, "sub").exists())
+        }
+    }
+
+    @Test
+    fun `copyFromRef contents mode trailing slash`() {
+        val store = createStore()
+        store.use {
+            var src = it.branches["main"]
+            src = src.write("dir/a.txt", "aaa".toByteArray())
+            src = src.write("dir/b.txt", "bbb".toByteArray())
+
+            it.branches["other"] = src
+            var dest = it.branches["other"]
+            dest = dest.write("other.txt", "other".toByteArray())
+
+            dest = dest.copyFromRef(src, listOf("dir/"), "imported")
+            assertEquals("aaa", dest.readText("imported/a.txt"))
+            assertEquals("bbb", dest.readText("imported/b.txt"))
+        }
+    }
+
+    @Test
+    fun `copyFromRef readonly dest throws`() {
+        val store = createStore()
+        store.use {
+            var src = it.branches["main"]
+            src = src.write("a.txt", "aaa".toByteArray())
+            it.tags["v1"] = src
+            val tagFs = it.tags["v1"]
+            assertThrows<PermissionError> {
+                tagFs.copyFromRef(src, listOf("a.txt"), "")
+            }
+        }
+    }
+
+    @Test
+    fun `copyFromRef custom message`() {
+        val store = createStore()
+        store.use {
+            var src = it.branches["main"]
+            src = src.write("a.txt", "aaa".toByteArray())
+
+            it.branches["other"] = src
+            var dest = it.branches["other"]
+            dest = dest.write("other.txt", "other".toByteArray())
+
+            dest = dest.copyFromRef(src, listOf("a.txt"), "dest", message = "custom copy")
+            assertEquals("custom copy", dest.message)
         }
     }
 }

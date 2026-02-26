@@ -135,3 +135,107 @@ TEST_CASE("move: read-only Fs throws", "[move]") {
     REQUIRE_THROWS_AS(tag_snap.move({"file.txt"}, "new.txt"), vost::PermissionError);
     fs::remove_all(path);
 }
+
+// ---------------------------------------------------------------------------
+// move: preserves other files
+// ---------------------------------------------------------------------------
+
+TEST_CASE("move: preserves other files", "[move]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches().get("main");
+    snap = snap.write_text("a.txt", "aaa");
+    snap = snap.write_text("other.txt", "other");
+
+    snap = snap.move({"a.txt"}, "b.txt");
+    CHECK_FALSE(snap.exists("a.txt"));
+    CHECK(snap.read_text("b.txt") == "aaa");
+    CHECK(snap.read_text("other.txt") == "other");
+    fs::remove_all(path);
+}
+
+// ---------------------------------------------------------------------------
+// move: directory recursive
+// ---------------------------------------------------------------------------
+
+TEST_CASE("move: directory recursive", "[move]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches().get("main");
+    snap = snap.write_text("src/a.txt", "a");
+    snap = snap.write_text("src/sub/b.txt", "b");
+
+    vost::MoveOptions opts;
+    opts.recursive = true;
+    snap = snap.move({"src"}, "dst", opts);
+    CHECK_FALSE(snap.exists("src"));
+    CHECK(snap.read_text("dst/a.txt") == "a");
+    CHECK(snap.read_text("dst/sub/b.txt") == "b");
+    fs::remove_all(path);
+}
+
+// ---------------------------------------------------------------------------
+// move: dry_run reports correct paths
+// ---------------------------------------------------------------------------
+
+TEST_CASE("move: dry_run reports correct paths", "[move]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches().get("main");
+    snap = snap.write_text("a.txt", "data");
+    snap = snap.write_text("b.txt", "other");
+
+    vost::MoveOptions mopts;
+    mopts.dry_run = true;
+    auto result = snap.move({"a.txt"}, "renamed.txt", mopts);
+
+    // Original unchanged
+    CHECK(snap.exists("a.txt"));
+    // No commit happened
+    auto snap2 = store.branches().get("main");
+    CHECK(snap2.exists("a.txt"));
+    CHECK_FALSE(snap2.exists("renamed.txt"));
+    fs::remove_all(path);
+}
+
+// ---------------------------------------------------------------------------
+// move: error cases
+// ---------------------------------------------------------------------------
+
+TEST_CASE("move: nonexistent source throws", "[move]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches().get("main");
+    snap = snap.write_text("exists.txt", "data");
+
+    REQUIRE_THROWS_AS(snap.move({"ghost.txt"}, "dest.txt"), vost::NotFoundError);
+    fs::remove_all(path);
+}
+
+TEST_CASE("move: directory without recursive throws", "[move]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches().get("main");
+    snap = snap.write_text("dir/file.txt", "content");
+
+    REQUIRE_THROWS_AS(snap.move({"dir"}, "other"), vost::IsADirectoryError);
+    fs::remove_all(path);
+}
+
+// ---------------------------------------------------------------------------
+// move: custom message
+// ---------------------------------------------------------------------------
+
+TEST_CASE("move: custom commit message", "[move]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches().get("main");
+    snap = snap.write_text("a.txt", "data");
+
+    vost::MoveOptions mopts;
+    mopts.message = "custom move message";
+    snap = snap.move({"a.txt"}, "b.txt", mopts);
+
+    CHECK(snap.message() == "custom move message");
+    fs::remove_all(path);
+}

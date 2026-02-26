@@ -372,3 +372,165 @@ TEST_CASE("RefDict: set_and_get returns writable Fs", "[notes][refdict]") {
 
     fs::remove_all(path);
 }
+
+// ---------------------------------------------------------------------------
+// Notes: batch delete
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Notes: batch delete", "[notes]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto hash = setup_commit(store);
+
+    auto ns = store.notes()["commits"];
+    ns.set(hash, "to delete");
+
+    auto batch = ns.batch();
+    batch.del(hash);
+    batch.commit();
+
+    CHECK_FALSE(ns.has(hash));
+
+    fs::remove_all(path);
+}
+
+// ---------------------------------------------------------------------------
+// Notes: batch mixed writes and deletes
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Notes: batch mixed writes and deletes", "[notes]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+
+    auto snap = store.branches()["main"];
+    snap = snap.write_text("a.txt", "a");
+    auto hash1 = *snap.commit_hash();
+    snap = snap.write_text("b.txt", "b");
+    auto hash2 = *snap.commit_hash();
+
+    auto ns = store.notes()["commits"];
+    ns.set(hash1, "old note");
+
+    auto batch = ns.batch();
+    batch.del(hash1);
+    batch.set(hash2, "new note");
+    batch.commit();
+
+    CHECK_FALSE(ns.has(hash1));
+    CHECK(ns.get(hash2) == "new note");
+
+    fs::remove_all(path);
+}
+
+// ---------------------------------------------------------------------------
+// Notes: empty text roundtrip
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Notes: empty text roundtrip", "[notes]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto hash = setup_commit(store);
+
+    auto ns = store.notes()["commits"];
+    ns.set(hash, "");
+    CHECK(ns.get(hash) == "");
+
+    fs::remove_all(path);
+}
+
+// ---------------------------------------------------------------------------
+// Notes: multiline text roundtrip
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Notes: multiline text roundtrip", "[notes]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto hash = setup_commit(store);
+
+    auto ns = store.notes()["commits"];
+    std::string text = "line1\nline2\nline3";
+    ns.set(hash, text);
+    CHECK(ns.get(hash) == text);
+
+    fs::remove_all(path);
+}
+
+// ---------------------------------------------------------------------------
+// Notes: batch set then delete same hash
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Notes: batch set then delete same hash", "[notes]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto hash = setup_commit(store);
+
+    // Pre-add the note so delete can find it
+    auto ns = store.notes()["commits"];
+    ns.set(hash, "existing");
+
+    auto batch = ns.batch();
+    batch.set(hash, "updated");
+    batch.del(hash);
+    batch.commit();
+
+    CHECK_FALSE(ns.has(hash));
+
+    fs::remove_all(path);
+}
+
+// ---------------------------------------------------------------------------
+// Notes: batch delete then set same hash
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Notes: batch delete then set same hash", "[notes]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto hash = setup_commit(store);
+
+    auto ns = store.notes()["commits"];
+    ns.set(hash, "original");
+
+    auto batch = ns.batch();
+    batch.del(hash);
+    batch.set(hash, "restored");
+    batch.commit();
+
+    CHECK(ns.get(hash) == "restored");
+
+    fs::remove_all(path);
+}
+
+// ---------------------------------------------------------------------------
+// Notes: batch closed rejects operations
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Notes: batch write after commit throws", "[notes]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto hash = setup_commit(store);
+
+    auto ns = store.notes()["commits"];
+    auto batch = ns.batch();
+    batch.set(hash, "note");
+    batch.commit();
+
+    CHECK_THROWS_AS(batch.set(hash, "another"), vost::BatchClosedError);
+
+    fs::remove_all(path);
+}
+
+// ---------------------------------------------------------------------------
+// Notes: batch invalid hash validation
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Notes: batch invalid hash throws", "[notes]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+
+    auto ns = store.notes()["commits"];
+    auto batch = ns.batch();
+
+    CHECK_THROWS_AS(batch.set("not-a-hash", "note"), vost::InvalidHashError);
+
+    fs::remove_all(path);
+}

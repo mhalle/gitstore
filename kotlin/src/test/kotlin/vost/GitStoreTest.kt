@@ -6,6 +6,8 @@ import java.io.File
 import java.io.FileNotFoundException
 import java.nio.file.Files
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -174,6 +176,113 @@ class GitStoreTest {
         val store = createStore()
         store.use {
             assertTrue(it.toString().startsWith("GitStore("))
+        }
+    }
+
+    @Test
+    fun `delete nonexistent branch throws`() {
+        val store = createStore()
+        store.use {
+            assertThrows<NoSuchElementException> {
+                it.branches.delete("nonexistent")
+            }
+        }
+    }
+
+    @Test
+    fun `get nonexistent tag throws`() {
+        val store = createStore()
+        store.use {
+            assertThrows<NoSuchElementException> {
+                it.tags["nonexistent"]
+            }
+        }
+    }
+
+    @Test
+    fun `delete tag`() {
+        val store = createStore()
+        store.use {
+            val fs = it.branches["main"]
+            it.tags["v1"] = fs
+            assertTrue("v1" in it.tags)
+            it.tags.delete("v1")
+            assertFalse("v1" in it.tags)
+        }
+    }
+
+    @Test
+    fun `tag is not writable`() {
+        val store = createStore()
+        store.use {
+            val fs = it.branches["main"]
+            it.tags["v1"] = fs
+            val tagFs = it.tags["v1"]
+            assertFalse(tagFs.writable)
+            assertThrows<PermissionError> {
+                tagFs.write("file.txt", "data".toByteArray())
+            }
+        }
+    }
+
+    @Test
+    fun `fs refName matches branch name`() {
+        val store = createStore()
+        store.use {
+            val fs = it.branches["main"]
+            assertEquals("main", fs.refName)
+        }
+    }
+
+    @Test
+    fun `fs writable is true for branches`() {
+        val store = createStore()
+        store.use {
+            val fs = it.branches["main"]
+            assertTrue(fs.writable)
+        }
+    }
+
+    @Test
+    fun `commitHash format is 40-char hex`() {
+        val store = createStore()
+        store.use {
+            val fs = it.branches["main"]
+            assertEquals(40, fs.commitHash.length)
+            assertTrue(fs.commitHash.all { c -> c in '0'..'9' || c in 'a'..'f' })
+        }
+    }
+
+    @Test
+    fun `branches size tracks changes`() {
+        val store = createStore()
+        store.use {
+            assertEquals(1, it.branches.size)
+            val fs = it.branches["main"]
+            it.branches["dev"] = fs
+            assertEquals(2, it.branches.size)
+            it.branches.delete("dev")
+            assertEquals(1, it.branches.size)
+        }
+    }
+
+    @Test
+    fun `current with no branches returns null`() {
+        val store = createStore(branch = null)
+        store.use {
+            assertNull(it.branches.current)
+        }
+    }
+
+    @Test
+    fun `tags list returns all tag names`() {
+        val store = createStore()
+        store.use {
+            val fs = it.branches["main"]
+            it.tags["v1"] = fs
+            it.tags["v2"] = fs
+            val names = it.tags.list().sorted()
+            assertEquals(listOf("v1", "v2"), names)
         }
     }
 }
