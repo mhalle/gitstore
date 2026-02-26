@@ -4,6 +4,22 @@ All notable changes to vost are documented in this file.
 
 ## Unreleased
 
+## v0.64.0 / Kotlin v0.8.0 (2026-02-25)
+
+**Breaking (Kotlin):**
+
+- Rename `Batch.result` → `Batch.fs` to match Python/TS/Rust/C++ naming; remove `resultFs` alias
+
+**Added (Kotlin):**
+
+- `ExcludeFilter` class — gitignore-style pattern matching for `copyIn`/`syncIn` operations (negation, dir-only, anchored patterns, load from file)
+- `GitStore.backup(url)` / `GitStore.restore(url)` — mirror operations using JGit transport (push/fetch all refs, auto-create bare repos, stale ref deletion, dry-run mode)
+- `MirrorDiff.inSync` and `.total` properties
+
+**Housekeeping:**
+
+- Add `cpp/build/`, `kotlin/build/`, `kotlin/.gradle/`, `site/` to `.gitignore`
+
 ## v0.63.0 / TS v0.7.0 / Rust v0.7.0 (2026-02-25)
 
 **Breaking (TypeScript):**
