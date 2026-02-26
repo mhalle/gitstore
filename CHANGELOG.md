@@ -4,6 +4,40 @@ All notable changes to vost are documented in this file.
 
 ## Unreleased
 
+## v0.65.1 / TS v0.8.0 / Rust v0.8.0 / Kotlin v0.9.0 / C++ v0.7.2 (2026-02-26)
+
+**Breaking (Kotlin):**
+
+- Rename `ReadOnlyError` → `PermissionError` to match Python/TS/Rust/C++
+- Rename `IsADirectoryException` → `IsADirectoryError`, `NotADirectoryException` → `NotADirectoryError` (deprecated typealiases provided)
+
+**Added (TypeScript):**
+
+- `ExcludeFilter` class — gitignore-style pattern matching for `copyIn`/`syncIn` operations
+- 5 typed error classes: `KeyNotFoundError`, `KeyExistsError`, `InvalidRefNameError`, `InvalidPathError`, `BatchClosedError` (all extend `GitStoreError`)
+
+**Added (Rust):**
+
+- `ExcludeFilter` struct — gitignore-style pattern matching for `copy_in`/`sync_in` operations
+
+**Added (Kotlin):**
+
+- `Fs.writeFromFile()` and `Batch.writeFromFile()` — import local file into repo with auto-detect executable bit
+
+**Fixed:**
+
+- Python: fix duplicate `test_read_with_path` in `test_fs_read.py` (second renamed to `test_read_text_with_path`)
+- Rust: fix 3 broken doctests (`GitStore::open` signature change, borrow checker in `BatchWriter` example)
+- TypeScript: fix `@throws {ReadOnlyError}` → `@throws {PermissionError}` in copy.ts doc comment
+
+**Tests:**
+
+- C++: add `test_stat.cpp` (8), `test_apply.cpp` (7), `test_move.cpp` (6) — 237 → 258 tests
+- Kotlin: expand StatTest, FsWriteTest, BatchTest, CopyTest — 164 → 205 tests
+- TypeScript: add ExcludeFilter tests — 616 → 631 tests
+- Rust: add ExcludeFilter unit tests — 516 → 540 tests
+- Total: 2,996 tests across 5 ports + full 5-language interop matrix
+
 ## v0.65.0 / TS v0.7.1 / Rust v0.7.1 / Kotlin v0.8.1 (2025-02-25)
 
 **Documentation (Kotlin, C++, TypeScript, Rust):**
