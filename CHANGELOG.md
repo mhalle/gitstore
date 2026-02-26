@@ -4,6 +4,16 @@ All notable changes to vost are documented in this file.
 
 ## Unreleased
 
+## v0.65.0 / TS v0.7.1 / Rust v0.7.1 / Kotlin v0.8.1 (2025-02-25)
+
+**Documentation (Kotlin, C++, TypeScript, Rust):**
+
+- Add missing docstrings to ~40 public API members across all four non-Python ports, using Python as the source of truth
+- Kotlin: KDoc added to `RefDict`, `Fs`, `Batch`, `Notes` classes
+- C++: Doxygen `@param`/`@throws`/`@return` added to `RefDict`, `Batch`, `Fs`, `Notes`, `Types` headers
+- TypeScript: JSDoc expanded on `mirror`, `copy`, `tree`, `reflog`, `fs`, `notes` modules
+- Rust: `///` doc comments expanded on `store`, `refdict` modules
+
 ## v0.64.0 / Kotlin v0.8.0 (2026-02-25)
 
 **Breaking (Kotlin):**
