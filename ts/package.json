@@ -1,5 +1,5 @@
 {
-  "name": "vost",
+  "name": "@mhalle/vost",
   "version": "0.8.1",
   "description": "A versioned filesystem backed by a bare git repository",
   "type": "module",

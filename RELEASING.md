@@ -53,17 +53,15 @@ uv build
 uvx twine upload dist/*   # reads ~/.pypirc
 ```
 
-### TypeScript (npm) — TODO
+### TypeScript (npm) — manual
 
-Not yet configured. When ready:
+Published as `@mhalle/vost` (scoped — npm rejects `vost` as too similar to existing short names).
 
 ```bash
-cd ts
-npm run build
-npm publish
+cd ts && npm publish --otp=<code>
 ```
 
-Requires: npm account, `npm login`, and `publishConfig.access: "public"` (already in package.json).
+The `prepack` script runs `tsc` automatically. Requires 2FA OTP.
 
 To automate: add a GitHub Actions workflow triggered on `v*` tags, using `NPM_TOKEN` secret or npm provenance (OIDC).
 
