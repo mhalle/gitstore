@@ -65,6 +65,7 @@ fn write_history(store: &GitStore, branch: &str, commits: &[CommitStep]) {
         let fs = store.branches().get(branch).unwrap();
         let mut batch = fs.batch(BatchOptions {
             message: Some(step.message.clone()),
+            ..Default::default()
         });
 
         for (filepath, content) in &step.files {

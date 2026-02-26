@@ -119,6 +119,10 @@ public:
     /// @throws KeyExistsError when overwriting a tag.
     void set(const std::string& name, const Fs& fs);
 
+    /// Point the named ref at the commit of `fs` and return a writable Fs.
+    /// Equivalent to set() followed by get().
+    Fs set_and_get(const std::string& name, const Fs& fs);
+
     /// Delete the named ref.
     /// @throws KeyNotFoundError if the ref does not exist.
     void del(const std::string& name);

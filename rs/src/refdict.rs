@@ -149,17 +149,15 @@ impl<'a> RefDict<'a> {
     ///
     /// Convenience wrapper: equivalent to calling [`set`](Self::set) followed by
     /// [`get`](Self::get).
-    pub fn set_to(&self, name: &str, fs: &Fs) -> Result<Fs> {
+    pub fn set_and_get(&self, name: &str, fs: &Fs) -> Result<Fs> {
         self.set(name, fs)?;
         self.get(name)
     }
 
-    /// Point the named ref at the commit of `fs` and return the previous [`Fs`]
-    /// (or `None` if the ref did not exist before).
-    pub fn set_and_get(&self, name: &str, fs: &Fs) -> Result<Option<Fs>> {
-        let old = self.try_get(name)?;
-        self.set(name, fs)?;
-        Ok(old)
+    /// Deprecated: use [`set_and_get`](Self::set_and_get) instead (identical behavior).
+    #[deprecated(since = "0.7.0", note = "use set_and_get instead")]
+    pub fn set_to(&self, name: &str, fs: &Fs) -> Result<Fs> {
+        self.set_and_get(name, fs)
     }
 
     /// Delete the named branch or tag.
@@ -355,22 +353,4 @@ impl<'a> RefDict<'a> {
         crate::reflog::read_reflog(&self.store.inner.path, &refname)
     }
 
-    /// Internal: get ref as Option (for set_and_get).
-    fn try_get(&self, name: &str) -> Result<Option<Fs>> {
-        let repo = self
-            .store
-            .inner
-            .repo
-            .lock()
-            .map_err(|e| Error::git_msg(e.to_string()))?;
-        let refname = self.full_name(name);
-        match repo.find_reference(refname.as_str()) {
-            Ok(reference) => {
-                let commit_oid = reference.id().detach();
-                drop(repo);
-                Ok(Some(self.fs_for_ref(commit_oid, name)?))
-            }
-            Err(_) => Ok(None),
-        }
-    }
 }

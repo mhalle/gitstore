@@ -74,6 +74,17 @@ struct WalkEntry {
 };
 
 // ---------------------------------------------------------------------------
+// WalkDirEntry
+// ---------------------------------------------------------------------------
+
+/// An entry yielded by os.walk-style directory traversal.
+struct WalkDirEntry {
+    std::string              dirpath;   ///< Directory path ("" for root).
+    std::vector<std::string> dirnames;  ///< Subdirectory names in this directory.
+    std::vector<WalkEntry>   files;     ///< Non-directory entries in this directory.
+};
+
+// ---------------------------------------------------------------------------
 // StatResult
 // ---------------------------------------------------------------------------
 
@@ -158,7 +169,7 @@ struct ChangeReport {
     std::vector<FileEntry>   update;
     std::vector<FileEntry>   del;      ///< Named 'del' to avoid C++ keyword.
     std::vector<ChangeError> errors;
-    std::vector<std::string> warnings;
+    std::vector<ChangeError> warnings;
 
     bool in_sync() const {
         return add.empty() && update.empty() && del.empty();
@@ -252,6 +263,7 @@ struct WriteOptions {
 /// Options for Fs::apply.
 struct ApplyOptions {
     std::optional<std::string> message;
+    std::optional<std::string> operation; ///< Operation prefix for auto-generated messages.
 };
 
 // ---------------------------------------------------------------------------
@@ -272,6 +284,7 @@ struct RemoveOptions {
 /// Options for Fs::batch.
 struct BatchOptions {
     std::optional<std::string> message;
+    std::optional<std::string> operation; ///< Operation prefix for auto-generated messages.
 };
 
 // ---------------------------------------------------------------------------
@@ -330,6 +343,61 @@ struct SyncOptions {
     std::optional<std::string>              message;
     bool                                    dry_run   = false;
     bool                                    checksum  = true;
+};
+
+// ---------------------------------------------------------------------------
+// MoveOptions
+// ---------------------------------------------------------------------------
+
+/// Options for Fs::move.
+struct MoveOptions {
+    bool                       recursive = false;
+    bool                       dry_run   = false;
+    std::optional<std::string> message;
+};
+
+// ---------------------------------------------------------------------------
+// CopyFromRefOptions
+// ---------------------------------------------------------------------------
+
+/// Options for Fs::copy_from_ref.
+struct CopyFromRefOptions {
+    bool                       delete_extra = false; ///< Delete files in dest not in source.
+    bool                       dry_run      = false;
+    std::optional<std::string> message;
+};
+
+// ---------------------------------------------------------------------------
+// ExcludeFilter
+// ---------------------------------------------------------------------------
+
+/// Gitignore-style exclude filter for copy_in/sync_in operations.
+class ExcludeFilter {
+public:
+    ExcludeFilter() = default;
+
+    /// Add exclude patterns (gitignore syntax).
+    void add_patterns(const std::vector<std::string>& patterns);
+
+    /// Load patterns from a file.
+    void load_from_file(const std::filesystem::path& path);
+
+    /// Check if a path should be excluded.
+    bool is_excluded(const std::string& rel_path, bool is_dir = false) const;
+
+    /// True if any filtering is configured.
+    bool active() const { return !patterns_.empty(); }
+
+private:
+    struct Pattern {
+        std::string raw;
+        bool negated  = false;
+        bool dir_only = false;
+    };
+    std::vector<Pattern> patterns_;
+
+    static bool match_pattern(const std::string& pattern,
+                              const std::string& path);
 };
 
 } // namespace vost

@@ -187,17 +187,15 @@ TEST_CASE("Fs: ls returns empty list for empty tree", "[fs][read]") {
     fs::remove_all(path);
 }
 
-TEST_CASE("Fs: ls returns entries after writing files", "[fs][read]") {
+TEST_CASE("Fs: ls returns name strings after writing files", "[fs][read]") {
     auto path = make_temp_repo();
     auto store = open_store(path);
     auto snapshot = store.branches().get("main");
     snapshot = snapshot.write_text("a.txt", "A");
     snapshot = snapshot.write_text("b.txt", "B");
 
-    auto entries = snapshot.ls();
-    REQUIRE(entries.size() == 2);
-    std::vector<std::string> names;
-    for (auto& e : entries) names.push_back(e.name);
+    auto names = snapshot.ls();
+    REQUIRE(names.size() == 2);
     std::sort(names.begin(), names.end());
     CHECK(names[0] == "a.txt");
     CHECK(names[1] == "b.txt");
@@ -215,7 +213,7 @@ TEST_CASE("Fs: ls throws NotADirectoryError for a file path", "[fs][read]") {
     fs::remove_all(path);
 }
 
-TEST_CASE("Fs: walk returns all files recursively", "[fs][read]") {
+TEST_CASE("Fs: walk returns os.walk-style entries", "[fs][read]") {
     auto path = make_temp_repo();
     auto store = open_store(path);
     auto snapshot = store.branches().get("main");
@@ -224,13 +222,28 @@ TEST_CASE("Fs: walk returns all files recursively", "[fs][read]") {
     snapshot = snapshot.write_text("sub/deep/c.txt", "C");
 
     auto entries = snapshot.walk();
+    // 3 directories: root, sub, sub/deep
     REQUIRE(entries.size() == 3);
-    std::vector<std::string> paths;
-    for (auto& [p, e] : entries) paths.push_back(p);
-    std::sort(paths.begin(), paths.end());
-    CHECK(paths[0] == "a.txt");
-    CHECK(paths[1] == "sub/b.txt");
-    CHECK(paths[2] == "sub/deep/c.txt");
+
+    // Root entry
+    CHECK(entries[0].dirpath == "");
+    CHECK(entries[0].dirnames.size() == 1);
+    CHECK(entries[0].dirnames[0] == "sub");
+    CHECK(entries[0].files.size() == 1);
+    CHECK(entries[0].files[0].name == "a.txt");
+
+    // sub entry
+    CHECK(entries[1].dirpath == "sub");
+    CHECK(entries[1].dirnames.size() == 1);
+    CHECK(entries[1].dirnames[0] == "deep");
+    CHECK(entries[1].files.size() == 1);
+    CHECK(entries[1].files[0].name == "b.txt");
+
+    // sub/deep entry
+    CHECK(entries[2].dirpath == "sub/deep");
+    CHECK(entries[2].dirnames.empty());
+    CHECK(entries[2].files.size() == 1);
+    CHECK(entries[2].files[0].name == "c.txt");
 
     fs::remove_all(path);
 }
@@ -444,10 +457,8 @@ TEST_CASE("Fs: ls on a subdirectory returns its direct children", "[fs][read]") 
     snap = snap.write_text("src/util.cpp", "// util");
     snap = snap.write_text("README.md",    "# readme");
 
-    auto entries = snap.ls("src");
-    REQUIRE(entries.size() == 2);
-    std::vector<std::string> names;
-    for (auto& e : entries) names.push_back(e.name);
+    auto names = snap.ls("src");
+    REQUIRE(names.size() == 2);
     std::sort(names.begin(), names.end());
     CHECK(names[0] == "main.cpp");
     CHECK(names[1] == "util.cpp");
@@ -458,7 +469,7 @@ TEST_CASE("Fs: ls on a subdirectory returns its direct children", "[fs][read]") 
 // walk subtree
 // ---------------------------------------------------------------------------
 
-TEST_CASE("Fs: walk from subtree prefix returns paths relative to root", "[fs][read]") {
+TEST_CASE("Fs: walk from subtree prefix returns entries for that subtree", "[fs][read]") {
     auto path = make_temp_repo();
     auto store = open_store(path);
     auto snap  = store.branches().get("main");
@@ -467,12 +478,16 @@ TEST_CASE("Fs: walk from subtree prefix returns paths relative to root", "[fs][r
     snap = snap.write_text("b/z.txt", "z");
 
     auto entries = snap.walk("a");
-    REQUIRE(entries.size() == 2);
-    std::vector<std::string> paths;
-    for (auto& [p, e] : entries) paths.push_back(p);
-    std::sort(paths.begin(), paths.end());
-    CHECK(paths[0] == "a/x.txt");
-    CHECK(paths[1] == "a/y.txt");
+    // Only 1 directory: a (with no subdirs)
+    REQUIRE(entries.size() == 1);
+    CHECK(entries[0].dirpath == "a");
+    CHECK(entries[0].dirnames.empty());
+    CHECK(entries[0].files.size() == 2);
+    std::vector<std::string> names;
+    for (auto& f : entries[0].files) names.push_back(f.name);
+    std::sort(names.begin(), names.end());
+    CHECK(names[0] == "x.txt");
+    CHECK(names[1] == "y.txt");
     fs::remove_all(path);
 }
 
@@ -490,21 +505,26 @@ TEST_CASE("Fs: walk on a file path raises NotADirectoryError", "[fs][read]") {
 // listdir alias
 // ---------------------------------------------------------------------------
 
-TEST_CASE("Fs: listdir is alias for ls", "[fs][read]") {
+TEST_CASE("Fs: listdir returns WalkEntry while ls returns names", "[fs][read]") {
     auto path = make_temp_repo();
     auto store = open_store(path);
     auto snap  = store.branches().get("main");
     snap = snap.write_text("p.txt", "P");
     snap = snap.write_text("q.txt", "Q");
 
-    auto ls_res      = snap.ls();
+    auto names       = snap.ls();
     auto listdir_res = snap.listdir();
 
-    REQUIRE(ls_res.size() == listdir_res.size());
-    for (size_t i = 0; i < ls_res.size(); ++i) {
-        CHECK(ls_res[i].name == listdir_res[i].name);
-        CHECK(ls_res[i].oid  == listdir_res[i].oid);
-        CHECK(ls_res[i].mode == listdir_res[i].mode);
+    REQUIRE(names.size() == listdir_res.size());
+    std::sort(names.begin(), names.end());
+    std::vector<std::string> listdir_names;
+    for (auto& e : listdir_res) listdir_names.push_back(e.name);
+    std::sort(listdir_names.begin(), listdir_names.end());
+    CHECK(names == listdir_names);
+    // listdir entries have OID and mode
+    for (auto& e : listdir_res) {
+        CHECK(e.oid.size() == 40);
+        CHECK(e.mode != 0);
     }
     fs::remove_all(path);
 }
@@ -793,6 +813,6 @@ TEST_CASE("Fs: path with trailing slash returns directory entries", "[fs][read]"
     auto ls1 = snap.ls("dir");
     auto ls2 = snap.ls("dir/");
     REQUIRE(ls1.size() == ls2.size());
-    CHECK(ls1[0].name == ls2[0].name);
+    CHECK(ls1[0] == ls2[0]);
     fs::remove_all(path);
 }

@@ -55,6 +55,14 @@ public:
     /// Return true if no notes exist.
     bool empty() const;
 
+    /// Get the note for the current HEAD branch's tip commit.
+    /// @throws NotFoundError if HEAD is unresolvable or no note exists.
+    std::string get_for_current_branch() const;
+
+    /// Set the note for the current HEAD branch's tip commit.
+    /// @throws NotFoundError if HEAD is unresolvable.
+    void set_for_current_branch(const std::string& text);
+
     /// Create a batch for accumulating multiple note changes.
     NotesBatch batch();
 
@@ -163,6 +171,9 @@ public:
 
     /// Get a NoteNamespace by name.
     NoteNamespace ns(const std::string& ns_name);
+
+    /// Shortcut for notes["commits"].
+    NoteNamespace commits() { return (*this)["commits"]; }
 
 private:
     std::shared_ptr<GitStoreInner> inner_;

@@ -120,23 +120,28 @@ static int check_basic(vost::Fs& snapshot, const json& spec,
                     continue;
                 }
                 // Check mode via walk
-                auto entries = snapshot.walk("");
+                auto dir_entries = snapshot.walk("");
                 bool found = false;
-                for (auto& [path, entry] : entries) {
-                    if (path == filepath) {
-                        auto ft = vost::file_type_from_mode(entry.mode);
-                        if (!ft || *ft != vost::FileType::Executable) {
-                            std::cout << "  FAIL " << name << ": " << filepath
-                                      << " expected EXECUTABLE, got mode "
-                                      << std::oct << entry.mode << std::dec << "\n";
-                            failures++;
-                        } else {
-                            std::cout << "  OK   " << name << ": executable "
-                                      << filepath << "\n";
+                for (auto& de : dir_entries) {
+                    for (auto& entry : de.files) {
+                        std::string path = de.dirpath.empty()
+                            ? entry.name : de.dirpath + "/" + entry.name;
+                        if (path == filepath) {
+                            auto ft = vost::file_type_from_mode(entry.mode);
+                            if (!ft || *ft != vost::FileType::Executable) {
+                                std::cout << "  FAIL " << name << ": " << filepath
+                                          << " expected EXECUTABLE, got mode "
+                                          << std::oct << entry.mode << std::dec << "\n";
+                                failures++;
+                            } else {
+                                std::cout << "  OK   " << name << ": executable "
+                                          << filepath << "\n";
+                            }
+                            found = true;
+                            break;
                         }
-                        found = true;
-                        break;
                     }
+                    if (found) break;
                 }
                 if (!found) {
                     std::cout << "  FAIL " << name << ": " << filepath
@@ -154,9 +159,13 @@ static int check_basic(vost::Fs& snapshot, const json& spec,
     // Verify file count
     std::set<std::string> all_files;
     try {
-        auto entries = snapshot.walk("");
-        for (auto& [path, entry] : entries) {
-            all_files.insert(path);
+        auto dir_entries = snapshot.walk("");
+        for (auto& de : dir_entries) {
+            for (auto& entry : de.files) {
+                std::string path = de.dirpath.empty()
+                    ? entry.name : de.dirpath + "/" + entry.name;
+                all_files.insert(path);
+            }
         }
     } catch (...) {}
 

@@ -67,6 +67,11 @@ walk_tree(git_repository* repo,
           const std::string& tree_oid_hex,
           const std::string& norm_path);
 
+std::vector<WalkDirEntry>
+walk_tree_dirs(git_repository* repo,
+               const std::string& tree_oid_hex,
+               const std::string& norm_path);
+
 uint32_t count_subdirs(git_repository* repo,
                         const std::string& tree_oid_hex);
 

@@ -50,22 +50,20 @@ fn read_text_roundtrip() {
 fn ls_root() {
     let dir = tempfile::tempdir().unwrap();
     let (_, fs) = common::store_with_files(dir.path());
-    let entries = fs.ls("").unwrap();
-    let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
-    assert!(names.contains(&"hello.txt"));
-    assert!(names.contains(&"dir"));
-    assert_eq!(entries.len(), 2);
+    let names = fs.ls("").unwrap();
+    assert!(names.iter().any(|n| n == "hello.txt"));
+    assert!(names.iter().any(|n| n == "dir"));
+    assert_eq!(names.len(), 2);
 }
 
 #[test]
 fn ls_subdir() {
     let dir = tempfile::tempdir().unwrap();
     let (_, fs) = common::store_with_files(dir.path());
-    let entries = fs.ls("dir").unwrap();
-    let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
-    assert!(names.contains(&"a.txt"));
-    assert!(names.contains(&"b.txt"));
-    assert_eq!(entries.len(), 2);
+    let names = fs.ls("dir").unwrap();
+    assert!(names.iter().any(|n| n == "a.txt"));
+    assert!(names.iter().any(|n| n == "b.txt"));
+    assert_eq!(names.len(), 2);
 }
 
 #[test]
@@ -84,11 +82,21 @@ fn walk_root() {
     let dir = tempfile::tempdir().unwrap();
     let (_, fs) = common::store_with_files(dir.path());
     let entries = fs.walk("").unwrap();
-    let paths: Vec<&str> = entries.iter().map(|(p, _)| p.as_str()).collect();
-    assert_eq!(paths.len(), 3);
-    assert!(paths.contains(&"hello.txt"));
-    assert!(paths.contains(&"dir/a.txt"));
-    assert!(paths.contains(&"dir/b.txt"));
+    // 2 directories: root and dir
+    assert_eq!(entries.len(), 2);
+
+    // Root
+    assert_eq!(entries[0].dirpath, "");
+    assert!(entries[0].dirnames.contains(&"dir".to_string()));
+    let root_file_names: Vec<&str> = entries[0].files.iter().map(|f| f.name.as_str()).collect();
+    assert!(root_file_names.contains(&"hello.txt"));
+
+    // dir
+    assert_eq!(entries[1].dirpath, "dir");
+    assert!(entries[1].dirnames.is_empty());
+    let dir_file_names: Vec<&str> = entries[1].files.iter().map(|f| f.name.as_str()).collect();
+    assert!(dir_file_names.contains(&"a.txt"));
+    assert!(dir_file_names.contains(&"b.txt"));
 }
 
 #[test]
@@ -96,10 +104,13 @@ fn walk_subdir() {
     let dir = tempfile::tempdir().unwrap();
     let (_, fs) = common::store_with_files(dir.path());
     let entries = fs.walk("dir").unwrap();
-    let paths: Vec<&str> = entries.iter().map(|(p, _)| p.as_str()).collect();
-    assert_eq!(paths.len(), 2);
-    assert!(paths.contains(&"dir/a.txt"));
-    assert!(paths.contains(&"dir/b.txt"));
+    // 1 directory: dir
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].dirpath, "dir");
+    assert!(entries[0].dirnames.is_empty());
+    let file_names: Vec<&str> = entries[0].files.iter().map(|f| f.name.as_str()).collect();
+    assert!(file_names.contains(&"a.txt"));
+    assert!(file_names.contains(&"b.txt"));
 }
 
 // ---------------------------------------------------------------------------

@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use gix::objs::tree::{Entry, EntryKind, EntryMode};
 
 use crate::error::{Error, Result};
-use crate::types::{WalkEntry, MODE_BLOB, MODE_BLOB_EXEC, MODE_LINK, MODE_TREE};
+use crate::types::{WalkDirEntry, WalkEntry, MODE_BLOB, MODE_BLOB_EXEC, MODE_LINK, MODE_TREE};
 
 /// Result of looking up a single tree entry.
 #[derive(Debug, Clone)]
@@ -273,6 +273,67 @@ fn walk_tree_recursive(
             ));
         }
     }
+    Ok(())
+}
+
+/// os.walk-style directory traversal: returns one [`WalkDirEntry`] per directory.
+///
+/// Each entry contains the directory path, a list of subdirectory names, and
+/// a list of non-directory [`WalkEntry`] items (files, symlinks).
+pub fn walk_tree_dirs(
+    repo: &gix::Repository,
+    tree_oid: gix::ObjectId,
+) -> Result<Vec<WalkDirEntry>> {
+    let mut results = Vec::new();
+    walk_tree_dirs_recursive(repo, tree_oid, "", &mut results)?;
+    Ok(results)
+}
+
+fn walk_tree_dirs_recursive(
+    repo: &gix::Repository,
+    tree_oid: gix::ObjectId,
+    prefix: &str,
+    results: &mut Vec<WalkDirEntry>,
+) -> Result<()> {
+    let tree_data = repo.find_object(tree_oid).map_err(Error::git)?;
+    let tree_ref = gix::objs::TreeRef::from_bytes(&tree_data.data).map_err(Error::git)?;
+
+    let mut entry = WalkDirEntry {
+        dirpath: prefix.to_string(),
+        dirnames: Vec::new(),
+        files: Vec::new(),
+    };
+
+    let mut subdirs: Vec<(String, gix::ObjectId)> = Vec::new();
+
+    for e in &tree_ref.entries {
+        let name = String::from_utf8_lossy(e.filename).into_owned();
+        let entry_mode = mode_to_u32(e.mode);
+        let entry_oid = e.oid.to_owned();
+
+        if entry_mode == MODE_TREE {
+            entry.dirnames.push(name.clone());
+            subdirs.push((name, entry_oid));
+        } else {
+            entry.files.push(WalkEntry {
+                name,
+                oid: entry_oid,
+                mode: entry_mode,
+            });
+        }
+    }
+
+    results.push(entry);
+
+    for (dname, doid) in subdirs {
+        let sub_prefix = if prefix.is_empty() {
+            dname
+        } else {
+            format!("{}/{}", prefix, dname)
+        };
+        walk_tree_dirs_recursive(repo, doid, &sub_prefix, results)?;
+    }
+
     Ok(())
 }
 

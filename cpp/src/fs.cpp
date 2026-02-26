@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <fstream>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -144,19 +145,23 @@ std::string Fs::read_text(const std::string& path) const {
     return std::string(data.begin(), data.end());
 }
 
-std::vector<WalkEntry> Fs::ls(const std::string& path) const {
+std::vector<std::string> Fs::ls(const std::string& path) const {
     const auto& tree = require_tree();
     std::string norm = paths::normalize(path);
     std::lock_guard<std::mutex> lk(inner_->mutex);
-    return tree::list_tree(inner_->repo, tree, norm);
+    auto entries = tree::list_tree(inner_->repo, tree, norm);
+    std::vector<std::string> names;
+    names.reserve(entries.size());
+    for (auto& e : entries) names.push_back(std::move(e.name));
+    return names;
 }
 
-std::vector<std::pair<std::string, WalkEntry>>
+std::vector<WalkDirEntry>
 Fs::walk(const std::string& path) const {
     const auto& tree_hex = require_tree();
     std::string norm = paths::normalize(path);
     std::lock_guard<std::mutex> lk(inner_->mutex);
-    return tree::walk_tree(inner_->repo, tree_hex, norm);
+    return tree::walk_tree_dirs(inner_->repo, tree_hex, norm);
 }
 
 bool Fs::exists(const std::string& path) const {
@@ -265,7 +270,10 @@ StatResult Fs::stat(const std::string& path) const {
 }
 
 std::vector<WalkEntry> Fs::listdir(const std::string& path) const {
-    return ls(path);
+    const auto& tree = require_tree();
+    std::string norm = paths::normalize(path);
+    std::lock_guard<std::mutex> lk(inner_->mutex);
+    return tree::list_tree(inner_->repo, tree, norm);
 }
 
 std::vector<uint8_t> Fs::read_range(const std::string& path,
@@ -495,6 +503,26 @@ Fs Fs::write_text(const std::string& path,
     return write(path, data, std::move(opts));
 }
 
+Fs Fs::write_from_file(const std::string& path,
+                        const std::filesystem::path& local_path,
+                        WriteOptions opts) const {
+    namespace fss = std::filesystem;
+    if (!fss::exists(local_path)) {
+        throw IoError("file not found: " + local_path.string());
+    }
+
+    std::ifstream ifs(local_path, std::ios::binary);
+    if (!ifs) {
+        throw IoError("cannot open file: " + local_path.string());
+    }
+    std::vector<uint8_t> data{std::istreambuf_iterator<char>(ifs),
+                               std::istreambuf_iterator<char>()};
+
+    uint32_t mode = opts.mode.value_or(copy::mode_from_disk(local_path));
+    opts.mode = mode;
+    return write(path, data, std::move(opts));
+}
+
 Fs Fs::write_symlink(const std::string& path,
                       const std::string& target,
                       WriteOptions opts) const {
@@ -510,7 +538,7 @@ Fs Fs::write_symlink(const std::string& path,
 Fs Fs::apply(const std::vector<std::pair<std::string, WriteEntry>>& writes,
               const std::vector<std::string>& removes,
               ApplyOptions opts) const {
-    std::string msg = paths::format_message("apply", opts.message);
+    std::string msg = paths::format_message(opts.operation.value_or("apply"), opts.message);
 
     std::vector<std::pair<std::string,
                           std::pair<std::vector<uint8_t>, uint32_t>>> internal;
@@ -561,6 +589,93 @@ Fs Fs::remove(const std::vector<std::string>& paths_in, RemoveOptions opts) cons
     }
 
     return commit_changes({}, to_remove, msg);
+}
+
+// ---------------------------------------------------------------------------
+// Move
+// ---------------------------------------------------------------------------
+
+Fs Fs::move(const std::vector<std::string>& sources,
+                   const std::string& dest,
+                   MoveOptions opts) const {
+    require_writable("move");
+    const auto& tree_hex = require_tree();
+    std::string norm_dest = paths::normalize(dest);
+
+    if (sources.empty()) {
+        throw InvalidPathError("move: no sources provided");
+    }
+
+    std::vector<std::pair<std::string, std::pair<std::vector<uint8_t>, uint32_t>>> writes;
+    std::vector<std::string> removes;
+
+    {
+        std::lock_guard<std::mutex> lk(inner_->mutex);
+
+        // Check if dest is an existing directory
+        bool dest_is_dir = false;
+        if (!norm_dest.empty()) {
+            auto dest_entry = tree::lookup(inner_->repo, tree_hex, norm_dest);
+            if (dest_entry && dest_entry->second == MODE_TREE) {
+                dest_is_dir = true;
+            }
+        } else {
+            dest_is_dir = true; // root is always a directory
+        }
+
+        // Multiple sources → dest must be a directory
+        if (sources.size() > 1 && !dest_is_dir) {
+            throw NotADirectoryError("move: destination must be a directory for multiple sources");
+        }
+
+        for (auto& src : sources) {
+            std::string norm_src = paths::normalize(src);
+            if (norm_src.empty()) {
+                throw InvalidPathError("cannot move root");
+            }
+
+            auto entry = tree::lookup(inner_->repo, tree_hex, norm_src);
+            if (!entry) throw NotFoundError(norm_src);
+
+            // Determine the target path
+            std::string target;
+            if (dest_is_dir) {
+                // Move into directory: use source basename
+                auto slash = norm_src.rfind('/');
+                std::string basename = (slash != std::string::npos)
+                    ? norm_src.substr(slash + 1) : norm_src;
+                target = norm_dest.empty() ? basename : norm_dest + "/" + basename;
+            } else {
+                // Single source, dest doesn't exist as dir → rename
+                target = norm_dest;
+            }
+
+            if (entry->second == MODE_TREE) {
+                if (!opts.recursive) {
+                    throw IsADirectoryError(norm_src);
+                }
+                // Walk all children under the source directory
+                auto children = tree::walk_tree(inner_->repo, tree_hex, norm_src);
+                for (auto& [rel_path, we] : children) {
+                    std::string new_path = target + rel_path.substr(norm_src.size());
+                    auto data = tree::read_blob(inner_->repo, tree_hex, rel_path);
+                    writes.push_back({new_path, {std::move(data), we.mode}});
+                }
+                removes.push_back(norm_src);
+            } else {
+                auto data = tree::read_blob(inner_->repo, tree_hex, norm_src);
+                writes.push_back({target, {std::move(data), entry->second}});
+                removes.push_back(norm_src);
+            }
+        }
+    }
+
+    if (opts.dry_run) {
+        return *this;
+    }
+
+    std::string msg = paths::format_message("move", opts.message);
+    return commit_changes(writes, removes, msg);
 }
 
 // ---------------------------------------------------------------------------
@@ -908,6 +1023,41 @@ std::vector<CommitInfo> Fs::log(LogOptions opts) const {
     }
 
     return results;
+}
+
+// ---------------------------------------------------------------------------
+// FsWriter
+// ---------------------------------------------------------------------------
+
+FsWriter::FsWriter(Fs fs, std::string path, WriteOptions opts)
+    : fs_(std::move(fs))
+    , path_(std::move(path))
+    , opts_(std::move(opts))
+{}
+
+FsWriter::~FsWriter() {
+    if (!closed_) {
+        try { close(); } catch (...) {}
+    }
+}
+
+FsWriter& FsWriter::write(const std::vector<uint8_t>& data) {
+    if (closed_) throw BatchClosedError();
+    buffer_.insert(buffer_.end(), data.begin(), data.end());
+    return *this;
+}
+
+FsWriter& FsWriter::write(const std::string& text) {
+    if (closed_) throw BatchClosedError();
+    buffer_.insert(buffer_.end(), text.begin(), text.end());
+    return *this;
+}
+
+Fs FsWriter::close() {
+    if (closed_) throw BatchClosedError();
+    closed_ = true;
+    fs_ = fs_.write(path_, buffer_, opts_);
+    return fs_;
 }
 
 } // namespace vost

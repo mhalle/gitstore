@@ -614,6 +614,7 @@ fn remove_file_via_batch_custom_message() {
     let (store, fs) = common::store_with_files(dir.path());
     let mut batch = fs.batch(fs::BatchOptions {
         message: Some("remove hello".into()),
+        ..Default::default()
     });
     batch.remove("hello.txt").unwrap();
     batch.commit().unwrap();

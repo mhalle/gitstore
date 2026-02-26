@@ -208,8 +208,11 @@ fn store_open_and_fs() {
 
     // Walk
     let entries = fs2.walk("").unwrap();
+    // 1 directory (root) with 1 file
     assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].0, "hello.txt");
+    assert_eq!(entries[0].dirpath, "");
+    assert_eq!(entries[0].files.len(), 1);
+    assert_eq!(entries[0].files[0].name, "hello.txt");
 
     // Open existing (no create)
     let store2 = vost::GitStore::open(&repo_path, vost::OpenOptions {

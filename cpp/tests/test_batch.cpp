@@ -2,6 +2,7 @@
 #include <vost/vost.h>
 
 #include <filesystem>
+#include <fstream>
 #include <string>
 #include <thread>
 #include <chrono>
@@ -294,5 +295,55 @@ TEST_CASE("Batch: remove then write same path — file is present", "[batch]") {
 
     REQUIRE(snap.exists("conflict.txt"));
     CHECK(snap.read_text("conflict.txt") == "restored");
+    fs::remove_all(path);
+}
+
+// ---------------------------------------------------------------------------
+// write_from_file
+// ---------------------------------------------------------------------------
+
+static void write_local_file(const fs::path& p, const std::string& content) {
+    fs::create_directories(p.parent_path());
+    std::ofstream ofs(p, std::ios::binary);
+    ofs << content;
+}
+
+TEST_CASE("Batch: write_from_file stages local file", "[batch]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches().get("main");
+
+    auto tmp = fs::temp_directory_path() / "vost_batch_wff_test";
+    fs::create_directories(tmp);
+    write_local_file(tmp / "data.txt", "from disk");
+
+    auto batch = snap.batch();
+    batch.write_from_file("data.txt", tmp / "data.txt");
+    snap = batch.commit();
+
+    CHECK(snap.read_text("data.txt") == "from disk");
+    fs::remove_all(path);
+    fs::remove_all(tmp);
+}
+
+// ---------------------------------------------------------------------------
+// BatchWriter
+// ---------------------------------------------------------------------------
+
+TEST_CASE("BatchWriter: accumulates writes and stages on close", "[batch][writer]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches().get("main");
+
+    auto batch = snap.batch();
+    {
+        vost::BatchWriter w(batch, "stream.txt");
+        w.write("chunk1 ");
+        w.write("chunk2");
+        w.close();
+    }
+    snap = batch.commit();
+
+    CHECK(snap.read_text("stream.txt") == "chunk1 chunk2");
     fs::remove_all(path);
 }

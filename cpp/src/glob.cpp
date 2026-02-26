@@ -1,4 +1,9 @@
 #include "internal.h"
+#include "vost/vost.h"
+
+#include <algorithm>
+#include <filesystem>
+#include <sstream>
 
 namespace vost {
 namespace glob {
@@ -71,4 +76,78 @@ bool glob_match(const std::string& pattern, const std::string& name) {
 }
 
 } // namespace glob
+
+// ---------------------------------------------------------------------------
+// disk_glob
+// ---------------------------------------------------------------------------
+
+namespace {
+
+void disk_glob_recursive(const std::filesystem::path& root,
+                          const std::filesystem::path& current,
+                          const std::vector<std::string>& segments,
+                          size_t seg_idx,
+                          std::vector<std::string>& results) {
+    namespace fss = std::filesystem;
+    if (seg_idx >= segments.size()) return;
+
+    const std::string& seg = segments[seg_idx];
+    bool is_last = (seg_idx + 1 == segments.size());
+
+    if (seg == "**") {
+        // Match zero directory levels: try remaining segments at this level
+        disk_glob_recursive(root, current, segments, seg_idx + 1, results);
+
+        // Match one or more: recurse into non-dotfile subdirectories
+        if (fss::exists(current) && fss::is_directory(current)) {
+            for (auto& entry : fss::directory_iterator(current)) {
+                if (entry.is_directory()) {
+                    std::string name = entry.path().filename().string();
+                    if (!name.empty() && name[0] == '.') continue;
+                    disk_glob_recursive(root, entry.path(), segments, seg_idx, results);
+                }
+            }
+        }
+    } else {
+        if (!fss::exists(current) || !fss::is_directory(current)) return;
+
+        for (auto& entry : fss::directory_iterator(current)) {
+            std::string name = entry.path().filename().string();
+            if (!glob::glob_match(seg, name)) continue;
+
+            if (is_last) {
+                // Last segment: match files only
+                if (!entry.is_directory()) {
+                    auto rel = fss::relative(entry.path(), root).string();
+                    results.push_back(rel);
+                }
+            } else if (entry.is_directory()) {
+                disk_glob_recursive(root, entry.path(), segments, seg_idx + 1, results);
+            }
+        }
+    }
+}
+
+} // anonymous namespace
+
+std::vector<std::string> disk_glob(const std::string& pattern,
+                                    const std::string& root) {
+    // Split pattern by '/'
+    std::vector<std::string> segments;
+    {
+        std::istringstream iss(pattern);
+        std::string seg;
+        while (std::getline(iss, seg, '/')) {
+            if (!seg.empty()) segments.push_back(seg);
+        }
+    }
+    if (segments.empty()) return {};
+
+    std::filesystem::path root_path(root);
+    std::vector<std::string> results;
+    disk_glob_recursive(root_path, root_path, segments, 0, results);
+    std::sort(results.begin(), results.end());
+    return results;
+}
+
 } // namespace vost

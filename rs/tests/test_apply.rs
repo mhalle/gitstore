@@ -278,6 +278,7 @@ fn apply_custom_message() {
         &[],
         fs::ApplyOptions {
             message: Some("custom apply msg".into()),
+            ..Default::default()
         },
     )
     .unwrap();

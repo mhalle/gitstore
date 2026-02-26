@@ -291,6 +291,7 @@ fn batch_custom_message() {
 
     let mut batch = fs.batch(fs::BatchOptions {
         message: Some("my batch".into()),
+        ..Default::default()
     });
     batch.write("a.txt", b"a").unwrap();
     batch.commit().unwrap();
@@ -388,7 +389,9 @@ fn batch_many_files() {
     assert_eq!(fs.read_text("file_000.txt").unwrap(), "data 0");
     assert_eq!(fs.read_text("file_049.txt").unwrap(), "data 49");
     let entries = fs.walk("").unwrap();
-    assert_eq!(entries.len(), 50);
+    // 1 directory (root) containing 50 files
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].files.len(), 50);
 }
 
 // ---------------------------------------------------------------------------

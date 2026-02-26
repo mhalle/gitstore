@@ -296,3 +296,79 @@ TEST_CASE("Notes: batch double-commit throws BatchClosedError", "[notes]") {
 
     fs::remove_all(path);
 }
+
+// ---------------------------------------------------------------------------
+// NoteDict::commits() shortcut
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Notes: commits() shortcut works", "[notes]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto hash = setup_commit(store);
+
+    store.notes().commits().set(hash, "via commits()");
+    CHECK(store.notes().commits().get(hash) == "via commits()");
+
+    // Also accessible via ["commits"]
+    CHECK(store.notes()["commits"].get(hash) == "via commits()");
+
+    fs::remove_all(path);
+}
+
+// ---------------------------------------------------------------------------
+// NoteNamespace::get_for_current_branch / set_for_current_branch
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Notes: set_for_current_branch and get_for_current_branch roundtrip", "[notes]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches()["main"];
+    snap = snap.write_text("test.txt", "data");
+
+    auto ns = store.notes()["commits"];
+    ns.set_for_current_branch("current branch note");
+    CHECK(ns.get_for_current_branch() == "current branch note");
+
+    // Verify it's stored under the HEAD tip commit hash
+    auto tip = *snap.commit_hash();
+    // After write_text, HEAD has advanced. Re-read to get actual tip.
+    auto latest = store.branches()["main"];
+    auto latest_hash = *latest.commit_hash();
+    CHECK(ns.get(latest_hash) == "current branch note");
+
+    fs::remove_all(path);
+}
+
+TEST_CASE("Notes: get_for_current_branch throws when no note exists", "[notes]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches()["main"];
+    snap = snap.write_text("test.txt", "data");
+
+    auto ns = store.notes()["commits"];
+    CHECK_THROWS_AS(ns.get_for_current_branch(), vost::KeyNotFoundError);
+
+    fs::remove_all(path);
+}
+
+// ---------------------------------------------------------------------------
+// RefDict::set_and_get
+// ---------------------------------------------------------------------------
+
+TEST_CASE("RefDict: set_and_get returns writable Fs", "[notes][refdict]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches()["main"];
+    snap = snap.write_text("f.txt", "data");
+
+    auto dev = store.branches().set_and_get("dev", snap);
+    CHECK(dev.writable());
+    CHECK(*dev.ref_name() == "dev");
+    CHECK(dev.read_text("f.txt") == "data");
+
+    // Can write to it
+    dev = dev.write_text("g.txt", "new data");
+    CHECK(dev.read_text("g.txt") == "new data");
+
+    fs::remove_all(path);
+}

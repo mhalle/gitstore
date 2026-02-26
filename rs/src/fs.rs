@@ -7,8 +7,8 @@ use crate::lock::with_repo_lock;
 use crate::store::GitStoreInner;
 use crate::tree;
 use crate::types::{
-    ChangeReport, CommitInfo, FileEntry, FileType, StatResult, WalkEntry, WriteEntry, MODE_BLOB,
-    MODE_LINK, MODE_TREE,
+    ChangeReport, CommitInfo, FileEntry, FileType, StatResult, WalkDirEntry, WalkEntry, WriteEntry,
+    MODE_BLOB, MODE_LINK, MODE_TREE,
 };
 
 // ---------------------------------------------------------------------------
@@ -42,6 +42,8 @@ pub struct WriteOptions {
 pub struct ApplyOptions {
     /// Commit message. Auto-generated if `None`.
     pub message: Option<String>,
+    /// Operation prefix for auto-generated commit messages (e.g. `"import"`).
+    pub operation: Option<String>,
 }
 
 /// Options for [`Fs::batch`].
@@ -49,6 +51,8 @@ pub struct ApplyOptions {
 pub struct BatchOptions {
     /// Commit message. Auto-generated if `None`.
     pub message: Option<String>,
+    /// Operation prefix for auto-generated commit messages (e.g. `"mv"`).
+    pub operation: Option<String>,
 }
 
 /// Options for [`Fs::copy_in`].
@@ -356,33 +360,37 @@ impl Fs {
         String::from_utf8(data).map_err(|e| Error::git_msg(format!("invalid UTF-8: {}", e)))
     }
 
-    /// List entry names and types at `path` (or root if empty).
+    /// List entry names at `path` (or root if empty).
     ///
-    /// Returns [`WalkEntry`] items with `name`, `oid`, and `mode` for each
-    /// immediate child.
+    /// Returns a `Vec<String>` of entry names (basenames). Use
+    /// [`listdir`](Fs::listdir) if you need OID and mode information.
     ///
     /// # Errors
     /// Returns [`Error::NotADirectory`] if `path` is a file.
-    pub fn ls(&self, path: &str) -> Result<Vec<WalkEntry>> {
+    pub fn ls(&self, path: &str) -> Result<Vec<String>> {
         let tree_oid = self.require_tree()?;
-        self.with_repo(|repo| tree::list_tree_at_path(repo, tree_oid, path))
+        self.with_repo(|repo| {
+            let entries = tree::list_tree_at_path(repo, tree_oid, path)?;
+            Ok(entries.into_iter().map(|e| e.name).collect())
+        })
     }
 
-    /// Recursively walk the tree under `path`, returning all leaf entries.
+    /// Recursively walk the tree under `path` (os.walk-style).
     ///
-    /// Returns `(relative_path, WalkEntry)` pairs for every file and symlink
-    /// under the given directory. Pass an empty string to walk the entire tree.
+    /// Returns a [`WalkDirEntry`] for each directory, containing subdirectory
+    /// names and non-directory [`WalkEntry`] items. Pass an empty string to
+    /// walk the entire tree.
     ///
     /// # Errors
     /// Returns [`Error::NotADirectory`] if `path` is a file.
     /// Returns [`Error::NotFound`] if `path` does not exist.
-    pub fn walk(&self, path: &str) -> Result<Vec<(String, WalkEntry)>> {
+    pub fn walk(&self, path: &str) -> Result<Vec<WalkDirEntry>> {
         let tree_oid = self.require_tree()?;
         let path_norm = crate::paths::normalize_path(path)?;
 
         self.with_repo(|repo| {
             if path_norm.is_empty() {
-                tree::walk_tree(repo, tree_oid)
+                tree::walk_tree_dirs(repo, tree_oid)
             } else {
                 // Resolve to subtree first
                 let entry = tree::entry_at_path(repo, tree_oid, &path_norm)?
@@ -390,12 +398,16 @@ impl Fs {
                 if entry.mode != MODE_TREE {
                     return Err(Error::not_a_directory(&path_norm));
                 }
-                let entries = tree::walk_tree(repo, entry.oid)?;
-                // Prefix paths
-                Ok(entries
-                    .into_iter()
-                    .map(|(p, e)| (format!("{}/{}", path_norm, p), e))
-                    .collect())
+                let mut entries = tree::walk_tree_dirs(repo, entry.oid)?;
+                // Prefix dirpath values
+                for e in &mut entries {
+                    if e.dirpath.is_empty() {
+                        e.dirpath = path_norm.clone();
+                    } else {
+                        e.dirpath = format!("{}/{}", path_norm, e.dirpath);
+                    }
+                }
+                Ok(entries)
             }
         })
     }
@@ -551,10 +563,12 @@ impl Fs {
 
     /// List directory entries with name, OID, and mode.
     ///
-    /// Alias for [`ls()`](Fs::ls). Useful for FUSE `readdir` where you need
-    /// `d_type` information alongside names.
+    /// Unlike [`ls()`](Fs::ls) which returns just names, `listdir` returns full
+    /// [`WalkEntry`] objects. Useful for FUSE `readdir` where you need `d_type`
+    /// information alongside names.
     pub fn listdir(&self, path: &str) -> Result<Vec<WalkEntry>> {
-        self.ls(path)
+        let tree_oid = self.require_tree()?;
+        self.with_repo(|repo| tree::list_tree_at_path(repo, tree_oid, path))
     }
 
     /// Read file contents as bytes with optional offset and size.
@@ -796,9 +810,10 @@ impl Fs {
             writes.push((path, None));
         }
 
+        let op = opts.operation.as_deref().unwrap_or("apply");
         let message = opts
             .message
-            .unwrap_or_else(|| crate::paths::format_commit_message("apply", None));
+            .unwrap_or_else(|| crate::paths::format_commit_message(op, None));
         self.commit_changes(&writes, &message)
     }
 
@@ -815,7 +830,7 @@ impl Fs {
             writes: vec![],
             removes: vec![],
             message: opts.message,
-            operation: None,
+            operation: opts.operation,
             closed: false,
         }
     }

@@ -374,3 +374,160 @@ TEST_CASE("Copy: copy_in then copy_out roundtrip", "[copy]") {
     fs::remove_all(src);
     fs::remove_all(dest);
 }
+
+// ---------------------------------------------------------------------------
+// copy_from_ref tests
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Copy: copy_from_ref basic cross-branch copy", "[copy][copy_from_ref]") {
+    auto repo_path = make_temp_repo();
+    auto store = open_store(repo_path);
+    auto main_snap = store.branches().get("main");
+    main_snap = main_snap.write_text("a.txt", "alpha");
+    main_snap = main_snap.write_text("b.txt", "beta");
+
+    // Create dev branch
+    auto dev = store.branches().set_and_get("dev", main_snap);
+    dev = dev.write_text("c.txt", "gamma");
+
+    // Copy from dev to main
+    main_snap = store.branches().get("main");
+    main_snap = main_snap.copy_from_ref(dev, {"c.txt"}, "");
+    CHECK(main_snap.read_text("c.txt") == "gamma");
+    CHECK(main_snap.read_text("a.txt") == "alpha");
+
+    fs::remove_all(repo_path);
+}
+
+TEST_CASE("Copy: copy_from_ref directory copy", "[copy][copy_from_ref]") {
+    auto repo_path = make_temp_repo();
+    auto store = open_store(repo_path);
+    auto snap = store.branches().get("main");
+    snap = snap.write_text("src/a.txt", "a");
+    snap = snap.write_text("src/b.txt", "b");
+
+    store.branches().set("dev", snap);
+    auto dev = store.branches().get("dev");
+    dev = dev.write_text("data/x.txt", "x");
+    dev = dev.write_text("data/y.txt", "y");
+
+    // Copy data/ from dev to main under "imported"
+    snap = store.branches().get("main");
+    snap = snap.copy_from_ref(dev, {"data/"}, "imported");
+    CHECK(snap.read_text("imported/x.txt") == "x");
+    CHECK(snap.read_text("imported/y.txt") == "y");
+
+    fs::remove_all(repo_path);
+}
+
+TEST_CASE("Copy: copy_from_ref with delete_extra", "[copy][copy_from_ref]") {
+    auto repo_path = make_temp_repo();
+    auto store = open_store(repo_path);
+    auto snap = store.branches().get("main");
+    snap = snap.write_text("a.txt", "a");
+    snap = snap.write_text("extra.txt", "extra");
+
+    store.branches().set("dev", snap);
+    auto dev = store.branches().get("dev");
+    dev = dev.remove({"extra.txt"});
+    dev = dev.write_text("a.txt", "updated a");
+
+    snap = store.branches().get("main");
+    vost::CopyFromRefOptions opts;
+    opts.delete_extra = true;
+    snap = snap.copy_from_ref(dev, {""}, "", opts);
+    CHECK(snap.read_text("a.txt") == "updated a");
+    CHECK_FALSE(snap.exists("extra.txt"));
+
+    fs::remove_all(repo_path);
+}
+
+TEST_CASE("Copy: copy_from_ref dry_run", "[copy][copy_from_ref]") {
+    auto repo_path = make_temp_repo();
+    auto store = open_store(repo_path);
+    auto snap = store.branches().get("main");
+    snap = snap.write_text("a.txt", "a");
+
+    store.branches().set("dev", snap);
+    auto dev = store.branches().get("dev");
+    dev = dev.write_text("new.txt", "new");
+
+    snap = store.branches().get("main");
+    auto hash_before = snap.commit_hash();
+    vost::CopyFromRefOptions opts;
+    opts.dry_run = true;
+    auto result = snap.copy_from_ref(dev, {"new.txt"}, "", opts);
+    CHECK(result.commit_hash() == hash_before);
+
+    fs::remove_all(repo_path);
+}
+
+TEST_CASE("Copy: copy_from_ref non-existent source throws", "[copy][copy_from_ref]") {
+    auto repo_path = make_temp_repo();
+    auto store = open_store(repo_path);
+    auto snap = store.branches().get("main");
+
+    store.branches().set("dev", snap);
+    auto dev = store.branches().get("dev");
+
+    REQUIRE_THROWS_AS(snap.copy_from_ref(dev, {"ghost.txt"}, ""),
+                      vost::NotFoundError);
+
+    fs::remove_all(repo_path);
+}
+
+// ---------------------------------------------------------------------------
+// ExcludeFilter tests
+// ---------------------------------------------------------------------------
+
+TEST_CASE("ExcludeFilter: basic pattern matching", "[exclude]") {
+    vost::ExcludeFilter filter;
+    filter.add_patterns({"*.log", "build/"});
+
+    CHECK(filter.is_excluded("test.log"));
+    CHECK(filter.is_excluded("sub/debug.log"));
+    CHECK(filter.is_excluded("build", true)); // dir_only pattern
+    CHECK_FALSE(filter.is_excluded("build", false)); // not a dir
+    CHECK_FALSE(filter.is_excluded("readme.txt"));
+}
+
+TEST_CASE("ExcludeFilter: negation patterns", "[exclude]") {
+    vost::ExcludeFilter filter;
+    filter.add_patterns({"*.log", "!important.log"});
+
+    CHECK(filter.is_excluded("debug.log"));
+    CHECK_FALSE(filter.is_excluded("important.log"));
+}
+
+TEST_CASE("ExcludeFilter: comments and empty lines ignored", "[exclude]") {
+    vost::ExcludeFilter filter;
+    filter.add_patterns({"# this is a comment", "", "*.tmp"});
+
+    CHECK(filter.is_excluded("test.tmp"));
+    CHECK_FALSE(filter.is_excluded("# this is a comment"));
+    CHECK(filter.active());
+}
+
+TEST_CASE("ExcludeFilter: load_from_file", "[exclude]") {
+    auto tmp = fs::temp_directory_path() / "vost_exclude_test";
+    fs::create_directories(tmp);
+    {
+        std::ofstream ofs(tmp / ".gitignore");
+        ofs << "*.pyc\n__pycache__/\n";
+    }
+
+    vost::ExcludeFilter filter;
+    filter.load_from_file(tmp / ".gitignore");
+
+    CHECK(filter.is_excluded("test.pyc"));
+    CHECK(filter.is_excluded("__pycache__", true));
+    CHECK_FALSE(filter.is_excluded("main.py"));
+
+    fs::remove_all(tmp);
+}
+
+TEST_CASE("ExcludeFilter: inactive when empty", "[exclude]") {
+    vost::ExcludeFilter filter;
+    CHECK_FALSE(filter.active());
+    CHECK_FALSE(filter.is_excluded("anything.txt"));
+}

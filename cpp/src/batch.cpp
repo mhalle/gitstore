@@ -2,6 +2,8 @@
 #include "vost/fs.h"
 #include "internal.h"
 
+#include <fstream>
+
 namespace vost {
 
 // ---------------------------------------------------------------------------
@@ -11,6 +13,7 @@ namespace vost {
 Batch::Batch(Fs fs, BatchOptions opts)
     : fs_(std::move(fs))
     , message_(std::move(opts.message))
+    , operation_(std::move(opts.operation))
 {}
 
 void Batch::require_open() const {
@@ -42,6 +45,25 @@ Batch& Batch::write_with_mode(const std::string& path,
         writes_.end());
 
     writes_.push_back({norm, {data, mode}});
+    return *this;
+}
+
+Batch& Batch::write_from_file(const std::string& path,
+                               const std::filesystem::path& local_path,
+                               uint32_t mode) {
+    namespace fss = std::filesystem;
+    if (!fss::exists(local_path)) {
+        throw IoError("file not found: " + local_path.string());
+    }
+
+    std::ifstream ifs(local_path, std::ios::binary);
+    if (!ifs) {
+        throw IoError("cannot open file: " + local_path.string());
+    }
+    std::vector<uint8_t> data{std::istreambuf_iterator<char>(ifs),
+                               std::istreambuf_iterator<char>()};
+
+    write_with_mode(path, data, mode);
     return *this;
 }
 
@@ -84,18 +106,55 @@ Fs Batch::commit() {
         msg = *message_;
     } else {
         // Auto-generate from staged operations
+        std::string op = operation_.value_or("batch");
         if (!writes_.empty() && removes_.empty()) {
-            msg = "batch: write " + std::to_string(writes_.size()) + " file(s)";
+            msg = op + ": write " + std::to_string(writes_.size()) + " file(s)";
         } else if (writes_.empty() && !removes_.empty()) {
-            msg = "batch: remove " + std::to_string(removes_.size()) + " file(s)";
+            msg = op + ": remove " + std::to_string(removes_.size()) + " file(s)";
         } else {
-            msg = "batch: " + std::to_string(writes_.size()) + " write(s), " +
+            msg = op + ": " + std::to_string(writes_.size()) + " write(s), " +
                   std::to_string(removes_.size()) + " remove(s)";
         }
     }
 
     // Delegate to Fs::commit_changes (internal)
-    return fs_.commit_changes(writes_, removes_, msg);
+    Fs result = fs_.commit_changes(writes_, removes_, msg);
+    result_fs_ = result;
+    return result;
+}
+
+// ---------------------------------------------------------------------------
+// BatchWriter
+// ---------------------------------------------------------------------------
+
+BatchWriter::BatchWriter(Batch& batch, std::string path, uint32_t mode)
+    : batch_(batch)
+    , path_(std::move(path))
+    , mode_(mode)
+{}
+
+BatchWriter::~BatchWriter() {
+    if (!closed_) {
+        try { close(); } catch (...) {}
+    }
+}
+
+BatchWriter& BatchWriter::write(const std::vector<uint8_t>& data) {
+    if (closed_) throw BatchClosedError();
+    buffer_.insert(buffer_.end(), data.begin(), data.end());
+    return *this;
+}
+
+BatchWriter& BatchWriter::write(const std::string& text) {
+    if (closed_) throw BatchClosedError();
+    buffer_.insert(buffer_.end(), text.begin(), text.end());
+    return *this;
+}
+
+void BatchWriter::close() {
+    if (closed_) throw BatchClosedError();
+    closed_ = true;
+    batch_.write_with_mode(path_, buffer_, mode_);
 }
 
 } // namespace vost

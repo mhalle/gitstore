@@ -5,6 +5,7 @@
 #include "types.h"
 
 #include <cstdint>
+#include <filesystem>
 #include <optional>
 #include <string>
 #include <vector>
@@ -58,6 +59,12 @@ public:
     /// Stage a UTF-8 string at `path`.
     Batch& write_text(const std::string& path, const std::string& text);
 
+    /// Stage a local file from disk at `path`.
+    /// @throws IoError if the local file cannot be read.
+    Batch& write_from_file(const std::string& path,
+                           const std::filesystem::path& local_path,
+                           uint32_t mode = MODE_BLOB);
+
     /// Stage a symlink at `path` pointing to `target`.
     Batch& write_symlink(const std::string& path, const std::string& target);
 
@@ -77,6 +84,9 @@ public:
     size_t pending_writes()  const { return writes_.size(); }
     size_t pending_removes() const { return removes_.size(); }
 
+    /// The result Fs after commit(). Only valid after commit() has been called.
+    const std::optional<Fs>& fs() const { return result_fs_; }
+
 private:
     void require_open() const;
 
@@ -87,7 +97,42 @@ private:
                           std::pair<std::vector<uint8_t>, uint32_t>>> writes_;
     std::vector<std::string> removes_;
     std::optional<std::string>               message_;
+    std::optional<std::string>               operation_;
+    std::optional<Fs>                        result_fs_;
     bool                                     closed_ = false;
+};
+
+// ---------------------------------------------------------------------------
+// BatchWriter — RAII streaming write for Batch
+// ---------------------------------------------------------------------------
+
+/// Accumulates data in memory, then stages to the batch on close().
+class BatchWriter {
+public:
+    BatchWriter(Batch& batch, std::string path, uint32_t mode = MODE_BLOB);
+    ~BatchWriter();
+
+    /// Append raw bytes.
+    BatchWriter& write(const std::vector<uint8_t>& data);
+
+    /// Append a UTF-8 string.
+    BatchWriter& write(const std::string& text);
+
+    /// Flush and stage to the batch.
+    void close();
+
+    // Non-copyable, non-movable (references a Batch)
+    BatchWriter(const BatchWriter&) = delete;
+    BatchWriter& operator=(const BatchWriter&) = delete;
+    BatchWriter(BatchWriter&&) = delete;
+    BatchWriter& operator=(BatchWriter&&) = delete;
+
+private:
+    Batch& batch_;
+    std::string path_;
+    uint32_t mode_;
+    std::vector<uint8_t> buffer_;
+    bool closed_ = false;
 };
 
 } // namespace vost

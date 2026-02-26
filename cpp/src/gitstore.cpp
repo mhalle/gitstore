@@ -219,6 +219,11 @@ Fs RefDict::get(const std::string& name) {
     return Fs(inner_, commit_hex, tree_hex, name, writable_);
 }
 
+Fs RefDict::set_and_get(const std::string& name, const Fs& fs) {
+    set(name, fs);
+    return get(name);
+}
+
 void RefDict::set(const std::string& name, const Fs& fs) {
     // Validate ref name
     {

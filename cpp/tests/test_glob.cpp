@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <fstream>
 #include <string>
 #include <thread>
 #include <chrono>
@@ -287,4 +288,65 @@ TEST_CASE("Glob: no matches returns empty", "[glob]") {
     CHECK(results.empty());
 
     fs::remove_all(path);
+}
+
+// ---------------------------------------------------------------------------
+// disk_glob tests
+// ---------------------------------------------------------------------------
+
+static void write_disk_file(const fs::path& p, const std::string& content) {
+    fs::create_directories(p.parent_path());
+    std::ofstream ofs(p, std::ios::binary);
+    ofs << content;
+}
+
+TEST_CASE("disk_glob: basic pattern matching", "[glob][disk_glob]") {
+    auto dir = fs::temp_directory_path() / "vost_dg_test";
+    fs::remove_all(dir);
+    write_disk_file(dir / "readme.txt", "r");
+    write_disk_file(dir / "notes.txt", "n");
+    write_disk_file(dir / "data.csv", "d");
+
+    auto results = vost::disk_glob("*.txt", dir.string());
+    REQUIRE(results.size() == 2);
+    CHECK(results[0] == "notes.txt");
+    CHECK(results[1] == "readme.txt");
+
+    fs::remove_all(dir);
+}
+
+TEST_CASE("disk_glob: dotfile exclusion", "[glob][disk_glob]") {
+    auto dir = fs::temp_directory_path() / "vost_dg_dot_test";
+    fs::remove_all(dir);
+    write_disk_file(dir / "visible.txt", "v");
+    write_disk_file(dir / ".hidden", "h");
+
+    auto results = vost::disk_glob("*", dir.string());
+    REQUIRE(results.size() == 1);
+    CHECK(results[0] == "visible.txt");
+
+    // Explicit dot pattern matches
+    auto dotfiles = vost::disk_glob(".*", dir.string());
+    REQUIRE(dotfiles.size() == 1);
+    CHECK(dotfiles[0] == ".hidden");
+
+    fs::remove_all(dir);
+}
+
+TEST_CASE("disk_glob: recursive pattern", "[glob][disk_glob]") {
+    auto dir = fs::temp_directory_path() / "vost_dg_rec_test";
+    fs::remove_all(dir);
+    write_disk_file(dir / "a.cpp", "a");
+    write_disk_file(dir / "src" / "b.cpp", "b");
+    write_disk_file(dir / "src" / "lib" / "c.cpp", "c");
+    write_disk_file(dir / "docs" / "readme.md", "r");
+
+    auto results = vost::disk_glob("**/*.cpp", dir.string());
+    REQUIRE(results.size() == 3);
+    // ** matches zero or more directory levels
+    CHECK(results[0] == "a.cpp");
+    CHECK(results[1] == "src/b.cpp");
+    CHECK(results[2] == "src/lib/c.cpp");
+
+    fs::remove_all(dir);
 }

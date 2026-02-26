@@ -155,7 +155,7 @@ fn stat_nonexistent_errors() {
 fn listdir_matches_ls() {
     let dir = tempfile::tempdir().unwrap();
     let (_, fs) = common::store_with_files(dir.path());
-    let ls_names: Vec<String> = fs.ls("").unwrap().iter().map(|e| e.name.clone()).collect();
+    let ls_names: Vec<String> = fs.ls("").unwrap();
     let ld_names: Vec<String> = fs.listdir("").unwrap().iter().map(|e| e.name.clone()).collect();
     assert_eq!(ls_names, ld_names);
 }

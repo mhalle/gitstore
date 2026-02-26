@@ -92,6 +92,24 @@ impl WalkEntry {
 }
 
 // ---------------------------------------------------------------------------
+// WalkDirEntry
+// ---------------------------------------------------------------------------
+
+/// An entry yielded by os.walk-style directory traversal.
+///
+/// Each entry represents one directory and its immediate contents,
+/// split into subdirectory names and non-directory file entries.
+#[derive(Debug, Clone)]
+pub struct WalkDirEntry {
+    /// Directory path (empty string for root).
+    pub dirpath: String,
+    /// Subdirectory names in this directory.
+    pub dirnames: Vec<String>,
+    /// Non-directory entries in this directory.
+    pub files: Vec<WalkEntry>,
+}
+
+// ---------------------------------------------------------------------------
 // StatResult
 // ---------------------------------------------------------------------------
 
@@ -313,7 +331,7 @@ pub struct ChangeReport {
     /// Non-fatal errors encountered during the operation.
     pub errors: Vec<ChangeError>,
     /// Non-fatal warnings (e.g. overlapping destinations).
-    pub warnings: Vec<String>,
+    pub warnings: Vec<ChangeError>,
 }
 
 impl ChangeReport {

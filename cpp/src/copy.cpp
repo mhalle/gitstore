@@ -508,4 +508,198 @@ Fs::sync_out(const std::string& src_path,
     return report;
 }
 
+// ---------------------------------------------------------------------------
+// Fs::copy_from_ref
+// ---------------------------------------------------------------------------
+
+Fs Fs::copy_from_ref(const Fs& source,
+                      const std::vector<std::string>& sources,
+                      const std::string& dest,
+                      CopyFromRefOptions opts) const {
+    require_writable("copy_from_ref");
+
+    // Source must have a tree
+    if (source.tree_oid_hex().empty()) {
+        throw NotFoundError("source has no tree");
+    }
+
+    std::string dest_norm = dest.empty() ? "" : paths::normalize(dest);
+
+    // Collect writes from source
+    std::vector<std::pair<std::string, std::pair<std::vector<uint8_t>, uint32_t>>> writes;
+    std::set<std::string> source_dest_paths;
+
+    {
+        std::lock_guard<std::mutex> lk(inner_->mutex);
+
+        for (auto& src_path : sources) {
+            std::string src_norm = src_path.empty() ? "" : paths::normalize(src_path);
+
+            // Check if source path has trailing slash (contents mode)
+            bool contents_mode = !src_path.empty() && src_path.back() == '/';
+
+            // Walk source tree at src_norm
+            std::vector<std::pair<std::string, WalkEntry>> src_entries;
+            if (src_norm.empty()) {
+                src_entries = tree::walk_tree(inner_->repo, source.tree_oid_hex(), "");
+            } else {
+                auto entry = tree::lookup(inner_->repo, source.tree_oid_hex(), src_norm);
+                if (!entry) throw NotFoundError(src_norm);
+
+                if (entry->second == MODE_TREE) {
+                    src_entries = tree::walk_tree(inner_->repo, source.tree_oid_hex(), src_norm);
+                } else {
+                    // Single file
+                    auto data = tree::read_blob(inner_->repo, source.tree_oid_hex(), src_norm);
+                    // Determine target name
+                    std::string target;
+                    if (dest_norm.empty()) {
+                        auto slash = src_norm.rfind('/');
+                        target = (slash != std::string::npos) ? src_norm.substr(slash + 1) : src_norm;
+                    } else {
+                        // Check if dest is a directory in target
+                        auto dest_entry = tree::lookup(inner_->repo, tree_oid_hex_, dest_norm);
+                        if (dest_entry && dest_entry->second == MODE_TREE) {
+                            auto slash = src_norm.rfind('/');
+                            std::string basename = (slash != std::string::npos)
+                                ? src_norm.substr(slash + 1) : src_norm;
+                            target = dest_norm + "/" + basename;
+                        } else {
+                            target = dest_norm;
+                        }
+                    }
+                    writes.push_back({target, {std::move(data), entry->second}});
+                    source_dest_paths.insert(target);
+                    continue;
+                }
+            }
+
+            // Map source entries to dest paths
+            for (auto& [rel_path, we] : src_entries) {
+                std::string rel;
+                if (src_norm.empty()) {
+                    rel = rel_path;
+                } else {
+                    if (rel_path.size() > src_norm.size() + 1) {
+                        rel = rel_path.substr(src_norm.size() + 1);
+                    } else {
+                        continue; // shouldn't happen
+                    }
+                }
+
+                std::string target;
+                if (contents_mode || src_norm.empty()) {
+                    // Contents mode: copy contents directly into dest
+                    target = dest_norm.empty() ? rel : dest_norm + "/" + rel;
+                } else {
+                    // Directory mode: copy the directory itself into dest
+                    auto slash = src_norm.rfind('/');
+                    std::string dir_name = (slash != std::string::npos)
+                        ? src_norm.substr(slash + 1) : src_norm;
+                    target = dest_norm.empty()
+                        ? dir_name + "/" + rel
+                        : dest_norm + "/" + dir_name + "/" + rel;
+                }
+
+                auto data = tree::read_blob(inner_->repo, source.tree_oid_hex(), rel_path);
+                writes.push_back({target, {std::move(data), we.mode}});
+                source_dest_paths.insert(target);
+            }
+        }
+    }
+
+    // If delete_extra, find files at dest that are not in source
+    std::vector<std::string> removes;
+    if (opts.delete_extra && !tree_oid_hex_.empty()) {
+        std::lock_guard<std::mutex> lk(inner_->mutex);
+        std::vector<std::pair<std::string, WalkEntry>> dest_entries;
+        if (dest_norm.empty()) {
+            dest_entries = tree::walk_tree(inner_->repo, tree_oid_hex_, "");
+        } else {
+            auto entry = tree::lookup(inner_->repo, tree_oid_hex_, dest_norm);
+            if (entry && entry->second == MODE_TREE) {
+                dest_entries = tree::walk_tree(inner_->repo, tree_oid_hex_, dest_norm);
+            }
+        }
+
+        for (auto& [rel_path, we] : dest_entries) {
+            if (source_dest_paths.count(rel_path) == 0) {
+                removes.push_back(rel_path);
+            }
+        }
+    }
+
+    if (opts.dry_run || (writes.empty() && removes.empty())) {
+        return *this;
+    }
+
+    std::string msg = paths::format_message("copy_from_ref", opts.message);
+    return commit_changes(writes, removes, msg);
+}
+
+// ---------------------------------------------------------------------------
+// ExcludeFilter
+// ---------------------------------------------------------------------------
+
+void ExcludeFilter::add_patterns(const std::vector<std::string>& patterns) {
+    for (auto& raw : patterns) {
+        if (raw.empty() || raw[0] == '#') continue;
+
+        Pattern p;
+        std::string s = raw;
+
+        if (s[0] == '!') {
+            p.negated = true;
+            s = s.substr(1);
+        }
+
+        if (!s.empty() && s.back() == '/') {
+            p.dir_only = true;
+            s.pop_back();
+        }
+
+        p.raw = s;
+        patterns_.push_back(std::move(p));
+    }
+}
+
+void ExcludeFilter::load_from_file(const std::filesystem::path& path) {
+    std::ifstream ifs(path);
+    if (!ifs) return;
+    std::vector<std::string> lines;
+    std::string line;
+    while (std::getline(ifs, line)) {
+        // Trim trailing whitespace
+        while (!line.empty() && (line.back() == ' ' || line.back() == '\r')) {
+            line.pop_back();
+        }
+        if (!line.empty()) lines.push_back(line);
+    }
+    add_patterns(lines);
+}
+
+bool ExcludeFilter::match_pattern(const std::string& pattern,
+                                   const std::string& path) {
+    // If pattern contains /, match against full path; otherwise match basename
+    if (pattern.find('/') != std::string::npos) {
+        return glob::fnmatch(pattern, path);
+    }
+    // Match against basename
+    auto slash = path.rfind('/');
+    std::string basename = (slash != std::string::npos)
+        ? path.substr(slash + 1) : path;
+    return glob::fnmatch(pattern, basename);
+}
+
+bool ExcludeFilter::is_excluded(const std::string& rel_path, bool is_dir) const {
+    bool excluded = false;
+    for (auto& p : patterns_) {
+        if (p.dir_only && !is_dir) continue;
+        if (match_pattern(p.raw, rel_path)) {
+            excluded = !p.negated;
+        }
+    }
+    return excluded;
+}
+
 } // namespace vost

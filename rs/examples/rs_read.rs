@@ -123,23 +123,30 @@ fn check_basic(fs: &vost::Fs, spec: &Fixture, name: &str) -> u32 {
         }
         // Check mode via walk
         match fs.walk("") {
-            Ok(entries) => {
+            Ok(dir_entries) => {
                 let mut found = false;
-                for (path, entry) in &entries {
-                    if path == filepath {
-                        if FileType::from_mode(entry.mode)
-                            != Some(FileType::Executable)
-                        {
-                            println!(
-                                "  FAIL {}: {} expected EXECUTABLE, got mode {:#o}",
-                                name, filepath, entry.mode
-                            );
-                            failures += 1;
+                'outer: for de in &dir_entries {
+                    for entry in &de.files {
+                        let path = if de.dirpath.is_empty() {
+                            entry.name.clone()
                         } else {
-                            println!("  OK   {}: executable {}", name, filepath);
+                            format!("{}/{}", de.dirpath, entry.name)
+                        };
+                        if path == *filepath {
+                            if FileType::from_mode(entry.mode)
+                                != Some(FileType::Executable)
+                            {
+                                println!(
+                                    "  FAIL {}: {} expected EXECUTABLE, got mode {:#o}",
+                                    name, filepath, entry.mode
+                                );
+                                failures += 1;
+                            } else {
+                                println!("  OK   {}: executable {}", name, filepath);
+                            }
+                            found = true;
+                            break 'outer;
                         }
-                        found = true;
-                        break;
                     }
                 }
                 if !found {
@@ -160,8 +167,15 @@ fn check_basic(fs: &vost::Fs, spec: &Fixture, name: &str) -> u32 {
     // Verify file count
     let mut all_files = HashSet::new();
     if let Ok(entries) = fs.walk("") {
-        for (path, _entry) in entries {
-            all_files.insert(path);
+        for de in entries {
+            for entry in &de.files {
+                let path = if de.dirpath.is_empty() {
+                    entry.name.clone()
+                } else {
+                    format!("{}/{}", de.dirpath, entry.name)
+                };
+                all_files.insert(path);
+            }
         }
     }
 

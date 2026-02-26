@@ -501,6 +501,44 @@ bool NoteNamespace::empty() const {
     return size() == 0;
 }
 
+std::string NoteNamespace::get_for_current_branch() const {
+    std::string tip_commit;
+    {
+        std::lock_guard<std::mutex> lk(inner_->mutex);
+        git_reference* head = nullptr;
+        if (git_repository_head(&head, inner_->repo) != 0)
+            throw NotFoundError("HEAD not resolvable");
+
+        git_object* obj = nullptr;
+        int rc = git_reference_peel(&obj, head, GIT_OBJECT_COMMIT);
+        git_reference_free(head);
+        if (rc != 0) throw NotFoundError("HEAD commit not found");
+
+        tip_commit = oid_to_hex(git_object_id(obj));
+        git_object_free(obj);
+    }
+    return get(tip_commit);
+}
+
+void NoteNamespace::set_for_current_branch(const std::string& text) {
+    std::string tip_commit;
+    {
+        std::lock_guard<std::mutex> lk(inner_->mutex);
+        git_reference* head = nullptr;
+        if (git_repository_head(&head, inner_->repo) != 0)
+            throw NotFoundError("HEAD not resolvable");
+
+        git_object* obj = nullptr;
+        int rc = git_reference_peel(&obj, head, GIT_OBJECT_COMMIT);
+        git_reference_free(head);
+        if (rc != 0) throw NotFoundError("HEAD commit not found");
+
+        tip_commit = oid_to_hex(git_object_id(obj));
+        git_object_free(obj);
+    }
+    set(tip_commit, text);
+}
+
 NotesBatch NoteNamespace::batch() {
     return NotesBatch(*this);
 }

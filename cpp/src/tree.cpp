@@ -280,6 +280,65 @@ walk_tree(git_repository* repo,
     return results;
 }
 
+/// os.walk-style directory traversal: returns WalkDirEntry per directory.
+std::vector<WalkDirEntry>
+walk_tree_dirs(git_repository* repo,
+               const std::string& tree_oid_hex,
+               const std::string& norm_path) {
+    std::string target_oid_hex = tree_oid_hex;
+    if (!norm_path.empty()) {
+        auto entry = entry_at_path(repo, tree_oid_hex, norm_path);
+        if (!entry) throw NotFoundError(norm_path);
+        if (entry->mode != MODE_TREE) throw NotADirectoryError(norm_path);
+        target_oid_hex = entry->oid_hex;
+    }
+
+    std::vector<WalkDirEntry> results;
+
+    // Recursive helper
+    std::function<void(const std::string&, const std::string&)> recurse =
+        [&](const std::string& oid_hex, const std::string& prefix) {
+        git_oid oid = hex_to_oid(oid_hex);
+        TreeGuard tg;
+        if (git_tree_lookup(&tg.t, repo, &oid) != 0)
+            throw_git_error("git_tree_lookup");
+
+        WalkDirEntry entry;
+        entry.dirpath = prefix;
+
+        size_t n = git_tree_entrycount(tg.t);
+        // Collect dirs for recursion after we finish this level
+        std::vector<std::pair<std::string, std::string>> subdirs; // (name, oid_hex)
+        for (size_t i = 0; i < n; ++i) {
+            const git_tree_entry* e = git_tree_entry_byindex(tg.t, i);
+            std::string name = git_tree_entry_name(e);
+            uint32_t mode = static_cast<uint32_t>(git_tree_entry_filemode(e));
+            std::string eid = oid_to_hex(git_tree_entry_id(e));
+
+            if (mode == MODE_TREE) {
+                entry.dirnames.push_back(name);
+                subdirs.push_back({name, eid});
+            } else {
+                WalkEntry we;
+                we.name = name;
+                we.oid = eid;
+                we.mode = mode;
+                entry.files.push_back(std::move(we));
+            }
+        }
+        results.push_back(std::move(entry));
+
+        // Recurse into subdirectories
+        for (auto& [dname, doid] : subdirs) {
+            std::string sub_prefix = prefix.empty() ? dname : prefix + "/" + dname;
+            recurse(doid, sub_prefix);
+        }
+    };
+
+    recurse(target_oid_hex, norm_path);
+    return results;
+}
+
 /// Count direct subdirectory entries in a tree (for nlink calculation).
 uint32_t count_subdirs(git_repository* repo, const std::string& tree_oid_hex) {
     git_oid oid = hex_to_oid(tree_oid_hex);

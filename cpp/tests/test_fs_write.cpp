@@ -2,6 +2,7 @@
 #include <vost/vost.h>
 
 #include <filesystem>
+#include <fstream>
 #include <string>
 #include <thread>
 #include <chrono>
@@ -683,5 +684,186 @@ TEST_CASE("Fs: overwriting a symlink with a regular file changes file_type", "[f
     snap = snap.write_text("target", "now a regular file");
     CHECK(snap.file_type("target") == vost::FileType::Blob);
     CHECK(snap.read_text("target") == "now a regular file");
+    fs::remove_all(path);
+}
+
+// ---------------------------------------------------------------------------
+// write_from_file
+// ---------------------------------------------------------------------------
+
+static void write_local_file(const fs::path& p, const std::string& content) {
+    fs::create_directories(p.parent_path());
+    std::ofstream ofs(p, std::ios::binary);
+    ofs << content;
+}
+
+TEST_CASE("Fs: write_from_file reads local file into store", "[fs][write]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches().get("main");
+
+    auto tmp = fs::temp_directory_path() / "vost_wff_test";
+    fs::create_directories(tmp);
+    write_local_file(tmp / "hello.txt", "file content");
+
+    snap = snap.write_from_file("hello.txt", tmp / "hello.txt");
+    CHECK(snap.read_text("hello.txt") == "file content");
+
+    fs::remove_all(path);
+    fs::remove_all(tmp);
+}
+
+TEST_CASE("Fs: write_from_file with executable mode", "[fs][write]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches().get("main");
+
+    auto tmp = fs::temp_directory_path() / "vost_wff_exec_test";
+    fs::create_directories(tmp);
+    write_local_file(tmp / "run.sh", "#!/bin/bash\n");
+
+    vost::WriteOptions opts;
+    opts.mode = vost::MODE_BLOB_EXEC;
+    snap = snap.write_from_file("run.sh", tmp / "run.sh", opts);
+    CHECK(snap.file_type("run.sh") == vost::FileType::Executable);
+    CHECK(snap.read_text("run.sh") == "#!/bin/bash\n");
+
+    fs::remove_all(path);
+    fs::remove_all(tmp);
+}
+
+TEST_CASE("Fs: write_from_file throws IoError for missing file", "[fs][write]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches().get("main");
+
+    REQUIRE_THROWS_AS(
+        snap.write_from_file("f.txt", "/nonexistent/path/file.txt"),
+        vost::IoError);
+    fs::remove_all(path);
+}
+
+// ---------------------------------------------------------------------------
+// move
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Fs: move single file rename", "[fs][write][move]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches().get("main");
+    snap = snap.write_text("old.txt", "data");
+
+    snap = snap.move({"old.txt"}, "new.txt");
+    CHECK_FALSE(snap.exists("old.txt"));
+    CHECK(snap.read_text("new.txt") == "data");
+    fs::remove_all(path);
+}
+
+TEST_CASE("Fs: move multiple sources into directory", "[fs][write][move]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches().get("main");
+    snap = snap.write_text("a.txt", "alpha");
+    snap = snap.write_text("b.txt", "beta");
+    snap = snap.write_text("dest/existing.txt", "exists");
+
+    snap = snap.move({"a.txt", "b.txt"}, "dest");
+    CHECK_FALSE(snap.exists("a.txt"));
+    CHECK_FALSE(snap.exists("b.txt"));
+    CHECK(snap.read_text("dest/a.txt") == "alpha");
+    CHECK(snap.read_text("dest/b.txt") == "beta");
+    CHECK(snap.read_text("dest/existing.txt") == "exists");
+    fs::remove_all(path);
+}
+
+TEST_CASE("Fs: move directory recursive", "[fs][write][move]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches().get("main");
+    snap = snap.write_text("src/a.txt", "a");
+    snap = snap.write_text("src/sub/b.txt", "b");
+
+    vost::MoveOptions opts;
+    opts.recursive = true;
+    snap = snap.move({"src"}, "dst", opts);
+    CHECK_FALSE(snap.exists("src"));
+    CHECK(snap.read_text("dst/a.txt") == "a");
+    CHECK(snap.read_text("dst/sub/b.txt") == "b");
+    fs::remove_all(path);
+}
+
+TEST_CASE("Fs: move non-recursive directory throws", "[fs][write][move]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches().get("main");
+    snap = snap.write_text("dir/file.txt", "content");
+
+    REQUIRE_THROWS_AS(snap.move({"dir"}, "other"),
+                      vost::IsADirectoryError);
+    fs::remove_all(path);
+}
+
+TEST_CASE("Fs: move dry_run does not commit", "[fs][write][move]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches().get("main");
+    snap = snap.write_text("f.txt", "data");
+    auto hash_before = snap.commit_hash();
+
+    vost::MoveOptions opts;
+    opts.dry_run = true;
+    auto result = snap.move({"f.txt"}, "g.txt", opts);
+    CHECK(result.commit_hash() == hash_before);
+    CHECK(snap.exists("f.txt")); // original unchanged
+    fs::remove_all(path);
+}
+
+TEST_CASE("Fs: move non-existent source throws", "[fs][write][move]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches().get("main");
+    snap = snap.write_text("exists.txt", "data");
+
+    REQUIRE_THROWS_AS(snap.move({"ghost.txt"}, "dest.txt"),
+                      vost::NotFoundError);
+    fs::remove_all(path);
+}
+
+// ---------------------------------------------------------------------------
+// FsWriter
+// ---------------------------------------------------------------------------
+
+TEST_CASE("FsWriter: accumulates writes and commits on close", "[fs][write][writer]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches().get("main");
+
+    vost::FsWriter w(snap, "data.txt");
+    w.write("hello ");
+    w.write("world");
+    snap = w.close();
+
+    CHECK(snap.read_text("data.txt") == "hello world");
+    fs::remove_all(path);
+}
+
+TEST_CASE("FsWriter: binary data", "[fs][write][writer]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches().get("main");
+
+    std::vector<uint8_t> chunk1 = {0x00, 0xFF};
+    std::vector<uint8_t> chunk2 = {0x42, 0x43};
+    vost::FsWriter w(snap, "bin.dat");
+    w.write(chunk1);
+    w.write(chunk2);
+    snap = w.close();
+
+    auto data = snap.read("bin.dat");
+    REQUIRE(data.size() == 4);
+    CHECK(data[0] == 0x00);
+    CHECK(data[1] == 0xFF);
+    CHECK(data[2] == 0x42);
+    CHECK(data[3] == 0x43);
     fs::remove_all(path);
 }

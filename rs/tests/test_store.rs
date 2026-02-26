@@ -259,23 +259,22 @@ fn set_current_to_nonexistent() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn branches_set_and_get_returns_old() {
+fn branches_set_and_get_returns_new_writable_fs() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
     let main_fs = store.branches().get("main").unwrap();
-    let sha = main_fs.commit_hash().unwrap();
-    store.branches().set("dev", &main_fs).unwrap();
+    main_fs.write("a.txt", b"hello", Default::default()).unwrap();
+    let main_fs = store.branches().get("main").unwrap();
 
-    // Advance dev
-    let fs = store.branches().get("dev").unwrap();
-    fs.write("new.txt", b"data", Default::default()).unwrap();
-    let new_sha = store.branches().get("dev").unwrap().commit_hash().unwrap();
+    // set_and_get creates the branch and returns the new writable Fs
+    let new_fs = store.branches().set_and_get("dev", &main_fs).unwrap();
+    assert_eq!(new_fs.ref_name(), Some("dev"));
+    assert_eq!(new_fs.read_text("a.txt").unwrap(), "hello");
 
-    // set_and_get returns old value
-    let old = store.branches().set_and_get("dev", &main_fs).unwrap();
-    assert_eq!(old.unwrap().commit_hash().unwrap(), new_sha);
-    // Now dev points back to original
-    assert_eq!(store.branches().get("dev").unwrap().commit_hash().unwrap(), sha);
+    // The returned Fs should be writable
+    new_fs.write("b.txt", b"world", Default::default()).unwrap();
+    let dev_fs = store.branches().get("dev").unwrap();
+    assert_eq!(dev_fs.read_text("b.txt").unwrap(), "world");
 }
 
 #[test]
@@ -285,9 +284,9 @@ fn branches_set_and_get_new_ref() {
     let main_fs = store.branches().get("main").unwrap();
     let sha = main_fs.commit_hash().unwrap();
 
-    let old = store.branches().set_and_get("brand_new", &main_fs).unwrap();
-    assert!(old.is_none());
-    assert_eq!(store.branches().get("brand_new").unwrap().commit_hash().unwrap(), sha);
+    let new_fs = store.branches().set_and_get("brand_new", &main_fs).unwrap();
+    assert_eq!(new_fs.ref_name(), Some("brand_new"));
+    assert_eq!(new_fs.commit_hash().unwrap(), sha);
 }
 
 // ---------------------------------------------------------------------------
@@ -611,32 +610,11 @@ fn branches_independent_content() {
 }
 
 // ---------------------------------------------------------------------------
-// set_to — returns writable Fs
+// set_and_get — updates existing branch
 // ---------------------------------------------------------------------------
 
 #[test]
-fn branches_set_to_returns_writable_fs() {
-    let dir = tempfile::tempdir().unwrap();
-    let store = common::create_store(dir.path(), "main");
-    let main_fs = store.branches().get("main").unwrap();
-    main_fs.write("a.txt", b"hello", Default::default()).unwrap();
-    let main_fs = store.branches().get("main").unwrap();
-
-    // Create a new branch using set_to
-    let new_fs = store.branches().set_to("dev", &main_fs).unwrap();
-
-    // The returned Fs should be writable (has branch "dev")
-    assert_eq!(new_fs.ref_name(), Some("dev"));
-    assert_eq!(new_fs.read_text("a.txt").unwrap(), "hello");
-
-    // Should be writable
-    new_fs.write("b.txt", b"world", Default::default()).unwrap();
-    let dev_fs = store.branches().get("dev").unwrap();
-    assert_eq!(dev_fs.read_text("b.txt").unwrap(), "world");
-}
-
-#[test]
-fn branches_set_to_updates_existing() {
+fn branches_set_and_get_updates_existing() {
     let dir = tempfile::tempdir().unwrap();
     let store = common::create_store(dir.path(), "main");
     let main_fs = store.branches().get("main").unwrap();
@@ -650,7 +628,8 @@ fn branches_set_to_updates_existing() {
     main_fs.write("b.txt", b"b", Default::default()).unwrap();
     let main_fs = store.branches().get("main").unwrap();
 
-    // Update dev to match main
-    let dev_fs = store.branches().set_to("dev", &main_fs).unwrap();
+    // Update dev to match main using set_and_get
+    let dev_fs = store.branches().set_and_get("dev", &main_fs).unwrap();
     assert!(dev_fs.exists("b.txt").unwrap());
+    assert_eq!(dev_fs.ref_name(), Some("dev"));
 }

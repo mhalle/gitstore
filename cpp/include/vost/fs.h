@@ -90,13 +90,13 @@ public:
     /// @throws NotFoundError if path does not exist.
     std::string read_text(const std::string& path) const;
 
-    /// List entries at `path` (or root if empty).
+    /// List entry names at `path` (or root if empty).
     /// @throws NotADirectoryError if path is a file.
-    std::vector<WalkEntry> ls(const std::string& path = "") const;
+    std::vector<std::string> ls(const std::string& path = "") const;
 
-    /// Recursively walk all entries under `path`.
-    /// Returns (relative_path, WalkEntry) pairs.
-    std::vector<std::pair<std::string, WalkEntry>>
+    /// Recursively walk all directories under `path` (os.walk-style).
+    /// Returns one WalkDirEntry per directory, each with dirnames and files.
+    std::vector<WalkDirEntry>
     walk(const std::string& path = "") const;
 
     /// Return true if `path` exists (file, directory, or symlink).
@@ -124,7 +124,7 @@ public:
     /// @throws NotFoundError if path does not exist.
     StatResult stat(const std::string& path = "") const;
 
-    /// Alias for ls() — for FUSE readdir.
+    /// List directory entries with name, OID, and mode — for FUSE readdir.
     std::vector<WalkEntry> listdir(const std::string& path = "") const;
 
     /// Read with optional byte-range (for FUSE partial reads).
@@ -157,6 +157,12 @@ public:
                   const std::string& text,
                   WriteOptions opts = {}) const;
 
+    /// Write a local file from disk into the store.
+    /// @throws IoError if the local file cannot be read.
+    Fs write_from_file(const std::string& path,
+                       const std::filesystem::path& local_path,
+                       WriteOptions opts = {}) const;
+
     /// Write a symlink at `path` pointing to `target`.
     Fs write_symlink(const std::string& path,
                      const std::string& target,
@@ -172,7 +178,22 @@ public:
     Fs remove(const std::vector<std::string>& paths,
               RemoveOptions opts = {}) const;
 
+    // -- Move ---------------------------------------------------------------
+
+    /// Move files/directories within the repo (POSIX mv semantics).
+    /// Supports multiple sources into a directory destination.
+    Fs move(const std::vector<std::string>& sources,
+            const std::string& dest,
+            MoveOptions opts = {}) const;
+
     // -- Copy ---------------------------------------------------------------
+
+    /// Copy files from one ref to another within the same repo.
+    /// Reuses blob OIDs for efficiency.
+    Fs copy_from_ref(const Fs& source,
+                     const std::vector<std::string>& sources = {""},
+                     const std::string& dest = "",
+                     CopyFromRefOptions opts = {}) const;
 
     /// Copy files from local disk `src` into the store at `dest`.
     /// Returns the ChangeReport and a new Fs with the committed changes.
@@ -280,6 +301,50 @@ private:
         const std::vector<std::string>& removes,
         const std::string& message,
         std::optional<ChangeReport> report = std::nullopt) const;
+};
+
+// ---------------------------------------------------------------------------
+// FsWriter — RAII streaming write
+// ---------------------------------------------------------------------------
+
+/// Accumulates data in memory, then writes to the repo on close().
+///
+/// Usage:
+/// @code
+///     auto w = FsWriter(fs, "data.bin");
+///     w.write(chunk1);
+///     w.write(chunk2);
+///     fs = w.close();
+/// @endcode
+class FsWriter {
+public:
+    FsWriter(Fs fs, std::string path, WriteOptions opts = {});
+    ~FsWriter();
+
+    /// Append raw bytes.
+    FsWriter& write(const std::vector<uint8_t>& data);
+
+    /// Append a UTF-8 string.
+    FsWriter& write(const std::string& text);
+
+    /// Flush and commit. Returns the resulting Fs.
+    Fs close();
+
+    /// The resulting Fs (only valid after close()).
+    const Fs& fs() const { return fs_; }
+
+    // Non-copyable, movable
+    FsWriter(const FsWriter&) = delete;
+    FsWriter& operator=(const FsWriter&) = delete;
+    FsWriter(FsWriter&&) = default;
+    FsWriter& operator=(FsWriter&&) = default;
+
+private:
+    Fs fs_;
+    std::string path_;
+    WriteOptions opts_;
+    std::vector<uint8_t> buffer_;
+    bool closed_ = false;
 };
 
 } // namespace vost
