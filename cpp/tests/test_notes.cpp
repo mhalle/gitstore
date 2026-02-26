@@ -654,3 +654,95 @@ TEST_CASE("Notes: nonexistent ref raises InvalidHashError", "[notes]") {
 
     fs::remove_all(path);
 }
+
+// ---------------------------------------------------------------------------
+// FS snapshot as target
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Notes: set and get by FS snapshot", "[notes]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches()["main"];
+    snap = snap.write_text("test.txt", "data");
+
+    auto ns = store.notes()["commits"];
+    ns.set(snap, "note for snapshot");
+    CHECK(ns.get(snap) == "note for snapshot");
+
+    fs::remove_all(path);
+}
+
+TEST_CASE("Notes: FS and hash access same note", "[notes]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches()["main"];
+    snap = snap.write_text("test.txt", "data");
+
+    auto ns = store.notes()["commits"];
+    ns.set(snap, "via snapshot");
+    CHECK(ns.get(*snap.commit_hash()) == "via snapshot");
+
+    fs::remove_all(path);
+}
+
+TEST_CASE("Notes: has by FS snapshot", "[notes]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches()["main"];
+    snap = snap.write_text("test.txt", "data");
+
+    auto ns = store.notes()["commits"];
+    CHECK_FALSE(ns.has(snap));
+    ns.set(snap, "note");
+    CHECK(ns.has(snap));
+
+    fs::remove_all(path);
+}
+
+TEST_CASE("Notes: delete by FS snapshot", "[notes]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches()["main"];
+    snap = snap.write_text("test.txt", "data");
+
+    auto ns = store.notes()["commits"];
+    ns.set(snap, "note");
+    ns.del(snap);
+    CHECK_FALSE(ns.has(snap));
+
+    fs::remove_all(path);
+}
+
+TEST_CASE("Notes: batch with FS targets", "[notes]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto fs1 = store.branches()["main"];
+    auto fs2 = fs1.write_text("a.txt", "a");
+
+    auto ns = store.notes()["commits"];
+    auto batch = ns.batch();
+    batch.set(fs1, "note for fs1");
+    batch.set(fs2, "note for fs2");
+    batch.commit();
+
+    CHECK(ns.get(fs1) == "note for fs1");
+    CHECK(ns.get(fs2) == "note for fs2");
+
+    fs::remove_all(path);
+}
+
+TEST_CASE("Notes: batch delete by FS snapshot", "[notes]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches()["main"];
+    snap = snap.write_text("test.txt", "data");
+
+    auto ns = store.notes()["commits"];
+    ns.set(snap, "note");
+    auto batch = ns.batch();
+    batch.del(snap);
+    batch.commit();
+    CHECK_FALSE(ns.has(snap));
+
+    fs::remove_all(path);
+}

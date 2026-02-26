@@ -44,14 +44,17 @@ class NoteNamespace(MutableMapping):
     # Target resolution
     # ------------------------------------------------------------------
 
-    def _resolve_target(self, target: str) -> str:
+    def _resolve_target(self, target) -> str:
         """Resolve *target* to a 40-char commit hash.
 
         Accepts a 40-char hex hash (returned as-is), a branch name,
-        or a tag name.
+        a tag name, or an FS snapshot (uses its commit_hash).
         """
+        from .fs import FS
+        if isinstance(target, FS):
+            return target.commit_hash
         if not isinstance(target, str):
-            raise TypeError(f"Expected str, got {type(target).__name__}")
+            raise TypeError(f"Expected str or FS, got {type(target).__name__}")
         if _HEX40_RE.match(target):
             return target
         store = self._store
@@ -281,7 +284,8 @@ class NoteNamespace(MutableMapping):
         raise KeyError(h)
 
     def __contains__(self, key: object) -> bool:
-        if not isinstance(key, str):
+        from .fs import FS
+        if not isinstance(key, (str, FS)):
             return False
         try:
             h = self._resolve_target(key)

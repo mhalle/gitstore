@@ -459,4 +459,79 @@ class NotesTest {
             }
         }
     }
+
+    // -- FS snapshot as target ------------------------------------------------
+
+    @Test
+    fun `set and get by FS snapshot`() {
+        val store = createStore()
+        store.use {
+            val fs = it.branches["main"]
+            val ns = it.notes.commits
+            ns[fs] = "note for snapshot"
+            assertEquals("note for snapshot", ns[fs])
+        }
+    }
+
+    @Test
+    fun `FS and hash access same note`() {
+        val store = createStore()
+        store.use {
+            val fs = it.branches["main"]
+            val ns = it.notes.commits
+            ns[fs] = "via snapshot"
+            assertEquals("via snapshot", ns[fs.commitHash])
+        }
+    }
+
+    @Test
+    fun `contains by FS`() {
+        val store = createStore()
+        store.use {
+            val fs = it.branches["main"]
+            val ns = it.notes.commits
+            assertFalse(fs in ns)
+            ns[fs] = "note"
+            assertTrue(fs in ns)
+        }
+    }
+
+    @Test
+    fun `delete by FS`() {
+        val store = createStore()
+        store.use {
+            val fs = it.branches["main"]
+            val ns = it.notes.commits
+            ns[fs] = "note"
+            ns.delete(fs)
+            assertFalse(fs in ns)
+        }
+    }
+
+    @Test
+    fun `batch with FS targets`() {
+        val store = createStore()
+        store.use {
+            val fs1 = it.branches["main"]
+            val fs2 = fs1.write("a.txt", "a".toByteArray())
+            it.notes.commits.batch().use { b ->
+                b[fs1] = "note for fs1"
+                b[fs2] = "note for fs2"
+            }
+            assertEquals("note for fs1", it.notes.commits[fs1])
+            assertEquals("note for fs2", it.notes.commits[fs2])
+        }
+    }
+
+    @Test
+    fun `batch delete by FS`() {
+        val store = createStore()
+        store.use {
+            val fs = it.branches["main"]
+            val ns = it.notes.commits
+            ns[fs] = "note"
+            ns.batch().use { b -> b.delete(fs) }
+            assertFalse(fs in ns)
+        }
+    }
 }

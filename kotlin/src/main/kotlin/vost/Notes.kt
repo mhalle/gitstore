@@ -193,7 +193,12 @@ class NoteNamespace internal constructor(
         )
     }
 
+    internal fun resolveTarget(fs: Fs): String = fs.commitHash
+
     // ── Public API ────────────────────────────────────────────────────
+
+    /** Get the note text for an FS snapshot. */
+    operator fun get(fs: Fs): String = get(fs.commitHash)
 
     /** Get the note text for a commit hash or ref name (branch/tag). */
     operator fun get(target: String): String {
@@ -203,6 +208,9 @@ class NoteNamespace internal constructor(
         val loader = store.repo.open(blobOid, Constants.OBJ_BLOB)
         return String(loader.bytes, Charsets.UTF_8)
     }
+
+    /** Set the note text for an FS snapshot. */
+    operator fun set(fs: Fs, text: String) = set(fs.commitHash, text)
 
     /** Set the note text for a commit hash or ref name (branch/tag). */
     operator fun set(target: String, text: String) {
@@ -231,6 +239,9 @@ class NoteNamespace internal constructor(
         commitNoteTree(newTreeOid, "Notes added by 'git notes' on ${h.substring(0, 7)}")
     }
 
+    /** Delete the note for an FS snapshot. */
+    fun delete(fs: Fs) = delete(fs.commitHash)
+
     /** Delete the note for a commit hash or ref name (branch/tag). */
     fun delete(target: String) {
         val h = resolveTarget(target)
@@ -247,6 +258,9 @@ class NoteNamespace internal constructor(
         val newTreeOid = buildNoteTree(entries)
         commitNoteTree(newTreeOid, "Notes removed by 'git notes' on ${h.substring(0, 7)}")
     }
+
+    /** Check if a note exists for an FS snapshot. */
+    operator fun contains(fs: Fs): Boolean = contains(fs.commitHash)
 
     /** Check if a note exists for a commit hash or ref name (branch/tag). */
     operator fun contains(target: String): Boolean {
@@ -309,6 +323,9 @@ class NotesBatch internal constructor(
     private val deletes = mutableSetOf<String>()
     private var closed = false
 
+    /** Stage a note write for an FS snapshot. */
+    operator fun set(fs: Fs, text: String) = set(fs.commitHash, text)
+
     /**
      * Stage a note write.
      *
@@ -320,6 +337,9 @@ class NotesBatch internal constructor(
         deletes.remove(h)
         writes[h] = text
     }
+
+    /** Stage a note deletion for an FS snapshot. */
+    fun delete(fs: Fs) = delete(fs.commitHash)
 
     /**
      * Stage a note deletion.

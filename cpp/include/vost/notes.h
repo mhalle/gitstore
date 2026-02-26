@@ -12,6 +12,7 @@
 namespace vost {
 
 struct GitStoreInner;
+class Fs;
 class NotesBatch;
 
 // ---------------------------------------------------------------------------
@@ -34,17 +35,29 @@ public:
     /// @throws InvalidHashError if target is not a valid hash or resolvable ref.
     std::string get(const std::string& hash) const;
 
+    /// Get the note text for an FS snapshot (uses its commit hash).
+    std::string get(const Fs& fs) const;
+
     /// Set (or overwrite) the note text for a commit hash or ref name (branch/tag).
     /// @throws InvalidHashError if target is not a valid hash or resolvable ref.
     void set(const std::string& hash, const std::string& text);
+
+    /// Set the note text for an FS snapshot (uses its commit hash).
+    void set(const Fs& fs, const std::string& text);
 
     /// Delete the note for a commit hash or ref name (branch/tag).
     /// @throws KeyNotFoundError if no note exists.
     /// @throws InvalidHashError if target is not a valid hash or resolvable ref.
     void del(const std::string& hash);
 
+    /// Delete the note for an FS snapshot (uses its commit hash).
+    void del(const Fs& fs);
+
     /// Return true if a note exists for this commit hash or ref name (branch/tag).
     bool has(const std::string& hash) const;
+
+    /// Return true if a note exists for this FS snapshot.
+    bool has(const Fs& fs) const;
 
     /// Return all hashes that have notes (sorted).
     std::vector<std::string> list() const;
@@ -139,9 +152,15 @@ public:
     /// @param text Note text to set.
     void set(const std::string& hash, const std::string& text);
 
+    /// Stage a note write for an FS snapshot.
+    void set(const Fs& fs, const std::string& text);
+
     /// Stage a note deletion.
     /// @param hash Commit hash or ref name (branch/tag).
     void del(const std::string& hash);
+
+    /// Stage a note deletion for an FS snapshot.
+    void del(const Fs& fs);
 
     /// Commit all staged changes as a single commit.
     /// @throws BatchClosedError if already committed.

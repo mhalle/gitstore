@@ -602,3 +602,60 @@ describe('ref-based targets', () => {
     await expect(store.notes.commits.set('nonexistent', 'note')).rejects.toThrow('Cannot resolve');
   });
 });
+
+// ---------------------------------------------------------------------------
+// FS snapshot as target
+// ---------------------------------------------------------------------------
+
+describe('FS snapshot targets', () => {
+  it('set and get by FS', async () => {
+    const snap = await store.branches.get('main');
+    const ns = store.notes.commits;
+    await ns.set(snap, 'note for snapshot');
+    expect(await ns.get(snap)).toBe('note for snapshot');
+  });
+
+  it('FS and hash access same note', async () => {
+    const snap = await store.branches.get('main');
+    const ns = store.notes.commits;
+    await ns.set(snap, 'via snapshot');
+    expect(await ns.get(snap.commitHash)).toBe('via snapshot');
+  });
+
+  it('has by FS', async () => {
+    const snap = await store.branches.get('main');
+    const ns = store.notes.commits;
+    expect(await ns.has(snap)).toBe(false);
+    await ns.set(snap, 'note');
+    expect(await ns.has(snap)).toBe(true);
+  });
+
+  it('delete by FS', async () => {
+    const snap = await store.branches.get('main');
+    const ns = store.notes.commits;
+    await ns.set(snap, 'note');
+    await ns.delete(snap);
+    expect(await ns.has(snap)).toBe(false);
+  });
+
+  it('batch with FS targets', async () => {
+    const fs1 = await store.branches.get('main');
+    const fs2 = await fs1.write('a.txt', toBytes('a'));
+    const batch = store.notes.commits.batch();
+    await batch.set(fs1, 'note for fs1');
+    await batch.set(fs2, 'note for fs2');
+    await batch.commit();
+    expect(await store.notes.commits.get(fs1)).toBe('note for fs1');
+    expect(await store.notes.commits.get(fs2)).toBe('note for fs2');
+  });
+
+  it('batch delete by FS', async () => {
+    const snap = await store.branches.get('main');
+    const ns = store.notes.commits;
+    await ns.set(snap, 'note');
+    const batch = ns.batch();
+    await batch.delete(snap);
+    await batch.commit();
+    expect(await ns.has(snap)).toBe(false);
+  });
+});

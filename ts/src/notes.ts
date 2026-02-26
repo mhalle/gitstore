@@ -11,6 +11,7 @@ import git from 'isomorphic-git';
 import { MODE_BLOB, MODE_TREE, GitStoreError, KeyNotFoundError, BatchClosedError, type FsModule } from './types.js';
 import { withRepoLock } from './lock.js';
 import type { GitStore } from './gitstore.js';
+import type { FS } from './fs.js';
 
 const HEX40_RE = /^[0-9a-f]{40}$/;
 
@@ -54,7 +55,13 @@ export class NoteNamespace {
    * @throws {GitStoreError} If the target cannot be resolved.
    * @internal
    */
-  async _resolveTarget(target: string): Promise<string> {
+  async _resolveTarget(target: string | FS): Promise<string> {
+    if (typeof target === 'object' && target !== null && 'commitHash' in target) {
+      return (target as FS).commitHash;
+    }
+    if (typeof target !== 'string') {
+      throw new GitStoreError(`Expected string or FS, got ${typeof target}`);
+    }
     if (HEX40_RE.test(target)) {
       return target;
     }
@@ -371,7 +378,7 @@ export class NoteNamespace {
    * @returns The note text (UTF-8).
    * @throws {GitStoreError} If no note exists for the hash.
    */
-  async get(hash: string): Promise<string> {
+  async get(hash: string | FS): Promise<string> {
     const h = await this._resolveTarget(hash);
     const treeOid = await this._treeOid();
     if (treeOid === null) {
@@ -394,10 +401,10 @@ export class NoteNamespace {
    *
    * Creates a commit on the namespace's notes ref.
    *
-   * @param hash - 40-char lowercase hex commit hash, or a branch/tag name.
+   * @param hash - 40-char lowercase hex commit hash, branch/tag name, or FS snapshot.
    * @param text - Note text (UTF-8 string).
    */
-  async set(hash: string, text: string): Promise<void> {
+  async set(hash: string | FS, text: string): Promise<void> {
     const h = await this._resolveTarget(hash);
     const writes = new Map<string, string>();
     writes.set(h, text);
@@ -412,7 +419,7 @@ export class NoteNamespace {
    * @param hash - 40-char lowercase hex commit hash, or a branch/tag name.
    * @throws {GitStoreError} If no note exists for the hash.
    */
-  async delete(hash: string): Promise<void> {
+  async delete(hash: string | FS): Promise<void> {
     const h = await this._resolveTarget(hash);
     const treeOid = await this._treeOid();
     if (treeOid === null) {
@@ -430,7 +437,7 @@ export class NoteNamespace {
    * @param hash - 40-char lowercase hex commit hash, or a branch/tag name.
    * @returns True if a note exists.
    */
-  async has(hash: string): Promise<boolean> {
+  async has(hash: string | FS): Promise<boolean> {
     const h = await this._resolveTarget(hash);
     const treeOid = await this._treeOid();
     if (treeOid === null) return false;
@@ -518,10 +525,10 @@ export class NotesBatch {
   /**
    * Stage a note write.
    *
-   * @param hash - 40-char lowercase hex commit hash, or a branch/tag name.
+   * @param hash - 40-char lowercase hex commit hash, branch/tag name, or FS snapshot.
    * @param text - Note text (UTF-8 string).
    */
-  async set(hash: string, text: string): Promise<void> {
+  async set(hash: string | FS, text: string): Promise<void> {
     if (this._closed) throw new BatchClosedError('Batch is closed');
     const h = await this._ns._resolveTarget(hash);
     this._deletes.delete(h);
@@ -531,9 +538,9 @@ export class NotesBatch {
   /**
    * Stage a note deletion.
    *
-   * @param hash - 40-char lowercase hex commit hash, or a branch/tag name.
+   * @param hash - 40-char lowercase hex commit hash, branch/tag name, or FS snapshot.
    */
-  async delete(hash: string): Promise<void> {
+  async delete(hash: string | FS): Promise<void> {
     if (this._closed) throw new BatchClosedError('Batch is closed');
     const h = await this._ns._resolveTarget(hash);
     this._writes.delete(h);

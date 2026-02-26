@@ -1,6 +1,6 @@
 {
   "name": "@mhalle/vost",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "description": "A versioned filesystem backed by a bare git repository",
   "type": "module",
   "main": "dist/index.js",

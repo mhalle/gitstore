@@ -1,4 +1,5 @@
 #include "vost/notes.h"
+#include "vost/fs.h"
 #include "vost/gitstore.h"
 #include "internal.h"
 
@@ -512,6 +513,24 @@ bool NoteNamespace::has(const std::string& hash) const {
     return find_note(*t, h).has_value();
 }
 
+// -- Fs overloads ----------------------------------------------------------
+
+std::string NoteNamespace::get(const Fs& fs) const {
+    return get(*fs.commit_hash());
+}
+
+void NoteNamespace::set(const Fs& fs, const std::string& text) {
+    set(*fs.commit_hash(), text);
+}
+
+void NoteNamespace::del(const Fs& fs) {
+    del(*fs.commit_hash());
+}
+
+bool NoteNamespace::has(const Fs& fs) const {
+    return has(*fs.commit_hash());
+}
+
 std::vector<std::string> NoteNamespace::list() const {
     std::lock_guard<std::mutex> lk(inner_->mutex);
 
@@ -623,6 +642,14 @@ void NotesBatch::del(const std::string& hash) {
     if (std::find(deletes_.begin(), deletes_.end(), h) == deletes_.end()) {
         deletes_.push_back(h);
     }
+}
+
+void NotesBatch::set(const Fs& fs, const std::string& text) {
+    set(*fs.commit_hash(), text);
+}
+
+void NotesBatch::del(const Fs& fs) {
+    del(*fs.commit_hash());
 }
 
 void NotesBatch::commit() {

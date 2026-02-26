@@ -4,6 +4,12 @@ All notable changes to vost are documented in this file.
 
 ## Unreleased
 
+## v0.68.0 / TS v0.9.1 / Kotlin v0.9.3 / C++ v0.8.2 (2026-02-26)
+
+**Added (Python, TypeScript, Kotlin, C++):**
+
+- Notes API (`get`/`set`/`delete`/`has`/`contains` and batch equivalents) now accepts FS snapshots in addition to commit hashes and ref names. The snapshot's commit hash is used automatically.
+
 ## v0.67.2 / TS v0.9.0 (2026-02-26)
 
 **Changed (TypeScript):**

@@ -546,3 +546,52 @@ class TestRefTargets:
     def test_nonexistent_ref_raises(self, store):
         with pytest.raises(ValueError, match="Cannot resolve"):
             store.notes.commits["nonexistent"] = "note"
+
+
+# ---------------------------------------------------------------------------
+# FS snapshot as target
+# ---------------------------------------------------------------------------
+
+class TestFsTargets:
+    def test_set_and_get_by_fs(self, store):
+        fs = store.branches["main"]
+        ns = store.notes.commits
+        ns[fs] = "note for snapshot"
+        assert ns[fs] == "note for snapshot"
+
+    def test_fs_and_hash_access_same_note(self, store):
+        fs = store.branches["main"]
+        ns = store.notes.commits
+        ns[fs] = "via snapshot"
+        assert ns[fs.commit_hash] == "via snapshot"
+
+    def test_contains_by_fs(self, store):
+        fs = store.branches["main"]
+        ns = store.notes.commits
+        assert fs not in ns
+        ns[fs] = "note"
+        assert fs in ns
+
+    def test_delete_by_fs(self, store):
+        fs = store.branches["main"]
+        ns = store.notes.commits
+        ns[fs] = "note"
+        del ns[fs]
+        assert fs not in ns
+
+    def test_batch_with_fs(self, store):
+        fs1 = store.branches["main"]
+        fs2 = fs1.write("a.txt", b"a")
+        with store.notes.commits.batch() as b:
+            b[fs1] = "note for fs1"
+            b[fs2] = "note for fs2"
+        assert store.notes.commits[fs1] == "note for fs1"
+        assert store.notes.commits[fs2] == "note for fs2"
+
+    def test_batch_delete_by_fs(self, store):
+        fs = store.branches["main"]
+        ns = store.notes.commits
+        ns[fs] = "note"
+        with ns.batch() as b:
+            del b[fs]
+        assert fs not in ns
