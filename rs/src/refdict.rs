@@ -149,6 +149,10 @@ impl<'a> RefDict<'a> {
     ///
     /// Convenience wrapper: equivalent to calling [`set`](Self::set) followed by
     /// [`get`](Self::get).
+    ///
+    /// # Errors
+    /// Returns [`Error::InvalidRefName`] for invalid ref names.
+    /// Returns [`Error::KeyExists`] when overwriting a tag.
     pub fn set_and_get(&self, name: &str, fs: &Fs) -> Result<Fs> {
         self.set(name, fs)?;
         self.get(name)
@@ -224,7 +228,9 @@ impl<'a> RefDict<'a> {
         Ok(names)
     }
 
-    /// Return all `(name, Fs)` pairs, sorted by name.
+    /// Return all `(name, Fs)` pairs under this prefix, sorted by name.
+    ///
+    /// Each `Fs` is writable for branches, read-only for tags.
     pub fn iter(&self) -> Result<Vec<(String, Fs)>> {
         let pairs = {
             let repo = self

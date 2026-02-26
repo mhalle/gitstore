@@ -37,6 +37,14 @@ export interface TreeWrite {
 // Detect executable bit from filesystem
 // ---------------------------------------------------------------------------
 
+/**
+ * Detect the git filemode for a local file by checking its executable bit.
+ *
+ * @param fsModule - Node.js-compatible fs module.
+ * @param localPath - Path to the local file.
+ * @returns MODE_BLOB_EXEC if executable, MODE_BLOB otherwise.
+ * @throws IsADirectoryError if the path is a directory.
+ */
 export async function modeFromDisk(
   fsModule: FsModule,
   localPath: string,
@@ -222,6 +230,14 @@ export async function existsAtPath(
 // Count subdirectories (for stat nlink)
 // ---------------------------------------------------------------------------
 
+/**
+ * Count the number of immediate subdirectories in a tree (for stat nlink).
+ *
+ * @param fsModule - Node.js-compatible fs module.
+ * @param gitdir   - Path to the bare git repository.
+ * @param treeOid  - 40-char hex SHA of the tree object.
+ * @returns Number of subdirectory entries in the tree.
+ */
 export async function countSubdirs(
   fsModule: FsModule,
   gitdir: string,

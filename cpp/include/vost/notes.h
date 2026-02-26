@@ -131,9 +131,12 @@ public:
     explicit NotesBatch(NoteNamespace ns);
 
     /// Stage a note write.
+    /// @param hash 40-char lowercase hex commit hash.
+    /// @param text Note text to set.
     void set(const std::string& hash, const std::string& text);
 
     /// Stage a note deletion.
+    /// @param hash 40-char lowercase hex commit hash.
     void del(const std::string& hash);
 
     /// Commit all staged changes as a single commit.
@@ -167,9 +170,11 @@ public:
     explicit NoteDict(std::shared_ptr<GitStoreInner> inner);
 
     /// Get a NoteNamespace by name.
+    /// @param ns_name Namespace name (e.g. "commits", "reviews").
     NoteNamespace operator[](const std::string& ns_name);
 
-    /// Get a NoteNamespace by name.
+    /// Get a NoteNamespace by name (same as operator[]).
+    /// @param ns_name Namespace name.
     NoteNamespace ns(const std::string& ns_name);
 
     /// Shortcut for notes["commits"].

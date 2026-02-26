@@ -7,11 +7,18 @@
 
 import type { FsModule, ReflogEntry } from './types.js';
 
+/** The all-zeros SHA used for newly-created refs in reflog entries. */
 const ZERO_SHA = '0000000000000000000000000000000000000000';
 
 /**
  * Read reflog entries for a branch.
  * Returns entries in chronological order (oldest first).
+ *
+ * @param fsModule   - Node.js-compatible fs module.
+ * @param gitdir     - Path to the bare git repository.
+ * @param branchName - Branch name (e.g. "main").
+ * @returns Array of {@link ReflogEntry} objects.
+ * @throws Error if no reflog file exists for the branch.
  */
 export async function readReflog(
   fsModule: FsModule,
@@ -65,6 +72,14 @@ export async function readReflog(
 
 /**
  * Append a reflog entry for a ref update.
+ *
+ * @param fsModule  - Node.js-compatible fs module.
+ * @param gitdir    - Path to the bare git repository.
+ * @param refName   - Full ref name (e.g. "refs/heads/main").
+ * @param oldSha    - Previous 40-char hex commit SHA (ZERO_SHA for new refs).
+ * @param newSha    - New 40-char hex commit SHA.
+ * @param committer - Identity string (e.g. "vost \<vost@localhost\>").
+ * @param message   - Reflog message (e.g. "commit: + file.txt").
  */
 export async function writeReflogEntry(
   fsModule: FsModule,

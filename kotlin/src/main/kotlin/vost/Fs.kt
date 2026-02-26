@@ -149,7 +149,13 @@ class Fs internal constructor(
         return data
     }
 
-    /** Read file contents as a string. */
+    /**
+     * Read file contents as a string.
+     *
+     * @param path File path in the repo.
+     * @param encoding Text encoding (default "UTF-8").
+     * @return Decoded file contents.
+     */
     fun readText(path: String, encoding: String = "UTF-8"): String =
         String(read(path), charset(encoding))
 
@@ -467,7 +473,18 @@ class Fs internal constructor(
         }
     }
 
-    /** Write text to path and commit, returning a new Fs. */
+    /**
+     * Write text to path and commit, returning a new Fs.
+     *
+     * @param path Destination path in the repo.
+     * @param text String content (encoded with [encoding]).
+     * @param encoding Text encoding (default "UTF-8").
+     * @param message Commit message (auto-generated if null).
+     * @param mode File mode override (e.g. [FileType.EXECUTABLE]).
+     * @return New Fs snapshot.
+     * @throws ReadOnlyError If this snapshot is read-only.
+     * @throws StaleSnapshotError If the branch has advanced since this snapshot.
+     */
     fun writeText(
         path: String,
         text: String,
@@ -476,7 +493,16 @@ class Fs internal constructor(
         mode: FileType? = null,
     ): Fs = write(path, text.toByteArray(charset(encoding)), message, mode)
 
-    /** Write a symlink entry and commit, returning a new Fs. */
+    /**
+     * Create a symbolic link entry and commit, returning a new Fs.
+     *
+     * @param path Symlink path in the repo.
+     * @param target The symlink target string.
+     * @param message Commit message (auto-generated if null).
+     * @return New Fs snapshot.
+     * @throws ReadOnlyError If this snapshot is read-only.
+     * @throws StaleSnapshotError If the branch has advanced since this snapshot.
+     */
     fun writeSymlink(path: String, target: String, message: String? = null): Fs {
         val normalized = normalizePath(path)
         val inserter = store.repo.newObjectInserter()
@@ -541,7 +567,15 @@ class Fs internal constructor(
         }
     }
 
-    /** Remove files from the repo. */
+    /**
+     * Remove files from the repo.
+     *
+     * @param paths Repo paths to remove.
+     * @param message Commit message (auto-generated if null).
+     * @return New Fs snapshot with the files removed.
+     * @throws ReadOnlyError If this snapshot is read-only.
+     * @throws StaleSnapshotError If the branch has advanced since this snapshot.
+     */
     fun remove(
         paths: List<String>,
         message: String? = null,
@@ -551,13 +585,29 @@ class Fs internal constructor(
         return commitChanges(writes, message)
     }
 
-    /** Return a Batch for multiple writes in one commit. */
+    /**
+     * Return a [Batch] context manager for multiple writes in one commit.
+     *
+     * @param message Commit message (auto-generated if null).
+     * @param operation Operation name for auto-generated messages.
+     * @return A new [Batch] instance.
+     * @throws ReadOnlyError If this snapshot is read-only.
+     */
     fun batch(message: String? = null, operation: String? = null): Batch {
         if (!writable) throw readonlyError("batch on")
         return Batch(this, message, operation)
     }
 
-    /** Return a file-like writer that commits on close. */
+    /**
+     * Return a writable file-like that commits on close.
+     *
+     * "wb" accepts bytes; "w" accepts strings (UTF-8 encoded).
+     *
+     * @param path Destination path in the repo.
+     * @param mode "wb" (binary, default) or "w" (text).
+     * @return A new [FsWriter] instance.
+     * @throws ReadOnlyError If this snapshot is read-only.
+     */
     fun writer(path: String, mode: String = "wb"): FsWriter {
         if (!writable) throw readonlyError("write to")
         val encoding = when (mode) {
@@ -858,7 +908,13 @@ class Fs internal constructor(
             }
         }
 
-    /** Return the Fs at the n-th ancestor commit. */
+    /**
+     * Return the Fs at the n-th ancestor commit.
+     *
+     * @param n Number of commits to go back (must be >= 0).
+     * @return Fs at the ancestor commit.
+     * @throws IllegalArgumentException If n < 0 or history is too short.
+     */
     fun back(n: Int = 1): Fs {
         require(n >= 0) { "back() requires n >= 0, got $n" }
         var fs = this

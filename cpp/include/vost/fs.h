@@ -168,8 +168,13 @@ public:
                      const std::string& target,
                      WriteOptions opts = {}) const;
 
-    /// Apply a batch of writes and removes atomically.
-    /// `writes` maps path → WriteEntry; `removes` is a list of paths.
+    /// Apply a batch of writes and removes in a single atomic commit.
+    /// @param writes  Vector of (path, WriteEntry) pairs to write.
+    /// @param removes Paths to delete from the repo.
+    /// @param opts    Options including optional message and operation name.
+    /// @return New Fs snapshot with all changes committed.
+    /// @throws ReadOnlyError if this snapshot is read-only.
+    /// @throws StaleSnapshotError if the branch has advanced since this snapshot.
     Fs apply(const std::vector<std::pair<std::string, WriteEntry>>& writes,
              const std::vector<std::string>& removes = {},
              ApplyOptions opts = {}) const;

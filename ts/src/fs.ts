@@ -1272,7 +1272,11 @@ export class FS {
   // History
   // ---------------------------------------------------------------------------
 
-  /** The parent snapshot, or `null` for the initial commit. */
+  /**
+   * The parent snapshot, or `null` for the initial commit.
+   *
+   * @returns The parent FS, or `null` if this is the initial commit.
+   */
   async getParent(): Promise<FS | null> {
     const { commit } = await git.readCommit({
       fs: this._fsModule,

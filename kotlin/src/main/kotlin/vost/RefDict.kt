@@ -20,7 +20,13 @@ class RefDict internal constructor(
 ) {
     private fun refName(name: String): String = "$prefix$name"
 
-    /** Get an Fs snapshot for the named branch or tag. */
+    /**
+     * Get an Fs snapshot for the named branch or tag.
+     *
+     * @param name Branch or tag name.
+     * @return Fs snapshot bound to the ref.
+     * @throws NoSuchElementException If the ref does not exist.
+     */
     operator fun get(name: String): Fs {
         val ref = store.repo.findRef(refName(name))
             ?: throw NoSuchElementException("Not found: $name")
@@ -49,7 +55,14 @@ class RefDict internal constructor(
         }
     }
 
-    /** Set branch/tag to point to the given Fs snapshot's commit. */
+    /**
+     * Set branch/tag to point to the given Fs snapshot's commit.
+     *
+     * @param name Branch or tag name.
+     * @param fs Fs snapshot whose commit to point to.
+     * @throws IllegalArgumentException If the ref name is invalid or the Fs belongs to a different repository.
+     * @throws IllegalStateException If a tag with the given name already exists.
+     */
     operator fun set(name: String, fs: Fs) {
         validateRefName(name)
         require(fs.store === store) { "FS belongs to a different repository" }
@@ -82,7 +95,12 @@ class RefDict internal constructor(
         }
     }
 
-    /** Delete a branch or tag. */
+    /**
+     * Delete a branch or tag.
+     *
+     * @param name Branch or tag name.
+     * @throws NoSuchElementException If the ref does not exist.
+     */
     fun delete(name: String) {
         val fullRef = refName(name)
         RepoLock.withLock(store.repo.directory.path) {
@@ -95,30 +113,56 @@ class RefDict internal constructor(
         }
     }
 
-    /** Set and return a new writable Fs bound to the branch. */
+    /**
+     * Set branch to Fs snapshot and return a new writable Fs bound to it.
+     *
+     * Convenience method combining set and get:
+     * ```
+     * val fsNew = store.branches.setAndGet("feature", fs)
+     * ```
+     *
+     * @param name Branch name.
+     * @param fs Fs snapshot to set (can be read-only).
+     * @return New writable Fs bound to the branch.
+     */
     fun setAndGet(name: String, fs: Fs): Fs {
         this[name] = fs
         return this[name]
     }
 
-    /** Check if a branch/tag exists. */
+    /**
+     * Check if a branch or tag exists.
+     *
+     * @param name Branch or tag name.
+     * @return True if the ref exists.
+     */
     operator fun contains(name: String): Boolean =
         store.repo.findRef(refName(name)) != null
 
-    /** List all branch/tag names. */
+    /**
+     * List all branch or tag names.
+     *
+     * @return List of ref names (without the refs/heads/ or refs/tags/ prefix).
+     */
     fun list(): List<String> {
         val allRefs = store.repo.refDatabase.getRefsByPrefix(prefix)
         return allRefs.map { it.name.removePrefix(prefix) }
     }
 
-    /** Check if a ref exists. */
+    /**
+     * Check if a ref exists (alias for [contains]).
+     *
+     * @param name Branch or tag name.
+     * @return True if the ref exists.
+     */
     fun exists(name: String): Boolean = contains(name)
 
-    /** Number of refs. */
+    /** The number of branches or tags. */
     val size: Int get() = list().size
 
     /** Iterate over ref names. */
     operator fun iterator(): Iterator<String> = list().iterator()
+
 
     // ── Current branch (branches only) ────────────────────────────────
 

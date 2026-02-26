@@ -51,10 +51,15 @@ inline uint32_t file_type_to_mode(FileType ft) {
     return MODE_BLOB; // unreachable
 }
 
+/// Return true if the FileType represents a regular or executable file.
 inline bool file_type_is_file(FileType ft) {
     return ft == FileType::Blob || ft == FileType::Executable;
 }
+
+/// Return true if the FileType represents a directory (tree).
 inline bool file_type_is_dir(FileType ft) { return ft == FileType::Tree; }
+
+/// Return true if the FileType represents a symbolic link.
 inline bool file_type_is_link(FileType ft) { return ft == FileType::Link; }
 
 // ---------------------------------------------------------------------------
@@ -376,13 +381,18 @@ class ExcludeFilter {
 public:
     ExcludeFilter() = default;
 
-    /// Add exclude patterns (gitignore syntax).
+    /// Add exclude patterns using gitignore syntax.
+    /// @param patterns Vector of gitignore-style patterns (e.g. "*.log", "build/").
     void add_patterns(const std::vector<std::string>& patterns);
 
-    /// Load patterns from a file.
+    /// Load patterns from a file (one pattern per line, gitignore syntax).
+    /// @param path Path to the patterns file (e.g. ".gitignore").
     void load_from_file(const std::filesystem::path& path);
 
-    /// Check if a path should be excluded.
+    /// Check if a relative path should be excluded.
+    /// @param rel_path Relative path to check.
+    /// @param is_dir   True if the path is a directory (matches dir-only patterns).
+    /// @return True if the path matches an exclude pattern.
     bool is_excluded(const std::string& rel_path, bool is_dir = false) const;
 
     /// True if any filtering is configured.

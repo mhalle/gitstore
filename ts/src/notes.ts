@@ -456,6 +456,8 @@ export class NoteNamespace {
   /**
    * Return a NotesBatch that collects writes/deletes and applies them
    * in a single commit when `commit()` is called.
+   *
+   * @returns A new {@link NotesBatch} instance.
    */
   batch(): NotesBatch {
     return new NotesBatch(this);

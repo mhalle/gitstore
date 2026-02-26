@@ -11,6 +11,13 @@ import type { GitStore } from './gitstore.js';
 
 /**
  * Push all local refs to url, creating an exact mirror.
+ * Remote-only refs are deleted.
+ *
+ * @param store - The GitStore to backup from.
+ * @param url   - Remote repository URL (HTTPS or local path).
+ * @param opts  - Options: `http` client, `dryRun` to compute diff without pushing,
+ *                and optional `onAuth` callback for credentials.
+ * @returns A {@link MirrorDiff} describing what changed (or would change).
  */
 export async function backup(
   store: GitStore,
@@ -73,6 +80,13 @@ export async function backup(
 
 /**
  * Fetch all remote refs from url, overwriting local state.
+ * Local-only refs are deleted.
+ *
+ * @param store - The GitStore to restore into.
+ * @param url   - Remote repository URL (HTTPS or local path).
+ * @param opts  - Options: `http` client, `dryRun` to compute diff without fetching,
+ *                and optional `onAuth` callback for credentials.
+ * @returns A {@link MirrorDiff} describing what changed (or would change).
  */
 export async function restore(
   store: GitStore,

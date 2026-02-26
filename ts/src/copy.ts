@@ -250,6 +250,13 @@ async function diskGlobWalk(
 // ---------------------------------------------------------------------------
 
 type ResolvedSource = { localPath: string; mode: 'file' | 'dir' | 'contents'; prefix: string };
+
+/**
+ * A resolved repo source path with its copy mode.
+ * - `repoPath` — normalized path in the repo.
+ * - `mode` — 'file' for a single file, 'dir' for a directory, 'contents' for trailing-slash contents mode.
+ * - `prefix` — prefix for pivot marker support.
+ */
 export type ResolvedRepoSource = { repoPath: string; mode: 'file' | 'dir' | 'contents'; prefix: string };
 
 async function resolveDiskSources(
@@ -287,6 +294,18 @@ async function resolveDiskSources(
   return resolved;
 }
 
+/**
+ * Resolve repo source paths into their copy mode (file/dir/contents).
+ *
+ * Trailing `/` means contents mode; bare directory names mean directory mode;
+ * files mean file mode. Empty string or `/` means root contents.
+ *
+ * @param fs      - The FS snapshot to resolve paths against.
+ * @param sources - Array of repo paths to resolve.
+ * @returns Array of resolved sources with mode and prefix.
+ * @throws {FileNotFoundError} If a source path does not exist.
+ * @throws {NotADirectoryError} If a trailing-`/` source is not a directory.
+ */
 export async function resolveRepoSources(
   fs: FS,
   sources: string[],
@@ -1156,6 +1175,7 @@ export async function remove(
  * @param opts.ignoreErrors - Continue on per-file errors. Default `false`.
  * @param opts.checksum - Use content hashing. When `false`, uses mtime. Default `true`.
  * @returns FS snapshot after sync, with `.changes` set.
+ * @throws {ReadOnlyError} If the FS is read-only.
  */
 export async function syncIn(
   fs: FS,

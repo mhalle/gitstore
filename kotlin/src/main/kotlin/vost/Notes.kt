@@ -261,7 +261,12 @@ class NoteNamespace internal constructor(
         return get(currentFs.commitHash)
     }
 
-    /** Set the note for the current HEAD commit. */
+    /**
+     * Set the note for the current HEAD commit.
+     *
+     * @param text Note text to set.
+     * @throws IllegalStateException If HEAD is dangling (no current branch).
+     */
     fun setForCurrentBranch(text: String) {
         val currentFs = store.branches.current
             ?: throw IllegalStateException("HEAD is dangling - no current branch")
@@ -270,7 +275,11 @@ class NoteNamespace internal constructor(
 
     // ── Batch ─────────────────────────────────────────────────────────
 
-    /** Return a NotesBatch for batching writes into a single commit. */
+    /**
+     * Return a [NotesBatch] context manager that batches writes into a single commit.
+     *
+     * @return A new [NotesBatch] instance.
+     */
     fun batch(): NotesBatch = NotesBatch(this)
 }
 
@@ -285,18 +294,35 @@ class NotesBatch internal constructor(
     private val deletes = mutableSetOf<String>()
     private var closed = false
 
+    /**
+     * Stage a note write.
+     *
+     * @param h 40-char lowercase hex commit hash.
+     * @param text Note text to set.
+     */
     operator fun set(h: String, text: String) {
         validateHash(h)
         deletes.remove(h)
         writes[h] = text
     }
 
+    /**
+     * Stage a note deletion.
+     *
+     * @param h 40-char lowercase hex commit hash.
+     * @throws NoSuchElementException If the note does not exist when committed.
+     */
     fun delete(h: String) {
         validateHash(h)
         writes.remove(h)
         deletes.add(h)
     }
 
+    /**
+     * Explicitly commit the batch.
+     *
+     * After calling this the batch is closed and no further writes are allowed.
+     */
     fun commit() {
         if (closed) throw IllegalStateException("NotesBatch is already closed")
         closed = true

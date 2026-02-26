@@ -112,28 +112,38 @@ public:
     Fs get(const std::string& name);
 
     /// Convenience: same as get().
+    /// @param name Branch or tag name.
+    /// @throws NotFoundError if the ref does not exist.
     Fs operator[](const std::string& name);
 
     /// Point the named ref at the commit of `fs`.
+    /// @param name Branch or tag name.
+    /// @param fs   Fs snapshot whose commit to point to.
     /// @throws InvalidRefNameError for bad ref names.
     /// @throws KeyExistsError when overwriting a tag.
+    /// @throws std::invalid_argument if fs belongs to a different repository.
     void set(const std::string& name, const Fs& fs);
 
-    /// Point the named ref at the commit of `fs` and return a writable Fs.
-    /// Equivalent to set() followed by get().
+    /// Point the named ref at the commit of `fs` and return a new writable Fs
+    /// bound to it. Equivalent to set() followed by get().
+    /// @param name Branch name.
+    /// @param fs   Fs snapshot to set (can be read-only).
+    /// @return New writable Fs bound to the branch.
     Fs set_and_get(const std::string& name, const Fs& fs);
 
     /// Delete the named ref.
+    /// @param name Branch or tag name.
     /// @throws KeyNotFoundError if the ref does not exist.
     void del(const std::string& name);
 
     /// Return true if the named ref exists.
+    /// @param name Branch or tag name.
     bool contains(const std::string& name);
 
-    /// Return all ref names under this prefix (without prefix).
+    /// Return all ref names under this prefix (without the prefix).
     std::vector<std::string> keys();
 
-    /// Return all Fs snapshots under this prefix.
+    /// Return Fs snapshots for all refs under this prefix.
     std::vector<Fs> values();
 
     /// Get the current branch name (HEAD), or nullopt if not set.

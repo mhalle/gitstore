@@ -112,13 +112,18 @@ public:
     BatchWriter(Batch& batch, std::string path, uint32_t mode = MODE_BLOB);
     ~BatchWriter();
 
-    /// Append raw bytes.
+    /// Append raw bytes to the internal buffer.
+    /// @param data Bytes to append.
+    /// @return Reference to this writer for chaining.
     BatchWriter& write(const std::vector<uint8_t>& data);
 
-    /// Append a UTF-8 string.
+    /// Append a UTF-8 string to the internal buffer.
+    /// @param text String to append (encoded as UTF-8).
+    /// @return Reference to this writer for chaining.
     BatchWriter& write(const std::string& text);
 
-    /// Flush and stage to the batch.
+    /// Flush the accumulated buffer and stage the result to the batch.
+    /// Called automatically by the destructor if not already closed.
     void close();
 
     // Non-copyable, non-movable (references a Batch)

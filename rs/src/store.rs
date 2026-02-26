@@ -161,17 +161,26 @@ impl GitStore {
         Fs::from_commit(Arc::clone(&self.inner), oid, None, Some(false))
     }
 
-    /// Return a `RefDict` for branches.
+    /// Return a [`RefDict`] for branches (`refs/heads/`).
+    ///
+    /// Supports `get`, `set`, `delete`, `contains`, `keys`, iteration,
+    /// and `current`/`set_current` for HEAD management.
     pub fn branches(&self) -> RefDict<'_> {
         RefDict::new(self, "refs/heads/")
     }
 
-    /// Return a `RefDict` for tags.
+    /// Return a [`RefDict`] for tags (`refs/tags/`).
+    ///
+    /// Tags are read-only snapshots — `set` creates a tag but the returned
+    /// [`Fs`] is not writable.
     pub fn tags(&self) -> RefDict<'_> {
         RefDict::new(self, "refs/tags/")
     }
 
-    /// Return a `NoteDict` for git notes namespaces.
+    /// Return a [`NoteDict`] for accessing git notes namespaces.
+    ///
+    /// Use `notes().commits()` for the default `refs/notes/commits` namespace,
+    /// or `notes().ns("custom")` for a custom namespace.
     pub fn notes(&self) -> NoteDict<'_> {
         NoteDict::new(self)
     }

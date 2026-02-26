@@ -27,7 +27,13 @@ class Batch internal constructor(
         if (closed) throw IllegalStateException("Batch is closed")
     }
 
-    /** Stage a file write. */
+    /**
+     * Stage a file write.
+     *
+     * @param path Destination path in the repo.
+     * @param data Raw bytes to write.
+     * @param mode File mode override (e.g. [FileType.EXECUTABLE]).
+     */
     fun write(path: String, data: ByteArray, mode: FileType? = null) {
         checkOpen()
         val normalized = normalizePath(path)
@@ -47,12 +53,24 @@ class Batch internal constructor(
         }
     }
 
-    /** Stage a text write (convenience wrapper). */
+    /**
+     * Stage a text write (convenience wrapper around [write]).
+     *
+     * @param path Destination path in the repo.
+     * @param text String content (encoded with [encoding]).
+     * @param encoding Text encoding (default "UTF-8").
+     * @param mode File mode override (e.g. [FileType.EXECUTABLE]).
+     */
     fun writeText(path: String, text: String, encoding: String = "UTF-8", mode: FileType? = null) {
         write(path, text.toByteArray(charset(encoding)), mode)
     }
 
-    /** Stage a symbolic link entry. */
+    /**
+     * Stage a symbolic link entry.
+     *
+     * @param path Symlink path in the repo.
+     * @param target The symlink target string.
+     */
     fun writeSymlink(path: String, target: String) {
         checkOpen()
         val normalized = normalizePath(path)
@@ -96,7 +114,15 @@ class Batch internal constructor(
         }
     }
 
-    /** Return a writable file-like that stages to the batch on close. */
+    /**
+     * Return a writable file-like that stages to the batch on close.
+     *
+     * "wb" accepts bytes; "w" accepts strings (UTF-8 encoded).
+     *
+     * @param path Destination path in the repo.
+     * @param mode "wb" (binary, default) or "w" (text).
+     * @return A new [BatchWriter] instance.
+     */
     fun writer(path: String, mode: String = "wb"): BatchWriter {
         checkOpen()
         val encoding = when (mode) {
