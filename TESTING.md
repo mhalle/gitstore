@@ -28,7 +28,50 @@ source ~/.sdkman/bin/sdkman-init.sh
 sdk install java 21-tem
 ```
 
-Rust, Node.js, and Deno are assumed to be installed via their standard installers.
+### Linux (Ubuntu/Debian) setup
+
+```bash
+# Python
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Node.js (via NodeSource)
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo bash -
+sudo apt install -y nodejs
+
+# C++ dependencies
+sudo apt install -y cmake g++ libgit2-dev catch2
+
+# Kotlin (Java 21 via sdkman)
+curl -s "https://get.sdkman.io" | bash
+source ~/.sdkman/bin/sdkman-init.sh
+sdk install java 21-tem
+
+# Rust
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+### Linux (Fedora/RHEL) setup
+
+```bash
+# Python
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Node.js
+sudo dnf install -y nodejs npm
+
+# C++ dependencies
+sudo dnf install -y cmake gcc-c++ libgit2-devel catch2-devel
+
+# Kotlin (Java 21 via sdkman)
+curl -s "https://get.sdkman.io" | bash
+source ~/.sdkman/bin/sdkman-init.sh
+sdk install java 21-tem
+
+# Rust
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+Rust, Node.js, and Deno are assumed to be installed via their standard installers on macOS.
 
 ## Running tests per port
 
@@ -61,9 +104,12 @@ cd rs && cargo test --all-targets
 Build first, then run:
 
 ```bash
-# Configure (one-time, or after CMakeLists.txt changes)
+# Configure — macOS with Homebrew
 cmake -B cpp/build -S cpp/ \
       -DCMAKE_PREFIX_PATH="$(brew --prefix libgit2);$(brew --prefix catch2)"
+
+# Configure — Linux (system packages are found automatically)
+cmake -B cpp/build -S cpp/
 
 # Build
 cmake --build cpp/build
@@ -72,7 +118,7 @@ cmake --build cpp/build
 ctest --test-dir cpp/build --output-on-failure
 ```
 
-With vcpkg instead of Homebrew:
+With vcpkg instead of system packages:
 
 ```bash
 cmake -B cpp/build -S cpp/ \
@@ -99,9 +145,14 @@ The interop script auto-detects which ports are available. Python and TypeScript
 **C++ interop binaries** — build with the `-DVOST_BUILD_INTEROP=ON` flag:
 
 ```bash
+# macOS with Homebrew
 cmake -B cpp/build -S cpp/ \
       -DCMAKE_PREFIX_PATH="$(brew --prefix libgit2);$(brew --prefix catch2)" \
       -DVOST_BUILD_INTEROP=ON
+
+# Linux (system packages)
+cmake -B cpp/build -S cpp/ -DVOST_BUILD_INTEROP=ON
+
 cmake --build cpp/build
 ```
 
