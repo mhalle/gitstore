@@ -2,6 +2,7 @@
  * GitStore: versioned filesystem backed by a bare git repository.
  */
 
+import * as nodeFs from 'node:fs';
 import git from 'isomorphic-git';
 import type { FsModule, Signature, MirrorDiff, HttpClient } from './types.js';
 import { RefDict } from './refdict.js';
@@ -42,7 +43,7 @@ export class GitStore {
    * Open or create a bare git repository.
    *
    * @param path - Path to the bare repository directory.
-   * @param opts.fs - Node.js `fs` module (or compatible).
+   * @param opts.fs - Filesystem module (default: Node.js `node:fs`). Override for custom implementations.
    * @param opts.create - Create the repo if it doesn't exist (default: true).
    * @param opts.branch - Initial branch when creating (default: "main"). Null for no branch.
    * @param opts.author - Default author name (default: "vost").
@@ -51,14 +52,14 @@ export class GitStore {
   static async open(
     path: string,
     opts: {
-      fs: FsModule;
+      fs?: FsModule;
       create?: boolean;
       branch?: string | null;
       author?: string;
       email?: string;
-    },
+    } = {},
   ): Promise<GitStore> {
-    const fsModule = opts.fs;
+    const fsModule = opts.fs ?? nodeFs as unknown as FsModule;
     const create = opts.create ?? true;
     const branch = opts.branch !== undefined ? opts.branch : 'main';
     const author = opts.author ?? 'vost';

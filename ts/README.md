@@ -15,11 +15,10 @@ Requires Node.js 18+ or Deno.
 ## Quick start
 
 ```typescript
-import * as fs from 'node:fs';
 import { GitStore } from '@mhalle/vost';
 
 // Create (or open) a repository with a "main" branch
-const store = await GitStore.open('data.git', { fs });
+const store = await GitStore.open('data.git');
 
 // Get a snapshot of the current branch ("main" by default)
 let snap = await store.branches.getCurrent();
@@ -52,17 +51,15 @@ Snapshots from **branches** are writable (`fs.writable === true`). Snapshots fro
 ### Opening a repository
 
 ```typescript
-import * as fs from 'node:fs';
-
-const store = await GitStore.open('data.git', { fs });                  // create or open
-const store = await GitStore.open('data.git', { fs, create: false });   // open only
-const store = await GitStore.open('data.git', { fs, branch: 'dev' });   // custom default branch
-const store = await GitStore.open('data.git', { fs, branch: null });    // branchless
-const store = await GitStore.open('data.git', { fs,
+const store = await GitStore.open('data.git');                          // create or open
+const store = await GitStore.open('data.git', { create: false });       // open only
+const store = await GitStore.open('data.git', { branch: 'dev' });       // custom default branch
+const store = await GitStore.open('data.git', { branch: null });        // branchless
+const store = await GitStore.open('data.git', {
   author: 'alice', email: 'alice@example.com' });                       // custom author
 ```
 
-The `fs` option is required and should be Node's `node:fs` module (or a compatible implementation for Deno).
+The `fs` option defaults to Node's `node:fs` module. Override it to provide a custom filesystem implementation (e.g. `lightning-fs` for browsers).
 
 ### Branches and tags
 
@@ -339,10 +336,9 @@ All errors extend `GitStoreError`.
 vost works under Deno using its Node.js compatibility layer:
 
 ```typescript
-import * as fs from 'node:fs';
 import { GitStore } from 'npm:@mhalle/vost';
 
-const store = await GitStore.open('/tmp/repo.git', { fs });
+const store = await GitStore.open('/tmp/repo.git');
 ```
 
 ## License

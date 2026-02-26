@@ -17,17 +17,20 @@ import {
 
 Opens or creates a bare Git repository.
 
-### `GitStore.open(path, options)`
+### `GitStore.open(path, options?)`
 
 ```typescript
+const store = await GitStore.open('/path/to/repo.git');
 const store = await GitStore.open('/path/to/repo.git', {
-  fs,                         // required — Node.js fs module
+  fs: customFs,               // filesystem module (default: node:fs)
   create: true,               // create if missing (default: true)
   branch: 'main',             // default branch (default: 'main', null for branchless)
   author: 'vost',             // commit author name
   email: 'vost@localhost',    // commit author email
 });
 ```
+
+All options are optional. The `fs` parameter defaults to Node's `node:fs` module; override it for custom filesystem implementations (e.g. `lightning-fs` for browsers).
 
 Returns `Promise<GitStore>`.
 

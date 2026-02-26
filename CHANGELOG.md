@@ -4,6 +4,12 @@ All notable changes to vost are documented in this file.
 
 ## Unreleased
 
+## v0.67.2 / TS v0.9.0 (2026-02-26)
+
+**Changed (TypeScript):**
+
+- `GitStore.open()` no longer requires the `fs` option — defaults to Node's `node:fs` module. Pass a custom `fs` only for non-Node environments (e.g. `lightning-fs` in browsers).
+
 ## v0.67.1 / TS v0.8.2 (2026-02-26)
 
 **Docs (TypeScript):**

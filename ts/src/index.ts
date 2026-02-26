@@ -5,10 +5,9 @@
  *
  * @example
  * ```ts
- * import * as fs from 'node:fs';
- * import { GitStore } from 'vost';
+ * import { GitStore } from '@mhalle/vost';
  *
- * const store = await GitStore.open('/tmp/myrepo.git', { fs });
+ * const store = await GitStore.open('/tmp/myrepo.git');
  * const snapshot = await store.branches.get('main');
  *
  * // Read
