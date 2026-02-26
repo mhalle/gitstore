@@ -991,6 +991,7 @@ export class FS {
       delete?: boolean;
       ignoreErrors?: boolean;
       checksum?: boolean;
+      exclude?: import('./exclude.js').ExcludeFilter;
     } = {},
   ): Promise<FS> {
     const { copyIn } = await import('./copy.js');
@@ -1049,6 +1050,7 @@ export class FS {
       message?: string;
       ignoreErrors?: boolean;
       checksum?: boolean;
+      exclude?: import('./exclude.js').ExcludeFilter;
     } = {},
   ): Promise<FS> {
     const { syncIn } = await import('./copy.js');

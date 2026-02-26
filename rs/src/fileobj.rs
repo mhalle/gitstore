@@ -21,9 +21,9 @@ use crate::fs::{Fs, WriteOptions};
 ///
 /// ```rust,no_run
 /// use std::io::Write;
-/// use vost::{GitStore, Fs};
+/// use vost::{GitStore, Fs, OpenOptions};
 ///
-/// let store = GitStore::open("/tmp/repo").unwrap();
+/// let store = GitStore::open("/tmp/repo", OpenOptions::default()).unwrap();
 /// let fs = store.branches().get("main").unwrap();
 /// let mut w = fs.writer("output.bin").unwrap();
 /// w.write_all(b"chunk 1").unwrap();
@@ -101,15 +101,17 @@ impl Drop for FsWriter {
 ///
 /// ```rust,no_run
 /// use std::io::Write;
-/// use vost::{GitStore, Fs};
+/// use vost::{GitStore, Fs, OpenOptions};
 /// use vost::fs::BatchOptions;
 ///
-/// let store = GitStore::open("/tmp/repo").unwrap();
+/// let store = GitStore::open("/tmp/repo", OpenOptions::default()).unwrap();
 /// let fs = store.branches().get("main").unwrap();
 /// let mut batch = fs.batch(Default::default());
-/// let mut w = batch.writer("data.bin").unwrap();
-/// w.write_all(b"chunk").unwrap();
-/// w.close().unwrap();
+/// {
+///     let mut w = batch.writer("data.bin").unwrap();
+///     w.write_all(b"chunk").unwrap();
+///     w.close().unwrap();
+/// }
 /// let fs2 = batch.commit().unwrap();
 /// ```
 pub struct BatchWriter<'a> {

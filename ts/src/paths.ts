@@ -2,6 +2,8 @@
  * Path normalization and validation utilities.
  */
 
+import { InvalidPathError, InvalidRefNameError } from './types.js';
+
 /**
  * Return true if path represents the root (empty or only slashes).
  */
@@ -15,11 +17,11 @@ export function isRootPath(path: string): boolean {
  */
 export function normalizePath(path: string): string {
   path = path.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
-  if (!path) throw new Error('Path must not be empty');
+  if (!path) throw new InvalidPathError('Path must not be empty');
   const segments = path.split('/');
   for (const seg of segments) {
-    if (!seg) throw new Error(`Empty segment in path: '${path}'`);
-    if (seg === '.' || seg === '..') throw new Error(`Invalid path segment: '${seg}'`);
+    if (!seg) throw new InvalidPathError(`Empty segment in path: '${path}'`);
+    if (seg === '.' || seg === '..') throw new InvalidPathError(`Invalid path segment: '${seg}'`);
   }
   return segments.join('/');
 }
@@ -36,7 +38,7 @@ export function validateRefName(name: string): void {
   ];
   for (const [ch, label] of bad) {
     if (name.includes(ch)) {
-      throw new Error(`Invalid ref name '${name}': contains ${label}`);
+      throw new InvalidRefNameError(`Invalid ref name '${name}': contains ${label}`);
     }
   }
 }

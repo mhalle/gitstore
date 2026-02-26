@@ -123,4 +123,54 @@ class StatTest {
             assertEquals(hash, st.hash)
         }
     }
+
+    @Test
+    fun `read with offset and size`() {
+        val store = createStore()
+        store.use {
+            var fs = it.branches["main"]
+            fs = fs.write("file.txt", "Hello World".toByteArray())
+
+            val partial = fs.read("file.txt", offset = 6, size = 5)
+            assertEquals("World", String(partial))
+        }
+    }
+
+    @Test
+    fun `read with offset beyond end returns empty`() {
+        val store = createStore()
+        store.use {
+            var fs = it.branches["main"]
+            fs = fs.write("file.txt", "short".toByteArray())
+
+            val result = fs.read("file.txt", offset = 100)
+            assertEquals(0, result.size)
+        }
+    }
+
+    @Test
+    fun `readByHash returns blob content`() {
+        val store = createStore()
+        store.use {
+            var fs = it.branches["main"]
+            fs = fs.write("file.txt", "content".toByteArray())
+
+            val hash = fs.objectHash("file.txt")
+            val data = fs.readByHash(hash)
+            assertEquals("content", String(data))
+        }
+    }
+
+    @Test
+    fun `readByHash with offset and size`() {
+        val store = createStore()
+        store.use {
+            var fs = it.branches["main"]
+            fs = fs.write("file.txt", "Hello World".toByteArray())
+
+            val hash = fs.objectHash("file.txt")
+            val partial = fs.readByHash(hash, offset = 6, size = 5)
+            assertEquals("World", String(partial))
+        }
+    }
 }

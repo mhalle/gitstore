@@ -12,7 +12,7 @@ pub fn glob_match(pattern: &str, name: &str) -> bool {
 }
 
 /// Simple fnmatch implementation: `*` matches any chars, `?` matches single char.
-fn fnmatch(pat: &[u8], name: &[u8]) -> bool {
+pub(crate) fn fnmatch(pat: &[u8], name: &[u8]) -> bool {
     let mut pi = 0;
     let mut ni = 0;
     let mut star_pi = usize::MAX;

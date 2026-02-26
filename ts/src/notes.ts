@@ -8,7 +8,7 @@
  */
 
 import git from 'isomorphic-git';
-import { MODE_BLOB, MODE_TREE, GitStoreError, type FsModule } from './types.js';
+import { MODE_BLOB, MODE_TREE, GitStoreError, KeyNotFoundError, BatchClosedError, type FsModule } from './types.js';
 import { withRepoLock } from './lock.js';
 import type { GitStore } from './gitstore.js';
 
@@ -221,7 +221,7 @@ export class NoteNamespace {
       }
 
       if (!removed) {
-        throw new GitStoreError(`key not found: ${h}`);
+        throw new KeyNotFoundError(`key not found: ${h}`);
       }
     }
 
@@ -343,11 +343,11 @@ export class NoteNamespace {
     validateHash(hash);
     const treeOid = await this._treeOid();
     if (treeOid === null) {
-      throw new GitStoreError(`key not found: ${hash}`);
+      throw new KeyNotFoundError(`key not found: ${hash}`);
     }
     const blobOid = await this._findNoteInTree(treeOid, hash);
     if (blobOid === null) {
-      throw new GitStoreError(`key not found: ${hash}`);
+      throw new KeyNotFoundError(`key not found: ${hash}`);
     }
     const { blob } = await git.readBlob({
       fs: this._fs,
@@ -384,7 +384,7 @@ export class NoteNamespace {
     validateHash(hash);
     const treeOid = await this._treeOid();
     if (treeOid === null) {
-      throw new GitStoreError(`key not found: ${hash}`);
+      throw new KeyNotFoundError(`key not found: ${hash}`);
     }
     const deletes = new Set<string>();
     deletes.add(hash);
@@ -490,7 +490,7 @@ export class NotesBatch {
    * @param text - Note text (UTF-8 string).
    */
   async set(hash: string, text: string): Promise<void> {
-    if (this._closed) throw new GitStoreError('Batch is closed');
+    if (this._closed) throw new BatchClosedError('Batch is closed');
     validateHash(hash);
     this._deletes.delete(hash);
     this._writes.set(hash, text);
@@ -502,7 +502,7 @@ export class NotesBatch {
    * @param hash - 40-char lowercase hex commit hash.
    */
   delete(hash: string): void {
-    if (this._closed) throw new GitStoreError('Batch is closed');
+    if (this._closed) throw new BatchClosedError('Batch is closed');
     validateHash(hash);
     this._writes.delete(hash);
     this._deletes.add(hash);
@@ -514,7 +514,7 @@ export class NotesBatch {
    * After calling this the batch is closed and no further changes are allowed.
    */
   async commit(): Promise<void> {
-    if (this._closed) throw new GitStoreError('Batch is already committed');
+    if (this._closed) throw new BatchClosedError('Batch is already committed');
     this._closed = true;
 
     if (this._writes.size === 0 && this._deletes.size === 0) {

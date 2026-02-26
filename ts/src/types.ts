@@ -154,6 +154,46 @@ export class PermissionError extends GitStoreError {
   }
 }
 
+/** Raised when a branch, tag, or note key is not found. */
+export class KeyNotFoundError extends GitStoreError {
+  constructor(message: string) {
+    super(message);
+    this.name = 'KeyNotFoundError';
+  }
+}
+
+/** Raised when a tag already exists and cannot be overwritten. */
+export class KeyExistsError extends GitStoreError {
+  constructor(message: string) {
+    super(message);
+    this.name = 'KeyExistsError';
+  }
+}
+
+/** Raised when a ref name contains invalid characters. */
+export class InvalidRefNameError extends GitStoreError {
+  constructor(message: string) {
+    super(message);
+    this.name = 'InvalidRefNameError';
+  }
+}
+
+/** Raised when a path is empty or contains invalid segments. */
+export class InvalidPathError extends GitStoreError {
+  constructor(message: string) {
+    super(message);
+    this.name = 'InvalidPathError';
+  }
+}
+
+/** Raised when a batch is used after it has been committed or closed. */
+export class BatchClosedError extends GitStoreError {
+  constructor(message: string) {
+    super(message);
+    this.name = 'BatchClosedError';
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Data structures
 // ---------------------------------------------------------------------------

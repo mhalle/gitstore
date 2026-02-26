@@ -95,7 +95,7 @@ class FsWriteTest {
             val fs = it.branches["main"]
             it.tags["v1"] = fs
             val tagFs = it.tags["v1"]
-            assertThrows<ReadOnlyError> {
+            assertThrows<PermissionError> {
                 tagFs.write("file.txt", "data".toByteArray())
             }
         }
@@ -245,6 +245,92 @@ class FsWriteTest {
             fs = fs.write("dir/file.txt", "inside".toByteArray())
             assertTrue(fs.isDir("dir"))
             assertEquals("inside", fs.readText("dir/file.txt"))
+        }
+    }
+
+    @Test
+    fun `writeFromFile reads local file into repo`() {
+        val store = createStore()
+        store.use {
+            var fs = it.branches["main"]
+            val tmpFile = java.io.File.createTempFile("vost-test-", ".txt")
+            try {
+                tmpFile.writeText("hello from disk")
+                fs = fs.writeFromFile("imported.txt", tmpFile.absolutePath)
+                assertEquals("hello from disk", fs.readText("imported.txt"))
+            } finally {
+                tmpFile.delete()
+            }
+        }
+    }
+
+    @Test
+    fun `writeFromFile auto-detects executable`() {
+        val store = createStore()
+        store.use {
+            var fs = it.branches["main"]
+            val tmpFile = java.io.File.createTempFile("vost-test-", ".sh")
+            try {
+                tmpFile.writeText("#!/bin/sh\necho hello")
+                tmpFile.setExecutable(true)
+                fs = fs.writeFromFile("script.sh", tmpFile.absolutePath)
+                assertEquals(FileType.EXECUTABLE, fs.fileType("script.sh"))
+            } finally {
+                tmpFile.delete()
+            }
+        }
+    }
+
+    @Test
+    fun `writeFromFile with explicit mode`() {
+        val store = createStore()
+        store.use {
+            var fs = it.branches["main"]
+            val tmpFile = java.io.File.createTempFile("vost-test-", ".txt")
+            try {
+                tmpFile.writeText("data")
+                fs = fs.writeFromFile("exec.txt", tmpFile.absolutePath, mode = FileType.EXECUTABLE)
+                assertEquals(FileType.EXECUTABLE, fs.fileType("exec.txt"))
+            } finally {
+                tmpFile.delete()
+            }
+        }
+    }
+
+    @Test
+    fun `write symlink creates link`() {
+        val store = createStore()
+        store.use {
+            var fs = it.branches["main"]
+            fs = fs.write("target.txt", "data".toByteArray())
+            fs = fs.writeSymlink("link.txt", "target.txt")
+            assertEquals(FileType.LINK, fs.fileType("link.txt"))
+            assertEquals("target.txt", fs.readlink("link.txt"))
+        }
+    }
+
+    @Test
+    fun `write with explicit executable mode`() {
+        val store = createStore()
+        store.use {
+            var fs = it.branches["main"]
+            fs = fs.write("script.sh", "#!/bin/sh".toByteArray(), mode = FileType.EXECUTABLE)
+            assertEquals(FileType.EXECUTABLE, fs.fileType("script.sh"))
+        }
+    }
+
+    @Test
+    fun `remove multiple files`() {
+        val store = createStore()
+        store.use {
+            var fs = it.branches["main"]
+            fs = fs.write("a.txt", "a".toByteArray())
+            fs = fs.write("b.txt", "b".toByteArray())
+            fs = fs.write("c.txt", "c".toByteArray())
+            fs = fs.remove(listOf("a.txt", "b.txt"))
+            assertFalse(fs.exists("a.txt"))
+            assertFalse(fs.exists("b.txt"))
+            assertTrue(fs.exists("c.txt"))
         }
     }
 }

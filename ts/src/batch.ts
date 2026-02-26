@@ -10,6 +10,7 @@ import {
   FileNotFoundError,
   IsADirectoryError,
   PermissionError,
+  BatchClosedError,
   type FsModule,
 } from './types.js';
 import { normalizePath } from './paths.js';
@@ -53,7 +54,7 @@ export class Batch {
   }
 
   private _checkOpen(): void {
-    if (this._closed) throw new Error('Batch is closed');
+    if (this._closed) throw new BatchClosedError('Batch is closed');
   }
 
   /**
@@ -172,7 +173,7 @@ export class Batch {
    * @throws {StaleSnapshotError} If the branch has advanced since the snapshot.
    */
   async commit(): Promise<FS> {
-    if (this._closed) throw new Error('Batch is already committed');
+    if (this._closed) throw new BatchClosedError('Batch is already committed');
     this._closed = true;
 
     if (this._writes.size === 0 && this._removes.size === 0) {

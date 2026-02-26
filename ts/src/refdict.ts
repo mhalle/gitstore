@@ -3,7 +3,7 @@
  */
 
 import git from 'isomorphic-git';
-import { PermissionError, type FsModule, type ReflogEntry } from './types.js';
+import { PermissionError, KeyNotFoundError, KeyExistsError, type FsModule, type ReflogEntry } from './types.js';
 import { validateRefName } from './paths.js';
 import { withRepoLock } from './lock.js';
 import { readReflog, writeReflogEntry, ZERO_SHA } from './reflog.js';
@@ -61,7 +61,7 @@ export class RefDict {
     try {
       oid = await git.resolveRef({ fs: this._fsModule, gitdir: this._gitdir, ref: refName });
     } catch {
-      throw new Error(`Key not found: ${name}`);
+      throw new KeyNotFoundError(`Key not found: ${name}`);
     }
 
     if (this._isTags) {
@@ -113,7 +113,7 @@ export class RefDict {
       } catch { /* not found */ }
 
       if (exists && this._isTags) {
-        throw new Error(`Tag '${name}' already exists`);
+        throw new KeyExistsError(`Tag '${name}' already exists`);
       }
 
       const oldSha = exists
@@ -171,7 +171,7 @@ export class RefDict {
       try {
         await git.resolveRef({ fs: this._fsModule, gitdir: this._gitdir, ref: refName });
       } catch {
-        throw new Error(`Key not found: ${name}`);
+        throw new KeyNotFoundError(`Key not found: ${name}`);
       }
       await git.deleteRef({ fs: this._fsModule, gitdir: this._gitdir, ref: refName });
     });
@@ -285,7 +285,7 @@ export class RefDict {
    */
   async reflog(name: string): Promise<ReflogEntry[]> {
     if (this._isTags) throw new Error('Tags do not have reflog');
-    if (!(await this.has(name))) throw new Error(`Key not found: ${name}`);
+    if (!(await this.has(name))) throw new KeyNotFoundError(`Key not found: ${name}`);
     return readReflog(this._fsModule, this._gitdir, name);
   }
 }

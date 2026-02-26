@@ -17,10 +17,10 @@
 //! # Quick example
 //!
 //! ```rust,no_run
-//! use vost::{GitStore, Fs};
+//! use vost::{GitStore, Fs, OpenOptions};
 //! use vost::fs::WriteOptions;
 //!
-//! let store = GitStore::open("/tmp/my-repo").unwrap();
+//! let store = GitStore::open("/tmp/my-repo", OpenOptions::default()).unwrap();
 //! let fs = store.branches().get("main").unwrap();
 //!
 //! // Read
@@ -34,6 +34,7 @@
 pub mod batch;
 pub mod copy;
 pub mod error;
+pub mod exclude;
 pub mod fileobj;
 pub mod fs;
 pub mod glob;
@@ -57,3 +58,4 @@ pub use notes::{NoteDict, NoteNamespace, NotesBatch};
 pub use fileobj::{FsWriter, BatchWriter};
 pub use types::*;
 pub use copy::disk_glob;
+pub use exclude::ExcludeFilter;

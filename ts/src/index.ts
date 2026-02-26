@@ -51,6 +51,11 @@ export {
   IsADirectoryError,
   NotADirectoryError,
   PermissionError,
+  KeyNotFoundError,
+  KeyExistsError,
+  InvalidRefNameError,
+  InvalidPathError,
+  BatchClosedError,
 
   // Data structures
   type WalkEntry,
@@ -81,6 +86,7 @@ export {
 
 // Copy operations (usable standalone)
 export { diskGlob } from './copy.js';
+export { ExcludeFilter } from './exclude.js';
 
 // Path utilities
 export { normalizePath, validateRefName } from './paths.js';

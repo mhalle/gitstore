@@ -66,6 +66,35 @@ class Batch internal constructor(
     }
 
     /**
+     * Stage a write from a local file.
+     *
+     * Reads the file and creates a blob in the object store. Executable
+     * permission is auto-detected from disk unless [mode] is set.
+     *
+     * @param path Destination path in the repo.
+     * @param localPath Path to the local file on disk.
+     * @param mode File mode override (e.g. [FileType.EXECUTABLE]).
+     */
+    fun writeFromFile(path: String, localPath: String, mode: FileType? = null) {
+        checkOpen()
+        val file = java.io.File(localPath)
+        val data = file.readBytes()
+        val filemode = mode?.filemode()
+            ?: if (file.canExecute()) GIT_FILEMODE_BLOB_EXECUTABLE else GIT_FILEMODE_BLOB
+        val normalized = normalizePath(path)
+        val inserter = _fs.store.repo.newObjectInserter()
+        try {
+            val blobId = inserter.insert(Constants.OBJ_BLOB, data)
+            inserter.flush()
+            removePaths.remove(normalized)
+            writes.removeAll { it.first == normalized }
+            writes.add(Pair(normalized, TreeWrite(blobId, filemode)))
+        } finally {
+            inserter.close()
+        }
+    }
+
+    /**
      * Stage a symbolic link entry.
      *
      * @param path Symlink path in the repo.
@@ -90,7 +119,7 @@ class Batch internal constructor(
      * Stage a file removal.
      *
      * @throws java.io.FileNotFoundException If path does not exist.
-     * @throws IsADirectoryException If path is a directory.
+     * @throws IsADirectoryError If path is a directory.
      */
     fun remove(path: String) {
         checkOpen()
@@ -104,7 +133,7 @@ class Batch internal constructor(
 
         if (existsInBase) {
             val (_, mode) = walkTo(_fs.store.repo, _fs.treeId, normalized)
-            if (mode == FileMode.TREE.bits) throw IsADirectoryException(normalized)
+            if (mode == FileMode.TREE.bits) throw IsADirectoryError(normalized)
         }
 
         writes.removeAll { it.first == normalized }

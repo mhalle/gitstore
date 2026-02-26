@@ -9,6 +9,9 @@ add_executable(vost_tests
     test_glob.cpp
     test_copy.cpp
     test_notes.cpp
+    test_stat.cpp
+    test_apply.cpp
+    test_move.cpp
 )
 
 target_link_libraries(vost_tests

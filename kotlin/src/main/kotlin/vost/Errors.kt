@@ -16,9 +16,15 @@ class StaleSnapshotError(message: String) : VostError(message)
 /**
  * Raised when a write is attempted on a read-only snapshot.
  */
-class ReadOnlyError(message: String) : VostError(message)
+class PermissionError(message: String) : VostError(message)
 
 /**
  * Raised when a low-level git tree operation fails.
  */
 class GitError(message: String) : VostError(message)
+
+/** Raised when an operation expected a file but found a directory. */
+class IsADirectoryError(path: String) : VostError("Is a directory: $path")
+
+/** Raised when a path traversal encounters a non-directory entry. */
+class NotADirectoryError(path: String) : VostError("Not a directory: $path")

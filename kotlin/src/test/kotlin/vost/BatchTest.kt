@@ -128,7 +128,7 @@ class BatchTest {
             fs = fs.write("dir/file.txt", "data".toByteArray())
 
             val batch = fs.batch()
-            assertThrows<IsADirectoryException> {
+            assertThrows<IsADirectoryError> {
                 batch.remove("dir")
             }
         }
@@ -208,7 +208,7 @@ class BatchTest {
             val fs = it.branches["main"]
             it.tags["v1"] = fs
             val tagFs = it.tags["v1"]
-            assertThrows<ReadOnlyError> {
+            assertThrows<PermissionError> {
                 tagFs.batch()
             }
         }
@@ -225,6 +225,97 @@ class BatchTest {
             batch.write("file.txt", "v3".toByteArray())
             val result = batch.commit()
             assertEquals("v3", result.readText("file.txt"))
+        }
+    }
+
+    @Test
+    fun `batch writeFromFile reads local file`() {
+        val store = createStore()
+        store.use {
+            val fs = it.branches["main"]
+            val tmpFile = java.io.File.createTempFile("vost-test-", ".txt")
+            try {
+                tmpFile.writeText("batch import")
+                val batch = fs.batch()
+                batch.writeFromFile("imported.txt", tmpFile.absolutePath)
+                val result = batch.commit()
+                assertEquals("batch import", result.readText("imported.txt"))
+            } finally {
+                tmpFile.delete()
+            }
+        }
+    }
+
+    @Test
+    fun `batch writeFromFile auto-detects executable`() {
+        val store = createStore()
+        store.use {
+            val fs = it.branches["main"]
+            val tmpFile = java.io.File.createTempFile("vost-test-", ".sh")
+            try {
+                tmpFile.writeText("#!/bin/sh")
+                tmpFile.setExecutable(true)
+                val batch = fs.batch()
+                batch.writeFromFile("script.sh", tmpFile.absolutePath)
+                val result = batch.commit()
+                assertEquals(FileType.EXECUTABLE, result.fileType("script.sh"))
+            } finally {
+                tmpFile.delete()
+            }
+        }
+    }
+
+    @Test
+    fun `batch writeSymlink creates link`() {
+        val store = createStore()
+        store.use {
+            val fs = it.branches["main"]
+            val batch = fs.batch()
+            batch.write("target.txt", "data".toByteArray())
+            batch.writeSymlink("link.txt", "target.txt")
+            val result = batch.commit()
+            assertEquals(FileType.LINK, result.fileType("link.txt"))
+            assertEquals("target.txt", result.readlink("link.txt"))
+        }
+    }
+
+    @Test
+    fun `batch commit after commit throws`() {
+        val store = createStore()
+        store.use {
+            val fs = it.branches["main"]
+            val batch = fs.batch()
+            batch.write("file.txt", "data".toByteArray())
+            batch.commit()
+            assertThrows<IllegalStateException> {
+                batch.commit()
+            }
+        }
+    }
+
+    @Test
+    fun `batch write after commit throws`() {
+        val store = createStore()
+        store.use {
+            val fs = it.branches["main"]
+            val batch = fs.batch()
+            batch.write("file.txt", "data".toByteArray())
+            batch.commit()
+            assertThrows<IllegalStateException> {
+                batch.write("another.txt", "more".toByteArray())
+            }
+        }
+    }
+
+    @Test
+    fun `batch fs matches commit result`() {
+        val store = createStore()
+        store.use {
+            val fs = it.branches["main"]
+            val batch = fs.batch()
+            batch.write("file.txt", "data".toByteArray())
+            val result = batch.commit()
+            assertEquals(result.commitHash, batch.fs?.commitHash)
         }
     }
 }

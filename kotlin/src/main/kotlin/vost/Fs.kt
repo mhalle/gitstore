@@ -124,9 +124,9 @@ class Fs internal constructor(
         return _commitTime!!
     }
 
-    private fun readonlyError(verb: String): ReadOnlyError =
-        if (refName != null) ReadOnlyError("Cannot $verb read-only snapshot (ref '$refName')")
-        else ReadOnlyError("Cannot $verb read-only snapshot")
+    private fun readonlyError(verb: String): PermissionError =
+        if (refName != null) PermissionError("Cannot $verb read-only snapshot (ref '$refName')")
+        else PermissionError("Cannot $verb read-only snapshot")
 
     // ── Read operations ───────────────────────────────────────────────
 
@@ -137,7 +137,7 @@ class Fs internal constructor(
      * @param offset Byte offset to start reading from.
      * @param size Maximum number of bytes to return (null for all).
      * @throws java.io.FileNotFoundException If path does not exist.
-     * @throws IsADirectoryException If path is a directory.
+     * @throws IsADirectoryError If path is a directory.
      */
     fun read(path: String, offset: Int = 0, size: Int? = null): ByteArray {
         val data = readBlobAtPath(store.repo, treeId, path)
@@ -162,7 +162,7 @@ class Fs internal constructor(
     /**
      * List entry names at path (or root if null).
      *
-     * @throws NotADirectoryException If path is a file.
+     * @throws NotADirectoryError If path is a file.
      */
     fun ls(path: String? = null): List<String> =
         listTreeAtPath(store.repo, treeId, path)
@@ -172,7 +172,7 @@ class Fs internal constructor(
      *
      * Returns list of (dirpath, dirnames, file_entries).
      *
-     * @throws NotADirectoryException If path is a file.
+     * @throws NotADirectoryError If path is a file.
      */
     fun walk(path: String? = null): List<WalkDirEntry> {
         return if (path == null || isRootPath(path)) {
@@ -180,7 +180,7 @@ class Fs internal constructor(
         } else {
             val normalized = normalizePath(path)
             val (objId, mode) = walkTo(store.repo, treeId, normalized)
-            if (mode != FileMode.TREE.bits) throw NotADirectoryException(normalized)
+            if (mode != FileMode.TREE.bits) throw NotADirectoryError(normalized)
             walkTree(store.repo, objId, normalized)
         }
     }
@@ -482,7 +482,7 @@ class Fs internal constructor(
      * @param message Commit message (auto-generated if null).
      * @param mode File mode override (e.g. [FileType.EXECUTABLE]).
      * @return New Fs snapshot.
-     * @throws ReadOnlyError If this snapshot is read-only.
+     * @throws PermissionError If this snapshot is read-only.
      * @throws StaleSnapshotError If the branch has advanced since this snapshot.
      */
     fun writeText(
@@ -494,13 +494,48 @@ class Fs internal constructor(
     ): Fs = write(path, text.toByteArray(charset(encoding)), message, mode)
 
     /**
+     * Write a local file into the repo and commit, returning a new Fs.
+     *
+     * Executable permission is auto-detected from disk unless [mode] is set.
+     *
+     * @param path Destination path in the repo.
+     * @param localPath Path to the local file on disk.
+     * @param message Commit message (auto-generated if null).
+     * @param mode File mode override (e.g. [FileType.EXECUTABLE]).
+     * @return New Fs snapshot.
+     * @throws PermissionError If this snapshot is read-only.
+     * @throws StaleSnapshotError If the branch has advanced since this snapshot.
+     */
+    fun writeFromFile(
+        path: String,
+        localPath: String,
+        message: String? = null,
+        mode: FileType? = null,
+    ): Fs {
+        val file = java.io.File(localPath)
+        val data = file.readBytes()
+        val filemode = mode?.filemode()
+            ?: if (file.canExecute()) GIT_FILEMODE_BLOB_EXECUTABLE else GIT_FILEMODE_BLOB
+        val normalized = normalizePath(path)
+        val inserter = store.repo.newObjectInserter()
+        try {
+            val blobId = inserter.insert(Constants.OBJ_BLOB, data)
+            inserter.flush()
+            val writes = listOf(Pair(normalized, TreeWrite(blobId, filemode) as TreeWrite?))
+            return commitChanges(writes, message)
+        } finally {
+            inserter.close()
+        }
+    }
+
+    /**
      * Create a symbolic link entry and commit, returning a new Fs.
      *
      * @param path Symlink path in the repo.
      * @param target The symlink target string.
      * @param message Commit message (auto-generated if null).
      * @return New Fs snapshot.
-     * @throws ReadOnlyError If this snapshot is read-only.
+     * @throws PermissionError If this snapshot is read-only.
      * @throws StaleSnapshotError If the branch has advanced since this snapshot.
      */
     fun writeSymlink(path: String, target: String, message: String? = null): Fs {
@@ -573,7 +608,7 @@ class Fs internal constructor(
      * @param paths Repo paths to remove.
      * @param message Commit message (auto-generated if null).
      * @return New Fs snapshot with the files removed.
-     * @throws ReadOnlyError If this snapshot is read-only.
+     * @throws PermissionError If this snapshot is read-only.
      * @throws StaleSnapshotError If the branch has advanced since this snapshot.
      */
     fun remove(
@@ -591,7 +626,7 @@ class Fs internal constructor(
      * @param message Commit message (auto-generated if null).
      * @param operation Operation name for auto-generated messages.
      * @return A new [Batch] instance.
-     * @throws ReadOnlyError If this snapshot is read-only.
+     * @throws PermissionError If this snapshot is read-only.
      */
     fun batch(message: String? = null, operation: String? = null): Batch {
         if (!writable) throw readonlyError("batch on")
@@ -606,7 +641,7 @@ class Fs internal constructor(
      * @param path Destination path in the repo.
      * @param mode "wb" (binary, default) or "w" (text).
      * @return A new [FsWriter] instance.
-     * @throws ReadOnlyError If this snapshot is read-only.
+     * @throws PermissionError If this snapshot is read-only.
      */
     fun writer(path: String, mode: String = "wb"): FsWriter {
         if (!writable) throw readonlyError("write to")

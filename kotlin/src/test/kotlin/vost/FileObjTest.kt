@@ -61,7 +61,7 @@ class FileObjTest {
             val fs = it.branches["main"]
             it.tags["v1"] = fs
             val tagFs = it.tags["v1"]
-            assertThrows<ReadOnlyError> {
+            assertThrows<PermissionError> {
                 tagFs.writer("file.txt")
             }
         }

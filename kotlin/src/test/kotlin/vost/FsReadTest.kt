@@ -44,12 +44,12 @@ class FsReadTest {
     }
 
     @Test
-    fun `read directory throws IsADirectoryException`() {
+    fun `read directory throws IsADirectoryError`() {
         val store = createStore()
         store.use {
             var fs = it.branches["main"]
             fs = fs.write("dir/file.txt", "content".toByteArray())
-            assertThrows<IsADirectoryException> {
+            assertThrows<IsADirectoryError> {
                 fs.read("dir")
             }
         }
@@ -107,7 +107,7 @@ class FsReadTest {
         store.use {
             var fs = it.branches["main"]
             fs = fs.write("file.txt", "data".toByteArray())
-            assertThrows<NotADirectoryException> {
+            assertThrows<NotADirectoryError> {
                 fs.ls("file.txt")
             }
         }

@@ -81,7 +81,7 @@ internal fun walkTo(repo: Repository, treeId: ObjectId, path: String): Pair<Obje
     for ((i, seg) in segments.withIndex()) {
         if (currentMode != FileMode.TREE.bits) {
             val partial = segments.subList(0, i).joinToString("/")
-            throw NotADirectoryException(partial)
+            throw NotADirectoryError(partial)
         }
         val tw = TreeWalk(repo)
         try {
@@ -104,10 +104,10 @@ internal fun walkTo(repo: Repository, treeId: ObjectId, path: String): Pair<Obje
     return Pair(currentId, currentMode)
 }
 
-/** Exception for path traversal through a non-directory. */
-class NotADirectoryException(path: String) : VostError("Not a directory: $path")
-/** Exception for operations on a directory when a file is expected. */
-class IsADirectoryException(path: String) : VostError("Is a directory: $path")
+/** @deprecated Use NotADirectoryError instead. */
+typealias NotADirectoryException = NotADirectoryError
+/** @deprecated Use IsADirectoryError instead. */
+typealias IsADirectoryException = IsADirectoryError
 
 /**
  * Read blob bytes at the given path in the tree.
@@ -117,7 +117,7 @@ class IsADirectoryException(path: String) : VostError("Is a directory: $path")
 internal fun readBlobAtPath(repo: Repository, treeId: ObjectId, path: String): ByteArray {
     val normalized = normalizePath(path)
     val (objId, mode) = walkTo(repo, treeId, normalized)
-    if (mode == FileMode.TREE.bits) throw IsADirectoryException(normalized)
+    if (mode == FileMode.TREE.bits) throw IsADirectoryError(normalized)
     val loader = repo.open(objId, Constants.OBJ_BLOB)
     return loader.bytes
 }
@@ -137,7 +137,7 @@ internal fun listEntriesAtPath(repo: Repository, treeId: ObjectId, path: String?
     } else {
         val normalized = normalizePath(path)
         val (objId, mode) = walkTo(repo, treeId, normalized)
-        if (mode != FileMode.TREE.bits) throw NotADirectoryException(normalized)
+        if (mode != FileMode.TREE.bits) throw NotADirectoryError(normalized)
         objId
     }
 

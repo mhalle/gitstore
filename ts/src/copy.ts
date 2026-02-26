@@ -28,6 +28,7 @@ import { normalizePath } from './paths.js';
 import { entryAtPath, modeFromDisk, walkTo } from './tree.js';
 import { globMatch } from './glob.js';
 import type { FS } from './fs.js';
+import type { ExcludeFilter } from './exclude.js';
 import type { Batch } from './batch.js';
 
 // ---------------------------------------------------------------------------
@@ -69,6 +70,7 @@ async function walkLocalPaths(
   fsModule: FsModule,
   localPath: string,
   followSymlinks = false,
+  exclude?: ExcludeFilter,
 ): Promise<Set<string>> {
   const result = new Set<string>();
 
@@ -89,12 +91,14 @@ async function walkLocalPaths(
         continue;
       }
       if (stat.isDirectory()) {
+        if (exclude && exclude.active && exclude.isExcluded(rel, true)) continue;
         if (!followSymlinks && stat.isSymbolicLink()) {
           result.add(rel);
         } else {
           await recurse(full, rel);
         }
       } else {
+        if (exclude && exclude.active && exclude.isExcluded(rel, false)) continue;
         result.add(rel);
       }
     }
@@ -346,6 +350,7 @@ async function enumDiskToRepo(
   resolved: ResolvedSource[],
   dest: string,
   followSymlinks = false,
+  exclude?: ExcludeFilter,
 ): Promise<Array<[string, string]>> {
   const pairs: Array<[string, string]> = [];
   for (const { localPath, mode, prefix } of resolved) {
@@ -353,18 +358,19 @@ async function enumDiskToRepo(
 
     if (mode === 'file') {
       const name = basename(localPath);
+      if (exclude && exclude.active && exclude.isExcluded(name, false)) continue;
       const repoFile = _dest ? `${_dest}/${name}` : name;
       pairs.push([localPath, normalizePath(repoFile)]);
     } else if (mode === 'dir') {
       const dirName = basename(localPath);
       const target = _dest ? `${_dest}/${dirName}` : dirName;
-      const rels = await walkLocalPaths(fsModule, localPath, followSymlinks);
+      const rels = await walkLocalPaths(fsModule, localPath, followSymlinks, exclude);
       for (const rel of [...rels].sort()) {
         pairs.push([join(localPath, rel), normalizePath(`${target}/${rel}`)]);
       }
     } else {
       // contents
-      const rels = await walkLocalPaths(fsModule, localPath, followSymlinks);
+      const rels = await walkLocalPaths(fsModule, localPath, followSymlinks, exclude);
       for (const rel of [...rels].sort()) {
         const repoFile = _dest ? `${_dest}/${rel}` : rel;
         pairs.push([join(localPath, rel), normalizePath(repoFile)]);
@@ -691,6 +697,7 @@ export async function copyIn(
     ignoreErrors?: boolean;
     checksum?: boolean;
     operation?: string;
+    exclude?: ExcludeFilter;
   } = {},
 ): Promise<FS> {
   const srcList = typeof sources === 'string' ? [sources] : sources;
@@ -717,7 +724,7 @@ export async function copyIn(
   } else {
     resolved = await resolveDiskSources(fsModule, srcList);
   }
-  let pairs = await enumDiskToRepo(fsModule, resolved, dest, opts.followSymlinks);
+  let pairs = await enumDiskToRepo(fsModule, resolved, dest, opts.followSymlinks, opts.exclude);
 
   if (opts.delete) {
     // Build {repo_rel: local_abs} map
@@ -1175,7 +1182,7 @@ export async function remove(
  * @param opts.ignoreErrors - Continue on per-file errors. Default `false`.
  * @param opts.checksum - Use content hashing. When `false`, uses mtime. Default `true`.
  * @returns FS snapshot after sync, with `.changes` set.
- * @throws {ReadOnlyError} If the FS is read-only.
+ * @throws {PermissionError} If the FS is read-only.
  */
 export async function syncIn(
   fs: FS,
@@ -1186,6 +1193,7 @@ export async function syncIn(
     message?: string;
     ignoreErrors?: boolean;
     checksum?: boolean;
+    exclude?: ExcludeFilter;
   } = {},
 ): Promise<FS> {
   const src = localPath.endsWith('/') ? localPath : localPath + '/';

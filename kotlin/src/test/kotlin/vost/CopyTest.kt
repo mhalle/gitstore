@@ -300,4 +300,39 @@ class CopyTest {
             assertEquals("existing", fs.readText("dest/existing.txt"))
         }
     }
+
+    @Test
+    fun `move multiple files into directory`() {
+        val store = createStore()
+        store.use {
+            var fs = it.branches["main"]
+            fs = fs.write("a.txt", "aaa".toByteArray())
+            fs = fs.write("b.txt", "bbb".toByteArray())
+            fs = fs.write("dest/placeholder.txt", "p".toByteArray())
+
+            fs = fs.move(listOf("a.txt", "b.txt"), "dest")
+            assertFalse(fs.exists("a.txt"))
+            assertFalse(fs.exists("b.txt"))
+            assertEquals("aaa", fs.readText("dest/a.txt"))
+            assertEquals("bbb", fs.readText("dest/b.txt"))
+        }
+    }
+
+    @Test
+    fun `copyFromRef copies between branches`() {
+        val store = createStore()
+        store.use {
+            var src = it.branches["main"]
+            src = src.write("file.txt", "source data".toByteArray())
+
+            it.branches["other"] = src
+            var dest = it.branches["other"]
+            dest = dest.write("other.txt", "other".toByteArray())
+            // Get fresh writable dest
+            dest = it.branches["other"]
+
+            dest = dest.copyFromRef(src, listOf("file.txt"), "")
+            assertEquals("source data", dest.readText("file.txt"))
+        }
+    }
 }

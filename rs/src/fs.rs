@@ -62,6 +62,9 @@ pub struct CopyInOptions {
     pub include: Option<Vec<String>>,
     /// Glob patterns to exclude. `None` means exclude nothing.
     pub exclude: Option<Vec<String>>,
+    /// Gitignore-style exclude filter. When set, files matching the filter
+    /// are skipped during disk enumeration. Applied in addition to `exclude`.
+    pub exclude_filter: Option<crate::ExcludeFilter>,
     /// Commit message. Auto-generated if `None`.
     pub message: Option<String>,
     /// Preview only; when `true` the returned `Fs` is unchanged but the
@@ -76,6 +79,7 @@ impl Default for CopyInOptions {
         Self {
             include: None,
             exclude: None,
+            exclude_filter: None,
             message: None,
             dry_run: false,
             checksum: true,
@@ -99,6 +103,9 @@ pub struct SyncOptions {
     pub include: Option<Vec<String>>,
     /// Glob patterns to exclude. `None` means exclude nothing.
     pub exclude: Option<Vec<String>>,
+    /// Gitignore-style exclude filter. When set, files matching the filter
+    /// are skipped during disk enumeration. Applied in addition to `exclude`.
+    pub exclude_filter: Option<crate::ExcludeFilter>,
     /// Commit message (only used by `sync_in`). Auto-generated if `None`.
     pub message: Option<String>,
     /// Preview only; when `true` the store is not modified.
@@ -112,6 +119,7 @@ impl Default for SyncOptions {
         Self {
             include: None,
             exclude: None,
+            exclude_filter: None,
             message: None,
             dry_run: false,
             checksum: true,
@@ -871,11 +879,22 @@ impl Fs {
     ) -> Result<(ChangeReport, Fs)> {
         let tree_oid = self.require_tree()?;
         let checksum = opts.checksum;
+        let exclude_filter = opts.exclude_filter;
         let (writes, report) = self.with_repo(|repo| {
             let inc: Option<Vec<&str>> = opts.include.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect());
             let exc: Option<Vec<&str>> = opts.exclude.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect());
             crate::copy::copy_in(repo, tree_oid, src, dest, inc.as_deref(), exc.as_deref(), checksum)
         })?;
+        // Post-filter writes using the ExcludeFilter
+        let writes: Vec<_> = if let Some(ref ef) = exclude_filter {
+            if ef.active() {
+                writes.into_iter().filter(|(p, _)| !ef.is_excluded(p, false)).collect()
+            } else {
+                writes
+            }
+        } else {
+            writes
+        };
         if opts.dry_run {
             return Ok((report, self.clone()));
         }
@@ -932,11 +951,22 @@ impl Fs {
     ) -> Result<(ChangeReport, Fs)> {
         let tree_oid = self.require_tree()?;
         let checksum = opts.checksum;
+        let exclude_filter = opts.exclude_filter;
         let (writes, report) = self.with_repo(|repo| {
             let inc: Option<Vec<&str>> = opts.include.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect());
             let exc: Option<Vec<&str>> = opts.exclude.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect());
             crate::copy::sync_in(repo, tree_oid, src, dest, inc.as_deref(), exc.as_deref(), checksum)
         })?;
+        // Post-filter writes using the ExcludeFilter
+        let writes: Vec<_> = if let Some(ref ef) = exclude_filter {
+            if ef.active() {
+                writes.into_iter().filter(|(p, _)| !ef.is_excluded(p, false)).collect()
+            } else {
+                writes
+            }
+        } else {
+            writes
+        };
         if opts.dry_run {
             return Ok((report, self.clone()));
         }
