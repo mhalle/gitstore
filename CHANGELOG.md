@@ -4,6 +4,14 @@ All notable changes to vost are documented in this file.
 
 ## Unreleased
 
+## v0.66.1 / Kotlin v0.9.2 / C++ v0.8.1 (2026-02-26)
+
+**Tests:**
+
+- Kotlin: +65 tests (205 → 270) — apply, move, copy/sync/copyFromRef, store, notes, stat, glob
+- C++: +78 tests (267 → 345) — apply, move, copy/sync/copyFromRef, batch, notes, stat, history, exclude filter, FsWriter
+- Total: 3,165 tests across 5 ports + full 5-language interop matrix
+
 ## v0.66.0 / TS v0.8.1 / Rust v0.9.0 / Kotlin v0.9.1 / C++ v0.8.0 (2026-02-26)
 
 **Added (Rust):**
