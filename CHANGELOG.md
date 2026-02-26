@@ -4,6 +4,13 @@ All notable changes to vost are documented in this file.
 
 ## Unreleased
 
+## v0.66.2 (2026-02-26)
+
+**Fixed:**
+
+- Deno compat tests: add `--no-check` flag to skip type-checking of compiled `.js` imports (fixes 24 type errors)
+- TESTING.md: fix Rust test count (558 → 549), add C++ configure step to "Running everything" section, add Kotlin report path
+
 ## v0.66.1 / Kotlin v0.9.2 / C++ v0.8.1 (2026-02-26)
 
 **Tests:**

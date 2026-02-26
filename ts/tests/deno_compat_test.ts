@@ -1,7 +1,7 @@
 /**
  * Deno compatibility tests for vost.
  *
- * Run: deno test tests/deno_compat_test.ts --allow-read --allow-write
+ * Run: deno test tests/deno_compat_test.ts --allow-read --allow-write --no-check
  *
  * These tests import the compiled dist/ to verify the package works
  * under Deno's runtime — same as an npm consumer would use it.

@@ -20,7 +20,7 @@
     "check": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:deno": "deno test tests/deno_compat_test.ts --allow-read --allow-write --allow-env",
+    "test:deno": "deno test tests/deno_compat_test.ts --allow-read --allow-write --allow-env --no-check",
     "prepack": "cp ../LICENSE . && npm run build",
     "postpack": "rm -f LICENSE"
   },

@@ -93,7 +93,7 @@ cd ts && npm test
 cd ts && npm run build && npm run test:deno
 ```
 
-### Rust (558 tests)
+### Rust (549 tests)
 
 ```bash
 cd rs && cargo test --all-targets
@@ -201,13 +201,19 @@ cd ts && npm test && cd ..
 # Rust
 cd rs && cargo test --all-targets && cd ..
 
-# C++ (with interop binaries)
+# C++ (configure + build + test; includes interop binaries)
+# macOS with Homebrew:
+cmake -B cpp/build -S cpp/ \
+      -DCMAKE_PREFIX_PATH="$(brew --prefix libgit2);$(brew --prefix catch2)" \
+      -DVOST_BUILD_INTEROP=ON
+# Linux: cmake -B cpp/build -S cpp/ -DVOST_BUILD_INTEROP=ON
 cmake --build cpp/build
 ctest --test-dir cpp/build --output-on-failure
 
-# Kotlin
+# Kotlin (270 tests)
 source ~/.sdkman/bin/sdkman-init.sh
 cd kotlin && ./gradlew test && cd ..
+# Detailed report: kotlin/build/reports/tests/test/index.html
 
 # Interop (all 5 ports cross-read)
 source ~/.sdkman/bin/sdkman-init.sh
@@ -221,7 +227,7 @@ bash interop/run.sh
 | Python | 1,362 |
 | TypeScript | 631 |
 | Deno | 33 |
-| Rust | 558 |
+| Rust | 549 |
 | C++ | 345 |
 | Kotlin | 270 |
-| **Total** | **3,199** |
+| **Total** | **3,190** |
