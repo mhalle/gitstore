@@ -185,11 +185,15 @@ class Fs internal constructor(
         }
     }
 
-    /** Return true if path exists (file or directory). */
+    /**
+     * Return true if [path] exists (file, directory, or symlink).
+     */
     fun exists(path: String): Boolean =
         existsAtPath(store.repo, treeId, path)
 
-    /** Return true if path is a directory (tree) in the repo. */
+    /**
+     * Return true if [path] is a directory (tree) in the repo.
+     */
     fun isDir(path: String): Boolean {
         val normalized = normalizePath(path)
         val entry = entryAtPath(store.repo, treeId, normalized) ?: return false
@@ -278,13 +282,20 @@ class Fs internal constructor(
     }
 
     /**
-     * List directory entries with name, oid, and mode.
+     * List directory entries with name, OID, and mode — for FUSE readdir.
+     *
+     * @param path Directory path (or null/empty for root).
+     * @return List of [WalkEntry] with name, oid hex, and raw mode.
      */
     fun listdir(path: String? = null): List<WalkEntry> =
         listEntriesAtPath(store.repo, treeId, path)
 
     /**
-     * Read raw blob data by hash, bypassing tree lookup.
+     * Read raw blob data by its 40-char hex hash, bypassing tree lookup.
+     *
+     * @param hash 40-char hex SHA of the blob.
+     * @param offset Byte offset to start reading from.
+     * @param size Maximum number of bytes to return (null for all).
      */
     fun readByHash(hash: String, offset: Int = 0, size: Int? = null): ByteArray {
         val oid = ObjectId.fromString(hash)
@@ -299,7 +310,12 @@ class Fs internal constructor(
     }
 
     /**
-     * Read the target of a symlink.
+     * Read the target of a symlink at [path].
+     *
+     * @param path Symlink path in the repo.
+     * @return The symlink target string.
+     * @throws java.io.FileNotFoundException If the path does not exist.
+     * @throws IllegalStateException If the path is not a symlink.
      */
     fun readlink(path: String): String {
         val normalized = normalizePath(path)
@@ -452,7 +468,15 @@ class Fs internal constructor(
     // ── Write operations ──────────────────────────────────────────────
 
     /**
-     * Write data to path and commit, returning a new Fs.
+     * Write raw bytes to [path] and commit, returning a new Fs.
+     *
+     * @param path Destination path in the repo.
+     * @param data Raw bytes to write.
+     * @param message Commit message (auto-generated if null).
+     * @param mode File mode override (e.g. [FileType.EXECUTABLE]).
+     * @return New Fs snapshot.
+     * @throws PermissionError If this snapshot is read-only.
+     * @throws StaleSnapshotError If the branch has advanced since this snapshot.
      */
     fun write(
         path: String,
@@ -553,6 +577,14 @@ class Fs internal constructor(
 
     /**
      * Apply multiple writes and removes in a single atomic commit.
+     *
+     * @param writes Map of path to value (ByteArray, String, or [WriteEntry]).
+     * @param removes Paths to delete.
+     * @param message Commit message (auto-generated if null).
+     * @param operation Operation name for auto-generated messages.
+     * @return New Fs snapshot.
+     * @throws PermissionError If this snapshot is read-only.
+     * @throws StaleSnapshotError If the branch has advanced since this snapshot.
      */
     fun apply(
         writes: Map<String, Any>? = null,
@@ -662,6 +694,9 @@ class Fs internal constructor(
      * @param dest Destination path.
      * @param message Optional commit message.
      * @return New Fs snapshot.
+     * @throws PermissionError If this snapshot is read-only.
+     * @throws java.io.FileNotFoundException If [src] does not exist.
+     * @throws StaleSnapshotError If the branch has advanced since this snapshot.
      */
     fun rename(src: String, dest: String, message: String? = null): Fs {
         val srcNorm = normalizePath(src)
@@ -706,12 +741,17 @@ class Fs internal constructor(
     }
 
     /**
-     * Move files within the repo.
+     * Move files/directories within the repo (POSIX mv semantics).
+     *
+     * Supports multiple sources into a directory destination.
      *
      * @param sources Source path(s).
      * @param dest Destination path.
      * @param message Optional commit message.
      * @return New Fs snapshot.
+     * @throws PermissionError If this snapshot is read-only.
+     * @throws java.io.FileNotFoundException If a source path does not exist.
+     * @throws StaleSnapshotError If the branch has advanced since this snapshot.
      */
     fun move(sources: List<String>, dest: String, message: String? = null): Fs {
         val destNorm = if (dest.trimEnd('/').isNotEmpty()) normalizePath(dest.trimEnd('/')) else ""
@@ -758,9 +798,12 @@ class Fs internal constructor(
      *
      * @param sources Local path(s). Trailing `/` copies contents.
      * @param dest Destination path in the repo.
-     * @param message Commit message.
+     * @param message Commit message (auto-generated if null).
      * @param delete Remove repo files under dest not in source.
+     * @param exclude Filter to exclude certain paths.
      * @return New Fs snapshot with changes.
+     * @throws PermissionError If this snapshot is read-only.
+     * @throws StaleSnapshotError If the branch has advanced since this snapshot.
      */
     fun copyIn(
         sources: List<String>,
@@ -776,7 +819,8 @@ class Fs internal constructor(
      * @param sources Repo path(s). Trailing `/` copies contents.
      * @param dest Local destination directory.
      * @param delete Remove local files under dest not in source.
-     * @return This Fs with changes set.
+     * @return This Fs with changes report set.
+     * @throws java.io.FileNotFoundException If a source path does not exist.
      */
     fun copyOut(
         sources: List<String>,
@@ -785,7 +829,15 @@ class Fs internal constructor(
     ): Fs = CopyOps.copyOut(this, sources, dest, delete = delete)
 
     /**
-     * Make repo_path identical to local_path (including deletes).
+     * Sync local disk into the repo (copy + delete extras in repo).
+     *
+     * @param localPath Local directory path.
+     * @param repoPath Destination path in the repo.
+     * @param message Commit message (auto-generated if null).
+     * @param exclude Filter to exclude certain paths.
+     * @return New Fs snapshot.
+     * @throws PermissionError If this snapshot is read-only.
+     * @throws StaleSnapshotError If the branch has advanced since this snapshot.
      */
     fun syncIn(
         localPath: String,
@@ -795,7 +847,12 @@ class Fs internal constructor(
     ): Fs = CopyOps.syncIn(this, localPath, repoPath, message = message, exclude = exclude)
 
     /**
-     * Make local_path identical to repo_path (including deletes).
+     * Sync from the repo to local disk (copy + delete extras on disk).
+     *
+     * @param repoPath Source path in the repo.
+     * @param localPath Local destination directory.
+     * @return This Fs with changes report set.
+     * @throws java.io.FileNotFoundException If [repoPath] does not exist.
      */
     fun syncOut(
         repoPath: String,
@@ -803,14 +860,20 @@ class Fs internal constructor(
     ): Fs = CopyOps.syncOut(this, repoPath, localPath)
 
     /**
-     * Copy files from another ref into this branch in a single atomic commit.
-     *
-     * Since both snapshots share the same object store, blobs are referenced
-     * by OID — no data is read into memory regardless of file size.
-     */
-    /**
      * Copy files from a named branch or tag into this branch.
-     * Resolves the name to an FS, then delegates to copyFromRef(Fs, ...).
+     *
+     * Resolves [source] to an Fs (tries branches first, then tags),
+     * then delegates to [copyFromRef] with the resolved Fs.
+     *
+     * @param source Branch or tag name to copy from.
+     * @param sources Paths within the source to copy. Trailing `/` copies contents.
+     * @param dest Destination path in this branch.
+     * @param delete Remove files under [dest] not present in source.
+     * @param message Commit message (auto-generated if null).
+     * @return New Fs snapshot.
+     * @throws IllegalArgumentException If [source] is not a known branch or tag.
+     * @throws PermissionError If this snapshot is read-only.
+     * @throws StaleSnapshotError If the branch has advanced since this snapshot.
      */
     fun copyFromRef(
         source: String,
@@ -829,6 +892,22 @@ class Fs internal constructor(
         return copyFromRef(resolved, sources, dest, delete, message)
     }
 
+    /**
+     * Copy files from another Fs snapshot into this branch in a single atomic commit.
+     *
+     * Since both snapshots share the same object store, blobs are referenced
+     * by OID — no data is read into memory regardless of file size.
+     *
+     * @param source Fs snapshot to copy from (must belong to the same repo).
+     * @param sources Paths within the source to copy. Trailing `/` copies contents.
+     * @param dest Destination path in this branch.
+     * @param delete Remove files under [dest] not present in source.
+     * @param message Commit message (auto-generated if null).
+     * @return New Fs snapshot.
+     * @throws IllegalArgumentException If [source] belongs to a different repo.
+     * @throws PermissionError If this snapshot is read-only.
+     * @throws StaleSnapshotError If the branch has advanced since this snapshot.
+     */
     fun copyFromRef(
         source: Fs,
         sources: List<String> = listOf(""),
@@ -981,7 +1060,13 @@ class Fs internal constructor(
     }
 
     /**
-     * Move branch back N commits (undo).
+     * Undo the last [steps] commits by resetting the branch to its ancestor.
+     *
+     * @param steps Number of commits to undo (default 1).
+     * @return New Fs snapshot at the ancestor commit.
+     * @throws PermissionError If this snapshot is read-only.
+     * @throws StaleSnapshotError If the branch has advanced since this snapshot.
+     * @throws IllegalArgumentException If there is insufficient history.
      */
     fun undo(steps: Int = 1): Fs {
         require(steps >= 1) { "steps must be >= 1, got $steps" }
@@ -1014,7 +1099,13 @@ class Fs internal constructor(
     }
 
     /**
-     * Move branch forward N steps using reflog (redo).
+     * Redo the last [steps] undone commits using the reflog.
+     *
+     * @param steps Number of commits to redo (default 1).
+     * @return New Fs snapshot at the restored commit.
+     * @throws PermissionError If this snapshot is read-only.
+     * @throws StaleSnapshotError If the branch has advanced since this snapshot.
+     * @throws IllegalStateException If no redo history is found.
      */
     fun redo(steps: Int = 1): Fs {
         require(steps >= 1) { "steps must be >= 1, got $steps" }

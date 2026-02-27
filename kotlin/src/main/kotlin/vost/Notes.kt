@@ -197,10 +197,23 @@ class NoteNamespace internal constructor(
 
     // ── Public API ────────────────────────────────────────────────────
 
-    /** Get the note text for an FS snapshot. */
+    /**
+     * Get the note text for an Fs snapshot.
+     *
+     * @param fs Snapshot whose commit to look up.
+     * @return The note text.
+     * @throws NoSuchElementException If no note exists for this commit.
+     */
     operator fun get(fs: Fs): String = get(fs.commitHash)
 
-    /** Get the note text for a commit hash or ref name (branch/tag). */
+    /**
+     * Get the note text for a commit hash or ref name (branch/tag).
+     *
+     * @param target 40-char hex commit hash, branch name, or tag name.
+     * @return The note text.
+     * @throws NoSuchElementException If no note exists for the resolved commit.
+     * @throws IllegalArgumentException If [target] cannot be resolved.
+     */
     operator fun get(target: String): String {
         val h = resolveTarget(target)
         val treeOid = treeOid() ?: throw NoSuchElementException(h)
@@ -209,10 +222,21 @@ class NoteNamespace internal constructor(
         return String(loader.bytes, Charsets.UTF_8)
     }
 
-    /** Set the note text for an FS snapshot. */
+    /**
+     * Set the note text for an Fs snapshot.
+     *
+     * @param fs Snapshot whose commit to annotate.
+     * @param text Note text to set.
+     */
     operator fun set(fs: Fs, text: String) = set(fs.commitHash, text)
 
-    /** Set the note text for a commit hash or ref name (branch/tag). */
+    /**
+     * Set the note text for a commit hash or ref name (branch/tag).
+     *
+     * @param target 40-char hex commit hash, branch name, or tag name.
+     * @param text Note text to set.
+     * @throws IllegalArgumentException If [target] cannot be resolved.
+     */
     operator fun set(target: String, text: String) {
         val h = resolveTarget(target)
 
@@ -239,10 +263,21 @@ class NoteNamespace internal constructor(
         commitNoteTree(newTreeOid, "Notes added by 'git notes' on ${h.substring(0, 7)}")
     }
 
-    /** Delete the note for an FS snapshot. */
+    /**
+     * Delete the note for an Fs snapshot.
+     *
+     * @param fs Snapshot whose note to delete.
+     * @throws NoSuchElementException If no note exists for this commit.
+     */
     fun delete(fs: Fs) = delete(fs.commitHash)
 
-    /** Delete the note for a commit hash or ref name (branch/tag). */
+    /**
+     * Delete the note for a commit hash or ref name (branch/tag).
+     *
+     * @param target 40-char hex commit hash, branch name, or tag name.
+     * @throws NoSuchElementException If no note exists for the resolved commit.
+     * @throws IllegalArgumentException If [target] cannot be resolved.
+     */
     fun delete(target: String) {
         val h = resolveTarget(target)
         val treeOid = treeOid() ?: throw NoSuchElementException(h)
@@ -259,17 +294,27 @@ class NoteNamespace internal constructor(
         commitNoteTree(newTreeOid, "Notes removed by 'git notes' on ${h.substring(0, 7)}")
     }
 
-    /** Check if a note exists for an FS snapshot. */
+    /**
+     * Check if a note exists for an Fs snapshot.
+     *
+     * @param fs Snapshot to check.
+     * @return True if a note exists for this commit.
+     */
     operator fun contains(fs: Fs): Boolean = contains(fs.commitHash)
 
-    /** Check if a note exists for a commit hash or ref name (branch/tag). */
+    /**
+     * Check if a note exists for a commit hash or ref name (branch/tag).
+     *
+     * @param target 40-char hex commit hash, branch name, or tag name.
+     * @return True if a note exists for the resolved commit.
+     */
     operator fun contains(target: String): Boolean {
         val h = try { resolveTarget(target) } catch (_: IllegalArgumentException) { return false }
         val treeOid = treeOid() ?: return false
         return findNoteInTree(treeOid, h) != null
     }
 
-    /** Return all commit hashes that have notes. */
+    /** Return all commit hashes that have notes in this namespace. */
     fun keys(): List<String> {
         val treeOid = treeOid() ?: return emptyList()
         return iterNotes(treeOid).map { it.first }
@@ -323,7 +368,12 @@ class NotesBatch internal constructor(
     private val deletes = mutableSetOf<String>()
     private var closed = false
 
-    /** Stage a note write for an FS snapshot. */
+    /**
+     * Stage a note write for an Fs snapshot.
+     *
+     * @param fs Snapshot whose commit to annotate.
+     * @param text Note text to set.
+     */
     operator fun set(fs: Fs, text: String) = set(fs.commitHash, text)
 
     /**
@@ -338,7 +388,11 @@ class NotesBatch internal constructor(
         writes[h] = text
     }
 
-    /** Stage a note deletion for an FS snapshot. */
+    /**
+     * Stage a note deletion for an Fs snapshot.
+     *
+     * @param fs Snapshot whose note to delete.
+     */
     fun delete(fs: Fs) = delete(fs.commitHash)
 
     /**
@@ -417,7 +471,11 @@ class NoteDict internal constructor(
 ) {
     override fun toString(): String = "NoteDict($store)"
 
-    /** Get a NoteNamespace by name. */
+    /**
+     * Get a [NoteNamespace] by name.
+     *
+     * @param namespace Namespace name (e.g. "reviews"). Maps to `refs/notes/<namespace>`.
+     */
     operator fun get(namespace: String): NoteNamespace = NoteNamespace(store, namespace)
 
     /** The default `refs/notes/commits` namespace. */

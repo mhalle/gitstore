@@ -181,6 +181,7 @@ class Batch internal constructor(
         return fs!!
     }
 
+    /** Close the batch, committing any staged changes. Idempotent. */
     override fun close() {
         if (closed) return
         if (writes.isEmpty()) {

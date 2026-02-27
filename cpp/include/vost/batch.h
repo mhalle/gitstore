@@ -37,6 +37,8 @@ namespace vost {
 /// @endcode
 class Batch {
 public:
+    /// Construct a Batch from an Fs snapshot.
+    /// Obtain via Fs::batch() rather than constructing directly.
     explicit Batch(Fs fs, BatchOptions opts = {});
 
     // Non-copyable (contains move-only internal data)
@@ -52,23 +54,28 @@ public:
     Batch& write(const std::string& path, const std::vector<uint8_t>& data);
 
     /// Stage raw bytes at `path` with an explicit mode.
+    /// @throws BatchClosedError if already committed.
     Batch& write_with_mode(const std::string& path,
                            const std::vector<uint8_t>& data,
                            uint32_t mode);
 
     /// Stage a UTF-8 string at `path`.
+    /// @throws BatchClosedError if already committed.
     Batch& write_text(const std::string& path, const std::string& text);
 
     /// Stage a local file from disk at `path`.
+    /// @throws BatchClosedError if already committed.
     /// @throws IoError if the local file cannot be read.
     Batch& write_from_file(const std::string& path,
                            const std::filesystem::path& local_path,
                            uint32_t mode = MODE_BLOB);
 
     /// Stage a symlink at `path` pointing to `target`.
+    /// @throws BatchClosedError if already committed.
     Batch& write_symlink(const std::string& path, const std::string& target);
 
     /// Stage `path` for removal.
+    /// @throws BatchClosedError if already committed.
     Batch& remove(const std::string& path);
 
     // -- Commit --------------------------------------------------------------

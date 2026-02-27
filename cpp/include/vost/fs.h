@@ -153,6 +153,8 @@ public:
              WriteOptions opts = {}) const;
 
     /// Write a UTF-8 string to `path` and commit, returning a new Fs.
+    /// @throws PermissionError if this snapshot is read-only.
+    /// @throws StaleSnapshotError if the branch tip has advanced.
     Fs write_text(const std::string& path,
                   const std::string& text,
                   WriteOptions opts = {}) const;
@@ -164,6 +166,8 @@ public:
                        WriteOptions opts = {}) const;
 
     /// Write a symlink at `path` pointing to `target`.
+    /// @throws PermissionError if this snapshot is read-only.
+    /// @throws StaleSnapshotError if the branch tip has advanced.
     Fs write_symlink(const std::string& path,
                      const std::string& target,
                      WriteOptions opts = {}) const;
@@ -173,13 +177,15 @@ public:
     /// @param removes Paths to delete from the repo.
     /// @param opts    Options including optional message and operation name.
     /// @return New Fs snapshot with all changes committed.
-    /// @throws ReadOnlyError if this snapshot is read-only.
+    /// @throws PermissionError if this snapshot is read-only.
     /// @throws StaleSnapshotError if the branch has advanced since this snapshot.
     Fs apply(const std::vector<std::pair<std::string, WriteEntry>>& writes,
              const std::vector<std::string>& removes = {},
              ApplyOptions opts = {}) const;
 
     /// Remove one or more paths and commit.
+    /// @throws PermissionError if this snapshot is read-only.
+    /// @throws StaleSnapshotError if the branch tip has advanced.
     Fs remove(const std::vector<std::string>& paths,
               RemoveOptions opts = {}) const;
 
@@ -187,6 +193,9 @@ public:
 
     /// Move files/directories within the repo (POSIX mv semantics).
     /// Supports multiple sources into a directory destination.
+    /// @throws PermissionError if this snapshot is read-only.
+    /// @throws NotFoundError if a source path does not exist.
+    /// @throws StaleSnapshotError if the branch tip has advanced.
     Fs move(const std::vector<std::string>& sources,
             const std::string& dest,
             MoveOptions opts = {}) const;
@@ -194,14 +203,20 @@ public:
     // -- Copy ---------------------------------------------------------------
 
     /// Copy files from one ref to another within the same repo.
-    /// Reuses blob OIDs for efficiency.
+    /// Reuses blob OIDs for efficiency — no data is read into memory.
+    /// @throws PermissionError if this snapshot is read-only.
+    /// @throws StaleSnapshotError if the branch tip has advanced.
     Fs copy_from_ref(const Fs& source,
                      const std::vector<std::string>& sources = {""},
                      const std::string& dest = "",
                      CopyFromRefOptions opts = {}) const;
 
     /// Copy files from a named branch or tag into this branch.
-    /// Resolves the name to an Fs, then delegates to copy_from_ref(const Fs&, ...).
+    /// Resolves the name to an Fs (tries branches first, then tags),
+    /// then delegates to copy_from_ref(const Fs&, ...).
+    /// @throws InvalidHashError if the name is not a known branch or tag.
+    /// @throws PermissionError if this snapshot is read-only.
+    /// @throws StaleSnapshotError if the branch tip has advanced.
     Fs copy_from_ref(const std::string& source_name,
                      const std::vector<std::string>& sources = {""},
                      const std::string& dest = "",
@@ -209,24 +224,30 @@ public:
 
     /// Copy files from local disk `src` into the store at `dest`.
     /// Returns the ChangeReport and a new Fs with the committed changes.
+    /// @throws PermissionError if this snapshot is read-only.
+    /// @throws StaleSnapshotError if the branch tip has advanced.
     std::pair<ChangeReport, Fs>
     copy_in(const std::filesystem::path& src,
             const std::string& dest = "",
             CopyInOptions opts = {}) const;
 
     /// Copy files from the store at `src` to local disk `dest`.
+    /// @throws NotFoundError if `src` does not exist in the store.
     ChangeReport
     copy_out(const std::string& src,
              const std::filesystem::path& dest,
              CopyOutOptions opts = {}) const;
 
     /// Sync local disk `src` into the store at `dest` (copy + delete extras).
+    /// @throws PermissionError if this snapshot is read-only.
+    /// @throws StaleSnapshotError if the branch tip has advanced.
     std::pair<ChangeReport, Fs>
     sync_in(const std::filesystem::path& src,
             const std::string& dest = "",
             SyncOptions opts = {}) const;
 
     /// Sync from the store at `src` to local disk `dest` (copy + delete extras).
+    /// @throws NotFoundError if `src` does not exist in the store.
     ChangeReport
     sync_out(const std::string& src,
              const std::filesystem::path& dest,

@@ -192,7 +192,13 @@ class RefDict internal constructor(
             }
         }
 
-    /** Set the repository's current (HEAD) branch. */
+    /**
+     * Set the repository's current (HEAD) branch.
+     *
+     * @param name Branch name to set as HEAD.
+     * @throws IllegalStateException If called on a tags RefDict.
+     * @throws IllegalArgumentException If the branch does not exist.
+     */
     fun setCurrent(name: String) {
         if (isTags) throw IllegalStateException("Tags do not have a current branch")
         require(contains(name)) { "Branch not found: '$name'" }
@@ -202,7 +208,15 @@ class RefDict internal constructor(
 
     // ── Reflog (branches only) ────────────────────────────────────────
 
-    /** Read reflog entries for a branch. */
+    /**
+     * Read reflog entries for a branch (most-recent first).
+     *
+     * @param name Branch name.
+     * @return List of [ReflogEntry] in reverse chronological order.
+     * @throws IllegalStateException If called on a tags RefDict.
+     * @throws NoSuchElementException If the branch does not exist.
+     * @throws java.io.FileNotFoundException If no reflog is found.
+     */
     fun reflog(name: String): List<ReflogEntry> {
         if (isTags) throw IllegalStateException("Tags do not have reflog")
 
