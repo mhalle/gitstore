@@ -236,7 +236,7 @@ wheels = [
 
 [[package]]
 name = "vost"
-version = "0.67.0"
+version = "0.68.2"
 source = { editable = "." }
 dependencies = [
     { name = "dulwich" },

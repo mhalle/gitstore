@@ -4,6 +4,17 @@ All notable changes to vost are documented in this file.
 
 ## Unreleased
 
+## v0.68.2 / Rust v0.9.1 / Kotlin v0.9.4 / C++ v0.8.3 (2026-02-26)
+
+**Docs (Rust, Kotlin, C++):**
+
+- Rewrite rs/README.md with correct `vost` imports, full API examples for all operations, and error handling guide
+- Add kotlin/README.md with full API examples for all operations
+- Add kotlin/docs/api.md — complete Kotlin API reference covering all classes, methods, and types
+- Expand cpp/README.md from API table to comprehensive code example sections
+- Add cpp/docs/api.md — complete C++ API reference covering all classes, methods, and types
+- Add language ports table to root README.md linking all five ports
+
 ## v0.68.1 / TS v0.9.2 / Kotlin v0.9.3 / C++ v0.8.2 (2026-02-26)
 
 **Added (Python, TypeScript, Kotlin, C++):**
