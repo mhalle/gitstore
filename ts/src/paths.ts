@@ -19,11 +19,15 @@ export function normalizePath(path: string): string {
   path = path.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
   if (!path) throw new InvalidPathError('Path must not be empty');
   const segments = path.split('/');
+  const out: string[] = [];
   for (const seg of segments) {
     if (!seg) throw new InvalidPathError(`Empty segment in path: '${path}'`);
-    if (seg === '.' || seg === '..') throw new InvalidPathError(`Invalid path segment: '${seg}'`);
+    if (seg === '..') throw new InvalidPathError(`Invalid path segment: '${seg}'`);
+    if (seg === '.') continue; // collapse current-directory markers
+    out.push(seg);
   }
-  return segments.join('/');
+  if (!out.length) throw new InvalidPathError('Path must not be empty');
+  return out.join('/');
 }
 
 /**

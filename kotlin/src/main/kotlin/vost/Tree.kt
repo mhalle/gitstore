@@ -23,11 +23,15 @@ internal fun normalizePath(path: String): String {
     val p = path.replace("\\", "/").trim('/')
     if (p.isEmpty()) throw IllegalArgumentException("Path must not be empty")
     val segments = p.split("/")
+    val out = mutableListOf<String>()
     for (seg in segments) {
         if (seg.isEmpty()) throw IllegalArgumentException("Empty segment in path: '$path'")
-        if (seg == "." || seg == "..") throw IllegalArgumentException("Invalid path segment: '$seg'")
+        if (seg == "..") throw IllegalArgumentException("Invalid path segment: '$seg'")
+        if (seg == ".") continue // collapse current-directory markers
+        out.add(seg)
     }
-    return segments.joinToString("/")
+    if (out.isEmpty()) throw IllegalArgumentException("Path must not be empty")
+    return out.joinToString("/")
 }
 
 // ── Tree read helpers ─────────────────────────────────────────────────

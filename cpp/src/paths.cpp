@@ -26,14 +26,24 @@ std::string normalize(const std::string& path) {
         start = end + 1;
 
         if (seg.empty()) continue; // skip empty from leading/trailing/double slashes
-        if (seg == "." || seg == "..") {
+        if (seg == "..") {
             throw InvalidPathError(std::string("path segment '") +
                                    std::string(seg) + "' is not allowed");
         }
+        if (seg == ".") continue; // collapse current-directory markers
         segments.push_back(seg);
     }
 
-    if (segments.empty()) return {};
+    if (segments.empty()) {
+        // Only-slash paths like "///" mean root (empty string).
+        // Paths with actual content that collapsed away (e.g. ".") are errors.
+        bool all_slashes = true;
+        for (char c : path) {
+            if (c != '/') { all_slashes = false; break; }
+        }
+        if (all_slashes) return {};
+        throw InvalidPathError("path must not be empty");
+    }
 
     std::string out;
     out.reserve(path.size());

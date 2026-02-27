@@ -4,6 +4,12 @@ All notable changes to vost are documented in this file.
 
 ## Unreleased
 
+## v0.68.3 / TS v0.9.3 / Rust v0.9.2 / Kotlin v0.9.5 / C++ v0.8.4 (2026-02-27)
+
+**Fixed (all ports):**
+
+- Path normalization now collapses `.` segments instead of rejecting them. Paths like `./dir/file.txt` normalize to `dir/file.txt`. Paths that resolve to empty (`.`, `./.`) are still rejected. `..` remains rejected.
+
 ## v0.68.2 / Rust v0.9.1 / Kotlin v0.9.4 / C++ v0.8.3 (2026-02-26)
 
 **Docs (Rust, Kotlin, C++):**

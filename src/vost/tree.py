@@ -116,12 +116,18 @@ def _normalize_path(path: str | os.PathLike[str]) -> str:
     if not path:
         raise ValueError("Path must not be empty")
     segments = path.split("/")
+    out: list[str] = []
     for seg in segments:
         if not seg:
             raise ValueError(f"Empty segment in path: {path!r}")
-        if seg in (".", ".."):
+        if seg == "..":
             raise ValueError(f"Invalid path segment: {seg!r}")
-    return "/".join(segments)
+        if seg == ".":
+            continue  # collapse current-directory markers
+        out.append(seg)
+    if not out:
+        raise ValueError("Path must not be empty")
+    return "/".join(out)
 
 
 def rebuild_tree(

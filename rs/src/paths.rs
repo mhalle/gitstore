@@ -21,13 +21,25 @@ pub fn normalize_path(path: &str) -> Result<String> {
             // skip empty segments (from leading/trailing/double slashes)
             continue;
         }
-        if seg == "." || seg == ".." {
+        if seg == ".." {
             return Err(Error::invalid_path(format!(
                 "path segment '{}' is not allowed",
                 seg,
             )));
         }
+        if seg == "." {
+            continue; // collapse current-directory markers
+        }
         segments.push(seg);
+    }
+
+    if segments.is_empty() {
+        // Only-slash paths like "///" mean root (empty string).
+        // Paths with actual content that collapsed away (e.g. ".") are errors.
+        if path.bytes().all(|b| b == b'/') {
+            return Ok(String::new());
+        }
+        return Err(Error::invalid_path("path must not be empty"));
     }
 
     Ok(segments.join("/"))
@@ -125,8 +137,17 @@ mod tests {
     }
 
     #[test]
-    fn normalize_rejects_dot() {
-        assert!(normalize_path("a/./b").is_err());
+    fn normalize_collapses_dot() {
+        assert_eq!(normalize_path("a/./b").unwrap(), "a/b");
+        assert_eq!(normalize_path("./a/b").unwrap(), "a/b");
+        assert_eq!(normalize_path("a/b/.").unwrap(), "a/b");
+        assert_eq!(normalize_path("./a/./b/.").unwrap(), "a/b");
+    }
+
+    #[test]
+    fn normalize_only_dots_is_error() {
+        assert!(normalize_path(".").is_err());
+        assert!(normalize_path("./.").is_err());
     }
 
     #[test]

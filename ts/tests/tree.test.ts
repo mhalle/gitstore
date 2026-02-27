@@ -39,12 +39,21 @@ describe('normalizePath', () => {
     expect(() => normalizePath('')).toThrow(/must not be empty/);
   });
 
-  it('rejects dot', () => {
-    expect(() => normalizePath('.')).toThrow(/Invalid path segment/);
+  it('collapses dot segments', () => {
+    expect(normalizePath('foo/./bar')).toBe('foo/bar');
+    expect(normalizePath('./foo/bar')).toBe('foo/bar');
+    expect(normalizePath('foo/bar/.')).toBe('foo/bar');
+    expect(normalizePath('./foo/./bar/.')).toBe('foo/bar');
+  });
+
+  it('rejects only dots', () => {
+    expect(() => normalizePath('.')).toThrow(/must not be empty/);
+    expect(() => normalizePath('./.')).toThrow(/must not be empty/);
   });
 
   it('rejects dotdot', () => {
     expect(() => normalizePath('..')).toThrow(/Invalid path segment/);
+    expect(() => normalizePath('foo/../bar')).toThrow(/Invalid path segment/);
   });
 
   it('rejects double slash', () => {

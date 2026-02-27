@@ -51,9 +51,16 @@ fn path_normalization() {
     assert_eq!(paths::normalize_path("a//b///c").unwrap(), "a/b/c");
     assert_eq!(paths::normalize_path("///").unwrap(), "");
 
-    assert!(paths::normalize_path("a/./b").is_err());
-    assert!(paths::normalize_path("a/../b").is_err());
+    // dot segments are collapsed
+    assert_eq!(paths::normalize_path("a/./b").unwrap(), "a/b");
+    assert_eq!(paths::normalize_path("./a/b").unwrap(), "a/b");
+
+    // only-dot paths resolve to empty → error
     assert!(paths::normalize_path(".").is_err());
+    assert!(paths::normalize_path("./.").is_err());
+
+    // dotdot is still rejected
+    assert!(paths::normalize_path("a/../b").is_err());
     assert!(paths::normalize_path("..").is_err());
     assert!(paths::normalize_path("a/b/..").is_err());
 }

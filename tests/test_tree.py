@@ -31,9 +31,17 @@ class TestNormalizePath:
         with pytest.raises(ValueError):
             _normalize_path("")
 
-    def test_rejects_dot(self):
+    def test_collapses_dot(self):
+        assert _normalize_path("foo/./bar") == "foo/bar"
+        assert _normalize_path("./foo/bar") == "foo/bar"
+        assert _normalize_path("foo/bar/.") == "foo/bar"
+        assert _normalize_path("./foo/./bar/.") == "foo/bar"
+
+    def test_rejects_only_dots(self):
         with pytest.raises(ValueError):
-            _normalize_path("foo/./bar")
+            _normalize_path(".")
+        with pytest.raises(ValueError):
+            _normalize_path("./.")
 
     def test_rejects_dotdot(self):
         with pytest.raises(ValueError):
