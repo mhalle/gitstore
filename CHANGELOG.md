@@ -4,6 +4,12 @@ All notable changes to vost are documented in this file.
 
 ## Unreleased
 
+## v0.68.1 / TS v0.9.2 / Kotlin v0.9.3 / C++ v0.8.2 (2026-02-26)
+
+**Added (Python, TypeScript, Kotlin, C++):**
+
+- `copy_from_ref` now accepts a branch or tag name string in addition to an FS object. Resolution tries branches first, then tags.
+
 ## v0.68.0 / TS v0.9.1 / Kotlin v0.9.3 / C++ v0.8.2 (2026-02-26)
 
 **Added (Python, TypeScript, Kotlin, C++):**
