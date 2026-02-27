@@ -808,6 +808,27 @@ class Fs internal constructor(
      * Since both snapshots share the same object store, blobs are referenced
      * by OID — no data is read into memory regardless of file size.
      */
+    /**
+     * Copy files from a named branch or tag into this branch.
+     * Resolves the name to an FS, then delegates to copyFromRef(Fs, ...).
+     */
+    fun copyFromRef(
+        source: String,
+        sources: List<String> = listOf(""),
+        dest: String = "",
+        delete: Boolean = false,
+        message: String? = null,
+    ): Fs {
+        val resolved = if (source in store.branches) {
+            store.branches[source]
+        } else if (source in store.tags) {
+            store.tags[source]
+        } else {
+            throw IllegalArgumentException("Cannot resolve '$source': not a branch or tag")
+        }
+        return copyFromRef(resolved, sources, dest, delete, message)
+    }
+
     fun copyFromRef(
         source: Fs,
         sources: List<String> = listOf(""),

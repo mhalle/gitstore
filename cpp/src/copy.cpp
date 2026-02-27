@@ -637,6 +637,24 @@ Fs Fs::copy_from_ref(const Fs& source,
     return commit_changes(writes, removes, msg);
 }
 
+Fs Fs::copy_from_ref(const std::string& source_name,
+                      const std::vector<std::string>& sources,
+                      const std::string& dest,
+                      CopyFromRefOptions opts) const {
+    // Resolve name to Fs via branches, then tags
+    RefDict branches(inner_, "refs/heads/", true);
+    try {
+        auto src_fs = branches[source_name];
+        return copy_from_ref(src_fs, sources, dest, opts);
+    } catch (const KeyNotFoundError&) {}
+    RefDict tags(inner_, "refs/tags/", false);
+    try {
+        auto src_fs = tags[source_name];
+        return copy_from_ref(src_fs, sources, dest, opts);
+    } catch (const KeyNotFoundError&) {}
+    throw InvalidHashError(source_name);
+}
+
 // ---------------------------------------------------------------------------
 // ExcludeFilter
 // ---------------------------------------------------------------------------

@@ -387,3 +387,38 @@ class TestCopyRefMultipleSources:
         assert main.read("backup/a.json") == b'{"a":1}'
         # File: x.txt placed in backup/
         assert main.read("backup/x.txt") == b"x-worker"
+
+
+class TestCopyRefByName:
+    """Test copy_from_ref accepting a branch/tag name string."""
+
+    def test_copy_from_branch_name(self, store):
+        """Pass a branch name string instead of FS."""
+        main = store.branches["main"]
+        main = main.copy_from_ref("worker", "results")
+        assert main.read("results/a.json") == b'{"a":1}'
+        assert main.read("results/b.json") == b'{"b":2}'
+        assert main.read("readme.txt") == b"hello"
+
+    def test_copy_from_tag_name(self, store):
+        """Pass a tag name string — resolves via tags."""
+        worker = store.branches["worker"]
+        store.tags["v1"] = worker
+        main = store.branches["main"]
+        main = main.copy_from_ref("v1", "results")
+        assert main.read("results/a.json") == b'{"a":1}'
+
+    def test_copy_from_nonexistent_name(self, store):
+        """Unknown name raises ValueError."""
+        main = store.branches["main"]
+        with pytest.raises(ValueError, match="Cannot resolve"):
+            main.copy_from_ref("no-such-branch", "results")
+
+    def test_branch_preferred_over_tag(self, store):
+        """When both branch and tag exist, branch wins."""
+        # Tag 'worker' pointing to main (different content)
+        store.tags["worker"] = store.branches["main"]
+        main = store.branches["main"]
+        main = main.copy_from_ref("worker", "data")
+        # Should get worker branch's version, not main's
+        assert main.read("data/x.txt") == b"x-worker"

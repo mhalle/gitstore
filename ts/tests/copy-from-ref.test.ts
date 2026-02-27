@@ -410,3 +410,56 @@ describe('copyFromRef multiple sources', () => {
     expect(fromBytes(await main.read('backup/x.txt'))).toBe('x-worker');
   });
 });
+
+describe('copyFromRef by name', () => {
+  let store: GitStore;
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    ({ store, tmpDir } = await freshStore());
+
+    // Seed main with some files
+    let main = await store.branches.get('main');
+    main = await main.writeText('readme.txt', 'hello');
+    main = await main.writeText('data/x.txt', 'x-main');
+
+    // Create worker branch from main
+    await store.branches.set('worker', main);
+    let worker = await store.branches.get('worker');
+    worker = await worker.writeText('results/a.json', '{"a":1}');
+    worker = await worker.writeText('results/b.json', '{"b":2}');
+    worker = await worker.writeText('data/x.txt', 'x-worker');
+  });
+
+  it('copies from branch name string', async () => {
+    let main = await store.branches.get('main');
+    main = await main.copyFromRef('worker', 'results');
+    expect(fromBytes(await main.read('results/a.json'))).toBe('{"a":1}');
+    expect(fromBytes(await main.read('results/b.json'))).toBe('{"b":2}');
+    expect(fromBytes(await main.read('readme.txt'))).toBe('hello');
+  });
+
+  it('copies from tag name string', async () => {
+    const worker = await store.branches.get('worker');
+    await store.tags.set('v1', worker);
+    let main = await store.branches.get('main');
+    main = await main.copyFromRef('v1', 'results');
+    expect(fromBytes(await main.read('results/a.json'))).toBe('{"a":1}');
+  });
+
+  it('throws for nonexistent name', async () => {
+    const main = await store.branches.get('main');
+    await expect(main.copyFromRef('no-such-branch', 'results'))
+      .rejects.toThrow(/Cannot resolve/);
+  });
+
+  it('prefers branch over tag with same name', async () => {
+    // Create tag 'worker' pointing to main (different content)
+    const mainFs = await store.branches.get('main');
+    await store.tags.set('worker', mainFs);
+    let main = await store.branches.get('main');
+    main = await main.copyFromRef('worker', 'data');
+    // Should get worker branch's version, not main's
+    expect(fromBytes(await main.read('data/x.txt'))).toBe('x-worker');
+  });
+});

@@ -200,6 +200,13 @@ public:
                      const std::string& dest = "",
                      CopyFromRefOptions opts = {}) const;
 
+    /// Copy files from a named branch or tag into this branch.
+    /// Resolves the name to an Fs, then delegates to copy_from_ref(const Fs&, ...).
+    Fs copy_from_ref(const std::string& source_name,
+                     const std::vector<std::string>& sources = {""},
+                     const std::string& dest = "",
+                     CopyFromRefOptions opts = {}) const;
+
     /// Copy files from local disk `src` into the store at `dest`.
     /// Returns the ChangeReport and a new Fs with the committed changes.
     std::pair<ChangeReport, Fs>

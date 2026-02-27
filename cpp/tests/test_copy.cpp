@@ -819,3 +819,73 @@ TEST_CASE("ExcludeFilter: last rule wins", "[exclude]") {
     CHECK(filter.is_excluded("important.log"));
     CHECK(filter.is_excluded("debug.log"));
 }
+
+// ---------------------------------------------------------------------------
+// copy_from_ref by name string
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Copy: copy_from_ref resolves branch name string", "[copy][copy_from_ref]") {
+    auto repo_path = make_temp_repo();
+    auto store = open_store(repo_path);
+    auto main_snap = store.branches().get("main");
+    main_snap = main_snap.write_text("a.txt", "alpha");
+
+    auto dev = store.branches().set_and_get("dev", main_snap);
+    dev = dev.write_text("b.txt", "beta");
+
+    main_snap = store.branches().get("main");
+    main_snap = main_snap.copy_from_ref("dev", {"b.txt"});
+    CHECK(main_snap.read_text("b.txt") == "beta");
+    CHECK(main_snap.read_text("a.txt") == "alpha");
+
+    fs::remove_all(repo_path);
+}
+
+TEST_CASE("Copy: copy_from_ref resolves tag name string", "[copy][copy_from_ref]") {
+    auto repo_path = make_temp_repo();
+    auto store = open_store(repo_path);
+    auto main_snap = store.branches().get("main");
+    main_snap = main_snap.write_text("data/a.txt", "alpha");
+
+    store.tags().set("v1", main_snap);
+
+    auto dev = store.branches().set_and_get("dev", main_snap);
+    dev = dev.write_text("other.txt", "other");
+
+    // Copy directory from tag into a new dest
+    dev = dev.copy_from_ref("v1", {"data"}, "copied");
+    CHECK(dev.read_text("copied/data/a.txt") == "alpha");
+
+    fs::remove_all(repo_path);
+}
+
+TEST_CASE("Copy: copy_from_ref nonexistent name throws", "[copy][copy_from_ref]") {
+    auto repo_path = make_temp_repo();
+    auto store = open_store(repo_path);
+    auto main_snap = store.branches().get("main");
+    main_snap = main_snap.write_text("a.txt", "alpha");
+
+    CHECK_THROWS(main_snap.copy_from_ref("no-such-branch", {"a.txt"}));
+
+    fs::remove_all(repo_path);
+}
+
+TEST_CASE("Copy: copy_from_ref prefers branch over tag with same name", "[copy][copy_from_ref]") {
+    auto repo_path = make_temp_repo();
+    auto store = open_store(repo_path);
+    auto main_snap = store.branches().get("main");
+    main_snap = main_snap.write_text("data/a.txt", "from-main");
+
+    auto other = store.branches().set_and_get("other", main_snap);
+    other = other.write_text("data/a.txt", "from-other");
+
+    // Tag "other" pointing to main
+    store.tags().set("other", main_snap);
+
+    // Branch should win — copy the directory
+    main_snap = store.branches().get("main");
+    main_snap = main_snap.copy_from_ref("other", {"data"});
+    CHECK(main_snap.read_text("data/a.txt") == "from-other");
+
+    fs::remove_all(repo_path);
+}

@@ -1085,7 +1085,7 @@ class FS:
 
     def copy_from_ref(
         self,
-        source: FS,
+        source: FS | str,
         sources: str | list[str] = "",
         dest: str = "",
         *,
@@ -1109,7 +1109,9 @@ class FS:
         by OID — no data is read into memory regardless of file size.
 
         Args:
-            source: Any FS (branch, tag, detached commit). Read-only; not modified.
+            source: Any FS (branch, tag, detached commit), or a branch/tag
+                name string that will be resolved to an FS. Read-only; not
+                modified.
             sources: Source path(s) in *source*. Accepts a single string or a
                 list of strings.  Defaults to ``""`` (root = everything).
             dest: Destination path in this branch.  Defaults to ``""`` (root).
@@ -1121,13 +1123,26 @@ class FS:
             A new :class:`FS` for the dest branch with the commit applied.
 
         Raises:
-            ValueError: If *source* belongs to a different repo.
+            ValueError: If *source* belongs to a different repo or cannot be resolved.
             FileNotFoundError: If a source path does not exist.
             PermissionError: If this FS is read-only.
         """
         from .copy._resolve import _resolve_repo_sources, _walk_repo
         from .copy._types import _finalize_changes
         from .tree import BlobOid
+
+        # Resolve string to FS
+        if isinstance(source, str):
+            store = self._store
+            try:
+                source = store.branches[source]
+            except KeyError:
+                try:
+                    source = store.tags[source]
+                except KeyError:
+                    raise ValueError(
+                        f"Cannot resolve '{source}': not a branch or tag"
+                    )
 
         # Validate same repo
         try:

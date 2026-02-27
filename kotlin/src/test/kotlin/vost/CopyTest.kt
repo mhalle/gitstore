@@ -567,4 +567,77 @@ class CopyTest {
             assertEquals("custom copy", dest.message)
         }
     }
+
+    // -- copyFromRef by name string -------------------------------------------
+
+    @Test
+    fun `copyFromRef resolves branch name string`() {
+        val store = createStore()
+        store.use {
+            var src = it.branches["main"]
+            src = src.write("a.txt", "aaa".toByteArray())
+
+            it.branches["other"] = src
+            var other = it.branches["other"]
+            other = other.write("b.txt", "bbb".toByteArray())
+
+            // Copy from "other" by name string
+            var main = it.branches["main"]
+            main = main.copyFromRef("other", listOf("b.txt"))
+            assertEquals("bbb", main.readText("b.txt"))
+            assertEquals("aaa", main.readText("a.txt"))
+        }
+    }
+
+    @Test
+    fun `copyFromRef resolves tag name string`() {
+        val store = createStore()
+        store.use {
+            var src = it.branches["main"]
+            src = src.write("a.txt", "aaa".toByteArray())
+
+            it.tags["v1"] = src
+            it.branches["other"] = src
+            var other = it.branches["other"]
+            other = other.write("other.txt", "other".toByteArray())
+
+            other = other.copyFromRef("v1", listOf("a.txt"), "copied")
+            assertEquals("aaa", other.readText("copied/a.txt"))
+        }
+    }
+
+    @Test
+    fun `copyFromRef nonexistent name throws`() {
+        val store = createStore()
+        store.use {
+            var main = it.branches["main"]
+            main = main.write("a.txt", "aaa".toByteArray())
+
+            assertThrows<IllegalArgumentException> {
+                main.copyFromRef("no-such-branch", listOf("a.txt"))
+            }
+        }
+    }
+
+    @Test
+    fun `copyFromRef prefers branch over tag with same name`() {
+        val store = createStore()
+        store.use {
+            var main = it.branches["main"]
+            main = main.write("data/a.txt", "from-main".toByteArray())
+
+            // Create branch "other" with different content
+            it.branches["other"] = main
+            var other = it.branches["other"]
+            other = other.write("data/a.txt", "from-other".toByteArray())
+
+            // Create tag "other" pointing to main
+            it.tags["other"] = main
+
+            // Branch should win — copy the directory
+            main = it.branches["main"]
+            main = main.copyFromRef("other", listOf("data"))
+            assertEquals("from-other", main.readText("data/a.txt"))
+        }
+    }
 }

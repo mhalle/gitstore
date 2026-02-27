@@ -1151,12 +1151,26 @@ export class FS {
    * @throws {PermissionError} If this FS is read-only.
    */
   async copyFromRef(
-    source: FS,
+    source: FS | string,
     sources?: string | string[],
     dest?: string,
     opts?: { delete?: boolean; dryRun?: boolean; message?: string },
   ): Promise<FS> {
     if (!this._writable) throw this._readonlyError('write to');
+
+    // Resolve string to FS
+    if (typeof source === 'string') {
+      const name = source;
+      try {
+        source = await this._store.branches.get(name);
+      } catch {
+        try {
+          source = await this._store.tags.get(name);
+        } catch {
+          throw new Error(`Cannot resolve '${name}': not a branch or tag`);
+        }
+      }
+    }
 
     // Validate same repo
     const selfPath = this._fsModule.realpathSync(this._gitdir);
