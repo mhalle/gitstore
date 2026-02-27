@@ -399,11 +399,11 @@ class Fs internal constructor(
 
         if (hasWild) {
             val entries = try { iglobEntries(treeOid) } catch (_: Exception) { return@sequence }
-            for ((name, _, oid) in entries) {
+            for ((name, isDir, oid) in entries) {
                 if (!globMatch(seg, name)) continue
                 val full = if (prefix != null) "$prefix/$name" else name
                 if (rest.isNotEmpty()) {
-                    yieldAll(iglobWalk(rest, full, oid))
+                    if (isDir) yieldAll(iglobWalk(rest, full, oid))
                 } else {
                     yield(full)
                 }
@@ -418,7 +418,8 @@ class Fs internal constructor(
                     if (tw.nameString == seg) {
                         val full = if (prefix != null) "$prefix/$seg" else seg
                         if (rest.isNotEmpty()) {
-                            yieldAll(iglobWalk(rest, full, tw.getObjectId(0)))
+                            if (tw.getRawMode(0) == FileMode.TREE.bits)
+                                yieldAll(iglobWalk(rest, full, tw.getObjectId(0)))
                         } else {
                             yield(full)
                         }

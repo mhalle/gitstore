@@ -457,24 +457,26 @@ class FS:
                 entries = self._iglob_entries(tree_oid)
             except (KeyError, TypeError):
                 return
-            for name, _is_dir, oid in entries:
+            for name, is_dir, oid in entries:
                 if not _glob_match(seg, name):
                     continue
                 full = f"{prefix}/{name}" if prefix else name
                 if rest:
-                    yield from self._iglob_walk(rest, full, oid)
+                    if is_dir:
+                        yield from self._iglob_walk(rest, full, oid)
                 else:
                     yield full
         else:
             # Literal segment — look up directly in current tree
             try:
                 tree = repo[tree_oid]
-                _mode, sha = tree[seg.encode()]
+                mode, sha = tree[seg.encode()]
             except (KeyError, TypeError):
                 return
             full = f"{prefix}/{seg}" if prefix else seg
             if rest:
-                yield from self._iglob_walk(rest, full, sha)
+                if mode == GIT_FILEMODE_TREE:
+                    yield from self._iglob_walk(rest, full, sha)
             else:
                 yield full
 

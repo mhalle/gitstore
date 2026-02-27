@@ -4,7 +4,7 @@ plugins {
 }
 
 group = "io.github.mhalle"
-version = "0.9.5"
+version = "0.9.6"
 
 java {
     toolchain {

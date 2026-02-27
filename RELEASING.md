@@ -8,13 +8,13 @@ Each port has its own version number. Bump only the ports that changed:
 
 | Port | Version file | Field |
 |------|-------------|-------|
-| Python | `pyproject.toml` | `version = "0.68.3"` |
-| TypeScript | `ts/package.json` | `"version": "0.9.3"` |
+| Python | `pyproject.toml` | `version = "0.68.4"` |
+| TypeScript | `ts/package.json` | `"version": "0.9.4"` |
 | Rust | `rs/Cargo.toml` | `version = "0.9.2"` |
 | C++ | `cpp/CMakeLists.txt` | `project(vost VERSION 0.8.4 ...)` |
-| Kotlin | `kotlin/build.gradle.kts` | `version = "0.9.5"` |
+| Kotlin | `kotlin/build.gradle.kts` | `version = "0.9.6"` |
 
-The git tag (`v0.68.3`) tracks the Python version since that's the primary package.
+The git tag (`v0.68.4`) tracks the Python version since that's the primary package.
 
 ## 2. Update files
 

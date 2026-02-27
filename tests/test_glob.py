@@ -94,6 +94,23 @@ class TestGlobNested:
         assert "src/main.py" in result
 
 
+class TestGlobMultiWild:
+    def test_star_slash_star(self, fs_with_tree):
+        """*/* should skip files at the first level (not crash on blobs)."""
+        result = fs_with_tree.glob("*/*")
+        # Should include files one level deep in dirs
+        assert "src/main.py" in result
+        assert "docs/guide.md" in result
+        # Should NOT include root-level files
+        assert "readme.txt" not in result
+
+    def test_star_slash_star_slash_star(self, fs_with_tree):
+        """*/*/* should reach two levels deep without crashing."""
+        result = fs_with_tree.glob("*/*/*")
+        assert "src/sub/deep.txt" in result
+        assert "src/main.py" not in result
+
+
 class TestGlobEdgeCases:
     def test_no_matches(self, fs_with_tree):
         result = fs_with_tree.glob("*.zzz")

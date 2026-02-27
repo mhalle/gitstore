@@ -560,11 +560,11 @@ export class FS {
 
     if (hasWild) {
       const entries = await this._iglobEntries(treeOid);
-      for (const [name, , oid] of entries) {
+      for (const [name, isDir, oid] of entries) {
         if (!globMatch(seg, name)) continue;
         const full = prefix ? `${prefix}/${name}` : name;
         if (rest.length > 0) {
-          yield* this._iglobWalk(rest, full, oid);
+          if (isDir) yield* this._iglobWalk(rest, full, oid);
         } else {
           yield full;
         }
@@ -577,7 +577,7 @@ export class FS {
         if (!entry) return;
         const full = prefix ? `${prefix}/${seg}` : seg;
         if (rest.length > 0) {
-          yield* this._iglobWalk(rest, full, entry.oid);
+          if (entry.mode === MODE_TREE) yield* this._iglobWalk(rest, full, entry.oid);
         } else {
           yield full;
         }

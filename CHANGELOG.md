@@ -4,6 +4,12 @@ All notable changes to vost are documented in this file.
 
 ## Unreleased
 
+## v0.68.4 / TS v0.9.4 / Kotlin v0.9.6 (2026-02-27)
+
+**Fixed (Python, TypeScript, Kotlin):**
+
+- Glob patterns with multiple wildcards (e.g. `*/*/*`) no longer crash when a wildcard matches a file instead of a directory. The glob walker now skips non-directory entries when more pattern segments remain. (Rust and C++ were already correct.)
+
 ## v0.68.3 / TS v0.9.3 / Rust v0.9.2 / Kotlin v0.9.5 / C++ v0.8.4 (2026-02-27)
 
 **Fixed (all ports):**
