@@ -5,9 +5,12 @@
 #include <git2.h>
 
 #include <algorithm>
+#include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <map>
 #include <mutex>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -86,6 +89,25 @@ void auto_create_bare_repo(const std::string& url) {
         throw_git("git_repository_init (auto-create)");
     }
     git_repository_free(repo);
+}
+
+// ---------------------------------------------------------------------------
+// Shell quoting helper
+// ---------------------------------------------------------------------------
+
+/// Escape a string for use inside single quotes in a shell command.
+/// The strategy: replace each ' with '\'' (end quote, escaped quote, resume).
+std::string shell_quote(const std::string& s) {
+    std::string out = "'";
+    for (char c : s) {
+        if (c == '\'') {
+            out += "'\\''";
+        } else {
+            out += c;
+        }
+    }
+    out += "'";
+    return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -199,6 +221,202 @@ MirrorDiff diff_refs(const RefMap& src, const RefMap& dest) {
 }
 
 // ---------------------------------------------------------------------------
+// Ref name resolution
+// ---------------------------------------------------------------------------
+
+/// Resolve short ref names to full ref paths (e.g. "main" -> "refs/heads/main").
+/// Names already starting with "refs/" pass through.  Otherwise tries
+/// refs/heads/, refs/tags/, refs/notes/ against available_refs.
+/// If no match, defaults to refs/heads/<name>.
+std::set<std::string> resolve_ref_names(
+    const std::vector<std::string>& names,
+    const RefMap& available)
+{
+    std::set<std::string> result;
+    for (const auto& name : names) {
+        if (name.compare(0, 5, "refs/") == 0) {
+            result.insert(name);
+            continue;
+        }
+        bool found = false;
+        for (const char* prefix : {"refs/heads/", "refs/tags/", "refs/notes/"}) {
+            auto candidate = std::string(prefix) + name;
+            if (available.find(candidate) != available.end()) {
+                result.insert(candidate);
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            result.insert("refs/heads/" + name);
+        }
+    }
+    return result;
+}
+
+// ---------------------------------------------------------------------------
+// Bundle detection
+// ---------------------------------------------------------------------------
+
+bool is_bundle_path(const std::string& path) {
+    if (path.size() < 7) return false;
+    auto ext = path.substr(path.size() - 7);
+    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+    return ext == ".bundle";
+}
+
+// ---------------------------------------------------------------------------
+// Shell command helpers (for bundle operations)
+// ---------------------------------------------------------------------------
+
+/// Run a shell command and return its stdout, or empty string on failure.
+std::string run_cmd_output(const std::string& cmd) {
+    FILE* fp = popen(cmd.c_str(), "r");
+    if (!fp) return {};
+    char buf[4096];
+    std::string output;
+    while (std::fgets(buf, sizeof(buf), fp)) output += buf;
+    int status = pclose(fp);
+    if (status != 0) return {};
+    return output;
+}
+
+/// Trim trailing whitespace/newlines.
+std::string rtrim_str(std::string s) {
+    while (!s.empty() && (s.back() == '\n' || s.back() == '\r' || s.back() == ' '))
+        s.pop_back();
+    return s;
+}
+
+// ---------------------------------------------------------------------------
+// Bundle helpers
+// ---------------------------------------------------------------------------
+
+void bundle_export(const std::string& repo_path, const std::string& path,
+                   const std::vector<std::string>& refs, const RefMap& local_refs) {
+    std::string cmd = "git -C " + shell_quote(repo_path) +
+                      " bundle create " + shell_quote(path);
+    if (refs.empty()) {
+        cmd += " --all";
+    } else {
+        auto resolved = resolve_ref_names(refs, local_refs);
+        for (const auto& r : resolved) {
+            cmd += " " + shell_quote(r);
+        }
+    }
+    cmd += " 2>/dev/null";
+    int rc = std::system(cmd.c_str());
+    if (rc != 0) {
+        throw GitError("git bundle create failed");
+    }
+}
+
+RefMap bundle_list_heads(const std::string& path) {
+    std::string cmd = "git bundle list-heads " + shell_quote(path) + " 2>/dev/null";
+    auto output = run_cmd_output(cmd);
+    if (output.empty()) {
+        // Try running again to distinguish empty output from error
+        FILE* fp = popen(cmd.c_str(), "r");
+        if (!fp) throw GitError("failed to run git bundle list-heads");
+        char buf[4096];
+        std::string out2;
+        while (std::fgets(buf, sizeof(buf), fp)) out2 += buf;
+        int status = pclose(fp);
+        if (status != 0) throw GitError("git bundle list-heads failed");
+        output = out2;
+    }
+
+    RefMap refs;
+    std::istringstream iss(output);
+    std::string line;
+    while (std::getline(iss, line)) {
+        line = rtrim_str(line);
+        auto space = line.find(' ');
+        if (space == std::string::npos) continue;
+        auto sha = line.substr(0, space);
+        auto name = line.substr(space + 1);
+        if (name == "HEAD") continue;
+        if (name.size() >= 3 && name.compare(name.size() - 3, 3, "^{}") == 0)
+            continue;
+        refs[name] = sha;
+    }
+    return refs;
+}
+
+void bundle_import(const std::string& repo_path, const std::string& path,
+                   const std::vector<std::string>& refs) {
+    auto bundle_refs = bundle_list_heads(path);
+
+    RefMap refs_to_import;
+    if (refs.empty()) {
+        refs_to_import = bundle_refs;
+    } else {
+        auto resolved = resolve_ref_names(refs, bundle_refs);
+        for (const auto& [k, v] : bundle_refs) {
+            if (resolved.count(k)) refs_to_import[k] = v;
+        }
+    }
+
+    if (refs_to_import.empty()) return;
+
+    // Build fetch command with specific refspecs
+    std::string cmd = "git -C " + shell_quote(repo_path) +
+                      " fetch " + shell_quote(path);
+    for (const auto& [name, sha] : refs_to_import) {
+        cmd += " " + shell_quote("+" + name + ":" + name);
+    }
+    cmd += " 2>/dev/null";
+
+    int rc = std::system(cmd.c_str());
+    if (rc != 0) {
+        throw GitError("git fetch from bundle failed");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Bundle diff helpers
+// ---------------------------------------------------------------------------
+
+MirrorDiff diff_bundle_export(git_repository* repo,
+                               const std::vector<std::string>& refs) {
+    auto local_refs = get_local_refs(repo);
+    RefMap filtered;
+    if (refs.empty()) {
+        filtered = local_refs;
+    } else {
+        auto resolved = resolve_ref_names(refs, local_refs);
+        for (const auto& [k, v] : local_refs) {
+            if (resolved.count(k)) filtered[k] = v;
+        }
+    }
+
+    MirrorDiff diff;
+    for (const auto& [name, sha] : filtered) {
+        diff.add.push_back({name, std::nullopt, sha});
+    }
+    return diff;
+}
+
+MirrorDiff diff_bundle_import(git_repository* repo, const std::string& path,
+                               const std::vector<std::string>& refs) {
+    auto bundle_refs = bundle_list_heads(path);
+    RefMap filtered;
+    if (refs.empty()) {
+        filtered = bundle_refs;
+    } else {
+        auto resolved = resolve_ref_names(refs, bundle_refs);
+        for (const auto& [k, v] : bundle_refs) {
+            if (resolved.count(k)) filtered[k] = v;
+        }
+    }
+
+    auto local_refs = get_local_refs(repo);
+    auto diff = diff_refs(filtered, local_refs);
+    diff.del.clear(); // additive: no deletes
+    return diff;
+}
+
+// ---------------------------------------------------------------------------
 // Transport
 // ---------------------------------------------------------------------------
 
@@ -238,48 +456,83 @@ void mirror_push(git_repository* repo, const std::string& url,
     if (rc != 0) throw_git("git_remote_push");
 }
 
-void mirror_fetch(git_repository* repo, const std::string& url,
-                  const RefMap& remote_refs, const RefMap& local_refs) {
-    // Step 1: Fetch objects for all remote refs
-    if (!remote_refs.empty()) {
-        git_remote* remote = nullptr;
-        if (git_remote_create_anonymous(&remote, repo, url.c_str()) != 0) {
-            throw_git("git_remote_create_anonymous");
-        }
+/// Push only refs in ref_filter (no deletes on remote).
+void targeted_push(git_repository* repo, const std::string& url,
+                   const RefMap& local_refs, const std::set<std::string>& ref_filter) {
+    git_remote* remote = nullptr;
+    if (git_remote_create_anonymous(&remote, repo, url.c_str()) != 0) {
+        throw_git("git_remote_create_anonymous");
+    }
 
-        std::vector<std::string> refspec_strs;
-        for (auto& [name, sha] : remote_refs) {
+    std::vector<std::string> refspec_strs;
+    for (const auto& name : ref_filter) {
+        if (local_refs.find(name) != local_refs.end()) {
             refspec_strs.push_back("+" + name + ":" + name);
         }
-
-        std::vector<char*> refspec_ptrs;
-        refspec_ptrs.reserve(refspec_strs.size());
-        for (auto& s : refspec_strs) {
-            refspec_ptrs.push_back(const_cast<char*>(s.c_str()));
-        }
-
-        git_strarray arr;
-        arr.strings = refspec_ptrs.data();
-        arr.count = refspec_ptrs.size();
-
-        git_fetch_options fetch_opts;
-        git_fetch_options_init(&fetch_opts, GIT_FETCH_OPTIONS_VERSION);
-
-        int rc = git_remote_fetch(remote, &arr, &fetch_opts, nullptr);
-        git_remote_free(remote);
-        if (rc != 0) throw_git("git_remote_fetch");
     }
 
-    // Step 2: Delete local refs not in remote
-    for (auto& [name, sha] : local_refs) {
-        if (remote_refs.find(name) == remote_refs.end()) {
-            git_reference* ref = nullptr;
-            if (git_reference_lookup(&ref, repo, name.c_str()) == 0) {
-                git_reference_delete(ref);
-                git_reference_free(ref);
-            }
+    std::vector<char*> refspec_ptrs;
+    refspec_ptrs.reserve(refspec_strs.size());
+    for (auto& s : refspec_strs) {
+        refspec_ptrs.push_back(const_cast<char*>(s.c_str()));
+    }
+
+    git_strarray arr;
+    arr.strings = refspec_ptrs.data();
+    arr.count = refspec_ptrs.size();
+
+    git_push_options push_opts;
+    git_push_options_init(&push_opts, GIT_PUSH_OPTIONS_VERSION);
+
+    int rc = git_remote_push(remote, &arr, &push_opts);
+    git_remote_free(remote);
+    if (rc != 0) throw_git("git_remote_push");
+}
+
+/// Fetch refs additively (no deletes).  If refs_filter is non-empty,
+/// only fetches refs that match the filter.
+void additive_fetch(git_repository* repo, const std::string& url,
+                    const RefMap& remote_refs, const std::vector<std::string>& refs) {
+    RefMap to_fetch;
+    if (refs.empty()) {
+        to_fetch = remote_refs;
+    } else {
+        auto resolved = resolve_ref_names(refs, remote_refs);
+        for (const auto& [k, v] : remote_refs) {
+            if (resolved.count(k)) to_fetch[k] = v;
         }
     }
+
+    if (to_fetch.empty()) return;
+
+    git_remote* remote = nullptr;
+    if (git_remote_create_anonymous(&remote, repo, url.c_str()) != 0) {
+        throw_git("git_remote_create_anonymous");
+    }
+
+    std::vector<std::string> refspec_strs;
+    for (auto& [name, sha] : to_fetch) {
+        refspec_strs.push_back("+" + name + ":" + name);
+    }
+
+    std::vector<char*> refspec_ptrs;
+    refspec_ptrs.reserve(refspec_strs.size());
+    for (auto& s : refspec_strs) {
+        refspec_ptrs.push_back(const_cast<char*>(s.c_str()));
+    }
+
+    git_strarray arr;
+    arr.strings = refspec_ptrs.data();
+    arr.count = refspec_ptrs.size();
+
+    git_fetch_options fetch_opts;
+    git_fetch_options_init(&fetch_opts, GIT_FETCH_OPTIONS_VERSION);
+
+    int rc = git_remote_fetch(remote, &arr, &fetch_opts, nullptr);
+    git_remote_free(remote);
+    if (rc != 0) throw_git("git_remote_fetch");
+
+    // No deletes — that's what makes it additive
 }
 
 } // anonymous namespace
@@ -289,16 +542,53 @@ void mirror_fetch(git_repository* repo, const std::string& url,
 // ---------------------------------------------------------------------------
 
 MirrorDiff backup(const std::shared_ptr<GitStoreInner>& inner,
-                  const std::string& dest, bool dry_run) {
+                  const std::string& dest, const BackupOptions& opts) {
     reject_scp_url(dest);
-    auto_create_bare_repo(dest);
+
+    bool use_bundle = opts.format == "bundle" || is_bundle_path(dest);
 
     std::lock_guard<std::mutex> lk(inner->mutex);
+
+    if (use_bundle) {
+        auto diff = diff_bundle_export(inner->repo, opts.refs);
+        if (!opts.dry_run) {
+            auto local_refs = get_local_refs(inner->repo);
+            bundle_export(inner->path.string(), dest, opts.refs, local_refs);
+        }
+        return diff;
+    }
+
+    auto_create_bare_repo(dest);
+
+    if (!opts.refs.empty()) {
+        auto local_refs = get_local_refs(inner->repo);
+        auto remote_refs = get_remote_refs(inner->repo, dest);
+        auto ref_filter = resolve_ref_names(opts.refs, local_refs);
+        auto diff = diff_refs(local_refs, remote_refs);
+
+        // Filter to only targeted refs, no deletes
+        std::vector<RefChange> filtered_add, filtered_update;
+        for (auto& r : diff.add) {
+            if (ref_filter.count(r.ref_name)) filtered_add.push_back(std::move(r));
+        }
+        for (auto& r : diff.update) {
+            if (ref_filter.count(r.ref_name)) filtered_update.push_back(std::move(r));
+        }
+        diff.add = std::move(filtered_add);
+        diff.update = std::move(filtered_update);
+        diff.del.clear();
+
+        if (!opts.dry_run && !diff.in_sync()) {
+            targeted_push(inner->repo, dest, local_refs, ref_filter);
+        }
+        return diff;
+    }
+
     auto local_refs = get_local_refs(inner->repo);
     auto remote_refs = get_remote_refs(inner->repo, dest);
     auto diff = diff_refs(local_refs, remote_refs);
 
-    if (!dry_run && !diff.in_sync()) {
+    if (!opts.dry_run && !diff.in_sync()) {
         mirror_push(inner->repo, dest, local_refs, remote_refs);
     }
 
@@ -306,17 +596,41 @@ MirrorDiff backup(const std::shared_ptr<GitStoreInner>& inner,
 }
 
 MirrorDiff restore(const std::shared_ptr<GitStoreInner>& inner,
-                   const std::string& src, bool dry_run) {
+                   const std::string& src, const RestoreOptions& opts) {
     reject_scp_url(src);
 
+    bool use_bundle = opts.format == "bundle" || is_bundle_path(src);
+
     std::lock_guard<std::mutex> lk(inner->mutex);
+
+    if (use_bundle) {
+        auto diff = diff_bundle_import(inner->repo, src, opts.refs);
+        if (!opts.dry_run) {
+            bundle_import(inner->path.string(), src, opts.refs);
+        }
+        return diff;
+    }
+
     auto local_refs = get_local_refs(inner->repo);
     auto remote_refs = get_remote_refs(inner->repo, src);
-    // For restore, remote is source, local is destination
     auto diff = diff_refs(remote_refs, local_refs);
 
-    if (!dry_run && !diff.in_sync()) {
-        mirror_fetch(inner->repo, src, remote_refs, local_refs);
+    if (!opts.refs.empty()) {
+        auto ref_filter = resolve_ref_names(opts.refs, remote_refs);
+        std::vector<RefChange> filtered_add, filtered_update;
+        for (auto& r : diff.add) {
+            if (ref_filter.count(r.ref_name)) filtered_add.push_back(std::move(r));
+        }
+        for (auto& r : diff.update) {
+            if (ref_filter.count(r.ref_name)) filtered_update.push_back(std::move(r));
+        }
+        diff.add = std::move(filtered_add);
+        diff.update = std::move(filtered_update);
+    }
+    diff.del.clear(); // additive: never delete
+
+    if (!opts.dry_run && !diff.in_sync()) {
+        additive_fetch(inner->repo, src, remote_refs, opts.refs);
     }
 
     return diff;

@@ -149,7 +149,7 @@ class MirrorTest {
     }
 
     @Test
-    fun `restore deletes stale local refs`(@TempDir tempDir: Path) {
+    fun `restore is additive`(@TempDir tempDir: Path) {
         val store = createStore()
         store.use {
             var fs = it.branches["main"]
@@ -162,10 +162,10 @@ class MirrorTest {
             it.branches["local-only"] = fs
             assertTrue("local-only" in it.branches.list())
 
-            // Restore from remote — should delete local-only branch
+            // Restore from remote — local-only branch should survive (additive)
             val diff = it.restore(remoteUrl)
-            assertTrue(diff.delete.any { it.refName.contains("local-only") })
-            assertFalse("local-only" in it.branches.list())
+            assertTrue(diff.delete.isEmpty())
+            assertTrue("local-only" in it.branches.list())
         }
     }
 
@@ -230,6 +230,149 @@ class MirrorTest {
             remote.use { r ->
                 assertTrue("v1.0" in r.tags.list())
                 assertEquals("hello", r.tags["v1.0"].readText("a.txt"))
+            }
+        }
+    }
+
+    // ── Bundle tests ────────────────────────────────────────────────────
+
+    @Test
+    fun `backup to bundle`(@TempDir tempDir: Path) {
+        val store = createStore()
+        store.use {
+            var fs = it.branches["main"]
+            fs = fs.write("a.txt", "hello".toByteArray())
+            it.tags["v1.0"] = fs
+
+            val bundle = tempDir.resolve("backup.bundle").toFile().absolutePath
+            val diff = it.backup(bundle)
+
+            assertFalse(diff.inSync)
+            assertTrue(diff.add.isNotEmpty())
+            assertTrue(File(bundle).exists())
+        }
+    }
+
+    @Test
+    fun `restore from bundle`(@TempDir tempDir: Path) {
+        val store = createStore()
+        store.use {
+            var fs = it.branches["main"]
+            fs = fs.write("a.txt", "hello".toByteArray())
+            it.tags["v1.0"] = fs
+
+            val bundle = tempDir.resolve("backup.bundle").toFile().absolutePath
+            it.backup(bundle)
+
+            val store2Dir = tempDir.resolve("restored.git").toFile()
+            val store2 = GitStore.open(store2Dir.absolutePath, branch = null)
+            store2.use { s2 ->
+                val diff = s2.restore(bundle)
+                assertFalse(diff.inSync)
+
+                assertTrue("main" in s2.branches.list())
+                assertEquals("hello", s2.branches["main"].readText("a.txt"))
+                assertTrue("v1.0" in s2.tags.list())
+            }
+        }
+    }
+
+    @Test
+    fun `bundle dry run`(@TempDir tempDir: Path) {
+        val store = createStore()
+        store.use {
+            var fs = it.branches["main"]
+            fs = fs.write("a.txt", "hello".toByteArray())
+
+            val bundle = tempDir.resolve("backup.bundle").toFile().absolutePath
+            val diff = it.backup(bundle, dryRun = true)
+
+            assertFalse(diff.inSync)
+            assertFalse(File(bundle).exists())
+        }
+    }
+
+    @Test
+    fun `bundle round trip`(@TempDir tempDir: Path) {
+        val store = createStore()
+        store.use {
+            var fs = it.branches["main"]
+            fs = fs.write("a.txt", "aaa".toByteArray())
+            fs = fs.write("b.txt", "bbb".toByteArray())
+            it.tags["v1.0"] = fs
+
+            val bundle = tempDir.resolve("roundtrip.bundle").toFile().absolutePath
+            it.backup(bundle)
+
+            val store2Dir = tempDir.resolve("restored.git").toFile()
+            val store2 = GitStore.open(store2Dir.absolutePath, branch = null)
+            store2.use { s2 ->
+                s2.restore(bundle)
+                assertEquals("aaa", s2.branches["main"].readText("a.txt"))
+                assertEquals("bbb", s2.branches["main"].readText("b.txt"))
+                assertTrue("v1.0" in s2.tags.list())
+            }
+        }
+    }
+
+    // ── Refs filtering tests ────────────────────────────────────────────
+
+    @Test
+    fun `backup with refs filter`(@TempDir tempDir: Path) {
+        val store = createStore()
+        store.use {
+            var fs = it.branches["main"]
+            fs = fs.write("a.txt", "hello".toByteArray())
+            it.tags["v1.0"] = fs
+
+            val remoteUrl = createRemoteDir(tempDir)
+            it.backup(remoteUrl, refs = listOf("main"))
+
+            val remote = GitStore.open(remoteUrl, create = false)
+            remote.use { r ->
+                assertTrue("main" in r.branches.list())
+                assertFalse("v1.0" in r.tags.list())
+            }
+        }
+    }
+
+    @Test
+    fun `restore with refs filter`(@TempDir tempDir: Path) {
+        val store = createStore()
+        store.use {
+            var fs = it.branches["main"]
+            fs = fs.write("a.txt", "hello".toByteArray())
+            it.tags["v1.0"] = fs
+
+            val remoteUrl = createRemoteDir(tempDir)
+            it.backup(remoteUrl)
+
+            val store2Dir = tempDir.resolve("restored.git").toFile()
+            val store2 = GitStore.open(store2Dir.absolutePath, branch = null)
+            store2.use { s2 ->
+                s2.restore(remoteUrl, refs = listOf("v1.0"))
+                assertTrue("v1.0" in s2.tags.list())
+            }
+        }
+    }
+
+    @Test
+    fun `backup bundle with refs`(@TempDir tempDir: Path) {
+        val store = createStore()
+        store.use {
+            var fs = it.branches["main"]
+            fs = fs.write("a.txt", "hello".toByteArray())
+            it.tags["v1.0"] = fs
+
+            val bundle = tempDir.resolve("main-only.bundle").toFile().absolutePath
+            it.backup(bundle, refs = listOf("main"))
+
+            val store2Dir = tempDir.resolve("restored.git").toFile()
+            val store2 = GitStore.open(store2Dir.absolutePath, branch = null)
+            store2.use { s2 ->
+                s2.restore(bundle)
+                assertTrue("main" in s2.branches.list())
+                assertFalse("v1.0" in s2.tags.list())
             }
         }
     }

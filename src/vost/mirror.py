@@ -63,6 +63,46 @@ class MirrorDiff:
 
 
 # ---------------------------------------------------------------------------
+# Bundle detection and ref name resolution
+# ---------------------------------------------------------------------------
+
+def _is_bundle_path(path: str) -> bool:
+    """Return True if *path* has a ``.bundle`` extension."""
+    return path.lower().endswith(".bundle")
+
+
+def _resolve_ref_names(names, available_refs):
+    """Resolve short ref names to full byte ref paths.
+
+    Tries ``refs/heads/``, ``refs/tags/``, ``refs/notes/`` prefixes against
+    *available_refs*.  Full paths (starting with ``refs/``) pass through
+    unchanged.  If no match is found the name is assumed to be a branch.
+
+    Args:
+        names: Iterable of ref names (str or bytes).
+        available_refs: Set/collection of bytes ref names to match against.
+
+    Returns:
+        Set of bytes ref names.
+    """
+    result = set()
+    for name in names:
+        name_b = name.encode() if isinstance(name, str) else name
+        if name_b.startswith(b"refs/"):
+            result.add(name_b)
+            continue
+        for prefix in (b"refs/heads/", b"refs/tags/", b"refs/notes/"):
+            candidate = prefix + name_b
+            if candidate in available_refs:
+                result.add(candidate)
+                break
+        else:
+            # Default: assume branch
+            result.add(b"refs/heads/" + name_b)
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Transport helpers (operate on raw dulwich Repo)
 # ---------------------------------------------------------------------------
 
@@ -185,6 +225,140 @@ def _mirror_fetch(drepo: _DRepo, url: str, *, progress=None):
     return result
 
 
+def _targeted_push(drepo: _DRepo, url: str, ref_filter: set, *, progress=None):
+    """Push only refs in *ref_filter* to *url* (no deletes)."""
+    client, path = _get_transport_and_path(url)
+    local_refs = {
+        ref: sha
+        for ref, sha in drepo.get_refs().items()
+        if ref != b"HEAD" and ref in ref_filter
+    }
+
+    def update_refs(remote_refs):
+        # Preserve all existing remote refs, only add/update targeted ones
+        new_refs = dict(remote_refs)
+        for ref, sha in local_refs.items():
+            new_refs[ref] = sha
+        return new_refs
+
+    def gen_pack(have, want, *, ofs_delta=False, progress=progress):
+        return drepo.object_store.generate_pack_data(
+            have, want, ofs_delta=ofs_delta, progress=progress,
+        )
+
+    return client.send_pack(path, update_refs, gen_pack, progress=progress)
+
+
+def _additive_fetch(drepo: _DRepo, url: str, *, refs=None, progress=None):
+    """Fetch refs from *url* additively (no deletes).
+
+    If *refs* is given (list of str), only those refs are set locally.
+    """
+    client, path = _get_transport_and_path(url)
+    result = client.fetch(path, drepo, progress=progress)
+
+    remote_refs = {
+        ref: sha
+        for ref, sha in result.refs.items()
+        if ref != b"HEAD" and not ref.endswith(b"^{}")
+    }
+
+    if refs is not None:
+        ref_set = _resolve_ref_names(refs, set(remote_refs.keys()))
+        remote_refs = {r: s for r, s in remote_refs.items() if r in ref_set}
+
+    for ref, sha in remote_refs.items():
+        drepo.refs[ref] = sha
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Bundle helpers
+# ---------------------------------------------------------------------------
+
+def _bundle_export(drepo: _DRepo, path: str, *, refs=None, progress=None):
+    """Create a bundle file from local refs."""
+    from dulwich.bundle import create_bundle_from_repo, write_bundle
+
+    all_local = {r for r in drepo.get_refs() if r != b"HEAD"}
+    if refs is not None:
+        ref_set = _resolve_ref_names(refs, all_local)
+        bundle_refs = sorted(ref_set)
+    else:
+        bundle_refs = sorted(all_local)
+
+    bundle = create_bundle_from_repo(drepo, refs=bundle_refs, progress=progress)
+    with open(path, "wb") as f:
+        write_bundle(f, bundle)
+    bundle.close()
+
+
+def _bundle_import(drepo: _DRepo, path: str, *, refs=None, progress=None):
+    """Import refs from a bundle file (additive — no deletes)."""
+    from dulwich.bundle import read_bundle
+
+    with open(path, "rb") as f:
+        bundle = read_bundle(f)
+        bundle.store_objects(drepo.object_store, progress=progress)
+        if refs is not None:
+            ref_set = _resolve_ref_names(refs, set(bundle.references.keys()))
+        for ref, sha in bundle.references.items():
+            if refs is None or ref in ref_set:
+                drepo.refs[ref] = sha
+        bundle.close()
+
+
+def _diff_bundle_export(drepo: _DRepo, path: str, *, refs=None) -> dict:
+    """Compute diff for exporting a bundle (all refs are 'create')."""
+    local_refs = {
+        ref: sha for ref, sha in drepo.get_refs().items()
+        if ref != b"HEAD"
+    }
+    if refs is not None:
+        ref_set = _resolve_ref_names(refs, set(local_refs.keys()))
+        local_refs = {r: s for r, s in local_refs.items() if r in ref_set}
+
+    return {
+        "create": list(local_refs.keys()),
+        "update": [],
+        "delete": [],
+        "src": local_refs,
+        "dest": {},
+    }
+
+
+def _diff_bundle_import(drepo: _DRepo, path: str, *, refs=None) -> dict:
+    """Compute diff for importing a bundle (additive — no deletes)."""
+    from dulwich.bundle import read_bundle
+
+    with open(path, "rb") as f:
+        bundle = read_bundle(f)
+        bundle_refs = dict(bundle.references)
+        bundle.close()
+
+    if refs is not None:
+        ref_set = _resolve_ref_names(refs, set(bundle_refs.keys()))
+        bundle_refs = {r: s for r, s in bundle_refs.items() if r in ref_set}
+
+    local_refs = {r: s for r, s in drepo.get_refs().items() if r != b"HEAD"}
+
+    create, update = [], []
+    for ref, sha in bundle_refs.items():
+        if ref not in local_refs:
+            create.append(ref)
+        elif local_refs[ref] != sha:
+            update.append(ref)
+
+    return {
+        "create": create,
+        "update": update,
+        "delete": [],
+        "src": bundle_refs,
+        "dest": local_refs,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Core mirror functions
 # ---------------------------------------------------------------------------
@@ -211,12 +385,43 @@ def _raw_diff_to_sync_diff(raw: dict) -> MirrorDiff:
     return MirrorDiff(add=add, update=update, delete=delete)
 
 
-def backup(store: GitStore, url: str, *, dry_run: bool = False, progress=None) -> MirrorDiff:
-    """Push all refs to *url*, creating an exact mirror.
+def backup(
+    store: GitStore,
+    url: str,
+    *,
+    dry_run: bool = False,
+    progress=None,
+    refs: list[str] | None = None,
+    format: str | None = None,
+) -> MirrorDiff:
+    """Push refs to *url* (or write a bundle file).
+
+    Without ``--ref`` this is a full mirror: remote-only refs are deleted.
+    With ``--ref`` only the specified refs are pushed (no deletes).
 
     Returns a `MirrorDiff` describing what changed (or would change).
     """
     drepo = store._repo._drepo
+    use_bundle = (format == "bundle") or _is_bundle_path(url)
+
+    if use_bundle:
+        raw = _diff_bundle_export(drepo, url, refs=refs)
+        diff = _raw_diff_to_sync_diff(raw)
+        if not dry_run:
+            _bundle_export(drepo, url, refs=refs, progress=progress)
+        return diff
+
+    if refs is not None:
+        raw = _diff_refs(drepo, url, "push")
+        ref_set = _resolve_ref_names(refs, set(raw["src"].keys()))
+        raw["create"] = [r for r in raw["create"] if r in ref_set]
+        raw["update"] = [r for r in raw["update"] if r in ref_set]
+        raw["delete"] = []  # no deletes when using --ref
+        diff = _raw_diff_to_sync_diff(raw)
+        if not dry_run:
+            _targeted_push(drepo, url, ref_set, progress=progress)
+        return diff
+
     raw = _diff_refs(drepo, url, "push")
     diff = _raw_diff_to_sync_diff(raw)
     if not dry_run:
@@ -224,16 +429,41 @@ def backup(store: GitStore, url: str, *, dry_run: bool = False, progress=None) -
     return diff
 
 
-def restore(store: GitStore, url: str, *, dry_run: bool = False, progress=None) -> MirrorDiff:
-    """Fetch all refs from *url*, overwriting local state.
+def restore(
+    store: GitStore,
+    url: str,
+    *,
+    dry_run: bool = False,
+    progress=None,
+    refs: list[str] | None = None,
+    format: str | None = None,
+) -> MirrorDiff:
+    """Fetch refs from *url* (or import a bundle file).
+
+    Restore is **additive**: it adds and updates refs but never deletes
+    local-only refs.
 
     Returns a `MirrorDiff` describing what changed (or would change).
     """
     drepo = store._repo._drepo
+    use_bundle = (format == "bundle") or _is_bundle_path(url)
+
+    if use_bundle:
+        raw = _diff_bundle_import(drepo, url, refs=refs)
+        diff = _raw_diff_to_sync_diff(raw)
+        if not dry_run:
+            _bundle_import(drepo, url, refs=refs, progress=progress)
+        return diff
+
     raw = _diff_refs(drepo, url, "pull")
+    if refs is not None:
+        ref_set = _resolve_ref_names(refs, set(raw["src"].keys()))
+        raw["create"] = [r for r in raw["create"] if r in ref_set]
+        raw["update"] = [r for r in raw["update"] if r in ref_set]
+    raw["delete"] = []  # additive: never delete
     diff = _raw_diff_to_sync_diff(raw)
     if not dry_run:
-        _mirror_fetch(drepo, url, progress=progress)
+        _additive_fetch(drepo, url, refs=refs, progress=progress)
     return diff
 
 

@@ -358,39 +358,65 @@ class GitStore:
 
         return store
 
-    def backup(self, url: str, *, dry_run: bool = False, progress: Callable | None = None) -> MirrorDiff:
-        """Push all refs to *url*, creating an exact mirror.
+    def backup(
+        self,
+        url: str,
+        *,
+        dry_run: bool = False,
+        progress: Callable | None = None,
+        refs: list[str] | None = None,
+        format: str | None = None,
+    ) -> MirrorDiff:
+        """Push refs to *url*, or write a bundle file.
 
-        Remote-only refs are deleted.
+        Without *refs* this is a full mirror: remote-only refs are deleted.
+        With *refs* only the specified refs are pushed (no deletes).
+        If *url* ends with ``.bundle`` (or *format* is ``"bundle"``), a
+        portable bundle file is written instead of pushing to a remote.
 
         Args:
-            url: Remote repository URL (HTTPS, SSH, or local path).
+            url: Remote URL, local path, or ``.bundle`` file path.
             dry_run: Compute diff without pushing.
             progress: Optional progress callback.
+            refs: Ref names to include (short or full). ``None`` = all refs.
+            format: ``"bundle"`` to force bundle format.
 
         Returns:
             A :class:`MirrorDiff` describing what changed (or would change).
         """
         from .mirror import backup
-        return backup(self, url, dry_run=dry_run, progress=progress)
+        return backup(self, url, dry_run=dry_run, progress=progress,
+                       refs=refs, format=format)
 
-    def restore(self, url: str, *, dry_run: bool = False, progress: Callable | None = None) -> MirrorDiff:
-        """Fetch all refs from *url*, overwriting local state.
+    def restore(
+        self,
+        url: str,
+        *,
+        dry_run: bool = False,
+        progress: Callable | None = None,
+        refs: list[str] | None = None,
+        format: str | None = None,
+    ) -> MirrorDiff:
+        """Fetch refs from *url*, or import a bundle file.
 
-        Local-only refs are deleted.  All branches, tags, and notes are
-        restored, but HEAD (the current branch pointer) is not — use
-        ``store.branches.current = "name"`` afterwards if needed.
+        Restore is **additive**: refs are added and updated but local-only
+        refs are never deleted.  HEAD (the current branch pointer) is not
+        restored — use ``store.branches.current = "name"`` afterwards if
+        needed.
 
         Args:
-            url: Remote repository URL (HTTPS, SSH, or local path).
+            url: Remote URL, local path, or ``.bundle`` file path.
             dry_run: Compute diff without fetching.
             progress: Optional progress callback.
+            refs: Ref names to include (short or full). ``None`` = all refs.
+            format: ``"bundle"`` to force bundle format.
 
         Returns:
             A :class:`MirrorDiff` describing what changed (or would change).
         """
         from .mirror import restore
-        return restore(self, url, dry_run=dry_run, progress=progress)
+        return restore(self, url, dry_run=dry_run, progress=progress,
+                        refs=refs, format=format)
 
 
 class RefDict(MutableMapping):

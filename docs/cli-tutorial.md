@@ -816,7 +816,7 @@ Shows what would be added, updated, or deleted without transferring data.
 vost restore /tmp/mirror.git
 ```
 
-Overwrites local state to match the remote. Use `--dry-run` to preview.
+Adds and updates refs from the source. Restore is **additive** -- local-only refs are kept. Use `--dry-run` to preview.
 
 ### Remote URLs
 
@@ -825,6 +825,36 @@ Backup and restore work with any Git-compatible URL:
 ```bash
 vost backup https://github.com/user/data-backup.git
 vost restore git@github.com:user/data-backup.git
+```
+
+### Bundle files
+
+Export all refs as a single portable file:
+
+```bash
+vost backup /tmp/backup.bundle
+```
+
+The `.bundle` extension triggers bundle format automatically. Import with:
+
+```bash
+vost restore /tmp/backup.bundle
+```
+
+### Scoping to specific refs
+
+Use `--ref` (repeatable) to back up or restore only certain branches or tags:
+
+```bash
+vost backup backup.bundle --ref main --ref v1.0
+vost restore backup.bundle --ref main
+```
+
+This works with URLs too:
+
+```bash
+vost backup /tmp/mirror.git --ref main
+vost restore /tmp/mirror.git --ref v1
 ```
 
 ---

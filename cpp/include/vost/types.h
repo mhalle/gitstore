@@ -410,4 +410,22 @@ private:
                               const std::string& path);
 };
 
+// ---------------------------------------------------------------------------
+// BackupOptions / RestoreOptions
+// ---------------------------------------------------------------------------
+
+/// Options for backup operations.
+struct BackupOptions {
+    bool dry_run = false;                  ///< Compute diff without pushing.
+    std::vector<std::string> refs;         ///< Limit to specific refs (empty = all).
+    std::string format;                    ///< Force format: "bundle" or empty.
+};
+
+/// Options for restore operations.
+struct RestoreOptions {
+    bool dry_run = false;                  ///< Compute diff without fetching.
+    std::vector<std::string> refs;         ///< Limit to specific refs (empty = all).
+    std::string format;                    ///< Force format: "bundle" or empty.
+};
+
 } // namespace vost

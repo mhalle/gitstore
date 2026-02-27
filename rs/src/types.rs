@@ -494,3 +494,29 @@ pub struct OpenOptions {
     /// Default author email.
     pub email: Option<String>,
 }
+
+// ---------------------------------------------------------------------------
+// BackupOptions / RestoreOptions
+// ---------------------------------------------------------------------------
+
+/// Options for [`GitStore::backup`].
+#[derive(Debug, Clone, Default)]
+pub struct BackupOptions {
+    /// If true, compute diff but do not push.
+    pub dry_run: bool,
+    /// Limit to specific refs (short names like "main" or full like "refs/heads/main").
+    pub refs: Option<Vec<String>>,
+    /// Force format: "bundle" for bundle file output. Auto-detected from `.bundle` extension.
+    pub format: Option<String>,
+}
+
+/// Options for [`GitStore::restore`].
+#[derive(Debug, Clone, Default)]
+pub struct RestoreOptions {
+    /// If true, compute diff but do not fetch.
+    pub dry_run: bool,
+    /// Limit to specific refs (short names like "main" or full like "refs/heads/main").
+    pub refs: Option<Vec<String>>,
+    /// Force format: "bundle" for bundle file input. Auto-detected from `.bundle` extension.
+    pub format: Option<String>,
+}

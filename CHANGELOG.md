@@ -4,6 +4,32 @@ All notable changes to vost are documented in this file.
 
 ## Unreleased
 
+## v0.70.0 / TS v0.9.5 / Rust v0.9.3 / Kotlin v0.9.7 / C++ v0.8.5 (2026-02-27)
+
+**Added (all ports):**
+
+- Backup to `.bundle` files: `store.backup("backup.bundle")` creates a git bundle for offline transfer
+- Restore from `.bundle` files: `store.restore("backup.bundle")` imports refs from a bundle
+- Refs filtering: `refs` parameter limits backup/restore to specific branches/tags (e.g. `refs: ["main"]`)
+- `format: "bundle"` option forces bundle format even without `.bundle` extension
+
+**Changed (all ports):**
+
+- Restore is now **additive**: local-only refs are no longer deleted during restore. Only refs present in the source are added/updated.
+
+**API changes (Rust, C++):**
+
+- `backup()` / `restore()` now take `BackupOptions` / `RestoreOptions` structs instead of a bare `bool dry_run`
+
+**API changes (TypeScript):**
+
+- `http` parameter is now optional for `backup()` / `restore()` (only required for HTTP URLs; local paths and bundles use git CLI)
+- Added `refs` and `format` options to backup/restore opts
+
+**API changes (Kotlin):**
+
+- `backup()` / `restore()` accept new `refs: List<String>?` and `format: String?` parameters
+
 ## v0.69.0 (2026-02-27)
 
 **Added (CLI):**

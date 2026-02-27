@@ -174,12 +174,12 @@ Fs GitStore::fs(const std::string& hash) {
     return Fs(inner_, hash, tree_hex, std::nullopt, false);
 }
 
-MirrorDiff GitStore::backup(const std::string& dest, bool dry_run) {
-    return mirror::backup(inner_, dest, dry_run);
+MirrorDiff GitStore::backup(const std::string& dest, const BackupOptions& opts) {
+    return mirror::backup(inner_, dest, opts);
 }
 
-MirrorDiff GitStore::restore(const std::string& src, bool dry_run) {
-    return mirror::restore(inner_, src, dry_run);
+MirrorDiff GitStore::restore(const std::string& src, const RestoreOptions& opts) {
+    return mirror::restore(inner_, src, opts);
 }
 
 const std::filesystem::path& GitStore::path() const {

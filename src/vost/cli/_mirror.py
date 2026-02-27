@@ -54,17 +54,26 @@ def _progress_cb(ctx):
 @_repo_option
 @click.argument("url")
 @_dry_run_option
+@click.option("--ref", multiple=True, help="Ref to include (repeatable). Omit for all refs.")
+@click.option("--format", "fmt", type=click.Choice(["bundle"]), default=None,
+              help="Force output format (auto-detected from .bundle extension).")
 @click.pass_context
-def backup_cmd(ctx, url, dry_run):
-    """Push all refs to a remote URL, creating an exact mirror.
+def backup_cmd(ctx, url, dry_run, ref, fmt):
+    """Push refs to a remote URL or write a bundle file.
 
-    Force-overwrites diverged refs and deletes remote-only refs.
+    Without --ref this is a full mirror: remote-only refs are deleted.
+    With --ref only the specified refs are pushed (no deletes).
+
+    If URL ends with .bundle, a portable bundle file is written.
     """
-    from ..mirror import resolve_credentials
+    from ..mirror import _is_bundle_path, resolve_credentials
 
     store = _open_store(_require_repo(ctx))
-    auth_url = resolve_credentials(url)
-    diff = store.backup(auth_url, dry_run=dry_run, progress=_progress_cb(ctx))
+    refs = list(ref) if ref else None
+    use_bundle = (fmt == "bundle") or _is_bundle_path(url)
+    auth_url = url if use_bundle else resolve_credentials(url)
+    diff = store.backup(auth_url, dry_run=dry_run, progress=_progress_cb(ctx),
+                        refs=refs, format=fmt)
     if dry_run:
         _print_diff(diff, "push")
     else:
@@ -80,20 +89,26 @@ def backup_cmd(ctx, url, dry_run):
 @click.argument("url")
 @_dry_run_option
 @_no_create_option
+@click.option("--ref", multiple=True, help="Ref to include (repeatable). Omit for all refs.")
+@click.option("--format", "fmt", type=click.Choice(["bundle"]), default=None,
+              help="Force input format (auto-detected from .bundle extension).")
 @click.pass_context
-def restore_cmd(ctx, url, dry_run, no_create):
-    """Fetch all refs from a remote URL, overwriting local state.
+def restore_cmd(ctx, url, dry_run, no_create, ref, fmt):
+    """Fetch refs from a remote URL or import a bundle file.
 
-    Force-overwrites diverged refs and deletes local-only refs.
-    HEAD (the current branch) is not restored; use
-    'vost branch current -b NAME' afterwards if needed.
+    Restore is additive: refs are added and updated but local-only
+    refs are never deleted. HEAD (the current branch) is not restored;
+    use 'vost branch current -b NAME' afterwards if needed.
     """
-    from ..mirror import resolve_credentials
+    from ..mirror import _is_bundle_path, resolve_credentials
 
     repo_path = _require_repo(ctx)
     store = _open_store(repo_path) if no_create else _open_or_create_bare(repo_path)
-    auth_url = resolve_credentials(url)
-    diff = store.restore(auth_url, dry_run=dry_run, progress=_progress_cb(ctx))
+    refs = list(ref) if ref else None
+    use_bundle = (fmt == "bundle") or _is_bundle_path(url)
+    auth_url = url if use_bundle else resolve_credentials(url)
+    diff = store.restore(auth_url, dry_run=dry_run, progress=_progress_cb(ctx),
+                         refs=refs, format=fmt)
     if dry_run:
         _print_diff(diff, "pull")
     else:

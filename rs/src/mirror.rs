@@ -1,9 +1,9 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::process::{Command, Stdio};
 
 use crate::error::{Error, Result};
-use crate::types::{MirrorDiff, RefChange};
+use crate::types::{BackupOptions, MirrorDiff, RefChange, RestoreOptions};
 
 // ---------------------------------------------------------------------------
 // Credentials
@@ -175,6 +175,48 @@ fn auto_create_bare_repo(url: &str) -> Result<()> {
 }
 
 // ---------------------------------------------------------------------------
+// Bundle detection
+// ---------------------------------------------------------------------------
+
+/// Return true if `path` has a `.bundle` extension (case-insensitive).
+fn is_bundle_path(path: &str) -> bool {
+    path.to_lowercase().ends_with(".bundle")
+}
+
+// ---------------------------------------------------------------------------
+// Ref name resolution
+// ---------------------------------------------------------------------------
+
+/// Resolve short ref names to full ref paths.
+///
+/// Names starting with `refs/` pass through unchanged.  Otherwise tries
+/// `refs/heads/`, `refs/tags/`, `refs/notes/` prefixes against the
+/// available refs.  If no match, assumes `refs/heads/`.
+fn resolve_ref_names(names: &[String], available: &HashMap<String, String>) -> HashSet<String> {
+    let available_keys: HashSet<&str> = available.keys().map(|s| s.as_str()).collect();
+    let mut result = HashSet::new();
+    for name in names {
+        if name.starts_with("refs/") {
+            result.insert(name.clone());
+            continue;
+        }
+        let mut found = false;
+        for prefix in &["refs/heads/", "refs/tags/", "refs/notes/"] {
+            let candidate = format!("{}{}", prefix, name);
+            if available_keys.contains(candidate.as_str()) {
+                result.insert(candidate);
+                found = true;
+                break;
+            }
+        }
+        if !found {
+            result.insert(format!("refs/heads/{}", name));
+        }
+    }
+    result
+}
+
+// ---------------------------------------------------------------------------
 // Ref enumeration
 // ---------------------------------------------------------------------------
 
@@ -312,14 +354,68 @@ fn mirror_push(repo_path: &Path, url: &str) -> Result<()> {
     Ok(())
 }
 
-/// Fetch all refs from `url` and delete stale local refs.
-fn mirror_fetch(
-    repo_path: &Path,
-    url: &str,
-    remote_refs: &HashMap<String, String>,
-) -> Result<()> {
-    // Step 1: Fetch all refs
-    if !remote_refs.is_empty() {
+/// Push only refs in `ref_filter` to `url` (no deletes).
+fn targeted_push(repo_path: &Path, url: &str, ref_filter: &HashSet<String>) -> Result<()> {
+    let refspecs: Vec<String> = ref_filter.iter().map(|r| format!("+{}:{}", r, r)).collect();
+    let mut args = vec!["push".to_string(), url.to_string()];
+    args.extend(refspecs);
+
+    let output = Command::new("git")
+        .args(&args)
+        .current_dir(repo_path)
+        .output()
+        .map_err(|e| Error::git_msg(format!("failed to run git push: {}", e)))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(Error::git_msg(format!(
+            "git push failed: {}",
+            stderr.trim()
+        )));
+    }
+    Ok(())
+}
+
+/// Fetch refs from `url` additively (no deletes).
+///
+/// If `refs` is given, only those refs are fetched via targeted refspecs.
+/// Otherwise fetches all refs with `+refs/*:refs/*`.
+fn additive_fetch(repo_path: &Path, url: &str, refs: Option<&[String]>) -> Result<()> {
+    let remote_refs = get_remote_refs(repo_path, url)?;
+    if remote_refs.is_empty() {
+        return Ok(());
+    }
+
+    if let Some(filter) = refs {
+        // Targeted fetch: build refspecs for only the matching refs
+        let resolved = resolve_ref_names(filter, &remote_refs);
+        let refs_to_fetch: Vec<&String> = remote_refs
+            .keys()
+            .filter(|k| resolved.contains(k.as_str()))
+            .collect();
+        if refs_to_fetch.is_empty() {
+            return Ok(());
+        }
+
+        let refspecs: Vec<String> = refs_to_fetch.iter().map(|r| format!("+{}:{}", r, r)).collect();
+        let mut args = vec!["fetch".to_string(), url.to_string()];
+        args.extend(refspecs);
+
+        let output = Command::new("git")
+            .args(&args)
+            .current_dir(repo_path)
+            .output()
+            .map_err(|e| Error::git_msg(format!("failed to run git fetch: {}", e)))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(Error::git_msg(format!(
+                "git fetch failed: {}",
+                stderr.trim()
+            )));
+        }
+    } else {
+        // Fetch all refs
         let output = Command::new("git")
             .arg("fetch")
             .arg(url)
@@ -338,68 +434,272 @@ fn mirror_fetch(
         }
     }
 
-    // Step 2: Delete local refs not in remote
-    let local_refs = get_local_refs(repo_path)?;
-    for ref_name in local_refs.keys() {
-        if !remote_refs.contains_key(ref_name) {
-            let _ = Command::new("git")
-                .arg("update-ref")
-                .arg("-d")
-                .arg(ref_name)
-                .current_dir(repo_path)
-                .output();
+    // No deletes — that's what makes it additive
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Bundle helpers
+// ---------------------------------------------------------------------------
+
+/// Create a bundle file from local refs.
+fn bundle_export(repo_path: &Path, path: &str, refs: Option<&[String]>) -> Result<()> {
+    let mut args = vec!["bundle".to_string(), "create".to_string(), path.to_string()];
+
+    if let Some(refs) = refs {
+        // Get local refs to resolve short names
+        let local_refs = get_local_refs(repo_path)?;
+        let resolved = resolve_ref_names(refs, &local_refs);
+        for r in &resolved {
+            args.push(r.clone());
         }
+    } else {
+        args.push("--all".to_string());
+    }
+
+    let output = Command::new("git")
+        .args(&args)
+        .current_dir(repo_path)
+        .output()
+        .map_err(|e| Error::git_msg(format!("failed to run git bundle create: {}", e)))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(Error::git_msg(format!(
+            "git bundle create failed: {}",
+            stderr.trim()
+        )));
+    }
+    Ok(())
+}
+
+/// List refs in a bundle file.
+fn bundle_list_heads(path: &str) -> Result<HashMap<String, String>> {
+    let output = Command::new("git")
+        .args(["bundle", "list-heads", path])
+        .output()
+        .map_err(|e| Error::git_msg(format!("failed to run git bundle list-heads: {}", e)))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(Error::git_msg(format!(
+            "git bundle list-heads failed: {}",
+            stderr.trim()
+        )));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut refs = HashMap::new();
+    for line in stdout.lines() {
+        let mut parts = line.splitn(2, ' ');
+        let sha = match parts.next() {
+            Some(s) if !s.is_empty() => s,
+            _ => continue,
+        };
+        let name = match parts.next() {
+            Some(s) => s,
+            None => continue,
+        };
+        if name == "HEAD" || name.ends_with("^{}") {
+            continue;
+        }
+        refs.insert(name.to_string(), sha.to_string());
+    }
+    Ok(refs)
+}
+
+/// Import refs from a bundle file (additive -- no deletes).
+fn bundle_import(repo_path: &Path, path: &str, refs: Option<&[String]>) -> Result<()> {
+    let bundle_refs = bundle_list_heads(path)?;
+
+    let refs_to_set: HashMap<String, String> = if let Some(filter) = refs {
+        let resolved = resolve_ref_names(filter, &bundle_refs);
+        bundle_refs
+            .into_iter()
+            .filter(|(k, _)| resolved.contains(k))
+            .collect()
+    } else {
+        bundle_refs
+    };
+
+    if refs_to_set.is_empty() {
+        return Ok(());
+    }
+
+    // Build refspecs for the specific refs we want
+    let refspecs: Vec<String> = refs_to_set.keys().map(|r| format!("+{}:{}", r, r)).collect();
+    let mut args = vec!["fetch".to_string(), path.to_string()];
+    args.extend(refspecs);
+
+    let output = Command::new("git")
+        .args(&args)
+        .current_dir(repo_path)
+        .output()
+        .map_err(|e| Error::git_msg(format!("failed to run git fetch from bundle: {}", e)))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(Error::git_msg(format!(
+            "git fetch from bundle failed: {}",
+            stderr.trim()
+        )));
     }
 
     Ok(())
 }
 
 // ---------------------------------------------------------------------------
+// Bundle diff helpers
+// ---------------------------------------------------------------------------
+
+/// Compute diff for exporting a bundle (all local refs are "add").
+fn diff_bundle_export(repo_path: &Path, refs: Option<&[String]>) -> Result<MirrorDiff> {
+    let local_refs = get_local_refs(repo_path)?;
+    let filtered: HashMap<String, String> = if let Some(filter) = refs {
+        let resolved = resolve_ref_names(filter, &local_refs);
+        local_refs
+            .into_iter()
+            .filter(|(k, _)| resolved.contains(k))
+            .collect()
+    } else {
+        local_refs
+    };
+
+    let add = filtered
+        .into_iter()
+        .map(|(ref_name, sha)| RefChange {
+            ref_name,
+            old_target: None,
+            new_target: Some(sha),
+        })
+        .collect();
+
+    Ok(MirrorDiff {
+        add,
+        update: vec![],
+        delete: vec![],
+    })
+}
+
+/// Compute diff for importing a bundle (additive -- no deletes).
+fn diff_bundle_import(
+    repo_path: &Path,
+    path: &str,
+    refs: Option<&[String]>,
+) -> Result<MirrorDiff> {
+    let bundle_refs = bundle_list_heads(path)?;
+    let filtered: HashMap<String, String> = if let Some(filter) = refs {
+        let resolved = resolve_ref_names(filter, &bundle_refs);
+        bundle_refs
+            .into_iter()
+            .filter(|(k, _)| resolved.contains(k))
+            .collect()
+    } else {
+        bundle_refs
+    };
+
+    let local_refs = get_local_refs(repo_path)?;
+    let mut diff = diff_refs(&filtered, &local_refs);
+    diff.delete.clear(); // additive: no deletes
+    Ok(diff)
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
-/// Push all local refs to `dest`, creating an exact mirror.
+/// Push refs to `dest` (or write a bundle file).
+///
+/// Without `opts.refs` this is a full mirror: remote-only refs are deleted.
+/// With `opts.refs` only the specified refs are pushed (no deletes).
 ///
 /// Supports local paths and remote URLs (SSH, HTTPS, git).
 /// Auto-creates a bare repository at local destinations.
 ///
 /// # Arguments
 /// * `repo_path` - Path to the local bare repository.
-/// * `dest` - Destination URL or local path.
-/// * `dry_run` - If true, compute diff but do not push.
-pub fn backup(repo_path: &Path, dest: &str, dry_run: bool) -> Result<MirrorDiff> {
+/// * `dest` - Destination URL or local path (or bundle file path).
+/// * `opts` - [`BackupOptions`] controlling dry-run, refs filter, and format.
+pub fn backup(repo_path: &Path, dest: &str, opts: &BackupOptions) -> Result<MirrorDiff> {
     reject_scp_url(dest)?;
+
+    let use_bundle = opts.format.as_deref() == Some("bundle") || is_bundle_path(dest);
+
+    if use_bundle {
+        let diff = diff_bundle_export(repo_path, opts.refs.as_deref())?;
+        if !opts.dry_run {
+            bundle_export(repo_path, dest, opts.refs.as_deref())?;
+        }
+        return Ok(diff);
+    }
+
     auto_create_bare_repo(dest)?;
+
+    if let Some(ref refs) = opts.refs {
+        let local_refs = get_local_refs(repo_path)?;
+        let remote_refs = get_remote_refs(repo_path, dest)?;
+        let ref_set = resolve_ref_names(refs, &local_refs);
+
+        let mut diff = diff_refs(&local_refs, &remote_refs);
+        diff.add.retain(|r| ref_set.contains(&r.ref_name));
+        diff.update.retain(|r| ref_set.contains(&r.ref_name));
+        diff.delete.clear(); // no deletes when using --ref
+
+        if !opts.dry_run && !diff.in_sync() {
+            targeted_push(repo_path, dest, &ref_set)?;
+        }
+        return Ok(diff);
+    }
 
     let local_refs = get_local_refs(repo_path)?;
     let remote_refs = get_remote_refs(repo_path, dest)?;
     let diff = diff_refs(&local_refs, &remote_refs);
 
-    if !dry_run && !diff.in_sync() {
+    if !opts.dry_run && !diff.in_sync() {
         mirror_push(repo_path, dest)?;
     }
 
     Ok(diff)
 }
 
-/// Fetch all refs from `src`, overwriting local state.
+/// Fetch refs from `src` (or import a bundle file).
+///
+/// Restore is **additive**: it adds and updates refs but never deletes
+/// local-only refs.
 ///
 /// Supports local paths and remote URLs (SSH, HTTPS, git).
 ///
 /// # Arguments
 /// * `repo_path` - Path to the local bare repository.
-/// * `src` - Source URL or local path.
-/// * `dry_run` - If true, compute diff but do not fetch.
-pub fn restore(repo_path: &Path, src: &str, dry_run: bool) -> Result<MirrorDiff> {
+/// * `src` - Source URL or local path (or bundle file path).
+/// * `opts` - [`RestoreOptions`] controlling dry-run, refs filter, and format.
+pub fn restore(repo_path: &Path, src: &str, opts: &RestoreOptions) -> Result<MirrorDiff> {
     reject_scp_url(src)?;
+
+    let use_bundle = opts.format.as_deref() == Some("bundle") || is_bundle_path(src);
+
+    if use_bundle {
+        let diff = diff_bundle_import(repo_path, src, opts.refs.as_deref())?;
+        if !opts.dry_run && !diff.in_sync() {
+            bundle_import(repo_path, src, opts.refs.as_deref())?;
+        }
+        return Ok(diff);
+    }
 
     let local_refs = get_local_refs(repo_path)?;
     let remote_refs = get_remote_refs(repo_path, src)?;
     // For restore, remote is source, local is destination
-    let diff = diff_refs(&remote_refs, &local_refs);
+    let mut diff = diff_refs(&remote_refs, &local_refs);
 
-    if !dry_run && !diff.in_sync() {
-        mirror_fetch(repo_path, src, &remote_refs)?;
+    if let Some(ref refs) = opts.refs {
+        let ref_set = resolve_ref_names(refs, &remote_refs);
+        diff.add.retain(|r| ref_set.contains(&r.ref_name));
+        diff.update.retain(|r| ref_set.contains(&r.ref_name));
+    }
+    diff.delete.clear(); // additive: never delete
+
+    if !opts.dry_run && !diff.in_sync() {
+        additive_fetch(repo_path, src, opts.refs.as_deref())?;
     }
 
     Ok(diff)

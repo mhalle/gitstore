@@ -14,32 +14,38 @@ struct GitStoreInner;
 
 namespace mirror {
 
-/// Push all local refs to @p dest, creating an exact mirror.
+/// Push local refs to @p dest, creating a mirror or bundle.
 ///
-/// Supports local paths and remote URLs (SSH, HTTPS, git).
-/// Auto-creates a bare repository at local destinations.
+/// Without refs filtering this is a full mirror: remote-only refs are
+/// deleted.  With ``opts.refs`` only the specified refs are pushed (no
+/// deletes).  If ``opts.format == "bundle"`` or @p dest ends in
+/// ``.bundle``, a git bundle file is written instead.
 ///
 /// @param inner  Shared inner state of the GitStore.
-/// @param dest   Destination URL or local path.
-/// @param dry_run If true, compute diff but do not push.
+/// @param dest   Destination URL, local path, or bundle file path.
+/// @param opts   BackupOptions (dry_run, refs filter, format).
 /// @return MirrorDiff describing what changed (or would change).
 /// @throws InvalidPathError for scp-style URLs.
 /// @throws GitError on transport failures.
 MirrorDiff backup(const std::shared_ptr<GitStoreInner>& inner,
-                  const std::string& dest, bool dry_run = false);
+                  const std::string& dest,
+                  const BackupOptions& opts = {});
 
-/// Fetch all refs from @p src, overwriting local state.
+/// Fetch refs from @p src additively (no deletes).
 ///
-/// Supports local paths and remote URLs (SSH, HTTPS, git).
+/// Restore is **additive**: it adds and updates refs but never deletes
+/// local-only refs.  If ``opts.format == "bundle"`` or @p src ends in
+/// ``.bundle``, refs are imported from a git bundle file.
 ///
 /// @param inner  Shared inner state of the GitStore.
-/// @param src    Source URL or local path.
-/// @param dry_run If true, compute diff but do not fetch.
+/// @param src    Source URL, local path, or bundle file path.
+/// @param opts   RestoreOptions (dry_run, refs filter, format).
 /// @return MirrorDiff describing what changed (or would change).
 /// @throws InvalidPathError for scp-style URLs.
 /// @throws GitError on transport failures.
 MirrorDiff restore(const std::shared_ptr<GitStoreInner>& inner,
-                   const std::string& src, bool dry_run = false);
+                   const std::string& src,
+                   const RestoreOptions& opts = {});
 
 } // namespace mirror
 

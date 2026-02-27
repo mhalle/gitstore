@@ -652,21 +652,25 @@ vost untar data.tar.gz                    # = archive_in --format tar
 
 ### backup
 
-Push all refs to a remote URL, creating an exact mirror. Remote-only refs are deleted.
+Push refs to a remote URL or write a bundle file. Without `--ref` this is a full mirror: remote-only refs are deleted.
 
 ```bash
 vost backup https://github.com/user/repo.git
 vost backup /path/to/other.git
-vost backup -n https://github.com/user/repo.git   # dry run
+vost backup -n https://github.com/user/repo.git    # dry run
+vost backup /tmp/backup.bundle                      # bundle file
+vost backup backup.bundle --ref main --ref v1.0     # only specific refs
 ```
 
 ### restore
 
-Fetch all refs from a remote URL, overwriting local state. Local-only refs are deleted.
+Fetch refs from a remote URL or import a bundle file. Restore is **additive**: refs are added and updated but local-only refs are never deleted.
 
 ```bash
 vost restore https://github.com/user/repo.git
-vost restore -n https://github.com/user/repo.git  # dry run
+vost restore -n https://github.com/user/repo.git   # dry run
+vost restore /tmp/backup.bundle                     # bundle file
+vost restore backup.bundle --ref main               # only specific refs
 ```
 
 HEAD (the current branch) is not restored; use `vost branch current -b NAME` afterwards if needed.
@@ -674,6 +678,8 @@ HEAD (the current branch) is not restored; use `vost branch current -b NAME` aft
 | Option | Description |
 |--------|-------------|
 | `-n`, `--dry-run` | Preview without transferring data. |
+| `--ref REF` | Ref to include (repeatable). Short names resolved to branches/tags. Omit for all refs. |
+| `--format bundle` | Force bundle format (auto-detected from `.bundle` extension). |
 | `--no-create` | Don't auto-create the repo (restore only). |
 
 ---

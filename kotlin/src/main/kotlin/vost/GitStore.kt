@@ -34,28 +34,43 @@ class GitStore private constructor(
     }
 
     /**
-     * Push all refs to url, creating an exact mirror (backup).
+     * Push refs to url (or write a bundle file).
      *
-     * @param url Destination URL (local path or remote).
+     * Without [refs] this is a full mirror: remote-only refs are deleted.
+     * With [refs] only the specified refs are pushed (no deletes).
+     *
+     * @param url Destination URL (local path or remote), or bundle file path.
      * @param dryRun If true, compute diff but don't push.
+     * @param refs Optional list of ref names to limit the backup to.
+     * @param format Optional format string; "bundle" forces bundle output.
      * @return MirrorDiff describing what changed (or would change).
      */
-    fun backup(url: String, dryRun: Boolean = false): MirrorDiff =
-        MirrorOps.backup(this, url, dryRun)
+    fun backup(
+        url: String,
+        dryRun: Boolean = false,
+        refs: List<String>? = null,
+        format: String? = null,
+    ): MirrorDiff = MirrorOps.backup(this, url, dryRun, refs, format)
 
     /**
-     * Fetch all refs from url, overwriting local state (restore).
+     * Fetch refs from url (or import a bundle file).
      *
-     * All branches, tags, and notes are restored, but HEAD (the current
-     * branch pointer) is not — use `store.branches.setCurrent("name")`
-     * afterwards if needed.
+     * Restore is **additive**: it adds and updates refs but never deletes
+     * local-only refs.  HEAD (the current branch pointer) is not changed —
+     * use `store.branches.setCurrent("name")` afterwards if needed.
      *
-     * @param url Source URL (local path or remote).
+     * @param url Source URL (local path or remote), or bundle file path.
      * @param dryRun If true, compute diff but don't fetch.
+     * @param refs Optional list of ref names to limit the restore to.
+     * @param format Optional format string; "bundle" forces bundle input.
      * @return MirrorDiff describing what changed (or would change).
      */
-    fun restore(url: String, dryRun: Boolean = false): MirrorDiff =
-        MirrorOps.restore(this, url, dryRun)
+    fun restore(
+        url: String,
+        dryRun: Boolean = false,
+        refs: List<String>? = null,
+        format: String? = null,
+    ): MirrorDiff = MirrorOps.restore(this, url, dryRun, refs, format)
 
     companion object {
         /**

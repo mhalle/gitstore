@@ -80,27 +80,30 @@ public:
 
     // -- Mirror -------------------------------------------------------------
 
-    /// Push all local refs to @p dest, creating an exact mirror.
+    /// Push local refs to @p dest, creating a mirror or bundle.
     ///
-    /// Supports local paths and remote URLs. Auto-creates a bare repo
-    /// at local destinations that don't yet exist.
+    /// Without refs filtering this is a full mirror: remote-only refs
+    /// are deleted.  With ``opts.refs`` only the specified refs are
+    /// pushed (no deletes).  Bundle format is auto-detected from
+    /// ``.bundle`` extension or forced via ``opts.format``.
     ///
-    /// @param dest    Destination URL or local path.
-    /// @param dry_run If true, compute diff but do not push.
+    /// @param dest  Destination URL, local path, or bundle file path.
+    /// @param opts  BackupOptions (dry_run, refs filter, format).
     /// @return MirrorDiff describing what changed (or would change).
-    MirrorDiff backup(const std::string& dest, bool dry_run = false);
+    MirrorDiff backup(const std::string& dest,
+                      const BackupOptions& opts = {});
 
-    /// Fetch all refs from @p src, overwriting local state.
+    /// Fetch refs from @p src additively (no deletes).
     ///
-    /// Supports local paths and remote URLs.  All branches, tags, and
-    /// notes are restored, but HEAD (the current branch pointer) is
-    /// not — use `store.branches().set_current("name")` afterwards
-    /// if needed.
+    /// Restore is **additive**: it adds and updates refs but never
+    /// deletes local-only refs.  Bundle format is auto-detected from
+    /// ``.bundle`` extension or forced via ``opts.format``.
     ///
-    /// @param src     Source URL or local path.
-    /// @param dry_run If true, compute diff but do not fetch.
+    /// @param src   Source URL, local path, or bundle file path.
+    /// @param opts  RestoreOptions (dry_run, refs filter, format).
     /// @return MirrorDiff describing what changed (or would change).
-    MirrorDiff restore(const std::string& src, bool dry_run = false);
+    MirrorDiff restore(const std::string& src,
+                       const RestoreOptions& opts = {});
 
     // -- Metadata -----------------------------------------------------------
 

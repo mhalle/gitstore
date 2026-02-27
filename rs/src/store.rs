@@ -5,7 +5,7 @@ use crate::error::{Error, Result};
 use crate::fs::Fs;
 use crate::notes::NoteDict;
 use crate::refdict::RefDict;
-use crate::types::{MirrorDiff, OpenOptions, Signature};
+use crate::types::{BackupOptions, MirrorDiff, OpenOptions, RestoreOptions, Signature};
 
 /// Internal state shared via `Arc`.
 pub(crate) struct GitStoreInner {
@@ -195,29 +195,31 @@ impl GitStore {
         &self.inner.signature
     }
 
-    /// Push all refs to `dest`, creating an exact mirror.
+    /// Push refs to `dest` (or write a bundle file).
     ///
-    /// Supports local paths and remote URLs (SSH, HTTPS, git).
+    /// Without `opts.refs` this is a full mirror: remote-only refs are deleted.
+    /// With `opts.refs` only the specified refs are pushed (no deletes).
+    ///
+    /// Supports local paths, remote URLs (SSH, HTTPS, git), and bundle files.
     /// Auto-creates a bare repository at local destinations.
     ///
     /// # Arguments
-    /// * `dest` - Destination URL or local path.
-    /// * `dry_run` - If true, compute diff but do not push.
-    pub fn backup(&self, dest: &str, dry_run: bool) -> Result<MirrorDiff> {
-        crate::mirror::backup(&self.inner.path, dest, dry_run)
+    /// * `dest` - Destination URL, local path, or bundle file path.
+    /// * `opts` - [`BackupOptions`] controlling dry-run, refs filter, and format.
+    pub fn backup(&self, dest: &str, opts: &BackupOptions) -> Result<MirrorDiff> {
+        crate::mirror::backup(&self.inner.path, dest, opts)
     }
 
-    /// Fetch all refs from `src`, overwriting local state.
+    /// Fetch refs from `src` (or import a bundle file).
     ///
-    /// Supports local paths and remote URLs (SSH, HTTPS, git).
-    /// All branches, tags, and notes are restored, but HEAD (the current
-    /// branch pointer) is not — use `store.branches().set_current("name")`
-    /// afterwards if needed.
+    /// Restore is **additive**: it adds and updates refs but never deletes
+    /// local-only refs. Supports local paths, remote URLs (SSH, HTTPS, git),
+    /// and bundle files.
     ///
     /// # Arguments
-    /// * `src` - Source URL or local path.
-    /// * `dry_run` - If true, compute diff but do not fetch.
-    pub fn restore(&self, src: &str, dry_run: bool) -> Result<MirrorDiff> {
-        crate::mirror::restore(&self.inner.path, src, dry_run)
+    /// * `src` - Source URL, local path, or bundle file path.
+    /// * `opts` - [`RestoreOptions`] controlling dry-run, refs filter, and format.
+    pub fn restore(&self, src: &str, opts: &RestoreOptions) -> Result<MirrorDiff> {
+        crate::mirror::restore(&self.inner.path, src, opts)
     }
 }

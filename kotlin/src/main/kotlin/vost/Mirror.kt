@@ -7,6 +7,7 @@ import org.eclipse.jgit.lib.Repository
 import org.eclipse.jgit.storage.file.FileRepositoryBuilder
 import org.eclipse.jgit.transport.*
 import java.io.File
+import java.io.FileOutputStream
 import java.util.concurrent.TimeUnit
 
 // ---------------------------------------------------------------------------
@@ -112,16 +113,53 @@ internal object MirrorOps {
     /**
      * Push all local refs to url, creating an exact mirror.
      *
+     * Without [refs] this is a full mirror: remote-only refs are deleted.
+     * With [refs] only the specified refs are pushed (no deletes).
+     *
      * @param store The GitStore to back up.
-     * @param url Destination URL (local path or remote URL).
+     * @param url Destination URL (local path or remote URL), or bundle file path.
      * @param dryRun If true, compute diff but don't push.
+     * @param refs Optional list of ref names to limit the backup to.
+     * @param format Optional format string; "bundle" forces bundle output.
      * @return MirrorDiff describing what changed (or would change).
      */
-    fun backup(store: GitStore, url: String, dryRun: Boolean = false): MirrorDiff {
+    fun backup(
+        store: GitStore,
+        url: String,
+        dryRun: Boolean = false,
+        refs: List<String>? = null,
+        format: String? = null,
+    ): MirrorDiff {
         val repo = store.repo
+        val useBundle = format == "bundle" || isBundlePath(url)
+
+        if (useBundle) {
+            val diff = diffBundleExport(repo, refs)
+            if (!dryRun) {
+                bundleExport(repo, url, refs)
+            }
+            return diff
+        }
 
         // Auto-create bare repo for local push targets
         autoCreateBareRepo(url)
+
+        if (refs != null) {
+            val localRefs = getLocalRefs(repo)
+            val remoteRefs = getRemoteRefs(repo, url)
+            val refSet = resolveRefNames(refs, localRefs.keys)
+            val fullDiff = diffRefs(localRefs, remoteRefs)
+            // Filter to only targeted refs, no deletes
+            val diff = MirrorDiff(
+                add = fullDiff.add.filter { it.refName in refSet },
+                update = fullDiff.update.filter { it.refName in refSet },
+                delete = emptyList(),
+            )
+            if (!dryRun && !diff.inSync) {
+                targetedPush(repo, url, localRefs, refSet)
+            }
+            return diff
+        }
 
         val localRefs = getLocalRefs(repo)
         val remoteRefs = getRemoteRefs(repo, url)
@@ -135,22 +173,54 @@ internal object MirrorOps {
     }
 
     /**
-     * Fetch all refs from url, overwriting local state.
+     * Fetch refs from url additively (no deletes).
+     *
+     * Restore is **additive**: it adds and updates refs but never deletes
+     * local-only refs.
      *
      * @param store The GitStore to restore into.
-     * @param url Source URL (local path or remote).
+     * @param url Source URL (local path or remote), or bundle file path.
      * @param dryRun If true, compute diff but don't fetch.
+     * @param refs Optional list of ref names to limit the restore to.
+     * @param format Optional format string; "bundle" forces bundle input.
      * @return MirrorDiff describing what changed (or would change).
      */
-    fun restore(store: GitStore, url: String, dryRun: Boolean = false): MirrorDiff {
+    fun restore(
+        store: GitStore,
+        url: String,
+        dryRun: Boolean = false,
+        refs: List<String>? = null,
+        format: String? = null,
+    ): MirrorDiff {
         val repo = store.repo
+        val useBundle = format == "bundle" || isBundlePath(url)
+
+        if (useBundle) {
+            val diff = diffBundleImport(repo, url, refs)
+            if (!dryRun) {
+                bundleImport(repo, url, refs)
+            }
+            return diff
+        }
+
         val localRefs = getLocalRefs(repo)
         val remoteRefs = getRemoteRefs(repo, url)
         // For restore, remote is source, local is destination
-        val diff = diffRefs(remoteRefs, localRefs)
+        var diff = diffRefs(remoteRefs, localRefs)
+
+        if (refs != null) {
+            val refSet = resolveRefNames(refs, remoteRefs.keys)
+            diff = MirrorDiff(
+                add = diff.add.filter { it.refName in refSet },
+                update = diff.update.filter { it.refName in refSet },
+                delete = emptyList(), // additive: never delete
+            )
+        } else {
+            diff = diff.copy(delete = emptyList()) // additive: never delete
+        }
 
         if (!dryRun && !diff.inSync) {
-            mirrorFetch(repo, url, remoteRefs, localRefs)
+            additiveFetch(repo, url, remoteRefs, refs)
         }
 
         return diff
@@ -285,7 +355,7 @@ internal object MirrorOps {
     }
 
     /**
-     * Fetch all remote refs, overwriting local state.
+     * Fetch all remote refs, overwriting local state (destructive — deletes stale).
      */
     private fun mirrorFetch(
         repo: Repository,
@@ -315,6 +385,214 @@ internal object MirrorOps {
                 refUpdate.delete()
             }
         }
+    }
+
+    /**
+     * Push only refs in [refFilter] to url (no deletes).
+     */
+    private fun targetedPush(
+        repo: Repository,
+        url: String,
+        localRefs: Map<String, String>,
+        refFilter: Set<String>,
+    ) {
+        val transport = Transport.open(repo, URIish(url))
+        try {
+            val commands = mutableListOf<RemoteRefUpdate>()
+            for (refName in refFilter) {
+                val sha = localRefs[refName] ?: continue
+                val oid = ObjectId.fromString(sha)
+                commands.add(
+                    RemoteRefUpdate(
+                        repo,
+                        null as String?,
+                        oid,
+                        refName,
+                        true,
+                        null,
+                        null,
+                    )
+                )
+            }
+            if (commands.isNotEmpty()) {
+                transport.push(NullProgressMonitor.INSTANCE, commands)
+            }
+        } finally {
+            transport.close()
+        }
+    }
+
+    /**
+     * Fetch refs from url additively (no deletes).
+     *
+     * If [refs] is given, only those refs are fetched.
+     */
+    private fun additiveFetch(
+        repo: Repository,
+        url: String,
+        remoteRefs: Map<String, String>,
+        refs: List<String>?,
+    ) {
+        val refsToFetch: Set<String> = if (refs != null) {
+            resolveRefNames(refs, remoteRefs.keys)
+        } else {
+            remoteRefs.keys.toSet()
+        }
+
+        val refSpecs = refsToFetch.filter { it in remoteRefs }.map { RefSpec("+$it:$it") }
+
+        if (refSpecs.isNotEmpty()) {
+            val transport = Transport.open(repo, URIish(url))
+            try {
+                transport.fetch(NullProgressMonitor.INSTANCE, refSpecs)
+            } finally {
+                transport.close()
+            }
+        }
+        // No deletes — additive
+    }
+
+    // ── Bundle helpers ──────────────────────────────────────────────────
+
+    /**
+     * Return true if [path] has a `.bundle` extension.
+     */
+    private fun isBundlePath(path: String): Boolean =
+        path.lowercase().endsWith(".bundle")
+
+    /**
+     * Resolve short ref names to full ref paths.
+     *
+     * Tries `refs/heads/`, `refs/tags/`, `refs/notes/` prefixes against
+     * [available].  Full paths (starting with `refs/`) pass through
+     * unchanged.  If no match is found the name is assumed to be a branch.
+     */
+    private fun resolveRefNames(names: List<String>, available: Set<String>): Set<String> {
+        val result = mutableSetOf<String>()
+        for (name in names) {
+            if (name.startsWith("refs/")) {
+                result.add(name)
+                continue
+            }
+            var found = false
+            for (prefix in listOf("refs/heads/", "refs/tags/", "refs/notes/")) {
+                val candidate = "$prefix$name"
+                if (candidate in available) {
+                    result.add(candidate)
+                    found = true
+                    break
+                }
+            }
+            if (!found) {
+                result.add("refs/heads/$name")
+            }
+        }
+        return result
+    }
+
+    /**
+     * Create a bundle file from local refs.
+     */
+    private fun bundleExport(repo: Repository, path: String, refs: List<String>?) {
+        val allRefs = getLocalRefs(repo)
+        val refsToExport: Set<String> = if (refs != null) {
+            resolveRefNames(refs, allRefs.keys)
+        } else {
+            allRefs.keys.toSet()
+        }
+
+        val writer = BundleWriter(repo)
+        for (refName in refsToExport) {
+            val sha = allRefs[refName] ?: continue
+            writer.include(refName, ObjectId.fromString(sha))
+        }
+        FileOutputStream(path).use { fos ->
+            writer.writeBundle(NullProgressMonitor.INSTANCE, fos)
+        }
+    }
+
+    /**
+     * Import refs from a bundle file (additive — no deletes).
+     */
+    private fun bundleImport(repo: Repository, path: String, refs: List<String>?) {
+        val bundleRefs = bundleListHeads(repo, path)
+        val refsToImport: Map<String, String> = if (refs != null) {
+            val resolved = resolveRefNames(refs, bundleRefs.keys)
+            bundleRefs.filterKeys { it in resolved }
+        } else {
+            bundleRefs
+        }
+
+        if (refsToImport.isEmpty()) return
+
+        val refSpecs = refsToImport.keys.map { RefSpec("+$it:$it") }
+        val uri = URIish(File(path).toURI().toString())
+        val transport = Transport.open(repo, uri)
+        try {
+            transport.fetch(NullProgressMonitor.INSTANCE, refSpecs)
+        } finally {
+            transport.close()
+        }
+    }
+
+    /**
+     * List refs in a bundle file.
+     */
+    private fun bundleListHeads(repo: Repository, path: String): Map<String, String> {
+        val uri = URIish(File(path).toURI().toString())
+        val transport = Transport.open(repo, uri)
+        val result = mutableMapOf<String, String>()
+        try {
+            val connection = transport.openFetch()
+            try {
+                for ((name, ref) in connection.refsMap) {
+                    if (name == Constants.HEAD) continue
+                    if (name.endsWith("^{}")) continue
+                    val oid = ref.objectId ?: continue
+                    result[name] = oid.name
+                }
+            } finally {
+                connection.close()
+            }
+        } finally {
+            transport.close()
+        }
+        return result
+    }
+
+    /**
+     * Compute diff for exporting a bundle (all refs are 'add').
+     */
+    private fun diffBundleExport(repo: Repository, refs: List<String>?): MirrorDiff {
+        val localRefs = getLocalRefs(repo)
+        val filtered = if (refs != null) {
+            val resolved = resolveRefNames(refs, localRefs.keys)
+            localRefs.filterKeys { it in resolved }
+        } else {
+            localRefs
+        }
+        return MirrorDiff(
+            add = filtered.map { (refName, sha) ->
+                RefChange(refName = refName, oldTarget = null, newTarget = sha)
+            },
+        )
+    }
+
+    /**
+     * Compute diff for importing a bundle (additive — no deletes).
+     */
+    private fun diffBundleImport(repo: Repository, path: String, refs: List<String>?): MirrorDiff {
+        val bundleRefs = bundleListHeads(repo, path)
+        val filtered = if (refs != null) {
+            val resolved = resolveRefNames(refs, bundleRefs.keys)
+            bundleRefs.filterKeys { it in resolved }
+        } else {
+            bundleRefs
+        }
+        val localRefs = getLocalRefs(repo)
+        val diff = diffRefs(filtered, localRefs)
+        // Additive: no deletes
+        return diff.copy(delete = emptyList())
     }
 
     /**

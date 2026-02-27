@@ -126,38 +126,58 @@ export class GitStore {
   /**
    * Push all refs to url, creating an exact mirror.
    *
-   * Remote-only refs are deleted.
+   * Remote-only refs are deleted (unless `refs` filtering is used).
+   * Supports HTTP URLs, local bare-repo paths, and `.bundle` files.
    *
-   * @param url - Remote repository URL (HTTPS or local path).
-   * @param opts.http - HTTP client (isomorphic-git compatible).
+   * @param url - Remote repository URL, local path, or bundle file path.
+   * @param opts.http - HTTP client (required for HTTP URLs only).
    * @param opts.dryRun - Compute diff without pushing.
    * @param opts.onAuth - Optional authentication callback.
+   * @param opts.refs - Only backup these refs (short names resolved automatically).
+   * @param opts.format - Force format: `'bundle'` for git bundle output.
    * @returns A MirrorDiff describing what changed (or would change).
    */
   async backup(
     url: string,
-    opts: { http: HttpClient; dryRun?: boolean; onAuth?: Function } = {} as any,
+    opts: {
+      http?: HttpClient;
+      dryRun?: boolean;
+      onAuth?: Function;
+      refs?: string[];
+      format?: string;
+    } = {},
   ): Promise<MirrorDiff> {
     const { backup } = await import('./mirror.js');
     return backup(this, url, opts);
   }
 
   /**
-   * Fetch all refs from url, overwriting local state.
+   * Fetch refs from url additively into the local store.
    *
-   * Local-only refs are deleted.  All branches, tags, and notes are
-   * restored, but HEAD (the current branch pointer) is not — use
+   * Local-only refs are preserved (not deleted).  All branches, tags,
+   * and notes from the source are merged in, but HEAD (the current
+   * branch pointer) is not changed — use
    * `store.branches.setCurrent("name")` afterwards if needed.
    *
-   * @param url - Remote repository URL (HTTPS or local path).
-   * @param opts.http - HTTP client (isomorphic-git compatible).
+   * Supports HTTP URLs, local bare-repo paths, and `.bundle` files.
+   *
+   * @param url - Remote repository URL, local path, or bundle file path.
+   * @param opts.http - HTTP client (required for HTTP URLs only).
    * @param opts.dryRun - Compute diff without fetching.
    * @param opts.onAuth - Optional authentication callback.
+   * @param opts.refs - Only restore these refs (short names resolved automatically).
+   * @param opts.format - Force format: `'bundle'` for git bundle input.
    * @returns A MirrorDiff describing what changed (or would change).
    */
   async restore(
     url: string,
-    opts: { http: HttpClient; dryRun?: boolean; onAuth?: Function } = {} as any,
+    opts: {
+      http?: HttpClient;
+      dryRun?: boolean;
+      onAuth?: Function;
+      refs?: string[];
+      format?: string;
+    } = {},
   ): Promise<MirrorDiff> {
     const { restore } = await import('./mirror.js');
     return restore(this, url, opts);
