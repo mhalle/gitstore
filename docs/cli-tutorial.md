@@ -759,9 +759,18 @@ Output: `Deployed to production`
 
 ### Note on the current branch
 
+When no target is given, `get`, `set`, and `delete` default to the current branch:
+
 ```bash
-vost note set-current "Latest build passed"
-vost note get-current
+vost note set "Latest build passed"
+vost note get                          # prints: Latest build passed
+```
+
+You can also use `:` or `main:` to be explicit:
+
+```bash
+vost note get :                        # current branch
+vost note set main: "Deployed"         # main branch
 ```
 
 ### Custom namespaces

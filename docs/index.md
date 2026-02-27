@@ -25,6 +25,7 @@ print(fs.read("hello.txt"))  # b'Hello, world!'
 
 - [Python API Reference](api.md) -- classes, methods, and data types
 - [CLI Reference](cli.md) -- the `vost` command-line tool
+- [CLI Tutorial](cli-tutorial.md) -- learn the CLI step by step
 - [Path Syntax](paths.md) -- how `ref:path` works across commands
 
 ## More

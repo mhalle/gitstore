@@ -145,7 +145,9 @@ export class GitStore {
   /**
    * Fetch all refs from url, overwriting local state.
    *
-   * Local-only refs are deleted.
+   * Local-only refs are deleted.  All branches, tags, and notes are
+   * restored, but HEAD (the current branch pointer) is not — use
+   * `store.branches.setCurrent("name")` afterwards if needed.
    *
    * @param url - Remote repository URL (HTTPS or local path).
    * @param opts.http - HTTP client (isomorphic-git compatible).

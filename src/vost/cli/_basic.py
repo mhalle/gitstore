@@ -432,6 +432,85 @@ def cat(ctx, paths, branch, ref, at_path, match_pattern, before, back):
 
 
 # ---------------------------------------------------------------------------
+# hash
+# ---------------------------------------------------------------------------
+
+def _parse_bare_as_ref(raw: str) -> RefPath:
+    """Parse a ref:path string, treating a bare string (no ``:``) as a ref."""
+    rp = _parse_ref_path(raw)
+    if rp.is_repo:
+        return rp
+    # No colon → treat as ref (branch/tag/hash), not a local path
+    # Parse ~N suffix
+    ref_part = raw
+    back = 0
+    tilde = ref_part.rfind("~")
+    if tilde >= 0:
+        suffix = ref_part[tilde + 1:]
+        if suffix.isdigit() and int(suffix) > 0:
+            back = int(suffix)
+            ref_part = ref_part[:tilde]
+        elif suffix.isdigit():
+            raise click.ClickException(
+                f"Invalid ancestor '~0' — use '{ref_part[:tilde]}:' instead"
+            )
+        else:
+            raise click.ClickException(
+                f"Invalid ancestor suffix '~{suffix}' — must be a positive integer"
+            )
+    return RefPath(ref=ref_part, back=back, path="")
+
+
+@main.command("hash")
+@_repo_option
+@click.argument("target", required=False, default=None)
+@_branch_option
+@_snapshot_options
+@click.pass_context
+def hash_cmd(ctx, target, branch, ref, at_path, match_pattern, before, back):
+    """Print the SHA hash of a commit, tree, or blob.
+
+    \b
+    TARGET is a ref, ref:path, or :path specification:
+        vost hash                     →  current branch commit hash
+        vost hash main                →  main branch commit hash
+        vost hash v1.0                →  tag commit hash
+        vost hash :config.json        →  blob hash on current branch
+        vost hash main:src/           →  tree hash of directory
+        vost hash ~3:                 →  commit hash 3 back
+    """
+    object_path = None
+    if target is not None:
+        rp = _parse_bare_as_ref(target)
+        if rp.ref and ref:
+            raise click.ClickException("Cannot specify both positional ref and --ref")
+        if rp.ref and branch is not None:
+            raise click.ClickException("Cannot use -b/--branch with explicit ref in target")
+        if rp.back and back:
+            raise click.ClickException("Cannot specify both positional ~N and --back")
+        if rp.ref:
+            ref = rp.ref
+        if rp.back:
+            back = rp.back
+        if rp.path:
+            object_path = _normalize_repo_path(rp.path)
+
+    store = _open_store(_require_repo(ctx))
+    branch = branch or _current_branch(store)
+    fs = _resolve_fs(store, branch, ref, at_path=at_path,
+                     match_pattern=match_pattern, before=before, back=back)
+
+    if object_path is not None:
+        try:
+            st = fs.stat(object_path)
+        except FileNotFoundError:
+            raise click.ClickException(f"Path not found: {object_path}")
+        click.echo(st.hash)
+    else:
+        click.echo(fs.commit_hash)
+
+
+# ---------------------------------------------------------------------------
 # rm
 # ---------------------------------------------------------------------------
 
@@ -682,36 +761,31 @@ def log(ctx, target, at_path, deprecated_at, match_pattern, before, branch, ref,
     """Show commit log, optionally filtered by path and/or message pattern.
 
     \b
-    An optional TARGET argument supports ref:path syntax:
-        vost log main:config.json   →  --ref main --path config.json
-        vost log main~3:            →  --ref main --back 3
-        vost log ~3:config.json     →  --back 3 --path config.json
+    An optional TARGET argument supports ref and ref:path syntax:
+        vost log main                →  --ref main
+        vost log main:config.json    →  --ref main --path config.json
+        vost log main~3:             →  --ref main --back 3
+        vost log ~3:config.json      →  --back 3 --path config.json
     """
     at_path = at_path or deprecated_at
 
     # Parse optional positional target
     if target is not None:
-        rp = _parse_ref_path(target)
-        if rp.is_repo:
-            if rp.ref and ref:
-                raise click.ClickException("Cannot specify both positional ref and --ref")
-            if rp.ref and branch is not None:
-                raise click.ClickException("Cannot use -b/--branch with explicit ref: in target")
-            if rp.back and back:
-                raise click.ClickException("Cannot specify both positional ~N and --back")
-            if rp.path and at_path:
-                raise click.ClickException("Cannot specify both positional path and --path")
-            if rp.ref:
-                ref = rp.ref
-            if rp.back:
-                back = rp.back
-            if rp.path:
-                at_path = rp.path
-        else:
-            # Not a repo path — treat the whole thing as a --path filter
-            if at_path:
-                raise click.ClickException("Cannot specify both positional path and --path")
-            at_path = target
+        rp = _parse_bare_as_ref(target)
+        if rp.ref and ref:
+            raise click.ClickException("Cannot specify both positional ref and --ref")
+        if rp.ref and branch is not None:
+            raise click.ClickException("Cannot use -b/--branch with explicit ref in target")
+        if rp.back and back:
+            raise click.ClickException("Cannot specify both positional ~N and --back")
+        if rp.path and at_path:
+            raise click.ClickException("Cannot specify both positional path and --path")
+        if rp.ref:
+            ref = rp.ref
+        if rp.back:
+            back = rp.back
+        if rp.path:
+            at_path = rp.path
 
     store = _open_store(_require_repo(ctx))
     branch = branch or _current_branch(store)
@@ -751,28 +825,29 @@ def diff(ctx, baseline, branch, ref, at_path, match_pattern, before, back, rever
     """Show files that differ between HEAD and another snapshot.
 
     \b
-    An optional BASELINE argument supports ref:path syntax:
-        vost diff ~3:     →  --back 3
-        vost diff dev:    →  --ref dev
+    An optional BASELINE argument supports ref and ref:path syntax:
+        vost diff dev                →  --ref dev
+        vost diff ~3:                →  --back 3
+        vost diff dev:               →  --ref dev
+        vost diff main~2:            →  --ref main --back 2
     """
     # Parse optional positional baseline
     if baseline is not None:
-        rp = _parse_ref_path(baseline)
-        if rp.is_repo:
-            if rp.ref and ref:
-                raise click.ClickException("Cannot specify both positional ref and --ref")
-            if rp.ref and branch is not None:
-                raise click.ClickException("Cannot use -b/--branch with explicit ref: in baseline")
-            if rp.back and back:
-                raise click.ClickException("Cannot specify both positional ~N and --back")
-            if rp.path and at_path:
-                raise click.ClickException("Cannot specify both positional path and --path")
-            if rp.ref:
-                ref = rp.ref
-            if rp.back:
-                back = rp.back
-            if rp.path:
-                at_path = rp.path
+        rp = _parse_bare_as_ref(baseline)
+        if rp.ref and ref:
+            raise click.ClickException("Cannot specify both positional ref and --ref")
+        if rp.ref and branch is not None:
+            raise click.ClickException("Cannot use -b/--branch with explicit ref in baseline")
+        if rp.back and back:
+            raise click.ClickException("Cannot specify both positional ~N and --back")
+        if rp.path and at_path:
+            raise click.ClickException("Cannot specify both positional path and --path")
+        if rp.ref:
+            ref = rp.ref
+        if rp.back:
+            back = rp.back
+        if rp.path:
+            at_path = rp.path
 
     store = _open_store(_require_repo(ctx))
     branch = branch or _current_branch(store)

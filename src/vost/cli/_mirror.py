@@ -85,6 +85,8 @@ def restore_cmd(ctx, url, dry_run, no_create):
     """Fetch all refs from a remote URL, overwriting local state.
 
     Force-overwrites diverged refs and deletes local-only refs.
+    HEAD (the current branch) is not restored; use
+    'vost branch current -b NAME' afterwards if needed.
     """
     from ..mirror import resolve_credentials
 

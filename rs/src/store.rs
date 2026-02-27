@@ -210,6 +210,9 @@ impl GitStore {
     /// Fetch all refs from `src`, overwriting local state.
     ///
     /// Supports local paths and remote URLs (SSH, HTTPS, git).
+    /// All branches, tags, and notes are restored, but HEAD (the current
+    /// branch pointer) is not — use `store.branches().set_current("name")`
+    /// afterwards if needed.
     ///
     /// # Arguments
     /// * `src` - Source URL or local path.

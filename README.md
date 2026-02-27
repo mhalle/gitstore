@@ -451,6 +451,7 @@ for commit_hash, text in ns.items():
 - [Documentation hub](https://github.com/mhalle/vost/blob/master/docs/index.md) -- quick start and navigation
 - [Python API Reference](https://github.com/mhalle/vost/blob/master/docs/api.md) -- classes, methods, and data types
 - [CLI Reference](https://github.com/mhalle/vost/blob/master/docs/cli.md) -- the `vost` command-line tool
+- [CLI Tutorial](https://github.com/mhalle/vost/blob/master/docs/cli-tutorial.md) -- learn the CLI step by step
 - [Path Syntax](https://github.com/mhalle/vost/blob/master/docs/paths.md) -- how `ref:path` works across commands
 - [GitHub Repository](https://github.com/mhalle/vost) -- source code, issues, and releases
 

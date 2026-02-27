@@ -377,7 +377,9 @@ class GitStore:
     def restore(self, url: str, *, dry_run: bool = False, progress: Callable | None = None) -> MirrorDiff:
         """Fetch all refs from *url*, overwriting local state.
 
-        Local-only refs are deleted.
+        Local-only refs are deleted.  All branches, tags, and notes are
+        restored, but HEAD (the current branch pointer) is not — use
+        ``store.branches.current = "name"`` afterwards if needed.
 
         Args:
             url: Remote repository URL (HTTPS, SSH, or local path).

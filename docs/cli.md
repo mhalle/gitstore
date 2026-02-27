@@ -12,6 +12,18 @@ Or pass `--repo`/`-r` per command. Use `--branch`/`-b` to target a branch (defau
 
 Pass `-v` before any command for status messages on stderr.
 
+### Command index
+
+| Category | Commands |
+|----------|----------|
+| [Repository Management](#repository-management) | [init](#init), [destroy](#destroy), [gc](#gc) |
+| [Everyday Commands](#everyday-commands) | [cp](#cp), [sync](#sync), [ls](#ls), [cat](#cat), [hash](#hash), [rm](#rm), [mv](#mv), [write](#write) |
+| [History](#history) | [log](#log), [diff](#diff), [cmp](#cmp), [undo](#undo), [redo](#redo), [reflog](#reflog) |
+| [Refs](#refs) | [branch](#branch), [tag](#tag), [note](#note) |
+| [Archives](#archives) | [archive_out / archive_in](#archive_out--archive_in), [zip / unzip / tar / untar](#zip--unzip--tar--untar) |
+| [Mirror](#mirror) | [backup](#backup), [restore](#restore) |
+| [Server](#server) | [serve](#serve), [gitserve](#gitserve), [mount](#mount) |
+
 ---
 
 ## Repo paths and the `:` prefix
@@ -34,6 +46,7 @@ Commands like `cp` and `sync` work with both local files and files inside the re
 
 - **`cp`, `sync`, `mv`** -- the `:` is how the command knows which arguments are repo paths and which are local paths. It is required.
 - **`ls`, `cat`, `rm`, `write`** -- arguments are always repo paths, so the `:` is optional. `vost cat file.txt` and `vost cat :file.txt` are equivalent. However, the `:` is required to use explicit ref syntax (`main:file.txt`).
+- **`hash`, `log`, `diff`** -- a bare string (no `:`) is treated as a **ref** (branch, tag, or commit hash), not a path. Use `:path` for repo paths: `vost hash main` = commit hash, `vost hash :file.txt` = blob hash.
 
 ### Direction detection in `cp`
 
@@ -59,6 +72,8 @@ vost cp file.txt main~1:       # ERROR -- cannot write to history
 For the full path syntax specification, see [Path Syntax](paths.md).
 
 ---
+
+## Repository Management
 
 ### init
 
@@ -138,13 +153,14 @@ vost cp --ref v1.0 :data ./local          # from tag/branch/hash
 | `--before` | Latest commit on or before this date (ISO 8601). |
 | `--back N` | Walk back N commits from tip. |
 | `-m`, `--message` | Commit message (supports [placeholders](#message-placeholders)). |
-| `--type` | `blob` (default) or `executable`. |
+| `--type` | `blob` or `executable` (default: auto-detect from disk permissions). |
 | `--follow-symlinks` | Dereference symlinks (disk→repo only). |
 | `-n`, `--dry-run` | Preview without writing. |
 | `--ignore-existing` | Skip existing destination files. |
 | `--delete` | Delete dest files not in source (rsync `--delete`). |
-| `--exclude PATTERN` | Exclude files matching pattern (gitignore syntax, repeatable; disk→repo only). |
-| `--exclude-from FILE` | Read exclude patterns from file (disk→repo only). |
+| `--no-glob` | Treat source paths as literal (no `*` or `?` expansion). |
+| `--exclude PATTERN` | Exclude files matching pattern (gitignore syntax, repeatable; disk→repo only; see [Exclude patterns](#exclude-patterns)). |
+| `--exclude-from FILE` | Read exclude patterns from file (disk→repo only; see [Exclude patterns](#exclude-patterns)). |
 | `--ignore-errors` | Skip failed files and continue. |
 | `-c`, `--checksum` | Compare files by checksum instead of mtime (slower, exact). |
 | `--no-create` | Don't auto-create the repo. |
@@ -193,8 +209,8 @@ vost sync :data ./local --ref v1.0        # from tag
 | `--back N` | Walk back N commits from tip. |
 | `-m`, `--message` | Commit message (supports [placeholders](#message-placeholders)). |
 | `-n`, `--dry-run` | Preview without writing. |
-| `--exclude PATTERN` | Exclude files matching pattern (gitignore syntax, repeatable; disk→repo only). |
-| `--exclude-from FILE` | Read exclude patterns from file (disk→repo only). |
+| `--exclude PATTERN` | Exclude files matching pattern (gitignore syntax, repeatable; disk→repo only; see [Exclude patterns](#exclude-patterns)). |
+| `--exclude-from FILE` | Read exclude patterns from file (disk→repo only; see [Exclude patterns](#exclude-patterns)). |
 | `--gitignore` | Read `.gitignore` files from source tree (disk→repo only). |
 | `--ignore-errors` | Skip failed files. |
 | `-c`, `--checksum` | Compare files by checksum instead of mtime (slower, exact). |
@@ -247,12 +263,37 @@ vost ls -R 'src/*'                        # glob + recursive expansion
 
 ### cat
 
-Print file contents to stdout.
+Print file contents to stdout. Accepts multiple paths — output is concatenated.
 
 ```bash
 vost cat file.txt
 vost cat file.txt --ref v1.0
+vost cat :a.txt :b.txt                    # concatenate multiple files
+vost cat main:f.txt dev:f.txt             # files from different refs
 ```
+
+| Option | Description |
+|--------|-------------|
+| `-b`, `--branch` | Branch (default: current branch). |
+| `--ref`, `--path`, `--match`, `--before`, `--back` | Snapshot filters. |
+
+### hash
+
+Print the SHA hash of a commit, tree, or blob. An optional `TARGET` argument is interpreted as a ref (bare string) or `ref:path` (with colon).
+
+```bash
+vost hash                                 # current branch commit hash
+vost hash main                            # main branch commit hash
+vost hash v1.0                            # tag commit hash
+vost hash ~3                              # 3 commits back
+vost hash :config.json                    # blob hash on current branch
+vost hash main:src/                       # tree hash of directory
+vost hash main~1:file.txt                 # blob hash from one commit back
+vost hash --match "deploy*"               # commit matching message
+vost hash :file.txt --path file.txt       # blob hash at commit that last changed file
+```
+
+A bare string (no `:`) is treated as a ref — branch name, tag name, or commit hash. With `:path`, the object hash at that path is printed instead of the commit hash.
 
 | Option | Description |
 |--------|-------------|
@@ -276,6 +317,7 @@ vost rm :a.txt :b.txt               # multiple
 |--------|-------------|
 | `-R`, `--recursive` | Remove directories recursively. |
 | `-n`, `--dry-run` | Show what would change without writing. |
+| `--no-glob` | Treat source paths as literal (no `*` or `?` expansion). |
 | `-b`, `--branch` | Branch (default: current branch). |
 | `-m`, `--message` | Commit message. |
 | `--tag` | Create a tag at the resulting commit. |
@@ -298,6 +340,7 @@ vost mv dev:old.txt dev:new.txt         # explicit branch
 |--------|-------------|
 | `-R`, `--recursive` | Move directories recursively. |
 | `-n`, `--dry-run` | Show what would change without writing. |
+| `--no-glob` | Treat source paths as literal (no `*` or `?` expansion). |
 | `-b`, `--branch` | Branch (default: current branch). |
 | `-m`, `--message` | Commit message. |
 | `--tag` | Create a tag at the resulting commit. |
@@ -334,14 +377,22 @@ tail -f /var/log/app.log | vost write log.txt --passthrough
 
 ### log
 
-Show commit history.
+Show commit history. An optional `TARGET` argument selects the ref to start from. A bare string (no `:`) is treated as a ref; with `:` it supports `ref:path` syntax.
 
 ```bash
 vost log
+vost log main                             # log of main branch
+vost log v1.0                             # log starting from tag
+vost log main~3                           # log from 3 commits back on main
 vost log --path file.txt
 vost log --match "deploy*"
 vost log --before 2024-06-01
 vost log --format json                    # or jsonl
+
+# ref:path syntax
+vost log main:config.json                 # --ref main --path config.json
+vost log main~3:                          # --ref main --back 3
+vost log ~3:config.json                   # --back 3 --path config.json
 ```
 
 | Option | Description |
@@ -358,7 +409,7 @@ Text format: `SHORT_HASH  ISO_TIMESTAMP  MESSAGE`
 
 ### diff
 
-Compare current branch HEAD against another snapshot. Output uses git-style `--name-status` format (old → new by default):
+Compare current branch HEAD against another snapshot. An optional `BASELINE` argument selects the comparison target. A bare string (no `:`) is treated as a ref; with `:` it supports `ref:path` syntax. Output uses git-style `--name-status` format (old → new by default):
 
 ```
 A  new-file.txt          # Added since baseline
@@ -367,10 +418,11 @@ D  removed-file.txt      # Deleted since baseline
 ```
 
 ```bash
-vost diff --back 3                    # what changed in last 3 commits
-vost diff --ref other-branch          # what's different vs another branch
+vost diff dev                         # what's different vs dev branch
+vost diff v1.0                        # what changed since tag
+vost diff ~3                          # what changed in last 3 commits
+vost diff main~2                      # vs 2 commits back on main
 vost diff --before 2025-01-01         # what changed since Jan 1
-vost diff --ref feature --back 2      # vs feature~2
 vost diff --back 3 --reverse          # swap direction (new → old)
 ```
 
@@ -406,10 +458,6 @@ vost -v cmp :old.txt :new.txt             # verbose — show hashes on stderr
 | `1` | Files differ. |
 
 With `-v` (verbose, before the subcommand), both hashes are printed to stderr.
-
----
-
-## History
 
 ### undo
 
@@ -466,7 +514,7 @@ vost branch set dev -f                    # overwrite existing
 vost branch set dev --empty               # empty orphan branch
 vost branch exists dev                    # exit 0 if exists, 1 if not
 vost branch current                       # show current branch
-vost branch current -b dev                # set current branch
+vost branch current -b dev                # set current branch to 'dev'
 vost branch delete dev
 vost branch hash main                     # tip commit SHA
 vost branch hash main --back 3            # 3 commits before tip
@@ -482,15 +530,21 @@ vost branch hash main --path config.json  # last commit that changed file
 | `--empty` | Create an empty root branch (no parent commit). Cannot combine with other options. |
 | `--ref`, `--path`, `--match`, `--before`, `--back` | Snapshot filters. |
 
+#### branch current
+
+With no arguments, prints the current branch name. With `-b NAME`, sets the current branch (HEAD) to NAME. Note: `-b` here means "set current branch to" rather than its usual "operate on branch" meaning.
+
 #### branch exists
 
 Exits with code 0 if the branch exists, 1 if it does not. No output.
 
 #### branch hash options
 
+The positional NAME selects the branch. `--ref` is accepted but has no effect — use `--path`, `--match`, `--before`, and `--back` to select a specific commit.
+
 | Option | Description |
 |--------|-------------|
-| `--ref`, `--path`, `--match`, `--before`, `--back` | Snapshot filters. |
+| `--path`, `--match`, `--before`, `--back` | Snapshot filters (see [Snapshot filters](#snapshot-filters)). |
 
 ### tag
 
@@ -523,17 +577,15 @@ Exits with code 0 if the tag exists, 1 if it does not. No output.
 Manage git notes on commits. Notes are stored in namespaces (default: `commits`).
 
 ```bash
-vost note get TARGET                      # get note (hash or branch/tag name)
-vost note set TARGET "text"               # set note (hash or branch/tag name)
-vost note delete TARGET                   # delete note (hash or branch/tag name)
+vost note get [TARGET]                    # get note (default: current branch)
+vost note set [TARGET] "text"             # set note (default: current branch)
+vost note delete [TARGET]                 # delete note (default: current branch)
 vost note list                            # list commits that have notes
-vost note get-current                     # get note for HEAD commit
-vost note set-current "text"              # set note for HEAD commit
 ```
 
 #### note get / set / delete
 
-Operate on a specific commit. TARGET can be a 40-char hex commit hash or a branch/tag name (resolved to its tip commit).
+Operate on a specific commit. TARGET can be a 40-char hex commit hash, a branch/tag name (resolved to its tip commit), `:` (current branch), or `ref:` (strip trailing colon). When TARGET is omitted, the current branch is used.
 
 | Option | Description |
 |--------|-------------|
@@ -542,14 +594,6 @@ Operate on a specific commit. TARGET can be a 40-char hex commit hash or a branc
 #### note list
 
 List all commit hashes that have notes in the given namespace.
-
-| Option | Description |
-|--------|-------------|
-| `-N`, `--namespace` | Notes namespace (default: `commits`). |
-
-#### note get-current / set-current
-
-Shorthand for operating on the current branch's HEAD commit.
 
 | Option | Description |
 |--------|-------------|
@@ -624,6 +668,8 @@ Fetch all refs from a remote URL, overwriting local state. Local-only refs are d
 vost restore https://github.com/user/repo.git
 vost restore -n https://github.com/user/repo.git  # dry run
 ```
+
+HEAD (the current branch) is not restored; use `vost branch current -b NAME` afterwards if needed.
 
 | Option | Description |
 |--------|-------------|
@@ -724,10 +770,6 @@ vost mount /tmp/mnt -f                       # run in foreground
 
 ## Appendix
 
-### The `:` prefix
-
-See [Repo paths and the `:` prefix](#repo-paths-and-the--prefix) near the top of this document for full details.
-
 ### Snapshot filters
 
 Several commands accept filters to select a specific commit:
@@ -740,7 +782,7 @@ Several commands accept filters to select a specific commit:
 | `--before DATE` | Latest commit on or before this date (ISO 8601). |
 | `--back N` | Walk back N commits from tip. |
 
-Filters combine with AND. Available on `cp`, `sync`, `ls`, `cat`, `log`, `diff`, `cmp`, `branch set`, `branch hash`, `tag set`, `archive_out`, `zip`, `tar`, `mount`.
+Filters combine with AND. Available on `cp`, `sync`, `ls`, `cat`, `log`, `diff`, `cmp`, `branch set`, `branch hash`, `tag set`, `archive_out`, `zip`, `tar`, `serve`, `mount`.
 
 ### Dry-run output format
 
@@ -761,7 +803,7 @@ The `-m` option accepts placeholders that expand at commit time:
 | `{update_count}` | Number of updates. |
 | `{delete_count}` | Number of deletions. |
 | `{total_count}` | Total changed files. |
-| `{op}` | Operation name (`cp`, `ar`, or empty). |
+| `{op}` | Operation name (`cp`, `sync`, `rm`, `mv`, `ar` (archive), or empty). |
 
 ```bash
 vost cp dir/ :dest -m "Deploy: {default}"
@@ -786,18 +828,18 @@ Multiple `--exclude` flags combine. `--exclude-from` reads one pattern per line 
 
 The `--gitignore` flag (sync only) automatically reads `.gitignore` files from the source directory tree. Each `.gitignore` applies to files in its own directory and below. When active, `.gitignore` files themselves are excluded from the repo.
 
-### Copy behavior table
+### Dry-run commands
 
-| Source | Result at `:dest` |
-|--------|-------------------|
-| `file.txt` | `dest/file.txt` |
-| `dir` | `dest/dir/...` (name preserved) |
-| `dir/` | `dest/...` (contents, including dotfiles) |
-| `'dir/*'` | `dest/matched...` (glob, no dotfiles) |
-| `'**/*.py'` | `dest/matched...` (recursive glob) |
-| `/base/./sub/dir` | `dest/sub/dir/...` (pivot) |
-| `/base/./sub/dir/` | `dest/sub/...` (pivot + contents) |
+Available on: `cp`, `sync`, `rm`, `mv`, `backup`, `restore`.
+
+### Tag-on-commit commands
+
+The `--tag` and `--force-tag` options create a tag at the resulting commit. Available on: `cp`, `sync`, `rm`, `mv`, `write`, `archive_in`, `unzip`, `untar`.
+
+### Copy behavior
+
+See [Copy behavior](#copy-behavior) in the `cp` section.
 
 ---
 
-See also: [Path Syntax](paths.md) | [Python API Reference](api.md) | [README](../README.md)
+See also: [Path Syntax](paths.md) | [Python API Reference](api.md) | [CLI Tutorial](cli-tutorial.md) | [README](../README.md)

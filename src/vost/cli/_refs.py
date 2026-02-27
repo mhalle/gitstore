@@ -109,9 +109,15 @@ def branch_delete(ctx, name):
 @branch.command("hash")
 @_repo_option
 @click.argument("name")
-@_snapshot_options
+@click.option("--back", type=int, default=0, help="Walk back N commits.")
+@click.option("--before", "before", default=None,
+              help="Use latest commit on or before this date (ISO 8601).")
+@click.option("--match", "match_pattern", default=None,
+              help="Use latest commit matching this message pattern (* and ?).")
+@click.option("--path", "at_path", default=None,
+              help="Use latest commit that changed this path.")
 @click.pass_context
-def branch_hash(ctx, name, ref, at_path, match_pattern, before, back):
+def branch_hash(ctx, name, at_path, match_pattern, before, back):
     """Print the commit hash of branch NAME."""
     store = _open_store(_require_repo(ctx))
     try:

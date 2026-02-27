@@ -14,6 +14,20 @@ from ._helpers import (
 )
 
 
+def _resolve_note_target(store, target):
+    """Resolve a note target string to a ref name for NoteNamespace lookup.
+
+    - None or ":" → current branch name
+    - "main:" → "main" (strip trailing colon)
+    - anything else → passed through unchanged (hash, branch, tag)
+    """
+    if target is None or target == ":":
+        return _current_branch(store)
+    if target.endswith(":"):
+        return target[:-1]
+    return target
+
+
 @main.group()
 def note():
     """Manage git notes on commits."""
@@ -21,18 +35,24 @@ def note():
 
 @note.command("get")
 @_repo_option
-@click.argument("target")
+@click.argument("target", required=False, default=None)
 @click.option("-N", "--namespace", default="commits",
               help="Notes namespace (default: commits).")
 @click.pass_context
 def note_get(ctx, target, namespace):
-    """Get the note for a commit hash or ref name (branch/tag)."""
+    """Get the note for a commit hash or ref name (branch/tag).
+
+    \b
+    Without TARGET, uses the current branch.
+    TARGET can also be ":" (current branch) or "main:" (strip trailing colon).
+    """
     store = _open_store(_require_repo(ctx))
+    resolved = _resolve_note_target(store, target)
     ns = store.notes[namespace]
     try:
-        text = ns[target]
+        text = ns[resolved]
     except KeyError:
-        raise click.ClickException(f"No note for {target} in namespace '{namespace}'")
+        raise click.ClickException(f"No note for {resolved} in namespace '{namespace}'")
     except (TypeError, ValueError) as e:
         raise click.ClickException(str(e))
     click.echo(text, nl=False)
@@ -40,39 +60,59 @@ def note_get(ctx, target, namespace):
 
 @note.command("set")
 @_repo_option
-@click.argument("target")
-@click.argument("text")
+@click.argument("args", nargs=-1, required=True)
 @click.option("-N", "--namespace", default="commits",
               help="Notes namespace (default: commits).")
 @click.pass_context
-def note_set(ctx, target, text, namespace):
-    """Set the note for a commit hash or ref name (branch/tag)."""
+def note_set(ctx, args, namespace):
+    """Set the note for a commit hash or ref name (branch/tag).
+
+    \b
+    Usage:
+        vost note set TEXT                  set note for current branch
+        vost note set TARGET TEXT           set note for TARGET
+        vost note set : TEXT                set note for current branch (explicit)
+        vost note set main: TEXT            set note for main branch
+    """
+    if len(args) == 1:
+        target, text = None, args[0]
+    elif len(args) == 2:
+        target, text = args
+    else:
+        raise click.ClickException("Usage: vost note set [TARGET] TEXT")
     store = _open_store(_require_repo(ctx))
+    resolved = _resolve_note_target(store, target)
     ns = store.notes[namespace]
     try:
-        ns[target] = text
+        ns[resolved] = text
     except (TypeError, ValueError) as e:
         raise click.ClickException(str(e))
-    _status(ctx, f"Note set for {target}")
+    _status(ctx, f"Note set for {resolved}")
 
 
 @note.command("delete")
 @_repo_option
-@click.argument("target")
+@click.argument("target", required=False, default=None)
 @click.option("-N", "--namespace", default="commits",
               help="Notes namespace (default: commits).")
 @click.pass_context
 def note_delete(ctx, target, namespace):
-    """Delete the note for a commit hash or ref name (branch/tag)."""
+    """Delete the note for a commit hash or ref name (branch/tag).
+
+    \b
+    Without TARGET, uses the current branch.
+    TARGET can also be ":" (current branch) or "main:" (strip trailing colon).
+    """
     store = _open_store(_require_repo(ctx))
+    resolved = _resolve_note_target(store, target)
     ns = store.notes[namespace]
     try:
-        del ns[target]
+        del ns[resolved]
     except KeyError:
-        raise click.ClickException(f"No note for {target} in namespace '{namespace}'")
+        raise click.ClickException(f"No note for {resolved} in namespace '{namespace}'")
     except (TypeError, ValueError) as e:
         raise click.ClickException(str(e))
-    _status(ctx, f"Note deleted for {target}")
+    _status(ctx, f"Note deleted for {resolved}")
 
 
 @note.command("list")
@@ -86,48 +126,3 @@ def note_list(ctx, namespace):
     ns = store.notes[namespace]
     for h in sorted(ns):
         click.echo(h)
-
-
-@note.command("get-current")
-@_repo_option
-@click.option("-N", "--namespace", default="commits",
-              help="Notes namespace (default: commits).")
-@click.pass_context
-def note_get_current(ctx, namespace):
-    """Get the note for the current branch's HEAD commit."""
-    store = _open_store(_require_repo(ctx))
-    branch = _current_branch(store)
-    try:
-        fs = store.branches[branch]
-    except KeyError:
-        raise click.ClickException(f"Branch not found: {branch}")
-    ns = store.notes[namespace]
-    try:
-        text = ns[fs.commit_hash]
-    except KeyError:
-        raise click.ClickException(
-            f"No note for HEAD ({fs.commit_hash[:7]}) in namespace '{namespace}'"
-        )
-    click.echo(text, nl=False)
-
-
-@note.command("set-current")
-@_repo_option
-@click.argument("text")
-@click.option("-N", "--namespace", default="commits",
-              help="Notes namespace (default: commits).")
-@click.pass_context
-def note_set_current(ctx, text, namespace):
-    """Set the note for the current branch's HEAD commit."""
-    store = _open_store(_require_repo(ctx))
-    branch = _current_branch(store)
-    try:
-        fs = store.branches[branch]
-    except KeyError:
-        raise click.ClickException(f"Branch not found: {branch}")
-    ns = store.notes[namespace]
-    try:
-        ns[fs.commit_hash] = text
-    except (TypeError, ValueError) as e:
-        raise click.ClickException(str(e))
-    _status(ctx, f"Note set for HEAD ({fs.commit_hash[:7]})")

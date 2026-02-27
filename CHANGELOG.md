@@ -4,6 +4,23 @@ All notable changes to vost are documented in this file.
 
 ## Unreleased
 
+## v0.69.0 (2026-02-27)
+
+**Added (CLI):**
+
+- `hash` command: print SHA hash of a commit, tree, or blob (`vost hash`, `vost hash main`, `vost hash :file.txt`)
+- `log` and `diff` accept bare-ref positional syntax (`vost log main`, `vost diff dev`, `vost diff ~3`)
+- `note get`, `note set`, `note delete` default to the current branch when no target is given
+- `note get/set/delete` accept `:` (current branch) and `ref:` (trailing colon stripped) target syntax
+
+**Changed (CLI):**
+
+- Remove `note get-current` / `note set-current` commands — use `note get` / `note set` without a target instead
+
+**Docs:**
+
+- Rewrite CLI tutorial: add introduction, restructure section order, move cross-cutting concepts earlier (`:` syntax, commit messages, globs, dry-run, JSON output), add sections for hashes and `/./` pivot syntax, expand install options
+
 ## v0.68.4 / TS v0.9.4 / Kotlin v0.9.6 (2026-02-27)
 
 **Fixed (Python, TypeScript, Kotlin):**

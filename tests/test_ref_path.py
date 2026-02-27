@@ -5,6 +5,7 @@ import click
 
 from vost.cli import main
 from vost.cli._helpers import RefPath, _parse_ref_path
+from vost.cli._basic import _parse_bare_as_ref
 from vost.repo import _validate_ref_name
 
 
@@ -832,3 +833,502 @@ class TestMv:
         assert r.output == "hello world\n"
         r = runner.invoke(main, ["cat", "--repo", repo_with_files, "~1:moved.txt"])
         assert r.exit_code != 0
+
+
+# ---------------------------------------------------------------------------
+# _parse_bare_as_ref unit tests
+# ---------------------------------------------------------------------------
+
+class TestParseBareAsRef:
+    """Tests for _parse_bare_as_ref() — bare strings treated as refs."""
+
+    def test_bare_branch_name(self):
+        rp = _parse_bare_as_ref("main")
+        assert rp == RefPath(ref="main", back=0, path="")
+
+    def test_bare_tag_name(self):
+        rp = _parse_bare_as_ref("v1.0")
+        assert rp == RefPath(ref="v1.0", back=0, path="")
+
+    def test_bare_hex_hash(self):
+        rp = _parse_bare_as_ref("abc123")
+        assert rp == RefPath(ref="abc123", back=0, path="")
+
+    def test_bare_40_char_hash(self):
+        h = "a" * 40
+        rp = _parse_bare_as_ref(h)
+        assert rp == RefPath(ref=h, back=0, path="")
+
+    def test_bare_with_tilde(self):
+        rp = _parse_bare_as_ref("main~3")
+        assert rp == RefPath(ref="main", back=3, path="")
+
+    def test_bare_tilde_only(self):
+        """~3 without ref = current branch, 3 back."""
+        rp = _parse_bare_as_ref("~3")
+        assert rp == RefPath(ref="", back=3, path="")
+
+    def test_bare_tilde_zero_error(self):
+        with pytest.raises(click.ClickException, match="~0"):
+            _parse_bare_as_ref("main~0")
+
+    def test_bare_tilde_non_numeric_error(self):
+        with pytest.raises(click.ClickException, match="must be a positive integer"):
+            _parse_bare_as_ref("main~abc")
+
+    def test_colon_prefix_passes_through(self):
+        """Colon-prefixed paths still work as repo paths."""
+        rp = _parse_bare_as_ref(":file.txt")
+        assert rp == RefPath(ref="", back=0, path="file.txt")
+
+    def test_ref_colon_path_passes_through(self):
+        rp = _parse_bare_as_ref("main:file.txt")
+        assert rp == RefPath(ref="main", back=0, path="file.txt")
+
+    def test_ref_tilde_colon_path(self):
+        rp = _parse_bare_as_ref("main~2:file.txt")
+        assert rp == RefPath(ref="main", back=2, path="file.txt")
+
+    def test_colon_only(self):
+        rp = _parse_bare_as_ref(":")
+        assert rp == RefPath(ref="", back=0, path="")
+
+    def test_tilde_colon_empty(self):
+        rp = _parse_bare_as_ref("~5:")
+        assert rp == RefPath(ref="", back=5, path="")
+
+    def test_slashed_ref_name(self):
+        """feature/thing is treated as a ref, not a local path."""
+        rp = _parse_bare_as_ref("feature/thing")
+        # _parse_ref_path sees / before : and returns local; but
+        # _parse_bare_as_ref overrides to ref
+        assert rp == RefPath(ref="feature/thing", back=0, path="")
+
+    def test_dotted_tag_name(self):
+        rp = _parse_bare_as_ref("release-2.1.0")
+        assert rp == RefPath(ref="release-2.1.0", back=0, path="")
+
+
+# ---------------------------------------------------------------------------
+# hash command tests
+# ---------------------------------------------------------------------------
+
+class TestHashCommand:
+    """Tests for `vost hash`."""
+
+    def test_no_args_commit_hash(self, runner, repo_with_files):
+        """hash with no args prints current branch commit hash."""
+        from vost.repo import GitStore
+        store = GitStore.open(repo_with_files)
+        expected = store.branches["main"].commit_hash
+        r = runner.invoke(main, ["hash", "--repo", repo_with_files])
+        assert r.exit_code == 0, r.output
+        assert r.output.strip() == expected
+
+    def test_bare_branch_name(self, runner, repo_with_files):
+        """hash main prints main's commit hash."""
+        from vost.repo import GitStore
+        store = GitStore.open(repo_with_files)
+        expected = store.branches["main"].commit_hash
+        r = runner.invoke(main, ["hash", "--repo", repo_with_files, "main"])
+        assert r.exit_code == 0, r.output
+        assert r.output.strip() == expected
+
+    def test_bare_tag(self, runner, repo_with_files):
+        """hash v1 prints tag's commit hash."""
+        from vost.repo import GitStore
+        store = GitStore.open(repo_with_files)
+        expected = store.branches["main"].commit_hash
+        runner.invoke(main, ["tag", "--repo", repo_with_files, "set", "v1"])
+        r = runner.invoke(main, ["hash", "--repo", repo_with_files, "v1"])
+        assert r.exit_code == 0, r.output
+        assert r.output.strip() == expected
+
+    def test_colon_path_blob_hash(self, runner, repo_with_files):
+        """hash :hello.txt prints the blob hash."""
+        from vost.repo import GitStore
+        store = GitStore.open(repo_with_files)
+        expected = store.branches["main"].stat("hello.txt").hash
+        r = runner.invoke(main, ["hash", "--repo", repo_with_files, ":hello.txt"])
+        assert r.exit_code == 0, r.output
+        assert r.output.strip() == expected
+
+    def test_ref_colon_path_blob_hash(self, runner, repo_with_files):
+        """hash main:hello.txt prints the blob hash on main."""
+        from vost.repo import GitStore
+        store = GitStore.open(repo_with_files)
+        expected = store.branches["main"].stat("hello.txt").hash
+        r = runner.invoke(main, ["hash", "--repo", repo_with_files, "main:hello.txt"])
+        assert r.exit_code == 0, r.output
+        assert r.output.strip() == expected
+
+    def test_colon_dir_tree_hash(self, runner, repo_with_files):
+        """hash :data prints the tree hash of a directory."""
+        from vost.repo import GitStore
+        store = GitStore.open(repo_with_files)
+        expected = store.branches["main"].stat("data").hash
+        r = runner.invoke(main, ["hash", "--repo", repo_with_files, ":data"])
+        assert r.exit_code == 0, r.output
+        assert r.output.strip() == expected
+
+    def test_hash_is_40_hex(self, runner, repo_with_files):
+        """All hashes are 40-char hex strings."""
+        import re
+        r = runner.invoke(main, ["hash", "--repo", repo_with_files])
+        assert r.exit_code == 0
+        assert re.fullmatch(r"[0-9a-f]{40}\n", r.output)
+
+    def test_blob_hash_is_40_hex(self, runner, repo_with_files):
+        import re
+        r = runner.invoke(main, ["hash", "--repo", repo_with_files, ":hello.txt"])
+        assert r.exit_code == 0
+        assert re.fullmatch(r"[0-9a-f]{40}\n", r.output)
+
+    def test_back_option(self, runner, repo_with_files, tmp_path):
+        """hash --back 1 prints the parent commit hash."""
+        from vost.repo import GitStore
+        store = GitStore.open(repo_with_files)
+        expected = store.branches["main"].parent.commit_hash
+        r = runner.invoke(main, ["hash", "--repo", repo_with_files, "--back", "1"])
+        assert r.exit_code == 0, r.output
+        assert r.output.strip() == expected
+
+    def test_tilde_ancestor(self, runner, repo_with_files):
+        """hash ~1: prints the parent commit hash."""
+        from vost.repo import GitStore
+        store = GitStore.open(repo_with_files)
+        expected = store.branches["main"].parent.commit_hash
+        r = runner.invoke(main, ["hash", "--repo", repo_with_files, "~1:"])
+        assert r.exit_code == 0, r.output
+        assert r.output.strip() == expected
+
+    def test_bare_tilde_ancestor(self, runner, repo_with_files):
+        """hash ~1 (no colon) prints the parent commit hash."""
+        from vost.repo import GitStore
+        store = GitStore.open(repo_with_files)
+        expected = store.branches["main"].parent.commit_hash
+        r = runner.invoke(main, ["hash", "--repo", repo_with_files, "~1"])
+        assert r.exit_code == 0, r.output
+        assert r.output.strip() == expected
+
+    def test_ref_tilde_colon_path(self, runner, repo_with_files, tmp_path):
+        """hash main~1:hello.txt gets blob hash from one commit back."""
+        from vost.repo import GitStore
+        store = GitStore.open(repo_with_files)
+        fs_parent = store.branches["main"].parent
+        expected = fs_parent.stat("hello.txt").hash
+        r = runner.invoke(main, ["hash", "--repo", repo_with_files, "main~1:hello.txt"])
+        assert r.exit_code == 0, r.output
+        assert r.output.strip() == expected
+
+    def test_nonexistent_path_error(self, runner, repo_with_files):
+        """hash :nonexistent prints error."""
+        r = runner.invoke(main, ["hash", "--repo", repo_with_files, ":nonexistent.txt"])
+        assert r.exit_code != 0
+        assert "not found" in r.output.lower()
+
+    def test_nonexistent_ref_error(self, runner, repo_with_files):
+        """hash nosuchbranch prints error."""
+        r = runner.invoke(main, ["hash", "--repo", repo_with_files, "nosuchbranch"])
+        assert r.exit_code != 0
+
+    def test_conflict_positional_ref_and_flag_ref(self, runner, repo_with_files):
+        """hash main --ref main is an error."""
+        r = runner.invoke(main, [
+            "hash", "--repo", repo_with_files, "main:", "--ref", "main"
+        ])
+        assert r.exit_code != 0
+        assert "positional ref" in r.output or "Cannot specify" in r.output
+
+    def test_conflict_positional_ref_and_branch(self, runner, repo_with_files):
+        """hash main -b main is an error."""
+        r = runner.invoke(main, [
+            "hash", "--repo", repo_with_files, "main", "-b", "main"
+        ])
+        assert r.exit_code != 0
+
+    def test_conflict_tilde_and_back(self, runner, repo_with_files):
+        """hash ~1 --back 1 is an error."""
+        r = runner.invoke(main, [
+            "hash", "--repo", repo_with_files, "~1", "--back", "1"
+        ])
+        assert r.exit_code != 0
+
+    def test_path_filter_with_object_path(self, runner, repo_with_files):
+        """hash :hello.txt --path hello.txt combines snapshot filter + object path."""
+        r = runner.invoke(main, [
+            "hash", "--repo", repo_with_files, ":hello.txt", "--path", "hello.txt"
+        ])
+        assert r.exit_code == 0, r.output
+        # Should print the blob hash (--path selects snapshot, :path selects object)
+
+    def test_same_content_same_hash(self, runner, initialized_repo, tmp_path):
+        """Two files with identical content have the same blob hash."""
+        f = tmp_path / "a.txt"
+        f.write_text("identical")
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":a.txt"])
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":b.txt"])
+        r1 = runner.invoke(main, ["hash", "--repo", initialized_repo, ":a.txt"])
+        r2 = runner.invoke(main, ["hash", "--repo", initialized_repo, ":b.txt"])
+        assert r1.exit_code == 0
+        assert r2.exit_code == 0
+        assert r1.output.strip() == r2.output.strip()
+
+    def test_different_content_different_hash(self, runner, repo_with_files):
+        """hello.txt and data/data.bin have different hashes."""
+        r1 = runner.invoke(main, ["hash", "--repo", repo_with_files, ":hello.txt"])
+        r2 = runner.invoke(main, ["hash", "--repo", repo_with_files, ":data/data.bin"])
+        assert r1.exit_code == 0
+        assert r2.exit_code == 0
+        assert r1.output.strip() != r2.output.strip()
+
+    def test_commit_hash_differs_from_blob_hash(self, runner, repo_with_files):
+        """Commit hash and blob hash are different."""
+        r_commit = runner.invoke(main, ["hash", "--repo", repo_with_files])
+        r_blob = runner.invoke(main, ["hash", "--repo", repo_with_files, ":hello.txt"])
+        assert r_commit.exit_code == 0
+        assert r_blob.exit_code == 0
+        assert r_commit.output.strip() != r_blob.output.strip()
+
+    def test_branch_option_selects_branch(self, runner, repo_with_files):
+        """hash -b dev uses dev branch."""
+        runner.invoke(main, ["branch", "--repo", repo_with_files, "set", "dev"])
+        runner.invoke(main, [
+            "write", "--repo", repo_with_files, "-b", "dev", ":dev-only.txt"
+        ], input="dev content")
+        # dev has dev-only.txt, main does not
+        r = runner.invoke(main, ["hash", "--repo", repo_with_files, "-b", "dev", ":dev-only.txt"])
+        assert r.exit_code == 0
+        r = runner.invoke(main, ["hash", "--repo", repo_with_files, ":dev-only.txt"])
+        assert r.exit_code != 0  # not on main
+
+    def test_match_filter(self, runner, initialized_repo, tmp_path):
+        """hash --match selects the matching commit."""
+        f = tmp_path / "a.txt"
+        f.write_text("v1")
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":a.txt", "-m", "deploy v1"])
+        r1 = runner.invoke(main, ["hash", "--repo", initialized_repo])
+        f.write_text("v2")
+        runner.invoke(main, ["cp", "--repo", initialized_repo, str(f), ":a.txt", "-m", "fix bug"])
+        # --match "deploy*" should give us the first commit, not the latest
+        r2 = runner.invoke(main, ["hash", "--repo", initialized_repo, "--match", "deploy*"])
+        assert r2.exit_code == 0
+        assert r2.output.strip() == r1.output.strip()
+
+
+# ---------------------------------------------------------------------------
+# log bare-string tests
+# ---------------------------------------------------------------------------
+
+class TestLogBareString:
+    """Tests for `vost log` with bare string = ref (not path)."""
+
+    def test_bare_branch_name(self, runner, repo_with_files):
+        """log main shows main's log."""
+        r = runner.invoke(main, ["log", "--repo", repo_with_files, "main"])
+        assert r.exit_code == 0, r.output
+        lines = r.output.strip().split("\n")
+        assert len(lines) >= 2  # init + at least one write
+
+    def test_bare_branch_same_as_ref_flag(self, runner, repo_with_files):
+        """log main == log --ref main."""
+        r1 = runner.invoke(main, ["log", "--repo", repo_with_files, "main"])
+        r2 = runner.invoke(main, ["log", "--repo", repo_with_files, "--ref", "main"])
+        assert r1.exit_code == 0
+        assert r2.exit_code == 0
+        assert r1.output == r2.output
+
+    def test_bare_tilde(self, runner, repo_with_files, tmp_path):
+        """log ~1 starts from one commit back."""
+        f = tmp_path / "a.txt"
+        f.write_text("v1")
+        runner.invoke(main, ["cp", "--repo", repo_with_files, str(f), ":a.txt", "-m", "add a"])
+        r_full = runner.invoke(main, ["log", "--repo", repo_with_files])
+        r_back = runner.invoke(main, ["log", "--repo", repo_with_files, "~1"])
+        assert r_back.exit_code == 0, r_back.output
+        full_lines = r_full.output.strip().split("\n")
+        back_lines = r_back.output.strip().split("\n")
+        assert len(back_lines) == len(full_lines) - 1
+
+    def test_bare_branch_tilde(self, runner, repo_with_files, tmp_path):
+        """log main~1 starts from one commit back on main."""
+        f = tmp_path / "a.txt"
+        f.write_text("v1")
+        runner.invoke(main, ["cp", "--repo", repo_with_files, str(f), ":a.txt", "-m", "add a"])
+        r_back = runner.invoke(main, ["log", "--repo", repo_with_files, "main~1"])
+        assert r_back.exit_code == 0, r_back.output
+        assert "add a" not in r_back.output
+
+    def test_bare_nonexistent_ref_error(self, runner, repo_with_files):
+        """log nosuchbranch errors."""
+        r = runner.invoke(main, ["log", "--repo", repo_with_files, "nosuchbranch"])
+        assert r.exit_code != 0
+
+    def test_bare_ref_with_ref_flag_conflict(self, runner, repo_with_files):
+        """log main --ref main is an error."""
+        r = runner.invoke(main, [
+            "log", "--repo", repo_with_files, "main", "--ref", "main"
+        ])
+        assert r.exit_code != 0
+        assert "Cannot specify" in r.output
+
+    def test_bare_ref_with_branch_flag_conflict(self, runner, repo_with_files):
+        """log main -b dev is an error."""
+        r = runner.invoke(main, [
+            "log", "--repo", repo_with_files, "main", "-b", "dev"
+        ])
+        assert r.exit_code != 0
+
+    def test_bare_tilde_with_back_flag_conflict(self, runner, repo_with_files):
+        """log ~1 --back 1 is an error."""
+        r = runner.invoke(main, [
+            "log", "--repo", repo_with_files, "~1", "--back", "1"
+        ])
+        assert r.exit_code != 0
+
+    def test_colon_syntax_still_works(self, runner, repo_with_files):
+        """log main: still works (colon form)."""
+        r = runner.invoke(main, ["log", "--repo", repo_with_files, "main:"])
+        assert r.exit_code == 0, r.output
+
+    def test_colon_ref_path_still_works(self, runner, repo_with_files):
+        """log main:hello.txt still filters by ref and path."""
+        r = runner.invoke(main, ["log", "--repo", repo_with_files, "main:hello.txt"])
+        assert r.exit_code == 0, r.output
+        assert len(r.output.strip().split("\n")) >= 1
+
+    def test_path_filter_flag_still_works(self, runner, repo_with_files):
+        """log --path hello.txt still works."""
+        r = runner.invoke(main, ["log", "--repo", repo_with_files, "--path", "hello.txt"])
+        assert r.exit_code == 0, r.output
+
+    def test_bare_tag(self, runner, repo_with_files):
+        """log v1 shows log starting from the tag."""
+        runner.invoke(main, ["tag", "--repo", repo_with_files, "set", "v1"])
+        r = runner.invoke(main, ["log", "--repo", repo_with_files, "v1"])
+        assert r.exit_code == 0, r.output
+
+    def test_bare_ref_with_path_filter(self, runner, repo_with_files):
+        """log main --path hello.txt filters path within the ref."""
+        r = runner.invoke(main, [
+            "log", "--repo", repo_with_files, "main", "--path", "hello.txt"
+        ])
+        assert r.exit_code == 0, r.output
+        lines = r.output.strip().split("\n")
+        assert len(lines) >= 1
+
+
+# ---------------------------------------------------------------------------
+# diff bare-string tests
+# ---------------------------------------------------------------------------
+
+class TestDiffBareString:
+    """Tests for `vost diff` with bare string = ref (not silently ignored)."""
+
+    def test_bare_branch_name(self, runner, repo_with_files):
+        """diff dev compares HEAD vs dev."""
+        runner.invoke(main, ["branch", "--repo", repo_with_files, "set", "dev"])
+        runner.invoke(main, [
+            "write", "--repo", repo_with_files, ":unique.txt"
+        ], input="main-only")
+        r = runner.invoke(main, ["diff", "--repo", repo_with_files, "dev"])
+        assert r.exit_code == 0, r.output
+        assert "A  unique.txt" in r.output
+
+    def test_bare_branch_same_as_colon(self, runner, repo_with_files):
+        """diff dev == diff dev: (colon form)."""
+        runner.invoke(main, ["branch", "--repo", repo_with_files, "set", "dev"])
+        runner.invoke(main, [
+            "write", "--repo", repo_with_files, ":unique.txt"
+        ], input="main-only")
+        r1 = runner.invoke(main, ["diff", "--repo", repo_with_files, "dev"])
+        r2 = runner.invoke(main, ["diff", "--repo", repo_with_files, "dev:"])
+        assert r1.exit_code == 0
+        assert r2.exit_code == 0
+        assert r1.output == r2.output
+
+    def test_bare_tilde(self, runner, repo_with_files, tmp_path):
+        """diff ~1 shows changes in the latest commit."""
+        f = tmp_path / "new.txt"
+        f.write_text("new")
+        runner.invoke(main, ["cp", "--repo", repo_with_files, str(f), ":new.txt"])
+        r = runner.invoke(main, ["diff", "--repo", repo_with_files, "~1"])
+        assert r.exit_code == 0, r.output
+        assert "A  new.txt" in r.output
+
+    def test_bare_tilde_same_as_back(self, runner, repo_with_files, tmp_path):
+        """diff ~1 == diff --back 1."""
+        f = tmp_path / "new.txt"
+        f.write_text("new")
+        runner.invoke(main, ["cp", "--repo", repo_with_files, str(f), ":new.txt"])
+        r1 = runner.invoke(main, ["diff", "--repo", repo_with_files, "~1"])
+        r2 = runner.invoke(main, ["diff", "--repo", repo_with_files, "--back", "1"])
+        assert r1.exit_code == 0
+        assert r2.exit_code == 0
+        assert r1.output == r2.output
+
+    def test_bare_branch_tilde(self, runner, repo_with_files, tmp_path):
+        """diff main~2 compares HEAD vs 2 commits back on main."""
+        f = tmp_path / "a.txt"
+        f.write_text("v1")
+        runner.invoke(main, ["cp", "--repo", repo_with_files, str(f), ":a.txt"])
+        f.write_text("v2")
+        runner.invoke(main, ["cp", "--repo", repo_with_files, str(f), ":a.txt"])
+        r = runner.invoke(main, ["diff", "--repo", repo_with_files, "main~2"])
+        assert r.exit_code == 0, r.output
+        # At least a.txt should show as added (didn't exist 2 commits ago)
+        assert "a.txt" in r.output
+
+    def test_bare_nonexistent_ref_error(self, runner, repo_with_files):
+        """diff nosuchbranch errors (was silently ignored before)."""
+        r = runner.invoke(main, ["diff", "--repo", repo_with_files, "nosuchbranch"])
+        assert r.exit_code != 0
+
+    def test_bare_ref_with_ref_flag_conflict(self, runner, repo_with_files):
+        """diff main --ref main is an error."""
+        r = runner.invoke(main, [
+            "diff", "--repo", repo_with_files, "main", "--ref", "main"
+        ])
+        assert r.exit_code != 0
+        assert "Cannot specify" in r.output
+
+    def test_bare_ref_with_branch_flag_conflict(self, runner, repo_with_files):
+        """diff main -b dev is an error."""
+        runner.invoke(main, ["branch", "--repo", repo_with_files, "set", "dev"])
+        r = runner.invoke(main, [
+            "diff", "--repo", repo_with_files, "main", "-b", "dev"
+        ])
+        assert r.exit_code != 0
+
+    def test_bare_tilde_with_back_flag_conflict(self, runner, repo_with_files):
+        """diff ~1 --back 1 is an error."""
+        r = runner.invoke(main, [
+            "diff", "--repo", repo_with_files, "~1", "--back", "1"
+        ])
+        assert r.exit_code != 0
+
+    def test_colon_syntax_still_works(self, runner, repo_with_files):
+        """diff dev: still works."""
+        runner.invoke(main, ["branch", "--repo", repo_with_files, "set", "dev"])
+        runner.invoke(main, [
+            "write", "--repo", repo_with_files, ":unique.txt"
+        ], input="main-only")
+        r = runner.invoke(main, ["diff", "--repo", repo_with_files, "dev:"])
+        assert r.exit_code == 0, r.output
+        assert "A  unique.txt" in r.output
+
+    def test_no_changes_empty(self, runner, repo_with_files):
+        """diff main against itself is empty."""
+        r = runner.invoke(main, ["diff", "--repo", repo_with_files, "main"])
+        assert r.exit_code == 0
+        assert r.output.strip() == ""
+
+    def test_bare_tag(self, runner, repo_with_files, tmp_path):
+        """diff v1 compares HEAD vs tag."""
+        runner.invoke(main, ["tag", "--repo", repo_with_files, "set", "v1"])
+        f = tmp_path / "after-tag.txt"
+        f.write_text("new")
+        runner.invoke(main, ["cp", "--repo", repo_with_files, str(f), ":after-tag.txt"])
+        r = runner.invoke(main, ["diff", "--repo", repo_with_files, "v1"])
+        assert r.exit_code == 0, r.output
+        assert "A  after-tag.txt" in r.output

@@ -46,6 +46,10 @@ class GitStore private constructor(
     /**
      * Fetch all refs from url, overwriting local state (restore).
      *
+     * All branches, tags, and notes are restored, but HEAD (the current
+     * branch pointer) is not — use `store.branches.setCurrent("name")`
+     * afterwards if needed.
+     *
      * @param url Source URL (local path or remote).
      * @param dryRun If true, compute diff but don't fetch.
      * @return MirrorDiff describing what changed (or would change).

@@ -92,7 +92,10 @@ public:
 
     /// Fetch all refs from @p src, overwriting local state.
     ///
-    /// Supports local paths and remote URLs.
+    /// Supports local paths and remote URLs.  All branches, tags, and
+    /// notes are restored, but HEAD (the current branch pointer) is
+    /// not — use `store.branches().set_current("name")` afterwards
+    /// if needed.
     ///
     /// @param src     Source URL or local path.
     /// @param dry_run If true, compute diff but do not fetch.
