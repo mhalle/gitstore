@@ -35,7 +35,7 @@ impl<'a> RefDict<'a> {
     }
 
     /// Build an `Fs` from a resolved commit OID and ref name.
-    fn fs_for_ref(&self, commit_oid: gix::ObjectId, name: &str) -> Result<Fs> {
+    fn fs_for_ref(&self, commit_oid: git2::Oid, name: &str) -> Result<Fs> {
         let writable = self.is_branch_prefix();
         Fs::from_commit(Arc::clone(&self.store.inner), commit_oid, Some(name.to_string()), Some(writable))
     }
@@ -54,10 +54,15 @@ impl<'a> RefDict<'a> {
             .lock()
             .map_err(|e| Error::git_msg(e.to_string()))?;
         let refname = self.full_name(name);
-        let reference = repo
-            .find_reference(refname.as_str())
-            .map_err(|_| Error::not_found(format!("ref '{}' not found", name)))?;
-        let commit_oid = reference.id().detach();
+        let commit_oid = {
+            let reference = repo
+                .find_reference(&refname)
+                .map_err(|_| Error::not_found(format!("ref '{}' not found", name)))?;
+            reference
+                .peel(git2::ObjectType::Commit)
+                .map_err(Error::git)?
+                .id()
+        };
         drop(repo);
         self.fs_for_ref(commit_oid, name)
     }
@@ -111,12 +116,11 @@ impl<'a> RefDict<'a> {
 
         // Read old OID for reflog
         let old_oid = repo
-            .find_reference(refname.as_str())
+            .find_reference(&refname)
             .ok()
-            .map(|r| r.id().detach());
+            .and_then(|r| r.target());
 
-        use gix::refs::transaction::PreviousValue;
-        repo.reference(refname.as_str(), commit_oid, PreviousValue::Any, "refdict: set")
+        repo.reference(&refname, commit_oid, true, "refdict: set")
             .map_err(Error::git)?;
 
         // Write reflog entry
@@ -177,18 +181,10 @@ impl<'a> RefDict<'a> {
             .map_err(|e| Error::git_msg(e.to_string()))?;
         let refname = self.full_name(name);
 
-        use gix::refs::transaction::{Change, PreviousValue, RefEdit, RefLog};
-        use gix::refs::FullName;
-
-        let edit = RefEdit {
-            change: Change::Delete {
-                expected: PreviousValue::Any,
-                log: RefLog::AndReference,
-            },
-            name: FullName::try_from(refname).map_err(Error::git)?,
-            deref: false,
-        };
-        repo.edit_reference(edit).map_err(Error::git)?;
+        let mut reference = repo
+            .find_reference(&refname)
+            .map_err(Error::git)?;
+        reference.delete().map_err(Error::git)?;
         Ok(())
     }
 
@@ -201,7 +197,8 @@ impl<'a> RefDict<'a> {
             .lock()
             .map_err(|e| Error::git_msg(e.to_string()))?;
         let refname = self.full_name(name);
-        Ok(repo.find_reference(refname.as_str()).is_ok())
+        let exists = repo.find_reference(&refname).is_ok();
+        Ok(exists)
     }
 
     /// List all ref short names under this prefix, sorted alphabetically.
@@ -216,12 +213,13 @@ impl<'a> RefDict<'a> {
             .lock()
             .map_err(|e| Error::git_msg(e.to_string()))?;
 
-        let refs_platform = repo.references().map_err(Error::git)?;
+        let refs = repo.references_glob(&format!("{}*", self.prefix)).map_err(Error::git)?;
         let mut names = Vec::new();
-        for reference in refs_platform.prefixed(self.prefix).map_err(Error::git)?.flatten() {
-            let full_name = reference.name().as_bstr().to_string();
-            if let Some(short) = full_name.strip_prefix(self.prefix) {
-                names.push(short.to_string());
+        for reference in refs.flatten() {
+            if let Some(full_name) = reference.name() {
+                if let Some(short) = full_name.strip_prefix(self.prefix) {
+                    names.push(short.to_string());
+                }
             }
         }
         names.sort();
@@ -240,13 +238,15 @@ impl<'a> RefDict<'a> {
                 .lock()
                 .map_err(|e| Error::git_msg(e.to_string()))?;
 
-            let refs_platform = repo.references().map_err(Error::git)?;
+            let refs = repo.references_glob(&format!("{}*", self.prefix)).map_err(Error::git)?;
             let mut raw_pairs = Vec::new();
-            for reference in refs_platform.prefixed(self.prefix).map_err(Error::git)?.flatten() {
-                let full_name = reference.name().as_bstr().to_string();
-                if let Some(short) = full_name.strip_prefix(self.prefix) {
-                    let oid = reference.id().detach();
-                    raw_pairs.push((short.to_string(), oid));
+            for reference in refs.flatten() {
+                if let Some(full_name) = reference.name() {
+                    if let Some(short) = full_name.strip_prefix(self.prefix) {
+                        if let Some(oid) = reference.target() {
+                            raw_pairs.push((short.to_string(), oid));
+                        }
+                    }
                 }
             }
             raw_pairs.sort_by(|a, b| a.0.cmp(&b.0));
@@ -277,16 +277,16 @@ impl<'a> RefDict<'a> {
             .lock()
             .map_err(|e| Error::git_msg(e.to_string()))?;
 
-        match repo.find_reference("HEAD") {
-            Ok(head) => match head.target().try_name() {
-                Some(name) => {
-                    let name_str = name.as_bstr().to_string();
-                    Ok(name_str.strip_prefix(self.prefix).map(|s| s.to_string()))
+        let result = match repo.find_reference("HEAD") {
+            Ok(head) => match head.symbolic_target() {
+                Some(target) => {
+                    Ok(target.strip_prefix(self.prefix).map(|s| s.to_string()))
                 }
                 None => Ok(None),
             },
             Err(_) => Ok(None),
-        }
+        };
+        result
     }
 
     /// Get the [`Fs`] for the current (HEAD) branch.
@@ -321,26 +321,7 @@ impl<'a> RefDict<'a> {
             .map_err(|e| Error::git_msg(e.to_string()))?;
 
         let target_refname = self.full_name(name);
-
-        use gix::refs::transaction::{Change, LogChange, PreviousValue, RefEdit, RefLog};
-        use gix::refs::{FullName, Target};
-
-        let edit = RefEdit {
-            change: Change::Update {
-                log: LogChange {
-                    mode: RefLog::AndReference,
-                    force_create_reflog: false,
-                    message: format!("set current: {}", name).into(),
-                },
-                expected: PreviousValue::Any,
-                new: Target::Symbolic(
-                    FullName::try_from(target_refname).map_err(Error::git)?,
-                ),
-            },
-            name: FullName::try_from("HEAD".to_string()).map_err(Error::git)?,
-            deref: false,
-        };
-        repo.edit_reference(edit).map_err(Error::git)?;
+        repo.set_head(&target_refname).map_err(Error::git)?;
         Ok(())
     }
 

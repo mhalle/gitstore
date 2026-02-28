@@ -7,8 +7,6 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use gix::objs::tree::{Entry, EntryKind, EntryMode};
-
 use crate::error::{Error, Result};
 use crate::lock::with_repo_lock;
 use crate::store::{GitStore, GitStoreInner};
@@ -47,7 +45,7 @@ impl NoteNamespace {
 
     fn with_repo<F, T>(&self, f: F) -> Result<T>
     where
-        F: FnOnce(&gix::Repository) -> Result<T>,
+        F: FnOnce(&git2::Repository) -> Result<T>,
     {
         let repo = self
             .inner
@@ -59,39 +57,37 @@ impl NoteNamespace {
 
     // -- internal helpers ------------------------------------------------
 
-    fn tip_oid(&self, repo: &gix::Repository) -> Result<Option<gix::ObjectId>> {
+    fn tip_oid(&self, repo: &git2::Repository) -> Result<Option<git2::Oid>> {
         match repo.find_reference(&self.ref_name) {
-            Ok(r) => Ok(Some(r.id().detach())),
+            Ok(r) => Ok(r.target()),
             Err(_) => Ok(None),
         }
     }
 
-    fn tree_oid(&self, repo: &gix::Repository) -> Result<Option<gix::ObjectId>> {
+    fn tree_oid(&self, repo: &git2::Repository) -> Result<Option<git2::Oid>> {
         let tip = self.tip_oid(repo)?;
         match tip {
             None => Ok(None),
             Some(oid) => {
-                let data = repo.find_object(oid).map_err(Error::git)?;
-                let commit =
-                    gix::objs::CommitRef::from_bytes(&data.data).map_err(Error::git)?;
-                Ok(Some(commit.tree()))
+                let commit = repo.find_commit(oid).map_err(Error::git)?;
+                Ok(Some(commit.tree_id()))
             }
         }
     }
 
-    /// Read tree entries into a BTreeMap.
+    /// Read tree entries into a vec of (name, oid, mode).
     fn read_tree_entries(
         &self,
-        repo: &gix::Repository,
-        tree_oid: gix::ObjectId,
-    ) -> Result<Vec<(String, gix::ObjectId, u32)>> {
-        let data = repo.find_object(tree_oid).map_err(Error::git)?;
-        let tree = gix::objs::TreeRef::from_bytes(&data.data).map_err(Error::git)?;
+        repo: &git2::Repository,
+        tree_oid: git2::Oid,
+    ) -> Result<Vec<(String, git2::Oid, u32)>> {
+        let tree = repo.find_tree(tree_oid).map_err(Error::git)?;
         let mut entries = Vec::new();
-        for e in &tree.entries {
-            let name = String::from_utf8_lossy(e.filename).into_owned();
-            let mode = e.mode.value() as u32;
-            entries.push((name, e.oid.to_owned(), mode));
+        for i in 0..tree.len() {
+            let e = tree.get(i).unwrap();
+            let name = e.name().unwrap_or("").to_string();
+            let mode = e.filemode() as u32;
+            entries.push((name, e.id(), mode));
         }
         Ok(entries)
     }
@@ -99,10 +95,10 @@ impl NoteNamespace {
     /// Find the blob OID for `hash` in a tree, handling flat and fanout.
     fn find_note_in_tree(
         &self,
-        repo: &gix::Repository,
-        tree_oid: gix::ObjectId,
+        repo: &git2::Repository,
+        tree_oid: git2::Oid,
         hash: &str,
-    ) -> Result<Option<gix::ObjectId>> {
+    ) -> Result<Option<git2::Oid>> {
         let entries = self.read_tree_entries(repo, tree_oid)?;
 
         // Try flat: entry named by full 40-char hash
@@ -132,9 +128,9 @@ impl NoteNamespace {
     /// Iterate all (hash, blob_oid) pairs from the tree.
     fn iter_notes(
         &self,
-        repo: &gix::Repository,
-        tree_oid: gix::ObjectId,
-    ) -> Result<Vec<(String, gix::ObjectId)>> {
+        repo: &git2::Repository,
+        tree_oid: git2::Oid,
+    ) -> Result<Vec<(String, git2::Oid)>> {
         let entries = self.read_tree_entries(repo, tree_oid)?;
         let mut result = Vec::new();
 
@@ -159,13 +155,13 @@ impl NoteNamespace {
     /// Build a new note tree from a base tree + writes + deletes.
     fn build_note_tree(
         &self,
-        repo: &gix::Repository,
-        base_tree_oid: Option<gix::ObjectId>,
+        repo: &git2::Repository,
+        base_tree_oid: Option<git2::Oid>,
         writes: &[(String, String)], // (hash, text)
         deletes: &[String],
-    ) -> Result<gix::ObjectId> {
+    ) -> Result<git2::Oid> {
         // Load existing tree entries
-        let mut tree_map: BTreeMap<String, (gix::ObjectId, u32)> = BTreeMap::new();
+        let mut tree_map: BTreeMap<String, (git2::Oid, u32)> = BTreeMap::new();
 
         if let Some(tree_oid) = base_tree_oid {
             let entries = self.read_tree_entries(repo, tree_oid)?;
@@ -218,7 +214,7 @@ impl NoteNamespace {
 
         // Process writes (flat, clearing fanout if present)
         for (h, text) in writes {
-            let blob_oid = repo.write_blob(text.as_bytes()).map_err(Error::git)?.detach();
+            let blob_oid = repo.blob(text.as_bytes()).map_err(Error::git)?;
 
             // Remove fanout entry if present
             if base_tree_oid.is_some() {
@@ -247,44 +243,31 @@ impl NoteNamespace {
             tree_map.insert(h.clone(), (blob_oid, MODE_BLOB));
         }
 
-        // Build and write final tree
-        let tree_entries: Vec<Entry> = tree_map
-            .iter()
-            .map(|(name, (oid, mode))| Entry {
-                mode: EntryMode::try_from(*mode).unwrap_or(EntryMode::from(EntryKind::Blob)),
-                filename: name.as_str().into(),
-                oid: *oid,
-            })
-            .collect();
-
-        let tree = gix::objs::Tree {
-            entries: tree_entries,
-        };
-        Ok(repo.write_object(&tree).map_err(Error::git)?.detach())
+        // Build and write final tree using TreeBuilder
+        let mut builder = repo.treebuilder(None).map_err(Error::git)?;
+        for (name, (oid, mode)) in &tree_map {
+            builder.insert(name, *oid, *mode as i32).map_err(Error::git)?;
+        }
+        let tree_oid = builder.write().map_err(Error::git)?;
+        Ok(tree_oid)
     }
 
     /// Write a flat tree from (name, oid, mode) entries.
     fn write_flat_tree(
         &self,
-        repo: &gix::Repository,
-        entries: &[(String, gix::ObjectId, u32)],
-    ) -> Result<gix::ObjectId> {
-        let tree_entries: Vec<Entry> = entries
-            .iter()
-            .map(|(name, oid, mode)| Entry {
-                mode: EntryMode::try_from(*mode).unwrap_or(EntryMode::from(EntryKind::Blob)),
-                filename: name.as_str().into(),
-                oid: *oid,
-            })
-            .collect();
-        let tree = gix::objs::Tree {
-            entries: tree_entries,
-        };
-        Ok(repo.write_object(&tree).map_err(Error::git)?.detach())
+        repo: &git2::Repository,
+        entries: &[(String, git2::Oid, u32)],
+    ) -> Result<git2::Oid> {
+        let mut builder = repo.treebuilder(None).map_err(Error::git)?;
+        for (name, oid, mode) in entries {
+            builder.insert(name, *oid, *mode as i32).map_err(Error::git)?;
+        }
+        let tree_oid = builder.write().map_err(Error::git)?;
+        Ok(tree_oid)
     }
 
     /// Commit a new tree to the notes ref under repo lock.
-    fn commit_note_tree(&self, new_tree_oid: gix::ObjectId, message: &str) -> Result<()> {
+    fn commit_note_tree(&self, new_tree_oid: git2::Oid, message: &str) -> Result<()> {
         with_repo_lock(&self.inner.path, || {
             let repo = self
                 .inner
@@ -294,46 +277,44 @@ impl NoteNamespace {
 
             // Re-read tip inside lock for CAS
             let tip = self.tip_oid(&repo)?;
-            let parents: Vec<gix::ObjectId> = match tip {
-                Some(oid) => vec![oid],
+
+            let git_sig = git2::Signature::now(
+                &self.inner.signature.name,
+                &self.inner.signature.email,
+            )
+            .map_err(Error::git)?;
+
+            let tree = repo.find_tree(new_tree_oid).map_err(Error::git)?;
+
+            let parent_commits: Vec<git2::Commit> = match tip {
+                Some(oid) => vec![repo.find_commit(oid).map_err(Error::git)?],
                 None => vec![],
             };
+            let parent_refs: Vec<&git2::Commit> = parent_commits.iter().collect();
 
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default();
-            let time =
-                gix::date::Time::new(now.as_secs() as gix::date::SecondsSinceUnixEpoch, 0);
-            let actor = gix::actor::Signature {
-                name: self.inner.signature.name.clone().into(),
-                email: self.inner.signature.email.clone().into(),
-                time,
-            };
+            let commit_oid = repo
+                .commit(
+                    None, // don't update any ref yet
+                    &git_sig,
+                    &git_sig,
+                    &format!("{}\n", message),
+                    &tree,
+                    &parent_refs,
+                )
+                .map_err(Error::git)?;
 
-            let commit = gix::objs::Commit {
-                tree: new_tree_oid,
-                parents: parents.into(),
-                author: actor.clone(),
-                committer: actor,
-                encoding: None,
-                message: format!("{}\n", message).into(),
-                extra_headers: vec![],
+            // CAS: verify the current tip hasn't changed since we read it
+            let current_tip = match repo.find_reference(&self.ref_name) {
+                Ok(r) => r.target(),
+                Err(_) => None,
             };
-            let commit_oid = repo.write_object(&commit).map_err(Error::git)?;
+            if current_tip != tip {
+                return Err(Error::stale_snapshot("notes ref changed during update"));
+            }
 
-            use gix::refs::transaction::PreviousValue;
-            use gix::refs::Target;
-            let previous = match tip {
-                Some(oid) => PreviousValue::ExistingMustMatch(Target::Object(oid)),
-                None => PreviousValue::MustNotExist,
-            };
-            repo.reference(
-                self.ref_name.as_str(),
-                commit_oid,
-                previous,
-                message,
-            )
-            .map_err(|_| Error::stale_snapshot("notes ref changed during update"))?;
+            // Create or update the ref
+            repo.reference(&self.ref_name, commit_oid, true, message)
+                .map_err(Error::git)?;
 
             Ok(())
         })
@@ -383,8 +364,8 @@ impl NoteNamespace {
             let blob_oid = self
                 .find_note_in_tree(repo, tree_oid, &hash)?
                 .ok_or_else(|| Error::key_not_found(&hash))?;
-            let data = repo.find_object(blob_oid).map_err(Error::git)?;
-            String::from_utf8(data.data.to_vec())
+            let blob = repo.find_blob(blob_oid).map_err(Error::git)?;
+            String::from_utf8(blob.content().to_vec())
                 .map_err(|e| Error::git_msg(e.to_string()))
         })
     }

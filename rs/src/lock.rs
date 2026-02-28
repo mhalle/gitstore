@@ -1,32 +1,41 @@
+use std::fs::OpenOptions;
 use std::path::Path;
+
+use fs2::FileExt;
 
 use crate::error::{Error, Result};
 
 /// Acquire an advisory file lock on the repository, execute `f`, then release.
 ///
-/// Creates `<gitdir>/vost.lock` using `gix_lock` with a 30-second
-/// backoff timeout. Serializes ref mutations across threads and processes.
+/// Creates `<gitdir>/vost.lock` using `fs2` with a blocking exclusive lock.
+/// Serializes ref mutations across threads and processes.
 ///
 /// # Arguments
 /// * `gitdir` - Path to the bare repository directory.
 /// * `f` - Closure to execute while the lock is held.
 ///
 /// # Errors
-/// Returns an error if the lock cannot be acquired within the timeout.
+/// Returns an error if the lock cannot be acquired.
 pub fn with_repo_lock<F, T>(gitdir: &Path, f: F) -> Result<T>
 where
     F: FnOnce() -> Result<T>,
 {
     let lock_path = gitdir.join("vost.lock");
 
-    // Use gix_lock for cross-process file locking
-    let _marker = gix_lock::Marker::acquire_to_hold_resource(
-        lock_path,
-        gix_lock::acquire::Fail::AfterDurationWithBackoff(std::time::Duration::from_secs(30)),
-        None,
-    )
-    .map_err(Error::git)?;
+    let file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(&lock_path)
+        .map_err(|e| Error::io(&lock_path, e))?;
 
-    f()
-    // _marker drops here, releasing the lock
+    file.lock_exclusive()
+        .map_err(|e| Error::io(&lock_path, e))?;
+
+    let result = f();
+
+    let _ = file.unlock();
+
+    result
+    // file drops here, also releasing the lock
 }

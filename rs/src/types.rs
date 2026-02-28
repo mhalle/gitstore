@@ -79,7 +79,7 @@ pub struct WalkEntry {
     /// Entry name (file or directory basename).
     pub name: String,
     /// Raw git object ID.
-    pub oid: gix::ObjectId,
+    pub oid: git2::Oid,
     /// Git filemode integer (e.g. `0o100644`).
     pub mode: u32,
 }

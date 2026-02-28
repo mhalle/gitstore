@@ -1,25 +1,13 @@
 use std::collections::BTreeMap;
 
-use gix::objs::tree::{Entry, EntryKind, EntryMode};
-
 use crate::error::{Error, Result};
 use crate::types::{WalkDirEntry, WalkEntry, MODE_BLOB, MODE_BLOB_EXEC, MODE_LINK, MODE_TREE};
 
 /// Result of looking up a single tree entry.
 #[derive(Debug, Clone)]
 pub struct TreeEntryResult {
-    pub oid: gix::ObjectId,
+    pub oid: git2::Oid,
     pub mode: u32,
-}
-
-/// Convert an EntryMode to our u32 representation.
-pub(crate) fn mode_to_u32(mode: EntryMode) -> u32 {
-    mode.value() as u32
-}
-
-/// Convert our u32 mode to an EntryMode.
-pub(crate) fn u32_to_mode(mode: u32) -> EntryMode {
-    EntryMode::try_from(mode).unwrap_or(EntryMode::from(EntryKind::Blob))
 }
 
 /// Return the `(oid, mode)` of the entry at `path`, or `None` if missing.
@@ -32,8 +20,8 @@ pub(crate) fn u32_to_mode(mode: u32) -> EntryMode {
 /// * `tree_oid` - Root tree to search from.
 /// * `path` - Normalized forward-slash path (e.g. `"dir/file.txt"`).
 pub fn entry_at_path(
-    repo: &gix::Repository,
-    tree_oid: gix::ObjectId,
+    repo: &git2::Repository,
+    tree_oid: git2::Oid,
     path: &str,
 ) -> Result<Option<TreeEntryResult>> {
     let path = crate::paths::normalize_path(path)?;
@@ -48,19 +36,12 @@ pub fn entry_at_path(
     let mut current_oid = tree_oid;
 
     for (i, segment) in segments.iter().enumerate() {
-        let tree_data = repo.find_object(current_oid).map_err(Error::git)?;
-        let tree_ref = gix::objs::TreeRef::from_bytes(&tree_data.data).map_err(Error::git)?;
+        let tree = repo.find_tree(current_oid).map_err(Error::git)?;
 
-        let found = tree_ref
-            .entries
-            .iter()
-            .find(|e| e.filename == segment.as_bytes());
+        let entry_info = tree.get_name(segment).map(|e| (e.id(), e.filemode() as u32));
 
-        match found {
-            Some(entry) => {
-                let entry_mode = mode_to_u32(entry.mode);
-                let entry_oid = entry.oid.to_owned();
-
+        match entry_info {
+            Some((entry_oid, entry_mode)) => {
                 if i == segments.len() - 1 {
                     // Last segment — return this entry
                     return Ok(Some(TreeEntryResult {
@@ -91,8 +72,8 @@ pub fn entry_at_path(
 /// Returns [`Error::NotFound`] if a segment is missing, or
 /// [`Error::NotADirectory`] if an intermediate entry is not a tree.
 pub fn walk_to(
-    repo: &gix::Repository,
-    tree_oid: gix::ObjectId,
+    repo: &git2::Repository,
+    tree_oid: git2::Oid,
     path: &str,
 ) -> Result<Vec<TreeEntryResult>> {
     let path = crate::paths::normalize_path(path)?;
@@ -108,19 +89,12 @@ pub fn walk_to(
     let mut results = Vec::new();
 
     for (i, segment) in segments.iter().enumerate() {
-        let tree_data = repo.find_object(current_oid).map_err(Error::git)?;
-        let tree_ref = gix::objs::TreeRef::from_bytes(&tree_data.data).map_err(Error::git)?;
+        let tree = repo.find_tree(current_oid).map_err(Error::git)?;
 
-        let found = tree_ref
-            .entries
-            .iter()
-            .find(|e| e.filename == segment.as_bytes());
+        let entry_info = tree.get_name(segment).map(|e| (e.id(), e.filemode() as u32));
 
-        match found {
-            Some(entry) => {
-                let entry_mode = mode_to_u32(entry.mode);
-                let entry_oid = entry.oid.to_owned();
-
+        match entry_info {
+            Some((entry_oid, entry_mode)) => {
                 results.push(TreeEntryResult {
                     oid: entry_oid,
                     mode: entry_mode,
@@ -148,8 +122,8 @@ pub fn walk_to(
 /// Returns [`Error::IsADirectory`] if the path points to a tree,
 /// [`Error::NotFound`] if the path does not exist.
 pub fn read_blob_at_path(
-    repo: &gix::Repository,
-    tree_oid: gix::ObjectId,
+    repo: &git2::Repository,
+    tree_oid: git2::Oid,
     path: &str,
 ) -> Result<Vec<u8>> {
     let results = walk_to(repo, tree_oid, path)?;
@@ -161,8 +135,8 @@ pub fn read_blob_at_path(
         return Err(Error::is_a_directory(path));
     }
 
-    let obj = repo.find_object(last.oid).map_err(Error::git)?;
-    Ok(obj.data.to_vec())
+    let blob = repo.find_blob(last.oid).map_err(Error::git)?;
+    Ok(blob.content().to_vec())
 }
 
 /// List the immediate children of a tree at the given path.
@@ -174,8 +148,8 @@ pub fn read_blob_at_path(
 /// Returns [`Error::NotFound`] if the path does not exist, or
 /// [`Error::NotADirectory`] if it is not a tree.
 pub fn list_tree_at_path(
-    repo: &gix::Repository,
-    tree_oid: gix::ObjectId,
+    repo: &git2::Repository,
+    tree_oid: git2::Oid,
     path: &str,
 ) -> Result<Vec<WalkEntry>> {
     let target_oid = if crate::paths::is_root_path(path) {
@@ -189,15 +163,14 @@ pub fn list_tree_at_path(
         entry.oid
     };
 
-    let tree_data = repo.find_object(target_oid).map_err(Error::git)?;
-    let tree_ref = gix::objs::TreeRef::from_bytes(&tree_data.data).map_err(Error::git)?;
-
+    let tree = repo.find_tree(target_oid).map_err(Error::git)?;
     let mut entries = Vec::new();
-    for e in &tree_ref.entries {
+    for i in 0..tree.len() {
+        let e = tree.get(i).unwrap();
         entries.push(WalkEntry {
-            name: String::from_utf8_lossy(e.filename).into_owned(),
-            oid: e.oid.to_owned(),
-            mode: mode_to_u32(e.mode),
+            name: e.name().unwrap_or("").to_string(),
+            oid: e.id(),
+            mode: e.filemode() as u32,
         });
     }
     Ok(entries)
@@ -209,8 +182,8 @@ pub fn list_tree_at_path(
 /// (basenames, not full paths). Directories are traversed but not included
 /// in the output.
 pub fn list_entries_at_path(
-    repo: &gix::Repository,
-    tree_oid: gix::ObjectId,
+    repo: &git2::Repository,
+    tree_oid: git2::Oid,
     path: &str,
 ) -> Result<Vec<WalkEntry>> {
     let target_oid = if crate::paths::is_root_path(path) {
@@ -233,8 +206,8 @@ pub fn list_entries_at_path(
 /// Each element is a `(full_path, WalkEntry)` pair where `full_path` is
 /// the slash-separated path from the tree root (e.g. `"dir/sub/file.txt"`).
 pub fn walk_tree(
-    repo: &gix::Repository,
-    tree_oid: gix::ObjectId,
+    repo: &git2::Repository,
+    tree_oid: git2::Oid,
 ) -> Result<Vec<(String, WalkEntry)>> {
     let mut results = Vec::new();
     walk_tree_recursive(repo, tree_oid, "", &mut results)?;
@@ -242,23 +215,23 @@ pub fn walk_tree(
 }
 
 fn walk_tree_recursive(
-    repo: &gix::Repository,
-    tree_oid: gix::ObjectId,
+    repo: &git2::Repository,
+    tree_oid: git2::Oid,
     prefix: &str,
     results: &mut Vec<(String, WalkEntry)>,
 ) -> Result<()> {
-    let tree_data = repo.find_object(tree_oid).map_err(Error::git)?;
-    let tree_ref = gix::objs::TreeRef::from_bytes(&tree_data.data).map_err(Error::git)?;
+    let tree = repo.find_tree(tree_oid).map_err(Error::git)?;
 
-    for e in &tree_ref.entries {
-        let name = String::from_utf8_lossy(e.filename).into_owned();
+    for i in 0..tree.len() {
+        let e = tree.get(i).unwrap();
+        let name = e.name().unwrap_or("").to_string();
         let full_path = if prefix.is_empty() {
             name.clone()
         } else {
             format!("{}/{}", prefix, name)
         };
-        let entry_mode = mode_to_u32(e.mode);
-        let entry_oid = e.oid.to_owned();
+        let entry_mode = e.filemode() as u32;
+        let entry_oid = e.id();
 
         if entry_mode == MODE_TREE {
             walk_tree_recursive(repo, entry_oid, &full_path, results)?;
@@ -281,8 +254,8 @@ fn walk_tree_recursive(
 /// Each entry contains the directory path, a list of subdirectory names, and
 /// a list of non-directory [`WalkEntry`] items (files, symlinks).
 pub fn walk_tree_dirs(
-    repo: &gix::Repository,
-    tree_oid: gix::ObjectId,
+    repo: &git2::Repository,
+    tree_oid: git2::Oid,
 ) -> Result<Vec<WalkDirEntry>> {
     let mut results = Vec::new();
     walk_tree_dirs_recursive(repo, tree_oid, "", &mut results)?;
@@ -290,13 +263,12 @@ pub fn walk_tree_dirs(
 }
 
 fn walk_tree_dirs_recursive(
-    repo: &gix::Repository,
-    tree_oid: gix::ObjectId,
+    repo: &git2::Repository,
+    tree_oid: git2::Oid,
     prefix: &str,
     results: &mut Vec<WalkDirEntry>,
 ) -> Result<()> {
-    let tree_data = repo.find_object(tree_oid).map_err(Error::git)?;
-    let tree_ref = gix::objs::TreeRef::from_bytes(&tree_data.data).map_err(Error::git)?;
+    let tree = repo.find_tree(tree_oid).map_err(Error::git)?;
 
     let mut entry = WalkDirEntry {
         dirpath: prefix.to_string(),
@@ -304,12 +276,13 @@ fn walk_tree_dirs_recursive(
         files: Vec::new(),
     };
 
-    let mut subdirs: Vec<(String, gix::ObjectId)> = Vec::new();
+    let mut subdirs: Vec<(String, git2::Oid)> = Vec::new();
 
-    for e in &tree_ref.entries {
-        let name = String::from_utf8_lossy(e.filename).into_owned();
-        let entry_mode = mode_to_u32(e.mode);
-        let entry_oid = e.oid.to_owned();
+    for i in 0..tree.len() {
+        let e = tree.get(i).unwrap();
+        let name = e.name().unwrap_or("").to_string();
+        let entry_mode = e.filemode() as u32;
+        let entry_oid = e.id();
 
         if entry_mode == MODE_TREE {
             entry.dirnames.push(name.clone());
@@ -342,8 +315,8 @@ fn walk_tree_dirs_recursive(
 /// Returns `Ok(true)` if the path resolves to any object (blob, tree,
 /// symlink), `Ok(false)` if not found.
 pub fn exists_at_path(
-    repo: &gix::Repository,
-    tree_oid: gix::ObjectId,
+    repo: &git2::Repository,
+    tree_oid: git2::Oid,
     path: &str,
 ) -> Result<bool> {
     Ok(entry_at_path(repo, tree_oid, path)?.is_some())
@@ -352,15 +325,16 @@ pub fn exists_at_path(
 /// Count immediate subdirectory entries in a tree (no recursion).
 ///
 /// Used to compute `nlink` for directory stat results.
-pub fn count_subdirs(repo: &gix::Repository, tree_oid: gix::ObjectId) -> Result<u32> {
-    let tree_data = repo.find_object(tree_oid).map_err(Error::git)?;
-    let tree_ref = gix::objs::TreeRef::from_bytes(&tree_data.data).map_err(Error::git)?;
-    let count = tree_ref
-        .entries
-        .iter()
-        .filter(|e| mode_to_u32(e.mode) == MODE_TREE)
-        .count();
-    Ok(count as u32)
+pub fn count_subdirs(repo: &git2::Repository, tree_oid: git2::Oid) -> Result<u32> {
+    let tree = repo.find_tree(tree_oid).map_err(Error::git)?;
+    let mut count = 0u32;
+    for i in 0..tree.len() {
+        let e = tree.get(i).unwrap();
+        if e.filemode() as u32 == MODE_TREE {
+            count += 1;
+        }
+    }
+    Ok(count)
 }
 
 /// Rebuild a tree by applying writes and deletes.
@@ -371,17 +345,17 @@ pub fn count_subdirs(repo: &gix::Repository, tree_oid: gix::ObjectId) -> Result<
 ///
 /// # Arguments
 /// * `repo` - The git repository.
-/// * `base_tree` - OID of the existing tree (null OID for empty).
+/// * `base_tree` - OID of the existing tree (zero OID for empty).
 /// * `writes` - Slice of `(path, Option<TreeWrite>)`. `Some` means add/update,
 ///   `None` means delete.
 ///
 /// # Returns
 /// OID of the new root tree.
 pub fn rebuild_tree(
-    repo: &gix::Repository,
-    base_tree: gix::ObjectId,
+    repo: &git2::Repository,
+    base_tree: git2::Oid,
     writes: &[(String, Option<crate::fs::TreeWrite>)],
-) -> Result<gix::ObjectId> {
+) -> Result<git2::Oid> {
     // Group writes by first path segment
     let mut leaf_writes: BTreeMap<String, &crate::fs::TreeWrite> = BTreeMap::new();
     let mut leaf_removes: Vec<String> = Vec::new();
@@ -409,17 +383,15 @@ pub fn rebuild_tree(
     }
 
     // Load base tree entries into a sorted map
-    let mut entries: BTreeMap<String, (gix::ObjectId, u32)> = BTreeMap::new();
+    let mut entries: BTreeMap<String, (git2::Oid, u32)> = BTreeMap::new();
 
-    // Check if this is a null OID (empty tree)
-    let is_null = base_tree.is_null();
-    if !is_null {
-        if let Ok(tree_data) = repo.find_object(base_tree) {
-            if let Ok(tree_ref) = gix::objs::TreeRef::from_bytes(&tree_data.data) {
-                for e in &tree_ref.entries {
-                    let name = String::from_utf8_lossy(e.filename).into_owned();
-                    entries.insert(name, (e.oid.to_owned(), mode_to_u32(e.mode)));
-                }
+    let is_zero = base_tree.is_zero();
+    if !is_zero {
+        if let Ok(tree) = repo.find_tree(base_tree) {
+            for i in 0..tree.len() {
+                let e = tree.get(i).unwrap();
+                let name = e.name().unwrap_or("").to_string();
+                entries.insert(name, (e.id(), e.filemode() as u32));
             }
         }
     }
@@ -445,7 +417,7 @@ pub fn rebuild_tree(
                     None
                 }
             })
-            .unwrap_or(gix::ObjectId::null(gix::hash::Kind::Sha1));
+            .unwrap_or_else(git2::Oid::zero);
 
         // If there's a non-tree entry at this name, remove it (blob→tree transition)
         if let Some((_, mode)) = entries.get(dir) {
@@ -463,32 +435,24 @@ pub fn rebuild_tree(
         let new_subtree_oid = rebuild_tree(repo, existing_subtree, &owned_writes)?;
 
         // Check if result tree is empty (prune)
-        let subtree_data = repo.find_object(new_subtree_oid).map_err(Error::git)?;
-        let subtree_ref =
-            gix::objs::TreeRef::from_bytes(&subtree_data.data).map_err(Error::git)?;
+        let subtree = repo.find_tree(new_subtree_oid).map_err(Error::git)?;
 
-        if subtree_ref.entries.is_empty() {
+        if subtree.len() == 0 {
             entries.remove(dir);
         } else {
             entries.insert(dir.clone(), (new_subtree_oid, MODE_TREE));
         }
     }
 
-    // Build and write new tree
-    let tree_entries: Vec<Entry> = entries
-        .iter()
-        .map(|(name, (oid, mode))| Entry {
-            mode: u32_to_mode(*mode),
-            filename: name.as_str().into(),
-            oid: *oid,
-        })
-        .collect();
+    // Build and write new tree using TreeBuilder
+    let mut builder = repo.treebuilder(None).map_err(Error::git)?;
 
-    let tree = gix::objs::Tree {
-        entries: tree_entries,
-    };
-    let tree_oid = repo.write_object(&tree).map_err(Error::git)?;
-    Ok(tree_oid.detach())
+    for (name, (oid, mode)) in &entries {
+        builder.insert(name, *oid, *mode as i32).map_err(Error::git)?;
+    }
+
+    let tree_oid = builder.write().map_err(Error::git)?;
+    Ok(tree_oid)
 }
 
 /// Determine the git filemode for a file on disk.

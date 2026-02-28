@@ -16,8 +16,8 @@ exclude = [
 ]
 
 [dependencies]
-gix = { version = "0.72", default-features = false, features = ["basic"] }
-gix-lock = "15"
+git2 = "0.19"
+fs2 = "0.4"
 thiserror = "2"
 
 [dev-dependencies]

@@ -9,7 +9,7 @@ use crate::types::{BackupOptions, MirrorDiff, OpenOptions, RestoreOptions, Signa
 
 /// Internal state shared via `Arc`.
 pub(crate) struct GitStoreInner {
-    pub(crate) repo: Mutex<gix::Repository>,
+    pub(crate) repo: Mutex<git2::Repository>,
     pub(crate) path: PathBuf,
     pub(crate) signature: Signature,
 }
@@ -50,10 +50,16 @@ impl GitStore {
         };
 
         let repo = if path.exists() {
-            gix::open(&path).map_err(Error::git)?
+            git2::Repository::open_bare(&path).map_err(Error::git)?
         } else if options.create {
             std::fs::create_dir_all(&path).map_err(|e| Error::io(&path, e))?;
-            let repo = gix::init_bare(&path).map_err(Error::git)?;
+            let repo = git2::Repository::init_bare(&path).map_err(Error::git)?;
+
+            // Enable reflogs for bare repos (matches C++ gitstore.cpp:117-119)
+            repo.config()
+                .map_err(Error::git)?
+                .set_str("core.logAllRefUpdates", "always")
+                .map_err(Error::git)?;
 
             if let Some(ref branch) = options.branch {
                 Self::init_branch(&repo, &path, branch, &sig)?;
@@ -78,52 +84,37 @@ impl GitStore {
     }
 
     /// Create the initial commit on `branch` with an empty tree.
-    fn init_branch(repo: &gix::Repository, path: &std::path::Path, branch: &str, sig: &Signature) -> Result<()> {
+    fn init_branch(repo: &git2::Repository, path: &std::path::Path, branch: &str, sig: &Signature) -> Result<()> {
         // Write empty tree
-        let empty_tree = gix::objs::Tree { entries: vec![] };
-        let tree_oid = repo.write_object(&empty_tree).map_err(Error::git)?;
+        let builder = repo.treebuilder(None).map_err(Error::git)?;
+        let tree_oid = builder.write().map_err(Error::git)?;
+        let tree = repo.find_tree(tree_oid).map_err(Error::git)?;
 
         // Build commit
+        let git_sig = git2::Signature::now(&sig.name, &sig.email).map_err(Error::git)?;
+        let msg = format!("Initialize {}", branch);
+        let refname = format!("refs/heads/{}", branch);
+
+        let commit_oid = repo.commit(
+            Some(&refname),
+            &git_sig,
+            &git_sig,
+            &msg,
+            &tree,
+            &[], // no parents
+        ).map_err(Error::git)?;
+
+        // Write reflog entry for the initial commit
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default();
-        let time = gix::date::Time::new(now.as_secs() as gix::date::SecondsSinceUnixEpoch, 0);
-        let actor = gix::actor::Signature {
-            name: sig.name.clone().into(),
-            email: sig.email.clone().into(),
-            time,
-        };
-
-        let commit = gix::objs::Commit {
-            tree: tree_oid.detach(),
-            parents: vec![].into(),
-            author: actor.clone(),
-            committer: actor,
-            encoding: None,
-            message: format!("Initialize {}", branch).into(),
-            extra_headers: vec![],
-        };
-        let commit_oid = repo.write_object(&commit).map_err(Error::git)?;
-
-        // Create branch ref
-        use gix::refs::transaction::PreviousValue;
-        let refname = format!("refs/heads/{}", branch);
         let log_msg = format!("commit: Initialize {}", branch);
-        repo.reference(
-            refname.as_str(),
-            commit_oid,
-            PreviousValue::Any,
-            log_msg.as_str(),
-        )
-        .map_err(Error::git)?;
-
-        // Write reflog entry for the initial commit
         let _ = crate::reflog::write_reflog_entry(
             path,
             &refname,
             &crate::types::ReflogEntry {
                 old_sha: crate::reflog::ZERO_SHA.to_string(),
-                new_sha: format!("{}", commit_oid),
+                new_sha: commit_oid.to_string(),
                 committer: format!("{} <{}>", sig.name, sig.email),
                 timestamp: now.as_secs(),
                 message: log_msg,
@@ -131,24 +122,7 @@ impl GitStore {
         );
 
         // Set HEAD as symbolic ref to the branch
-        use gix::refs::transaction::{Change, LogChange, RefEdit, RefLog};
-        use gix::refs::{FullName, Target};
-        let edit = RefEdit {
-            change: Change::Update {
-                log: LogChange {
-                    mode: RefLog::AndReference,
-                    force_create_reflog: false,
-                    message: format!("init: point to {}", branch).into(),
-                },
-                expected: PreviousValue::Any,
-                new: Target::Symbolic(
-                    FullName::try_from(refname).map_err(Error::git)?,
-                ),
-            },
-            name: FullName::try_from("HEAD".to_string()).map_err(Error::git)?,
-            deref: false,
-        };
-        repo.edit_reference(edit).map_err(Error::git)?;
+        repo.set_head(&refname).map_err(Error::git)?;
 
         Ok(())
     }
@@ -157,7 +131,8 @@ impl GitStore {
     ///
     /// The returned snapshot is not bound to any branch and cannot be written to.
     pub fn fs(&self, hash: &str) -> Result<Fs> {
-        let oid = gix::ObjectId::from_hex(hash.as_bytes()).map_err(Error::git)?;
+        let oid = git2::Oid::from_str(hash)
+            .map_err(|e| Error::git_msg(format!("invalid hash: {}", e)))?;
         Fs::from_commit(Arc::clone(&self.inner), oid, None, Some(false))
     }
 

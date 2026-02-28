@@ -170,7 +170,7 @@ fn auto_create_bare_repo(url: &str) -> Result<()> {
         return Ok(());
     }
     std::fs::create_dir_all(path).map_err(|e| Error::io(path, e))?;
-    gix::init_bare(path).map_err(Error::git)?;
+    git2::Repository::init_bare(path).map_err(Error::git)?;
     Ok(())
 }
 
@@ -222,17 +222,21 @@ fn resolve_ref_names(names: &[String], available: &HashMap<String, String>) -> H
 
 /// Get all local refs as `{full_ref_name: 40-char hex SHA}`.
 fn get_local_refs(repo_path: &Path) -> Result<HashMap<String, String>> {
-    let repo = gix::open(repo_path).map_err(Error::git)?;
+    let repo = git2::Repository::open_bare(repo_path).map_err(Error::git)?;
     let mut refs = HashMap::new();
 
-    let platform = repo.references().map_err(Error::git)?;
-    for r in platform.all().map_err(Error::git)?.flatten() {
-        let name = r.name().as_bstr().to_string();
+    let references = repo.references().map_err(Error::git)?;
+    for r in references.flatten() {
+        let name = match r.name() {
+            Some(n) => n.to_string(),
+            None => continue,
+        };
         if name == "HEAD" {
             continue;
         }
-        let oid = r.id().detach();
-        refs.insert(name, format!("{}", oid));
+        if let Some(oid) = r.target().or_else(|| r.resolve().ok().and_then(|r| r.target())) {
+            refs.insert(name, oid.to_string());
+        }
     }
 
     Ok(refs)

@@ -21,8 +21,8 @@ use crate::types::{ChangeReport, FileEntry, FileType, MODE_BLOB, MODE_LINK, MODE
 /// * `checksum` - When `true`, skip files whose blob OID and mode already
 ///   match the existing tree entry (content-based deduplication).
 pub fn copy_in(
-    repo: &gix::Repository,
-    base_tree: gix::ObjectId,
+    repo: &git2::Repository,
+    base_tree: git2::Oid,
     src: &Path,
     dest: &str,
     include: Option<&[&str]>,
@@ -34,22 +34,23 @@ pub fn copy_in(
     let dest_norm = crate::paths::normalize_path(dest)?;
 
     // Build existing entries map when checksum is enabled
-    let existing: std::collections::HashMap<String, (gix::ObjectId, u32)> = if checksum {
+    let existing: std::collections::HashMap<String, (git2::Oid, u32)> = if checksum {
         let target_oid = if dest_norm.is_empty() {
-            base_tree
+            Some(base_tree)
         } else {
             match tree::entry_at_path(repo, base_tree, &dest_norm)? {
-                Some(entry) if entry.mode == MODE_TREE => entry.oid,
-                _ => gix::ObjectId::empty_tree(gix::hash::Kind::Sha1),
+                Some(entry) if entry.mode == MODE_TREE => Some(entry.oid),
+                _ => None,
             }
         };
-        if target_oid == gix::ObjectId::empty_tree(gix::hash::Kind::Sha1) {
-            std::collections::HashMap::new()
-        } else {
-            tree::walk_tree(repo, target_oid)?
-                .into_iter()
-                .map(|(p, e)| (p, (e.oid, e.mode)))
-                .collect()
+        match target_oid {
+            Some(oid) if !oid.is_zero() => {
+                tree::walk_tree(repo, oid)?
+                    .into_iter()
+                    .map(|(p, e)| (p, (e.oid, e.mode)))
+                    .collect()
+            }
+            _ => std::collections::HashMap::new(),
         }
     } else {
         std::collections::HashMap::new()
@@ -74,12 +75,12 @@ pub fn copy_in(
         };
 
         let file_type = FileType::from_mode(mode).unwrap_or(FileType::Blob);
-        let blob_oid = repo.write_blob(&data).map_err(Error::git)?;
+        let blob_oid = repo.blob(&data).map_err(Error::git)?;
 
         // Skip unchanged files when checksum is enabled
         if checksum {
             if let Some((existing_oid, existing_mode)) = existing.get(rel_path) {
-                if *existing_oid == blob_oid.detach() && *existing_mode == mode {
+                if *existing_oid == blob_oid && *existing_mode == mode {
                     continue;
                 }
             }
@@ -89,7 +90,7 @@ pub fn copy_in(
             store_path.clone(),
             TreeWrite {
                 data,
-                oid: blob_oid.detach(),
+                oid: blob_oid,
                 mode,
             },
         ));
@@ -112,8 +113,8 @@ pub fn copy_in(
 /// * `include` - Optional glob patterns; only matching files are copied.
 /// * `exclude` - Optional glob patterns; matching files are skipped.
 pub fn copy_out(
-    repo: &gix::Repository,
-    tree_oid: gix::ObjectId,
+    repo: &git2::Repository,
+    tree_oid: git2::Oid,
     src: &str,
     dest: &Path,
     include: Option<&[&str]>,
@@ -145,10 +146,10 @@ pub fn copy_out(
             std::fs::create_dir_all(parent).map_err(|e| Error::io(parent, e))?;
         }
 
-        let obj = repo.find_object(entry.oid).map_err(Error::git)?;
+        let blob = repo.find_blob(entry.oid).map_err(Error::git)?;
 
         if entry.mode == MODE_LINK {
-            let target = String::from_utf8_lossy(&obj.data);
+            let target = String::from_utf8_lossy(blob.content());
             #[cfg(unix)]
             {
                 use std::os::unix::fs::symlink;
@@ -162,7 +163,7 @@ pub fn copy_out(
                     .map_err(|e| Error::io(&dest_path, e))?;
             }
         } else {
-            std::fs::write(&dest_path, &obj.data).map_err(|e| Error::io(&dest_path, e))?;
+            std::fs::write(&dest_path, blob.content()).map_err(|e| Error::io(&dest_path, e))?;
 
             #[cfg(unix)]
             if entry.mode == crate::types::MODE_BLOB_EXEC {
@@ -198,8 +199,8 @@ pub fn copy_out(
 /// * `checksum` - When `true`, skip unchanged files (OID + mode comparison).
 #[allow(clippy::type_complexity)]
 pub fn sync_in(
-    repo: &gix::Repository,
-    base_tree: gix::ObjectId,
+    repo: &git2::Repository,
+    base_tree: git2::Oid,
     src: &Path,
     dest: &str,
     include: Option<&[&str]>,
@@ -217,21 +218,16 @@ pub fn sync_in(
     // Collect existing tree entries at dest
     let existing = {
         let target_oid = if dest_norm.is_empty() {
-            base_tree
+            Some(base_tree)
         } else {
             match tree::entry_at_path(repo, base_tree, &dest_norm)? {
-                Some(entry) if entry.mode == MODE_TREE => entry.oid,
-                Some(_) => {
-                    // dest exists but is a file — treat as empty subtree
-                    gix::ObjectId::empty_tree(gix::hash::Kind::Sha1)
-                }
-                None => gix::ObjectId::empty_tree(gix::hash::Kind::Sha1),
+                Some(entry) if entry.mode == MODE_TREE => Some(entry.oid),
+                _ => None,
             }
         };
-        if target_oid == gix::ObjectId::empty_tree(gix::hash::Kind::Sha1) {
-            Vec::new()
-        } else {
-            tree::walk_tree(repo, target_oid)?
+        match target_oid {
+            Some(oid) if !oid.is_zero() => tree::walk_tree(repo, oid)?,
+            _ => Vec::new(),
         }
     };
 
@@ -255,13 +251,13 @@ pub fn sync_in(
             std::fs::read(&full_disk).map_err(|e| Error::io(&full_disk, e))?
         };
 
-        let blob_oid = repo.write_blob(&data).map_err(Error::git)?;
+        let blob_oid = repo.blob(&data).map_err(Error::git)?;
         let file_type = FileType::from_mode(mode).unwrap_or(FileType::Blob);
 
         // Check if this is an update vs add
         let is_changed = if let Some(existing_entry) = existing_map.get(rel_path.as_str()) {
             if checksum {
-                existing_entry.oid != blob_oid.detach() || existing_entry.mode != mode
+                existing_entry.oid != blob_oid || existing_entry.mode != mode
             } else {
                 // Without checksum, always treat as changed
                 true
@@ -275,7 +271,7 @@ pub fn sync_in(
                 store_path.clone(),
                 Some(TreeWrite {
                     data,
-                    oid: blob_oid.detach(),
+                    oid: blob_oid,
                     mode,
                 }),
             ));
@@ -325,8 +321,8 @@ pub fn sync_in(
 /// * `exclude` - Optional glob patterns; matching files are skipped.
 /// * `checksum` - When `true`, skip unchanged files (content comparison).
 pub fn sync_out(
-    repo: &gix::Repository,
-    tree_oid: gix::ObjectId,
+    repo: &git2::Repository,
+    tree_oid: git2::Oid,
     src: &str,
     dest: &Path,
     include: Option<&[&str]>,
@@ -367,7 +363,7 @@ pub fn sync_out(
         }
 
         let dest_path = dest.join(rel_path);
-        let obj = repo.find_object(entry.oid).map_err(Error::git)?;
+        let blob = repo.find_blob(entry.oid).map_err(Error::git)?;
         let file_type = FileType::from_mode(entry.mode).unwrap_or(FileType::Blob);
 
         // Check if file exists on disk and whether it's changed
@@ -382,8 +378,8 @@ pub fn sync_out(
                 } else {
                     std::fs::read(&dest_path).unwrap_or_default()
                 };
-                let existing_oid = repo.write_blob(&existing_data).map_err(Error::git)?;
-                existing_oid.detach() != entry.oid
+                let existing_oid = repo.blob(&existing_data).map_err(Error::git)?;
+                existing_oid != entry.oid
             } else {
                 true // without checksum, always write
             }
@@ -397,7 +393,7 @@ pub fn sync_out(
             }
 
             if entry.mode == MODE_LINK {
-                let target = String::from_utf8_lossy(&obj.data);
+                let target = String::from_utf8_lossy(blob.content());
                 #[cfg(unix)]
                 {
                     use std::os::unix::fs::symlink;
@@ -411,7 +407,7 @@ pub fn sync_out(
                         .map_err(|e| Error::io(&dest_path, e))?;
                 }
             } else {
-                std::fs::write(&dest_path, &obj.data).map_err(|e| Error::io(&dest_path, e))?;
+                std::fs::write(&dest_path, blob.content()).map_err(|e| Error::io(&dest_path, e))?;
 
                 #[cfg(unix)]
                 if entry.mode == crate::types::MODE_BLOB_EXEC {
@@ -528,8 +524,8 @@ pub fn remove_from_disk(
 /// # Errors
 /// Returns [`Error::NotFound`] if `src` does not exist in the tree.
 pub fn rename(
-    repo: &gix::Repository,
-    base_tree: gix::ObjectId,
+    repo: &git2::Repository,
+    base_tree: git2::Oid,
     src: &str,
     dest: &str,
 ) -> Result<Vec<(String, Option<TreeWrite>)>> {
@@ -547,14 +543,14 @@ pub fn rename(
         for (rel_path, we) in &sub_entries {
             let old_path = format!("{}/{}", src_norm, rel_path);
             let new_path = format!("{}/{}", dest_norm, rel_path);
-            let obj = repo.find_object(we.oid).map_err(Error::git)?;
+            let blob = repo.find_blob(we.oid).map_err(Error::git)?;
             // Delete old path
             writes.push((old_path, None));
             // Write new path
             writes.push((
                 new_path,
                 Some(TreeWrite {
-                    data: obj.data.to_vec(),
+                    data: blob.content().to_vec(),
                     oid: we.oid,
                     mode: we.mode,
                 }),
@@ -562,12 +558,12 @@ pub fn rename(
         }
     } else {
         // Rename single file: delete old, write new
-        let obj = repo.find_object(entry.oid).map_err(Error::git)?;
+        let blob = repo.find_blob(entry.oid).map_err(Error::git)?;
         writes.push((src_norm, None));
         writes.push((
             dest_norm,
             Some(TreeWrite {
-                data: obj.data.to_vec(),
+                data: blob.content().to_vec(),
                 oid: entry.oid,
                 mode: entry.mode,
             }),

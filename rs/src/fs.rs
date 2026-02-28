@@ -19,7 +19,7 @@ use crate::types::{
 #[derive(Debug, Clone)]
 pub struct TreeWrite {
     pub data: Vec<u8>,
-    pub oid: gix::ObjectId,
+    pub oid: git2::Oid,
     pub mode: u32,
 }
 
@@ -200,8 +200,8 @@ pub struct LogOptions {
 #[derive(Clone, Debug)]
 pub struct Fs {
     pub(crate) inner: Arc<GitStoreInner>,
-    pub(crate) commit_oid: Option<gix::ObjectId>,
-    pub(crate) tree_oid: Option<gix::ObjectId>,
+    pub(crate) commit_oid: Option<git2::Oid>,
+    pub(crate) tree_oid: Option<git2::Oid>,
     pub(crate) ref_name: Option<String>,
     pub(crate) writable: bool,
     pub(crate) changes: Option<ChangeReport>,
@@ -211,7 +211,7 @@ impl Fs {
     /// Helper: lock the repo mutex and call `f` with the repository.
     pub(crate) fn with_repo<F, T>(&self, f: F) -> Result<T>
     where
-        F: FnOnce(&gix::Repository) -> Result<T>,
+        F: FnOnce(&git2::Repository) -> Result<T>,
     {
         let repo = self
             .inner
@@ -222,7 +222,7 @@ impl Fs {
     }
 
     /// The tree OID, or error if there is none.
-    fn require_tree(&self) -> Result<gix::ObjectId> {
+    fn require_tree(&self) -> Result<git2::Oid> {
         self.tree_oid
             .ok_or_else(|| Error::not_found("no tree in snapshot"))
     }
@@ -230,13 +230,13 @@ impl Fs {
     /// The 40-character hex SHA of this snapshot's commit, or `None` for an
     /// empty (no-commit) snapshot.
     pub fn commit_hash(&self) -> Option<String> {
-        self.commit_oid.map(|oid| format!("{}", oid))
+        self.commit_oid.map(|oid| oid.to_string())
     }
 
     /// The 40-character hex SHA of the root tree, or `None` for an empty
     /// (no-tree) snapshot.
     pub fn tree_hash(&self) -> Option<String> {
-        self.tree_oid.map(|oid| format!("{}", oid))
+        self.tree_oid.map(|oid| oid.to_string())
     }
 
     /// The branch or tag name, or `None` for detached snapshots.
@@ -272,11 +272,8 @@ impl Fs {
             .commit_oid
             .ok_or_else(|| Error::not_found("no commit in snapshot"))?;
         self.with_repo(|repo| {
-            let obj = repo.find_object(commit_oid).map_err(Error::git)?;
-            let data = obj.data.to_vec();
-            let commit_ref =
-                gix::objs::CommitRef::from_bytes(&data).map_err(Error::git)?;
-            let msg = commit_ref.message.to_string();
+            let commit = repo.find_commit(commit_oid).map_err(Error::git)?;
+            let msg = commit.message().unwrap_or("");
             Ok(msg.trim_end_matches('\n').to_string())
         })
     }
@@ -290,11 +287,8 @@ impl Fs {
             .commit_oid
             .ok_or_else(|| Error::not_found("no commit in snapshot"))?;
         self.with_repo(|repo| {
-            let obj = repo.find_object(commit_oid).map_err(Error::git)?;
-            let data = obj.data.to_vec();
-            let commit_ref =
-                gix::objs::CommitRef::from_bytes(&data).map_err(Error::git)?;
-            Ok(commit_ref.author.time().map(|t| t.seconds as u64).unwrap_or(0))
+            let commit = repo.find_commit(commit_oid).map_err(Error::git)?;
+            Ok(commit.time().seconds() as u64)
         })
     }
 
@@ -307,11 +301,9 @@ impl Fs {
             .commit_oid
             .ok_or_else(|| Error::not_found("no commit in snapshot"))?;
         self.with_repo(|repo| {
-            let obj = repo.find_object(commit_oid).map_err(Error::git)?;
-            let data = obj.data.to_vec();
-            let commit_ref =
-                gix::objs::CommitRef::from_bytes(&data).map_err(Error::git)?;
-            Ok(commit_ref.author.name.to_string())
+            let commit = repo.find_commit(commit_oid).map_err(Error::git)?;
+            let name = commit.author().name().unwrap_or("").to_string();
+            Ok(name)
         })
     }
 
@@ -324,11 +316,9 @@ impl Fs {
             .commit_oid
             .ok_or_else(|| Error::not_found("no commit in snapshot"))?;
         self.with_repo(|repo| {
-            let obj = repo.find_object(commit_oid).map_err(Error::git)?;
-            let data = obj.data.to_vec();
-            let commit_ref =
-                gix::objs::CommitRef::from_bytes(&data).map_err(Error::git)?;
-            Ok(commit_ref.author.email.to_string())
+            let commit = repo.find_commit(commit_oid).map_err(Error::git)?;
+            let email = commit.author().email().unwrap_or("").to_string();
+            Ok(email)
         })
     }
 
@@ -343,38 +333,18 @@ impl Fs {
     // -- Read ---------------------------------------------------------------
 
     /// Read file contents as bytes.
-    ///
-    /// # Arguments
-    /// * `path` - File path in the repo.
-    ///
-    /// # Errors
-    /// Returns [`Error::NotFound`] if the path does not exist.
-    /// Returns [`Error::IsADirectory`] if the path is a directory.
     pub fn read(&self, path: &str) -> Result<Vec<u8>> {
         let tree_oid = self.require_tree()?;
         self.with_repo(|repo| tree::read_blob_at_path(repo, tree_oid, path))
     }
 
     /// Read file contents as a UTF-8 string.
-    ///
-    /// # Arguments
-    /// * `path` - File path in the repo.
-    ///
-    /// # Errors
-    /// Returns [`Error::NotFound`] if the path does not exist.
-    /// Returns an error if the content is not valid UTF-8.
     pub fn read_text(&self, path: &str) -> Result<String> {
         let data = self.read(path)?;
         String::from_utf8(data).map_err(|e| Error::git_msg(format!("invalid UTF-8: {}", e)))
     }
 
     /// List entry names at `path` (or root if empty).
-    ///
-    /// Returns a `Vec<String>` of entry names (basenames). Use
-    /// [`listdir`](Fs::listdir) if you need OID and mode information.
-    ///
-    /// # Errors
-    /// Returns [`Error::NotADirectory`] if `path` is a file.
     pub fn ls(&self, path: &str) -> Result<Vec<String>> {
         let tree_oid = self.require_tree()?;
         self.with_repo(|repo| {
@@ -384,14 +354,6 @@ impl Fs {
     }
 
     /// Recursively walk the tree under `path` (os.walk-style).
-    ///
-    /// Returns a [`WalkDirEntry`] for each directory, containing subdirectory
-    /// names and non-directory [`WalkEntry`] items. Pass an empty string to
-    /// walk the entire tree.
-    ///
-    /// # Errors
-    /// Returns [`Error::NotADirectory`] if `path` is a file.
-    /// Returns [`Error::NotFound`] if `path` does not exist.
     pub fn walk(&self, path: &str) -> Result<Vec<WalkDirEntry>> {
         let tree_oid = self.require_tree()?;
         let path_norm = crate::paths::normalize_path(path)?;
@@ -400,14 +362,12 @@ impl Fs {
             if path_norm.is_empty() {
                 tree::walk_tree_dirs(repo, tree_oid)
             } else {
-                // Resolve to subtree first
                 let entry = tree::entry_at_path(repo, tree_oid, &path_norm)?
                     .ok_or_else(|| Error::not_found(&path_norm))?;
                 if entry.mode != MODE_TREE {
                     return Err(Error::not_a_directory(&path_norm));
                 }
                 let mut entries = tree::walk_tree_dirs(repo, entry.oid)?;
-                // Prefix dirpath values
                 for e in &mut entries {
                     if e.dirpath.is_empty() {
                         e.dirpath = path_norm.clone();
@@ -427,8 +387,6 @@ impl Fs {
     }
 
     /// Return `true` if `path` is a directory (tree) in the repo.
-    ///
-    /// Returns `false` if the path does not exist or is a file/symlink.
     pub fn is_dir(&self, path: &str) -> Result<bool> {
         let tree_oid = self.require_tree()?;
         self.with_repo(|repo| {
@@ -440,12 +398,6 @@ impl Fs {
     }
 
     /// Return the [`FileType`] of `path`.
-    ///
-    /// Returns `FileType::Blob`, `FileType::Executable`, `FileType::Link`,
-    /// or `FileType::Tree`.
-    ///
-    /// # Errors
-    /// Returns [`Error::NotFound`] if the path does not exist.
     pub fn file_type(&self, path: &str) -> Result<FileType> {
         let tree_oid = self.require_tree()?;
         self.with_repo(|repo| {
@@ -457,10 +409,6 @@ impl Fs {
     }
 
     /// Return the size in bytes of the object at `path`.
-    ///
-    /// # Errors
-    /// Returns [`Error::NotFound`] if the path does not exist.
-    /// Returns [`Error::IsADirectory`] if the path is a directory.
     pub fn size(&self, path: &str) -> Result<u64> {
         let tree_oid = self.require_tree()?;
         self.with_repo(|repo| {
@@ -469,31 +417,22 @@ impl Fs {
             if entry.mode == MODE_TREE {
                 return Err(Error::is_a_directory(path));
             }
-            let obj = repo.find_object(entry.oid).map_err(Error::git)?;
-            Ok(obj.data.len() as u64)
+            let blob = repo.find_blob(entry.oid).map_err(Error::git)?;
+            Ok(blob.content().len() as u64)
         })
     }
 
     /// Return the 40-character hex SHA of the object at `path`.
-    ///
-    /// For files this is the blob SHA; for directories the tree SHA.
-    ///
-    /// # Errors
-    /// Returns [`Error::NotFound`] if the path does not exist.
     pub fn object_hash(&self, path: &str) -> Result<String> {
         let tree_oid = self.require_tree()?;
         self.with_repo(|repo| {
             let entry = tree::entry_at_path(repo, tree_oid, path)?
                 .ok_or_else(|| Error::not_found(path))?;
-            Ok(format!("{}", entry.oid))
+            Ok(entry.oid.to_string())
         })
     }
 
     /// Read the target of a symlink at `path`.
-    ///
-    /// # Errors
-    /// Returns [`Error::NotFound`] if the path does not exist.
-    /// Returns an error if `path` is not a symlink.
     pub fn readlink(&self, path: &str) -> Result<String> {
         let tree_oid = self.require_tree()?;
         self.with_repo(|repo| {
@@ -505,8 +444,8 @@ impl Fs {
                     path
                 )));
             }
-            let obj = repo.find_object(entry.oid).map_err(Error::git)?;
-            String::from_utf8(obj.data.to_vec())
+            let blob = repo.find_blob(entry.oid).map_err(Error::git)?;
+            String::from_utf8(blob.content().to_vec())
                 .map_err(|e| Error::git_msg(format!("invalid UTF-8 in symlink: {}", e)))
         })
     }
@@ -514,12 +453,6 @@ impl Fs {
     // -- FUSE-readiness API -------------------------------------------------
 
     /// Return a [`StatResult`] for `path` (pass `""` for the root).
-    ///
-    /// Combines file type, size, OID, nlink, and mtime in a single call --
-    /// the hot path for FUSE `getattr`.
-    ///
-    /// # Errors
-    /// Returns [`Error::NotFound`] if the path does not exist.
     pub fn stat(&self, path: &str) -> Result<StatResult> {
         let tree_oid = self.require_tree()?;
         let mtime = self.time()?;
@@ -528,13 +461,12 @@ impl Fs {
             let path_norm = crate::paths::normalize_path(path)?;
 
             if path_norm.is_empty() {
-                // Root directory
                 let nlink = 2 + tree::count_subdirs(repo, tree_oid)?;
                 return Ok(StatResult {
                     mode: MODE_TREE,
                     file_type: FileType::Tree,
                     size: 0,
-                    hash: format!("{}", tree_oid),
+                    hash: tree_oid.to_string(),
                     nlink,
                     mtime,
                 });
@@ -551,17 +483,17 @@ impl Fs {
                     mode: entry.mode,
                     file_type: ft,
                     size: 0,
-                    hash: format!("{}", entry.oid),
+                    hash: entry.oid.to_string(),
                     nlink,
                     mtime,
                 })
             } else {
-                let obj = repo.find_object(entry.oid).map_err(Error::git)?;
+                let blob = repo.find_blob(entry.oid).map_err(Error::git)?;
                 Ok(StatResult {
                     mode: entry.mode,
                     file_type: ft,
-                    size: obj.data.len() as u64,
-                    hash: format!("{}", entry.oid),
+                    size: blob.content().len() as u64,
+                    hash: entry.oid.to_string(),
                     nlink: 1,
                     mtime,
                 })
@@ -570,28 +502,12 @@ impl Fs {
     }
 
     /// List directory entries with name, OID, and mode.
-    ///
-    /// Unlike [`ls()`](Fs::ls) which returns just names, `listdir` returns full
-    /// [`WalkEntry`] objects. Useful for FUSE `readdir` where you need `d_type`
-    /// information alongside names.
     pub fn listdir(&self, path: &str) -> Result<Vec<WalkEntry>> {
         let tree_oid = self.require_tree()?;
         self.with_repo(|repo| tree::list_tree_at_path(repo, tree_oid, path))
     }
 
     /// Read file contents as bytes with optional offset and size.
-    ///
-    /// Separate method from [`read()`](Fs::read) so the base `read` signature
-    /// stays simple (no breaking change).
-    ///
-    /// # Arguments
-    /// * `path` - File path in the repo.
-    /// * `offset` - Byte offset to start reading from.
-    /// * `size` - Maximum number of bytes to return (`None` for all remaining).
-    ///
-    /// # Errors
-    /// Returns [`Error::NotFound`] if the path does not exist.
-    /// Returns [`Error::IsADirectory`] if the path is a directory.
     pub fn read_range(&self, path: &str, offset: usize, size: Option<usize>) -> Result<Vec<u8>> {
         let data = self.read(path)?;
         let start = offset.min(data.len());
@@ -603,28 +519,17 @@ impl Fs {
     }
 
     /// Read raw blob data by its hex hash, bypassing tree lookup.
-    ///
-    /// FUSE pattern: `stat()` to cache the hash, then `read_by_hash(hash)`
-    /// for subsequent reads without re-walking the tree.
-    ///
-    /// # Arguments
-    /// * `hash` - 40-character hex SHA of the blob.
-    /// * `offset` - Byte offset to start reading from.
-    /// * `size` - Maximum number of bytes to return (`None` for all remaining).
-    ///
-    /// # Errors
-    /// Returns an error if the hash is invalid or the object is not found.
     pub fn read_by_hash(
         &self,
         hash: &str,
         offset: usize,
         size: Option<usize>,
     ) -> Result<Vec<u8>> {
-        let oid = gix::ObjectId::from_hex(hash.as_bytes())
+        let oid = git2::Oid::from_str(hash)
             .map_err(|e| Error::git_msg(format!("invalid hash: {}", e)))?;
         self.with_repo(|repo| {
-            let obj = repo.find_object(oid).map_err(Error::git)?;
-            let data = obj.data.to_vec();
+            let blob = repo.find_blob(oid).map_err(Error::git)?;
+            let data = blob.content();
             let start = offset.min(data.len());
             let end = match size {
                 Some(s) => (start + s).min(data.len()),
@@ -637,12 +542,6 @@ impl Fs {
     // -- Glob ---------------------------------------------------------------
 
     /// Expand a glob pattern against the repo tree.
-    ///
-    /// Supports `*`, `?`, and `**`. `*` and `?` do not match a leading `.`
-    /// unless the pattern segment itself starts with `.`. `**` matches zero or
-    /// more directory levels, skipping directories whose names start with `.`.
-    ///
-    /// Returns a sorted, deduplicated list of matching paths.
     pub fn glob(&self, pattern: &str) -> Result<Vec<String>> {
         let mut paths = self.iglob(pattern)?;
         paths.sort();
@@ -650,9 +549,6 @@ impl Fs {
     }
 
     /// Expand a glob pattern against the repo tree (unsorted).
-    ///
-    /// Like [`glob()`](Fs::glob) but skips the final sort, which is cheaper
-    /// when you only need to iterate once.
     pub fn iglob(&self, pattern: &str) -> Result<Vec<String>> {
         let tree_oid = self.require_tree()?;
         let segments: Vec<&str> = pattern.split('/').collect();
@@ -667,15 +563,6 @@ impl Fs {
     // -- Write --------------------------------------------------------------
 
     /// Write `data` to `path` and commit, returning a new [`Fs`].
-    ///
-    /// # Arguments
-    /// * `path` - Destination path in the repo.
-    /// * `data` - Raw bytes to write.
-    /// * `opts` - [`WriteOptions`] for commit message and mode override.
-    ///
-    /// # Errors
-    /// Returns [`Error::Permission`] if this snapshot is read-only.
-    /// Returns [`Error::StaleSnapshot`] if the branch has advanced since this snapshot.
     pub fn write(
         &self,
         path: &str,
@@ -689,10 +576,10 @@ impl Fs {
             .unwrap_or_else(|| crate::paths::format_commit_message("write", Some(&path)));
 
         let tw = self.with_repo(|repo| {
-            let blob_oid = repo.write_blob(data).map_err(Error::git)?;
+            let blob_oid = repo.blob(data).map_err(Error::git)?;
             Ok(TreeWrite {
                 data: data.to_vec(),
-                oid: blob_oid.detach(),
+                oid: blob_oid,
                 mode,
             })
         })?;
@@ -702,13 +589,6 @@ impl Fs {
     }
 
     /// Write `text` to `path` and commit, returning a new [`Fs`].
-    ///
-    /// Convenience wrapper around [`write()`](Fs::write) that encodes the
-    /// string as UTF-8.
-    ///
-    /// # Errors
-    /// Returns [`Error::Permission`] if this snapshot is read-only.
-    /// Returns [`Error::StaleSnapshot`] if the branch has advanced since this snapshot.
     pub fn write_text(
         &self,
         path: &str,
@@ -719,19 +599,6 @@ impl Fs {
     }
 
     /// Write a local file into the repo and commit, returning a new [`Fs`].
-    ///
-    /// Executable permission is auto-detected from disk unless
-    /// `opts.mode` is set.
-    ///
-    /// # Arguments
-    /// * `path` - Destination path in the repo.
-    /// * `src` - Path to the local file on disk.
-    /// * `opts` - [`WriteOptions`] for commit message and mode override.
-    ///
-    /// # Errors
-    /// Returns [`Error::Permission`] if this snapshot is read-only.
-    /// Returns [`Error::StaleSnapshot`] if the branch has advanced since this snapshot.
-    /// Returns an I/O error if the local file cannot be read.
     pub fn write_from_file(
         &self,
         path: &str,
@@ -750,16 +617,6 @@ impl Fs {
     }
 
     /// Create a symbolic link entry and commit, returning a new [`Fs`].
-    ///
-    /// # Arguments
-    /// * `path` - Symlink path in the repo.
-    /// * `target` - The symlink target string.
-    /// * `opts` - [`WriteOptions`] (the `mode` field is ignored; symlinks
-    ///   always use `MODE_LINK`).
-    ///
-    /// # Errors
-    /// Returns [`Error::Permission`] if this snapshot is read-only.
-    /// Returns [`Error::StaleSnapshot`] if the branch has advanced since this snapshot.
     pub fn write_symlink(
         &self,
         path: &str,
@@ -774,15 +631,6 @@ impl Fs {
     }
 
     /// Apply multiple writes and removes in a single atomic commit.
-    ///
-    /// `entries` maps repo paths to [`WriteEntry`] values describing the
-    /// content and mode. `removes` lists repo paths to delete.
-    ///
-    /// Returns the new [`Fs`] snapshot with the changes committed.
-    ///
-    /// # Errors
-    /// Returns [`Error::Permission`] if this snapshot is read-only.
-    /// Returns [`Error::StaleSnapshot`] if the branch has advanced since this snapshot.
     pub fn apply(
         &self,
         entries: &[(&str, WriteEntry)],
@@ -802,17 +650,16 @@ impl Fs {
                 (entry.data.as_ref().unwrap().clone(), entry.mode)
             };
             let tw = self.with_repo(|repo| {
-                let blob_oid = repo.write_blob(&data).map_err(Error::git)?;
+                let blob_oid = repo.blob(&data).map_err(Error::git)?;
                 Ok(TreeWrite {
                     data,
-                    oid: blob_oid.detach(),
+                    oid: blob_oid,
                     mode,
                 })
             })?;
             writes.push((path, Some(tw)));
         }
 
-        // Append removes
         for path in removes {
             let path = crate::paths::normalize_path(path)?;
             writes.push((path, None));
@@ -826,12 +673,6 @@ impl Fs {
     }
 
     /// Return a [`Batch`] for accumulating multiple writes in one commit.
-    ///
-    /// Call [`Batch::commit()`] (or use it as a scope guard) to flush
-    /// accumulated changes atomically.
-    ///
-    /// # Errors
-    /// The batch itself is infallible; errors surface at commit time.
     pub fn batch(&self, opts: BatchOptions) -> Batch {
         Batch {
             fs: self.clone(),
@@ -843,13 +684,7 @@ impl Fs {
         }
     }
 
-    /// Return a buffered [`FsWriter`](crate::fileobj::FsWriter) that commits
-    /// on close.
-    ///
-    /// The writer implements [`std::io::Write`], so you can use `write_all` etc.
-    ///
-    /// # Errors
-    /// Returns [`Error::Permission`] if this snapshot is read-only.
+    /// Return a buffered [`FsWriter`](crate::fileobj::FsWriter) that commits on close.
     pub fn writer(&self, path: &str) -> Result<crate::fileobj::FsWriter> {
         self.require_writable("write to")?;
         let normalized = crate::paths::normalize_path(path)?;
@@ -859,18 +694,6 @@ impl Fs {
     // -- Copy / sync --------------------------------------------------------
 
     /// Copy local files from disk into the repo.
-    ///
-    /// Returns `(report, new_fs)` where `report` describes what changed and
-    /// `new_fs` is the committed snapshot (or an unchanged clone when
-    /// `dry_run` is set).
-    ///
-    /// # Arguments
-    /// * `src` - Local directory or file to copy from.
-    /// * `dest` - Destination path in the repo.
-    /// * `opts` - [`CopyInOptions`] for filtering, dry-run, and checksum.
-    ///
-    /// # Errors
-    /// Returns [`Error::Permission`] if this snapshot is read-only.
     pub fn copy_in(
         &self,
         src: &Path,
@@ -885,7 +708,6 @@ impl Fs {
             let exc: Option<Vec<&str>> = opts.exclude.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect());
             crate::copy::copy_in(repo, tree_oid, src, dest, inc.as_deref(), exc.as_deref(), checksum)
         })?;
-        // Post-filter writes using the ExcludeFilter
         let writes: Vec<_> = if let Some(ref ef) = exclude_filter {
             if ef.active() {
                 writes.into_iter().filter(|(p, _)| !ef.is_excluded(p, false)).collect()
@@ -912,13 +734,6 @@ impl Fs {
     }
 
     /// Copy repo files to local disk.
-    ///
-    /// Returns a [`ChangeReport`] describing what was written.
-    ///
-    /// # Arguments
-    /// * `src` - Repo path to copy from.
-    /// * `dest` - Local destination directory.
-    /// * `opts` - [`CopyOutOptions`] for include/exclude filtering.
     pub fn copy_out(
         &self,
         src: &str,
@@ -934,15 +749,6 @@ impl Fs {
     }
 
     /// Make `dest` in the repo identical to the local `src` directory.
-    ///
-    /// Unlike [`copy_in()`](Fs::copy_in), this also deletes files in the
-    /// destination that are not present on disk, making the two trees mirror
-    /// each other exactly.
-    ///
-    /// Returns `(report, new_fs)`.
-    ///
-    /// # Errors
-    /// Returns [`Error::Permission`] if this snapshot is read-only.
     pub fn sync_in(
         &self,
         src: &Path,
@@ -957,7 +763,6 @@ impl Fs {
             let exc: Option<Vec<&str>> = opts.exclude.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect());
             crate::copy::sync_in(repo, tree_oid, src, dest, inc.as_deref(), exc.as_deref(), checksum)
         })?;
-        // Post-filter writes using the ExcludeFilter
         let writes: Vec<_> = if let Some(ref ef) = exclude_filter {
             if ef.active() {
                 writes.into_iter().filter(|(p, _)| !ef.is_excluded(p, false)).collect()
@@ -980,11 +785,6 @@ impl Fs {
     }
 
     /// Make the local `dest` directory identical to `src` in the repo.
-    ///
-    /// Deletes extra local files and prunes empty directories so the local
-    /// tree mirrors the repo subtree exactly.
-    ///
-    /// Returns a [`ChangeReport`] describing what was written and deleted.
     pub fn sync_out(
         &self,
         src: &str,
@@ -1001,8 +801,6 @@ impl Fs {
     }
 
     /// Remove files from local disk that match the include/exclude filters.
-    ///
-    /// Returns a [`ChangeReport`] describing what was deleted.
     pub fn remove_from_disk(
         &self,
         path: &Path,
@@ -1014,15 +812,6 @@ impl Fs {
     }
 
     /// Remove files from the repo and commit, returning a new [`Fs`].
-    ///
-    /// Sources must be literal paths; use [`glob()`](Fs::glob) to expand
-    /// patterns before calling.
-    ///
-    /// # Errors
-    /// Returns [`Error::Permission`] if this snapshot is read-only.
-    /// Returns [`Error::NotFound`] if a source path does not exist.
-    /// Returns [`Error::IsADirectory`] if a source is a directory and
-    /// `opts.recursive` is `false`.
     pub fn remove(
         &self,
         sources: &[&str],
@@ -1042,7 +831,6 @@ impl Fs {
                     if !opts.recursive {
                         return Err(Error::is_a_directory(&path));
                     }
-                    // Walk subtree and collect all leaf paths for removal
                     let sub_entries = tree::walk_tree(repo, entry.oid)?;
                     for (rel_path, we) in &sub_entries {
                         let full_path = format!("{}/{}", path, rel_path);
@@ -1078,14 +866,6 @@ impl Fs {
     }
 
     /// Rename a single path within the repo and commit, returning a new [`Fs`].
-    ///
-    /// # Arguments
-    /// * `src` - Current path in the repo.
-    /// * `dest` - New path in the repo.
-    /// * `opts` - [`WriteOptions`] for commit message (mode is ignored).
-    ///
-    /// # Errors
-    /// Returns [`Error::Permission`] if this snapshot is read-only.
     pub fn rename(
         &self,
         src: &str,
@@ -1105,19 +885,6 @@ impl Fs {
     }
 
     /// Move or rename files within the repo, following POSIX `mv` semantics.
-    ///
-    /// - Single source to a non-existing destination: rename.
-    /// - Multiple sources: destination must be an existing directory.
-    ///
-    /// Returns the new [`Fs`] snapshot.
-    ///
-    /// # Errors
-    /// Returns [`Error::Permission`] if this snapshot is read-only.
-    /// Returns [`Error::NotFound`] if a source does not exist.
-    /// Returns [`Error::NotADirectory`] if multiple sources are given but
-    /// `dest` is not an existing directory.
-    /// Returns [`Error::IsADirectory`] if a source is a directory and
-    /// `opts.recursive` is `false`.
     pub fn move_paths(
         &self,
         sources: &[&str],
@@ -1127,7 +894,6 @@ impl Fs {
         let tree_oid = self.require_tree()?;
         let dest_norm = crate::paths::normalize_path(dest)?;
 
-        // Check if dest is an existing directory
         let dest_is_dir = self.with_repo(|repo| {
             match tree::entry_at_path(repo, tree_oid, &dest_norm)? {
                 Some(entry) => Ok(entry.mode == MODE_TREE),
@@ -1147,9 +913,7 @@ impl Fs {
                 let entry = tree::entry_at_path(repo, tree_oid, &src_norm)?
                     .ok_or_else(|| Error::not_found(&src_norm))?;
 
-                // Determine final destination path
                 let final_dest = if dest_is_dir {
-                    // Move into directory: use source basename
                     let basename = src_norm.rsplit('/').next().unwrap_or(&src_norm);
                     format!("{}/{}", dest_norm, basename)
                 } else {
@@ -1164,24 +928,24 @@ impl Fs {
                     for (rel_path, we) in &sub_entries {
                         let old_path = format!("{}/{}", src_norm, rel_path);
                         let new_path = format!("{}/{}", final_dest, rel_path);
-                        let obj = repo.find_object(we.oid).map_err(Error::git)?;
+                        let blob = repo.find_blob(we.oid).map_err(Error::git)?;
                         all_writes.push((old_path, None));
                         all_writes.push((
                             new_path,
                             Some(TreeWrite {
-                                data: obj.data.to_vec(),
+                                data: blob.content().to_vec(),
                                 oid: we.oid,
                                 mode: we.mode,
                             }),
                         ));
                     }
                 } else {
-                    let obj = repo.find_object(entry.oid).map_err(Error::git)?;
+                    let blob = repo.find_blob(entry.oid).map_err(Error::git)?;
                     all_writes.push((src_norm, None));
                     all_writes.push((
                         final_dest,
                         Some(TreeWrite {
-                            data: obj.data.to_vec(),
+                            data: blob.content().to_vec(),
                             oid: entry.oid,
                             mode: entry.mode,
                         }),
@@ -1203,28 +967,6 @@ impl Fs {
 
     /// Copy files from another branch, tag, or detached commit into this
     /// branch in a single atomic commit.
-    ///
-    /// Follows the same rsync trailing-slash conventions as
-    /// [`copy_in`](Fs::copy_in)/[`copy_out`](Fs::copy_out):
-    ///
-    /// - `"config"` → directory mode — copies `config/` *as* `config/` under dest.
-    /// - `"config/"` → contents mode — pours the *contents* of `config/` into dest.
-    /// - `"file.txt"` → file mode — copies the single file into dest.
-    /// - `""` or `"/"` → root contents mode — copies everything.
-    ///
-    /// Since both snapshots share the same object store, blobs are referenced
-    /// by OID — no data is read into memory regardless of file size.
-    ///
-    /// # Arguments
-    /// * `source` - Any `Fs` (branch, tag, detached). Read-only; not modified.
-    /// * `sources` - Source path(s) in *source*. Follows rsync conventions.
-    /// * `dest` - Destination path in this branch. `""` = root.
-    /// * `opts` - [`CopyFromRefOptions`] for delete, dry-run, and message.
-    ///
-    /// # Errors
-    /// Returns an error if `source` belongs to a different repo.
-    /// Returns [`Error::NotFound`] if a source path does not exist.
-    /// Returns [`Error::Permission`] if this `Fs` is read-only.
     pub fn copy_from_ref(
         &self,
         source: &Fs,
@@ -1234,7 +976,6 @@ impl Fs {
     ) -> Result<Fs> {
         self.require_writable("write to")?;
 
-        // Validate same repo
         let same = Arc::ptr_eq(&self.inner, &source.inner) || {
             let self_canon = std::fs::canonicalize(&self.inner.path).ok();
             let src_canon = std::fs::canonicalize(&source.inner.path).ok();
@@ -1250,9 +991,7 @@ impl Fs {
         let src_tree = source.require_tree()?;
         let dest_tree = self.require_tree()?;
 
-        // Resolve sources and enumerate files → BTreeMap<dest_path, (oid, mode)>
-        let mut src_mapped = std::collections::BTreeMap::<String, (gix::ObjectId, u32)>::new();
-        // Track dest prefixes for walking the dest tree
+        let mut src_mapped = std::collections::BTreeMap::<String, (git2::Oid, u32)>::new();
         let mut dest_prefixes = std::collections::BTreeSet::<String>::new();
 
         self.with_repo(|repo| {
@@ -1265,11 +1004,9 @@ impl Fs {
                     crate::paths::normalize_path(stripped)?
                 };
 
-                // Determine mode: file, dir, or contents
-                enum SrcMode { File(gix::ObjectId, u32), Dir, Contents }
+                enum SrcMode { File(git2::Oid, u32), Dir, Contents }
 
                 let mode = if contents_mode {
-                    // Trailing slash or root
                     if !normalized.is_empty() {
                         let entry = tree::entry_at_path(repo, src_tree, &normalized)?;
                         match entry {
@@ -1338,9 +1075,8 @@ impl Fs {
             Ok(())
         })?;
 
-        // Walk dest subtree(s)
         let dest_files = self.with_repo(|repo| {
-            let mut dest_files = std::collections::BTreeMap::<String, (gix::ObjectId, u32)>::new();
+            let mut dest_files = std::collections::BTreeMap::<String, (git2::Oid, u32)>::new();
             for dp in &dest_prefixes {
                 let walked = walk_subtree(repo, dest_tree, dp)?;
                 for (rel, entry) in walked {
@@ -1355,7 +1091,6 @@ impl Fs {
             Ok(dest_files)
         })?;
 
-        // Build writes and removes
         let mut writes: Vec<(String, Option<TreeWrite>)> = Vec::new();
         let mut report = ChangeReport::new();
 
@@ -1386,7 +1121,7 @@ impl Fs {
                         }),
                     ));
                 }
-                _ => {} // identical
+                _ => {}
             }
         }
 
@@ -1423,18 +1158,11 @@ impl Fs {
             .ok_or_else(|| Error::not_found("no commit in snapshot"))?;
 
         self.with_repo(|repo| {
-            let obj = repo.find_object(commit_oid).map_err(Error::git)?;
-            let data = obj.data.to_vec();
-            let commit_ref =
-                gix::objs::CommitRef::from_bytes(&data).map_err(Error::git)?;
-            let parent_oid = commit_ref.parents().next();
-            match parent_oid {
-                Some(pid) => {
-                    let parent_id: gix::ObjectId = pid;
-                    // Drop the repo lock before calling from_commit (which re-locks)
-                    Ok(Some(parent_id))
-                }
-                None => Ok(None),
+            let commit = repo.find_commit(commit_oid).map_err(Error::git)?;
+            if commit.parent_count() > 0 {
+                Ok(Some(commit.parent_id(0).map_err(Error::git)?))
+            } else {
+                Ok(None)
             }
         })?
         .map(|parent_id| {
@@ -1444,9 +1172,6 @@ impl Fs {
     }
 
     /// Return the `Fs` at the *n*-th ancestor commit.
-    ///
-    /// # Errors
-    /// Returns an error if the history is shorter than `n` commits.
     pub fn back(&self, n: usize) -> Result<Fs> {
         let mut current = self.clone();
         for _ in 0..n {
@@ -1461,19 +1186,9 @@ impl Fs {
     }
 
     /// Move the branch pointer back `n` commits (soft reset).
-    ///
-    /// Walks back through parent commits and updates the branch ref.
-    /// A reflog entry is written automatically so the change can be
-    /// reversed with [`redo()`](Fs::redo).
-    ///
-    /// # Errors
-    /// Returns [`Error::Permission`] if called on a read-only snapshot (tag).
-    /// Returns [`Error::StaleSnapshot`] if the branch has advanced since this snapshot.
-    /// Returns an error if there are fewer than `n` commits in the history.
     pub fn undo(&self, n: usize) -> Result<Fs> {
         let branch = self.require_writable("undo")?;
 
-        // Walk back n parents
         let mut target = self.clone();
         for _ in 0..n {
             target = target
@@ -1492,7 +1207,6 @@ impl Fs {
             .commit_oid
             .ok_or_else(|| Error::not_found("no commit in snapshot"))?;
 
-        use gix::refs::transaction::PreviousValue;
         with_repo_lock(&inner.path, || {
             let repo = inner
                 .repo
@@ -1501,9 +1215,10 @@ impl Fs {
 
             // Stale snapshot check
             let current_ref = repo
-                .find_reference(refname.as_str())
+                .find_reference(&refname)
                 .map_err(|_| Error::not_found(format!("branch '{}' not found", branch)))?;
-            let actual_oid = current_ref.id().detach();
+            let actual_oid = current_ref.target()
+                .ok_or_else(|| Error::git_msg("symbolic reference unexpected"))?;
             if actual_oid != current_oid {
                 return Err(Error::stale_snapshot(format!(
                     "branch '{}' has moved: expected {}, found {}",
@@ -1511,13 +1226,8 @@ impl Fs {
                 )));
             }
 
-            repo.reference(
-                refname.as_str(),
-                target_oid,
-                PreviousValue::Any,
-                "undo: move back",
-            )
-            .map_err(Error::git)?;
+            repo.reference(&refname, target_oid, true, "undo: move back")
+                .map_err(Error::git)?;
 
             // Write reflog entry for undo
             let now = std::time::SystemTime::now()
@@ -1527,8 +1237,8 @@ impl Fs {
                 &inner.path,
                 &refname,
                 &crate::types::ReflogEntry {
-                    old_sha: format!("{}", current_oid),
-                    new_sha: format!("{}", target_oid),
+                    old_sha: current_oid.to_string(),
+                    new_sha: target_oid.to_string(),
                     committer: format!(
                         "{} <{}>",
                         inner.signature.name, inner.signature.email
@@ -1545,33 +1255,23 @@ impl Fs {
     }
 
     /// Move the branch pointer forward `n` steps using the reflog.
-    ///
-    /// Reads the reflog to find where the branch was before the last `n`
-    /// movements, resurrecting "orphaned" commits after an [`undo()`](Fs::undo).
-    ///
-    /// # Errors
-    /// Returns [`Error::Permission`] if called on a read-only snapshot (tag).
-    /// Returns [`Error::StaleSnapshot`] if the branch has advanced since this snapshot.
-    /// Returns an error if not enough redo history exists.
     pub fn redo(&self, n: usize) -> Result<Fs> {
         let branch = self.require_writable("redo")?;
         let refname = format!("refs/heads/{}", branch);
 
         let current_hex = self
             .commit_oid
-            .map(|oid| format!("{}", oid))
+            .map(|oid| oid.to_string())
             .unwrap_or_default();
 
         let current_oid = self
             .commit_oid
             .ok_or_else(|| Error::not_found("no commit in snapshot"))?;
 
-        // Read reflog to find forward commits
         let reflog_entries = crate::reflog::read_reflog(&self.inner.path, &refname)?;
 
         let mut forward_sha = current_hex.clone();
         for _ in 0..n {
-            // Find entry where new_sha matches current — old_sha is the "forward" one
             let next = reflog_entries
                 .iter()
                 .rev()
@@ -1581,12 +1281,11 @@ impl Fs {
             forward_sha = next;
         }
 
-        let forward_oid =
-            gix::ObjectId::from_hex(forward_sha.as_bytes()).map_err(Error::git)?;
+        let forward_oid = git2::Oid::from_str(&forward_sha)
+            .map_err(|e| Error::git_msg(format!("invalid oid: {}", e)))?;
 
         let inner = Arc::clone(&self.inner);
 
-        use gix::refs::transaction::PreviousValue;
         with_repo_lock(&inner.path, || {
             let repo = inner
                 .repo
@@ -1595,9 +1294,10 @@ impl Fs {
 
             // Stale snapshot check
             let current_ref = repo
-                .find_reference(refname.as_str())
+                .find_reference(&refname)
                 .map_err(|_| Error::not_found(format!("branch '{}' not found", branch)))?;
-            let actual_oid = current_ref.id().detach();
+            let actual_oid = current_ref.target()
+                .ok_or_else(|| Error::git_msg("symbolic reference unexpected"))?;
             if actual_oid != current_oid {
                 return Err(Error::stale_snapshot(format!(
                     "branch '{}' has moved: expected {}, found {}",
@@ -1605,13 +1305,8 @@ impl Fs {
                 )));
             }
 
-            repo.reference(
-                refname.as_str(),
-                forward_oid,
-                PreviousValue::Any,
-                "redo: move forward",
-            )
-            .map_err(Error::git)?;
+            repo.reference(&refname, forward_oid, true, "redo: move forward")
+                .map_err(Error::git)?;
 
             // Write reflog entry for redo
             let now = std::time::SystemTime::now()
@@ -1639,10 +1334,6 @@ impl Fs {
     }
 
     /// Walk the commit history, returning [`CommitInfo`] entries.
-    ///
-    /// All filters in [`LogOptions`] are optional and combine with AND:
-    /// `path` restricts to commits that changed the given file, `match_pattern`
-    /// filters by commit message glob, and `before` caps the timestamp.
     pub fn log(&self, opts: LogOptions) -> Result<Vec<CommitInfo>> {
         let mut commit_oid = self
             .commit_oid
@@ -1664,28 +1355,25 @@ impl Fs {
         let mut matched = 0usize;
 
         loop {
-            let obj = repo.find_object(commit_oid).map_err(Error::git)?;
-            let data = obj.data.to_vec();
-            let commit_ref =
-                gix::objs::CommitRef::from_bytes(&data).map_err(Error::git)?;
+            let commit = repo.find_commit(commit_oid).map_err(Error::git)?;
 
-            let timestamp = commit_ref.author.time().map(|t| t.seconds as u64).unwrap_or(0);
-            let message = commit_ref.message.to_string();
-            let tree_oid: gix::ObjectId = commit_ref.tree();
-            let parent_oid: Option<gix::ObjectId> =
-                commit_ref.parents().next();
+            let timestamp = commit.time().seconds() as u64;
+            let message = commit.message().unwrap_or("").to_string();
+            let tree_oid = commit.tree_id();
+            let parent_oid = if commit.parent_count() > 0 {
+                Some(commit.parent_id(0).map_err(Error::git)?)
+            } else {
+                None
+            };
 
-            // Apply filters
             let mut include = true;
 
-            // before filter
             if let Some(cutoff) = before {
                 if timestamp > cutoff {
                     include = false;
                 }
             }
 
-            // match_pattern filter (glob on message)
             if include {
                 if let Some(pat) = match_pattern {
                     if !crate::glob::glob_match(pat, &message) {
@@ -1694,16 +1382,12 @@ impl Fs {
                 }
             }
 
-            // path filter: skip if the path has the same OID in this commit and its parent
             if include {
                 if let Some(ref filter) = filter_path {
                     let this_entry = tree::entry_at_path(&repo, tree_oid, filter)?;
                     let parent_entry = if let Some(pid) = parent_oid {
-                        let pobj = repo.find_object(pid).map_err(Error::git)?;
-                        let pdata = pobj.data.to_vec();
-                        let parent_commit =
-                            gix::objs::CommitRef::from_bytes(&pdata).map_err(Error::git)?;
-                        let parent_tree: gix::ObjectId = parent_commit.tree();
+                        let parent_commit = repo.find_commit(pid).map_err(Error::git)?;
+                        let parent_tree = parent_commit.tree_id();
                         tree::entry_at_path(&repo, parent_tree, filter)?
                     } else {
                         None
@@ -1724,11 +1408,11 @@ impl Fs {
                 matched += 1;
                 if matched > skip {
                     results.push(CommitInfo {
-                        commit_hash: format!("{}", commit_oid),
+                        commit_hash: commit_oid.to_string(),
                         message,
                         time: Some(timestamp),
-                        author_name: Some(commit_ref.author.name.to_string()),
-                        author_email: Some(commit_ref.author.email.to_string()),
+                        author_name: Some(commit.author().name().unwrap_or("").to_string()),
+                        author_email: Some(commit.author().email().unwrap_or("").to_string()),
                     });
                 }
             }
@@ -1751,7 +1435,7 @@ impl Fs {
     /// Build an `Fs` from a known commit oid.
     pub(crate) fn from_commit(
         inner: Arc<GitStoreInner>,
-        commit_oid: gix::ObjectId,
+        commit_oid: git2::Oid,
         ref_name: Option<String>,
         writable: Option<bool>,
     ) -> Result<Self> {
@@ -1761,12 +1445,8 @@ impl Fs {
                 .repo
                 .lock()
                 .map_err(|e| Error::git_msg(e.to_string()))?;
-            let obj = repo.find_object(commit_oid).map_err(Error::git)?;
-            let data = obj.data.to_vec();
-            let commit_ref =
-                gix::objs::CommitRef::from_bytes(&data).map_err(Error::git)?;
-            let tree_oid: gix::ObjectId = commit_ref.tree();
-            tree_oid
+            let commit = repo.find_commit(commit_oid).map_err(Error::git)?;
+            commit.tree_id()
         };
 
         Ok(Fs {
@@ -1797,9 +1477,10 @@ impl Fs {
         let (new_commit_oid, new_tree_oid) = with_repo_lock(&self.inner.path, || {
             // Stale snapshot check
             let current_ref = repo
-                .find_reference(refname.as_str())
+                .find_reference(&refname)
                 .map_err(|_| Error::not_found(format!("branch '{}' not found", branch)))?;
-            let current_oid = current_ref.id().detach();
+            let current_oid = current_ref.target()
+                .ok_or_else(|| Error::git_msg("symbolic reference unexpected"))?;
 
             if let Some(our_oid) = self.commit_oid {
                 if current_oid != our_oid {
@@ -1811,7 +1492,7 @@ impl Fs {
             }
 
             // Rebuild tree
-            let base_tree = self.tree_oid.unwrap_or_else(|| gix::ObjectId::null(gix::hash::Kind::Sha1));
+            let base_tree = self.tree_oid.unwrap_or_else(git2::Oid::zero);
             let new_tree_oid = tree::rebuild_tree(&repo, base_tree, writes)?;
 
             // No-op check: if tree didn't change, skip
@@ -1820,52 +1501,43 @@ impl Fs {
             }
 
             // Build commit
+            let git_sig = git2::Signature::now(
+                &self.inner.signature.name,
+                &self.inner.signature.email,
+            ).map_err(Error::git)?;
+
+            let tree = repo.find_tree(new_tree_oid).map_err(Error::git)?;
+            let parent_commit = if let Some(oid) = self.commit_oid {
+                Some(repo.find_commit(oid).map_err(Error::git)?)
+            } else {
+                None
+            };
+            let parents: Vec<&git2::Commit> = parent_commit.iter().collect();
+
+            let new_commit_oid = repo.commit(
+                None, // don't update ref yet — we do it manually for CAS
+                &git_sig,
+                &git_sig,
+                message,
+                &tree,
+                &parents,
+            ).map_err(Error::git)?;
+
+            // Update ref
+            let msg: String = format!("commit: {}", message);
+            repo.reference(&refname, new_commit_oid, true, &msg)
+                .map_err(Error::git)?;
+
+            // Write reflog entry manually
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default();
-            let time =
-                gix::date::Time::new(now.as_secs() as gix::date::SecondsSinceUnixEpoch, 0);
-            let actor = gix::actor::Signature {
-                name: self.inner.signature.name.clone().into(),
-                email: self.inner.signature.email.clone().into(),
-                time,
-            };
-
-            let parents: Vec<gix::ObjectId> = if let Some(oid) = self.commit_oid {
-                vec![oid]
-            } else {
-                vec![]
-            };
-
-            let commit = gix::objs::Commit {
-                tree: new_tree_oid,
-                parents: parents.into(),
-                author: actor.clone(),
-                committer: actor,
-                encoding: None,
-                message: message.into(),
-                extra_headers: vec![],
-            };
-            let new_commit_oid = repo.write_object(&commit).map_err(Error::git)?;
-
-            // Update ref
-            use gix::refs::transaction::PreviousValue;
-            let msg: String = format!("commit: {}", message);
-            repo.reference(
-                refname.as_str(),
-                new_commit_oid,
-                PreviousValue::Any,
-                msg.as_str(),
-            )
-            .map_err(Error::git)?;
-
-            // Write reflog entry manually (gix doesn't write reflogs for bare repos)
             let _ = crate::reflog::write_reflog_entry(
                 &self.inner.path,
                 &refname,
                 &crate::types::ReflogEntry {
-                    old_sha: format!("{}", current_oid),
-                    new_sha: format!("{}", new_commit_oid),
+                    old_sha: current_oid.to_string(),
+                    new_sha: new_commit_oid.to_string(),
                     committer: format!(
                         "{} <{}>",
                         self.inner.signature.name, self.inner.signature.email
@@ -1875,7 +1547,7 @@ impl Fs {
                 },
             );
 
-            Ok((new_commit_oid.detach(), new_tree_oid))
+            Ok((new_commit_oid, new_tree_oid))
         })?;
 
         Ok(Fs {
@@ -1891,7 +1563,7 @@ impl Fs {
 
 impl std::fmt::Display for Fs {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let short = self.commit_oid.map(|o| format!("{}", o)).unwrap_or_default();
+        let short = self.commit_oid.map(|o| o.to_string()).unwrap_or_default();
         let short = &short[..short.len().min(7)];
         let mut parts = Vec::new();
         if let Some(ref name) = self.ref_name {
@@ -1906,13 +1578,6 @@ impl std::fmt::Display for Fs {
 }
 
 /// Retry a write operation with automatic back-off on stale-snapshot errors.
-///
-/// Calls `f` up to 5 times. Uses exponential back-off with a base of 10 ms,
-/// factor 2x, and a cap of 200 ms to avoid thundering-herd problems.
-///
-/// # Errors
-/// Returns [`Error::StaleSnapshot`] if all attempts are exhausted.
-/// Returns any other error immediately.
 pub fn retry_write<F, T>(mut f: F) -> Result<T>
 where
     F: FnMut() -> Result<T>,
@@ -1941,20 +1606,18 @@ use std::collections::BTreeMap;
 
 /// Walk a subtree at `path` within a tree, returning `{rel: (oid, mode)}`.
 fn walk_subtree(
-    repo: &gix::Repository,
-    root_tree: gix::ObjectId,
+    repo: &git2::Repository,
+    root_tree: git2::Oid,
     path: &str,
-) -> Result<BTreeMap<String, (gix::ObjectId, u32)>> {
+) -> Result<BTreeMap<String, (git2::Oid, u32)>> {
     let mut result = BTreeMap::new();
 
     if path.is_empty() {
-        // Walk entire tree
         let entries = tree::walk_tree(repo, root_tree)?;
         for (rel, we) in entries {
             result.insert(rel, (we.oid, we.mode));
         }
     } else {
-        // Resolve to subtree
         let entry = tree::entry_at_path(repo, root_tree, path)?;
         match entry {
             Some(e) if e.mode == MODE_TREE => {
@@ -1963,9 +1626,7 @@ fn walk_subtree(
                     result.insert(rel, (we.oid, we.mode));
                 }
             }
-            _ => {
-                // Path doesn't exist or isn't a directory — return empty
-            }
+            _ => {}
         }
     }
 
@@ -1977,8 +1638,8 @@ fn walk_subtree(
 // ---------------------------------------------------------------------------
 
 fn iglob_recursive(
-    repo: &gix::Repository,
-    tree_oid: gix::ObjectId,
+    repo: &git2::Repository,
+    tree_oid: git2::Oid,
     segments: &[&str],
     prefix: &str,
     results: &mut Vec<String>,
@@ -1990,16 +1651,14 @@ fn iglob_recursive(
     let seg = segments[0];
     let rest = &segments[1..];
 
-    let tree_data = repo.find_object(tree_oid).map_err(Error::git)?;
-    let data = tree_data.data.to_vec();
-    let tree_ref = gix::objs::TreeRef::from_bytes(&data).map_err(Error::git)?;
+    let tree = repo.find_tree(tree_oid).map_err(Error::git)?;
 
     if seg == "**" {
-        // Match zero or more directory levels
         iglob_recursive(repo, tree_oid, rest, prefix, results)?;
 
-        for entry in &tree_ref.entries {
-            let name = String::from_utf8_lossy(entry.filename).into_owned();
+        for i in 0..tree.len() {
+            let entry = tree.get(i).unwrap();
+            let name = entry.name().unwrap_or("").to_string();
             if name.starts_with('.') {
                 continue;
             }
@@ -2008,14 +1667,15 @@ fn iglob_recursive(
             } else {
                 format!("{}/{}", prefix, name)
             };
-            let entry_mode = tree::mode_to_u32(entry.mode);
+            let entry_mode = entry.filemode() as u32;
             if entry_mode == MODE_TREE {
-                iglob_recursive(repo, entry.oid.to_owned(), segments, &full, results)?;
+                iglob_recursive(repo, entry.id(), segments, &full, results)?;
             }
         }
     } else {
-        for entry in &tree_ref.entries {
-            let name = String::from_utf8_lossy(entry.filename).into_owned();
+        for i in 0..tree.len() {
+            let entry = tree.get(i).unwrap();
+            let name = entry.name().unwrap_or("").to_string();
             if !crate::glob::glob_match(seg, &name) {
                 continue;
             }
@@ -2024,14 +1684,14 @@ fn iglob_recursive(
             } else {
                 format!("{}/{}", prefix, name)
             };
-            let entry_mode = tree::mode_to_u32(entry.mode);
+            let entry_mode = entry.filemode() as u32;
 
             if rest.is_empty() {
                 if entry_mode != MODE_TREE {
                     results.push(full);
                 }
             } else if entry_mode == MODE_TREE {
-                iglob_recursive(repo, entry.oid.to_owned(), rest, &full, results)?;
+                iglob_recursive(repo, entry.id(), rest, &full, results)?;
             }
         }
     }

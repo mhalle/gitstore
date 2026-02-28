@@ -1,121 +1,141 @@
 mod common;
 
+use std::process::Command;
 use vost::*;
 
 // ---------------------------------------------------------------------------
-// Helper: create a note in 2/38 fanout layout directly via gix
+// Helpers using git CLI (no direct git library access below our API layer)
 // ---------------------------------------------------------------------------
 
+/// Run a git command in the store's repo directory and return stdout.
+fn git(store: &GitStore, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(store.path())
+        .output()
+        .expect("failed to run git");
+    String::from_utf8(output.stdout).unwrap().trim().to_string()
+}
+
+/// Create a note in 2/38 fanout layout directly via git CLI.
 fn create_fanout_note(store: &GitStore, namespace: &str, hash: &str, text: &str) {
-    let repo = gix::open(store.path()).unwrap();
+    let repo_path = store.path();
     let ref_name = format!("refs/notes/{}", namespace);
-
-    // Create blob
-    let blob_oid = repo.write_blob(text.as_bytes()).unwrap().detach();
-
-    // Build subtree: hash[2:] -> blob
     let prefix = &hash[..2];
     let suffix = &hash[2..];
-    let sub_tree = gix::objs::Tree {
-        entries: vec![gix::objs::tree::Entry {
-            mode: gix::objs::tree::EntryMode::try_from(types::MODE_BLOB).unwrap(),
-            filename: suffix.into(),
-            oid: blob_oid,
-        }],
-    };
-    let sub_tree_oid = repo.write_object(&sub_tree).unwrap().detach();
 
-    // Read existing root entries
-    let mut root_entries = Vec::new();
-    let parents: Vec<gix::ObjectId> = match repo.find_reference(&ref_name) {
-        Ok(r) => {
-            let tip = r.id().detach();
-            let data = repo.find_object(tip).unwrap();
-            let commit = gix::objs::CommitRef::from_bytes(&data.data).unwrap();
-            let tree_data = repo.find_object(commit.tree()).unwrap();
-            let tree = gix::objs::TreeRef::from_bytes(&tree_data.data).unwrap();
-            for e in &tree.entries {
-                root_entries.push(gix::objs::tree::Entry {
-                    mode: e.mode,
-                    filename: e.filename.to_owned(),
-                    oid: e.oid.to_owned(),
-                });
-            }
-            vec![tip]
+    let run = |args: &[&str]| -> String {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(repo_path)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .expect("failed to run git");
+        let out = output.wait_with_output().unwrap();
+        String::from_utf8(out.stdout).unwrap().trim().to_string()
+    };
+
+    let run_stdin = |args: &[&str], input: &[u8]| -> String {
+        use std::io::Write;
+        let mut child = Command::new("git")
+            .args(args)
+            .current_dir(repo_path)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .expect("failed to run git");
+        child.stdin.take().unwrap().write_all(input).unwrap();
+        let out = child.wait_with_output().unwrap();
+        String::from_utf8(out.stdout).unwrap().trim().to_string()
+    };
+
+    // Create blob from text
+    let blob_oid = run_stdin(&["hash-object", "-w", "--stdin"], text.as_bytes());
+
+    // Build subtree: suffix -> blob
+    let sub_tree_line = format!("100644 blob {}\t{}", blob_oid, suffix);
+    let sub_tree_oid = run_stdin(&["mktree"], sub_tree_line.as_bytes());
+
+    // Read existing root tree entries (if ref exists)
+    let existing_entries = {
+        let output = Command::new("git")
+            .args(["rev-parse", "--verify", &ref_name])
+            .current_dir(repo_path)
+            .output()
+            .unwrap();
+        if output.status.success() {
+            let tip = String::from_utf8(output.stdout).unwrap().trim().to_string();
+            let tree_oid = run(&["rev-parse", &format!("{}^{{tree}}", tip)]);
+            let ls_output = Command::new("git")
+                .args(["ls-tree", &tree_oid])
+                .current_dir(repo_path)
+                .output()
+                .unwrap();
+            String::from_utf8(ls_output.stdout).unwrap()
+        } else {
+            String::new()
         }
-        Err(_) => {
-            vec![]
+    };
+
+    // Build new root tree: existing entries + fanout subtree
+    let mut mktree_input = String::new();
+    for line in existing_entries.lines() {
+        if !line.is_empty() {
+            mktree_input.push_str(line);
+            mktree_input.push('\n');
         }
-    };
-
-    // Add fanout subtree
-    root_entries.push(gix::objs::tree::Entry {
-        mode: gix::objs::tree::EntryMode::try_from(types::MODE_TREE).unwrap(),
-        filename: prefix.into(),
-        oid: sub_tree_oid,
-    });
-    root_entries.sort_by(|a, b| a.filename.cmp(&b.filename));
-
-    let root_tree = gix::objs::Tree {
-        entries: root_entries,
-    };
-    let root_tree_oid = repo.write_object(&root_tree).unwrap().detach();
-
-    // Create commit
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-    let time = gix::date::Time::new(now.as_secs() as gix::date::SecondsSinceUnixEpoch, 0);
-    let actor = gix::actor::Signature {
-        name: "test".into(),
-        email: "test@test".into(),
-        time,
-    };
-
-    let commit = gix::objs::Commit {
-        tree: root_tree_oid,
-        parents: parents.into(),
-        author: actor.clone(),
-        committer: actor,
-        encoding: None,
-        message: "fanout note\n".into(),
-        extra_headers: vec![],
-    };
-    let commit_oid = repo.write_object(&commit).unwrap();
-
-    use gix::refs::transaction::PreviousValue;
-    repo.reference(ref_name.as_str(), commit_oid, PreviousValue::Any, "fanout note")
-        .unwrap();
-}
-
-/// Helper: count commits on a notes ref by walking the chain via gix.
-fn notes_chain_length(store: &GitStore, namespace: &str) -> usize {
-    let repo = gix::open(store.path()).unwrap();
-    let ref_name = format!("refs/notes/{}", namespace);
-
-    let r = match repo.find_reference(&ref_name) {
-        Ok(r) => r,
-        Err(_) => return 0,
-    };
-    let mut tip = Some(r.id().detach());
-    let mut count = 0;
-    while let Some(oid) = tip {
-        let data = repo.find_object(oid).unwrap();
-        let commit = gix::objs::CommitRef::from_bytes(&data.data).unwrap();
-        count += 1;
-        tip = commit.parents().next();
     }
-    count
+    mktree_input.push_str(&format!("040000 tree {}\t{}\n", sub_tree_oid, prefix));
+    let root_tree_oid = run_stdin(&["mktree"], mktree_input.as_bytes());
+
+    // Create commit (with parent if ref exists)
+    let parent_check = Command::new("git")
+        .args(["rev-parse", "--verify", &ref_name])
+        .current_dir(repo_path)
+        .output()
+        .unwrap();
+    let commit_oid = if parent_check.status.success() {
+        let parent = String::from_utf8(parent_check.stdout).unwrap().trim().to_string();
+        run(&["commit-tree", &root_tree_oid, "-p", &parent, "-m", "fanout note"])
+    } else {
+        run(&["commit-tree", &root_tree_oid, "-m", "fanout note"])
+    };
+
+    // Update ref
+    run(&["update-ref", &ref_name, &commit_oid]);
 }
 
-/// Helper: get parent count of the tip commit on a notes ref.
-fn notes_tip_parent_count(store: &GitStore, namespace: &str) -> usize {
-    let repo = gix::open(store.path()).unwrap();
+/// Count commits on a notes ref by walking the chain via git CLI.
+fn notes_chain_length(store: &GitStore, namespace: &str) -> usize {
     let ref_name = format!("refs/notes/{}", namespace);
-    let r = repo.find_reference(&ref_name).unwrap();
-    let data = repo.find_object(r.id().detach()).unwrap();
-    let commit = gix::objs::CommitRef::from_bytes(&data.data).unwrap();
-    commit.parents().count()
+    let output = Command::new("git")
+        .args(["rev-parse", "--verify", &ref_name])
+        .current_dir(store.path())
+        .output()
+        .unwrap();
+    if !output.status.success() {
+        return 0;
+    }
+    let log_output = Command::new("git")
+        .args(["rev-list", &ref_name])
+        .current_dir(store.path())
+        .output()
+        .unwrap();
+    let text = String::from_utf8(log_output.stdout).unwrap();
+    text.lines().filter(|l| !l.is_empty()).count()
+}
+
+/// Get parent count of the tip commit on a notes ref via git CLI.
+fn notes_tip_parent_count(store: &GitStore, namespace: &str) -> usize {
+    let ref_name = format!("refs/notes/{}", namespace);
+    let output = Command::new("git")
+        .args(["cat-file", "-p", &ref_name])
+        .current_dir(store.path())
+        .output()
+        .unwrap();
+    let text = String::from_utf8(output.stdout).unwrap();
+    text.lines().filter(|l| l.starts_with("parent ")).count()
 }
 
 // ---------------------------------------------------------------------------

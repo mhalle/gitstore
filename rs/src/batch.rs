@@ -38,10 +38,10 @@ impl Batch {
         let path = crate::paths::normalize_path(path)?;
 
         let tw = self.fs.with_repo(|repo| {
-            let blob_oid = repo.write_blob(data).map_err(Error::git)?;
+            let blob_oid = repo.blob(data).map_err(Error::git)?;
             Ok(TreeWrite {
                 data: data.to_vec(),
-                oid: blob_oid.detach(),
+                oid: blob_oid,
                 mode,
             })
         })?;
@@ -68,10 +68,10 @@ impl Batch {
         let path = crate::paths::normalize_path(path)?;
 
         let tw = self.fs.with_repo(|repo| {
-            let blob_oid = repo.write_blob(target.as_bytes()).map_err(Error::git)?;
+            let blob_oid = repo.blob(target.as_bytes()).map_err(Error::git)?;
             Ok(TreeWrite {
                 data: target.as_bytes().to_vec(),
-                oid: blob_oid.detach(),
+                oid: blob_oid,
                 mode: MODE_LINK,
             })
         })?;
