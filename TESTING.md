@@ -136,7 +136,7 @@ cd kotlin && ./gradlew test
 
 ## Cross-language interop tests
 
-The interop suite verifies that repos written by one port can be read by all others. Each port writes a set of fixtures (basic tree, symlinks, binary data, executables, history, notes), then every other port reads and validates them.
+The interop suite verifies that repos written by one port can be read by all others. Each port writes a set of fixtures (basic tree, symlinks, binary data, executables, history, notes), then every other port reads and validates them. The git CLI also reads every port's repos, running `git fsck --strict` and verifying content, modes, history, and notes.
 
 ### Pre-build steps
 
@@ -215,7 +215,7 @@ source ~/.sdkman/bin/sdkman-init.sh
 cd kotlin && ./gradlew test && cd ..
 # Detailed report: kotlin/build/reports/tests/test/index.html
 
-# Interop (all 5 ports cross-read)
+# Interop (5 ports cross-read + git CLI validation)
 source ~/.sdkman/bin/sdkman-init.sh
 bash interop/run.sh
 ```
