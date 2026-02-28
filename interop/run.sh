@@ -148,5 +148,18 @@ if $HAS_KOTLIN; then
     fi
 fi
 
+# --- git CLI validates all ports ---
+
+PREFIXES="py ts"
+if $HAS_RUST; then PREFIXES="$PREFIXES rs"; fi
+if $HAS_CPP; then PREFIXES="$PREFIXES cpp"; fi
+if $HAS_KOTLIN; then PREFIXES="$PREFIXES kt"; fi
+
+for P in $PREFIXES; do
+    echo ""
+    echo "--- git reads $P repos ---"
+    bash interop/git_read.sh "$FIXTURES" "$TMPDIR" "$P"
+done
+
 echo ""
 echo "=== All interop tests passed ==="
