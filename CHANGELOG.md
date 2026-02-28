@@ -4,6 +4,12 @@ All notable changes to vost are documented in this file.
 
 ## Unreleased
 
+## v0.70.1 / Rust v0.9.4 (2026-02-27)
+
+**Changed (Rust):**
+
+- Internal: migrate from `gix` + `gix-lock` to `git2` (libgit2) + `fs2`, aligning with the C++ port's backend. No public API changes. Dependency count reduced by 74% (523 → 138 crate-graph entries).
+
 ## v0.70.0 / TS v0.9.5 / Rust v0.9.3 / Kotlin v0.9.7 / C++ v0.8.5 (2026-02-27)
 
 **Added (all ports):**
