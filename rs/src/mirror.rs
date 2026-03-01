@@ -482,12 +482,16 @@ pub fn bundle_export(repo_path: &Path, path: &str, refs: Option<&[String]>) -> R
         return Err(Error::git_msg("no refs to export"));
     }
 
-    // Build packfile containing all commits and their objects
+    // Build packfile containing all commits and their objects.
+    // Use RevWalk + insert_walk to include full ancestry (insert_commit
+    // only adds a single commit and its tree, not parent commits).
     let mut pb = repo.packbuilder().map_err(Error::git)?;
+    let mut revwalk = repo.revwalk().map_err(Error::git)?;
     for sha in to_export.values() {
         let oid = git2::Oid::from_str(sha).map_err(Error::git)?;
-        pb.insert_commit(oid).map_err(Error::git)?;
+        revwalk.push(oid).map_err(Error::git)?;
     }
+    pb.insert_walk(&mut revwalk).map_err(Error::git)?;
 
     let mut buf = git2::Buf::new();
     pb.write_buf(&mut buf).map_err(Error::git)?;
