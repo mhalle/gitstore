@@ -182,4 +182,32 @@ export class GitStore {
     const { restore } = await import('./mirror.js');
     return restore(this, url, opts);
   }
+
+  /**
+   * Export refs to a bundle file.
+   *
+   * @param path - Destination `.bundle` file path.
+   * @param opts.refs - Only export these refs (short names resolved automatically).
+   */
+  async bundleExport(
+    path: string,
+    opts: { refs?: string[] } = {},
+  ): Promise<void> {
+    const { bundleExport } = await import('./mirror.js');
+    return bundleExport(this, path, opts.refs);
+  }
+
+  /**
+   * Import refs from a bundle file (additive — no deletes).
+   *
+   * @param path - Source `.bundle` file path.
+   * @param opts.refs - Only import these refs (short names resolved automatically).
+   */
+  async bundleImport(
+    path: string,
+    opts: { refs?: string[] } = {},
+  ): Promise<void> {
+    const { bundleImport } = await import('./mirror.js');
+    return bundleImport(this, path, opts.refs);
+  }
 }

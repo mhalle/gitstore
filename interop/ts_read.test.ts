@@ -4,6 +4,7 @@
  */
 
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { GitStore, FileType, fileTypeFromMode } from '../ts/src/index.js';
 
@@ -192,21 +193,38 @@ async function main() {
   const fixturesPath = process.argv[2];
   const repoDir = process.argv[3];
   const prefix = process.argv[4] ?? 'py';
+  const mode = process.argv[5] ?? 'repo';
 
   const fixtures: Record<string, Spec> = JSON.parse(fs.readFileSync(fixturesPath, 'utf-8'));
   let failures = 0;
+  const tempDirs: string[] = [];
+  const bundleTmpMap = new Map<string, string>();
 
   for (const [name, spec] of Object.entries(fixtures)) {
-    const repoPath = path.join(repoDir, `${prefix}_${name}.git`);
     const branch = spec.branch ?? 'main';
+    let store: GitStore;
 
-    if (!fs.existsSync(repoPath)) {
-      console.log(`  FAIL ${name}: repo not found at ${repoPath}`);
-      failures++;
-      continue;
+    if (mode === 'bundle') {
+      const bundlePath = path.join(repoDir, `${prefix}_${name}.bundle`);
+      if (!fs.existsSync(bundlePath)) {
+        console.log(`  FAIL ${name}: bundle not found at ${bundlePath}`);
+        failures++;
+        continue;
+      }
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vost-bundle-'));
+      tempDirs.push(tmpDir);
+      bundleTmpMap.set(name, tmpDir);
+      store = await GitStore.open(tmpDir, { fs, branch });
+      await store.restore(bundlePath);
+    } else {
+      const repoPath = path.join(repoDir, `${prefix}_${name}.git`);
+      if (!fs.existsSync(repoPath)) {
+        console.log(`  FAIL ${name}: repo not found at ${repoPath}`);
+        failures++;
+        continue;
+      }
+      store = await GitStore.open(repoPath, { fs, create: false });
     }
-
-    const store = await GitStore.open(repoPath, { fs, create: false });
 
     if (spec.commits) {
       failures += await checkHistory(store, branch, spec, name);
@@ -220,17 +238,24 @@ async function main() {
   for (const [name, spec] of Object.entries(fixtures)) {
     if (!spec.notes) continue;
 
-    const repoPath = path.join(repoDir, `${prefix}_${name}.git`);
-    if (!fs.existsSync(repoPath)) continue;
+    let notesStore: GitStore;
+    if (mode === 'bundle') {
+      const tmpDir = bundleTmpMap.get(name);
+      if (!tmpDir) continue;
+      notesStore = await GitStore.open(tmpDir, { fs, create: false });
+    } else {
+      const repoPath = path.join(repoDir, `${prefix}_${name}.git`);
+      if (!fs.existsSync(repoPath)) continue;
+      notesStore = await GitStore.open(repoPath, { fs, create: false });
+    }
 
-    const store = await GitStore.open(repoPath, { fs, create: false });
     const branch = spec.branch ?? 'main';
-    const snapshot = await store.branches.get(branch);
+    const snapshot = await notesStore.branches.get(branch);
     const commitHash = snapshot.commitHash;
 
     for (const [namespace, expectedText] of Object.entries(spec.notes)) {
       try {
-        const actual = await store.notes.namespace(namespace).get(commitHash);
+        const actual = await notesStore.notes.namespace(namespace).get(commitHash);
         if (actual !== expectedText) {
           console.log(`  FAIL ${name}: notes[${namespace}] expected ${JSON.stringify(expectedText)}, got ${JSON.stringify(actual)}`);
           failures++;
@@ -242,6 +267,11 @@ async function main() {
         failures++;
       }
     }
+  }
+
+  // Clean up temp dirs
+  for (const tmpDir of tempDirs) {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 
   if (failures) {

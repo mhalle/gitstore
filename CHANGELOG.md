@@ -4,6 +4,23 @@ All notable changes to vost are documented in this file.
 
 ## Unreleased
 
+## v0.71.0 / TS v0.9.6 (2026-03-01)
+
+**Added (Python, TypeScript):**
+
+- `bundle_export()` / `bundleExport()` — public API method on `GitStore` and standalone function for creating bundle files directly
+- `bundle_import()` / `bundleImport()` — public API method on `GitStore` and standalone function for importing bundle files directly
+- Both functions are also exported from the top-level package
+
+**Changed (Python):**
+
+- Internal `_bundle_export` / `_bundle_import` functions now take `store: GitStore` instead of raw dulwich repo; renamed to `bundle_export` / `bundle_import` (public)
+
+**Changed (TypeScript):**
+
+- Bundle operations now use native isomorphic-git instead of shelling out to `git bundle` CLI
+- `bundleExport` / `bundleImport` are now exported from the mirror module
+
 ## v0.70.1 / Rust v0.9.4 (2026-02-27)
 
 **Changed (Rust):**

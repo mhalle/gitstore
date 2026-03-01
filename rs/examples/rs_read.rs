@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use base64::Engine;
 use serde::Deserialize;
 
-use vost::{FileType, GitStore, OpenOptions};
+use vost::{FileType, GitStore, OpenOptions, RestoreOptions};
 
 #[derive(Deserialize)]
 struct Fixture {
@@ -319,40 +319,70 @@ fn check_history(
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 4 {
-        eprintln!("Usage: rs_read <fixtures.json> <repo_dir> <prefix>");
+        eprintln!("Usage: rs_read <fixtures.json> <repo_dir> <prefix> [bundle]");
         std::process::exit(1);
     }
 
     let fixtures_path = &args[1];
     let repo_dir = &args[2];
     let prefix = &args[3];
+    let mode = args.get(4).map(|s| s.as_str()).unwrap_or("repo");
 
     let fixtures_text = std::fs::read_to_string(fixtures_path).unwrap();
     let fixtures: HashMap<String, Fixture> =
         serde_json::from_str(&fixtures_text).unwrap();
 
     let mut failures = 0u32;
+    let mut _temp_dirs: Vec<tempfile::TempDir> = Vec::new();
 
     for (name, spec) in &fixtures {
-        let repo_path =
-            PathBuf::from(repo_dir).join(format!("{}_{}.git", prefix, name));
         let branch = spec.branch.as_deref().unwrap_or("main");
 
-        if !repo_path.exists() {
-            println!(
-                "  FAIL {}: repo not found at {}",
-                name,
-                repo_path.display()
-            );
-            failures += 1;
-            continue;
-        }
-
-        let store = GitStore::open(&repo_path, OpenOptions {
-            create: false,
-            ..Default::default()
-        })
-        .unwrap();
+        let store = if mode == "bundle" {
+            let bundle_path =
+                PathBuf::from(repo_dir).join(format!("{}_{}.bundle", prefix, name));
+            if !bundle_path.exists() {
+                println!(
+                    "  FAIL {}: bundle not found at {}",
+                    name,
+                    bundle_path.display()
+                );
+                failures += 1;
+                continue;
+            }
+            let tmp = tempfile::tempdir().unwrap();
+            let store_path = tmp.path().join("store.git");
+            let s = GitStore::open(&store_path, OpenOptions {
+                create: true,
+                branch: Some(branch.to_string()),
+                ..Default::default()
+            })
+            .unwrap();
+            s.restore(
+                bundle_path.to_str().unwrap(),
+                &RestoreOptions::default(),
+            )
+            .unwrap();
+            _temp_dirs.push(tmp);
+            s
+        } else {
+            let repo_path =
+                PathBuf::from(repo_dir).join(format!("{}_{}.git", prefix, name));
+            if !repo_path.exists() {
+                println!(
+                    "  FAIL {}: repo not found at {}",
+                    name,
+                    repo_path.display()
+                );
+                failures += 1;
+                continue;
+            }
+            GitStore::open(&repo_path, OpenOptions {
+                create: false,
+                ..Default::default()
+            })
+            .unwrap()
+        };
 
         if spec.commits.is_some() {
             failures += check_history(&store, branch, spec, name);

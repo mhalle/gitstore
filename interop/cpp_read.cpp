@@ -12,6 +12,7 @@
 #include <iostream>
 #include <set>
 #include <string>
+#include <unistd.h>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -330,15 +331,26 @@ static int check_notes(vost::GitStore& store, const std::string& branch,
     return failures;
 }
 
+static std::string make_temp_dir() {
+    std::string tmpl = (fs::temp_directory_path() / "vost-bundle-XXXXXX").string();
+    std::vector<char> buf(tmpl.begin(), tmpl.end());
+    buf.push_back('\0');
+    if (!mkdtemp(buf.data())) {
+        throw std::runtime_error("mkdtemp failed");
+    }
+    return std::string(buf.data());
+}
+
 int main(int argc, char* argv[]) {
     if (argc < 4) {
-        std::cerr << "Usage: cpp_read <fixtures.json> <repo_dir> <prefix>\n";
+        std::cerr << "Usage: cpp_read <fixtures.json> <repo_dir> <prefix> [bundle]\n";
         return 1;
     }
 
     std::string fixtures_path = argv[1];
     std::string repo_dir = argv[2];
     std::string prefix = argv[3];
+    std::string mode = (argc > 4) ? argv[4] : "repo";
 
     std::ifstream f(fixtures_path);
     if (!f) {
@@ -348,32 +360,63 @@ int main(int argc, char* argv[]) {
     json fixtures = json::parse(f);
 
     int failures = 0;
+    std::vector<std::string> temp_dirs;
 
     for (auto& [name, spec] : fixtures.items()) {
-        std::string repo_path = repo_dir + "/" + prefix + "_" + name + ".git";
         std::string branch = spec.value("branch", "main");
 
-        if (!fs::exists(repo_path)) {
-            std::cout << "  FAIL " << name << ": repo not found at "
-                      << repo_path << "\n";
-            failures++;
-            continue;
-        }
+        if (mode == "bundle") {
+            std::string bundle_path = repo_dir + "/" + prefix + "_" + name + ".bundle";
+            if (!fs::exists(bundle_path)) {
+                std::cout << "  FAIL " << name << ": bundle not found at "
+                          << bundle_path << "\n";
+                failures++;
+                continue;
+            }
+            std::string tmp = make_temp_dir();
+            temp_dirs.push_back(tmp);
+            std::string store_path = tmp + "/store.git";
+            vost::OpenOptions opts;
+            opts.create = true;
+            opts.branch = branch;
+            auto store = vost::GitStore::open(store_path, opts);
+            store.restore(bundle_path);
 
-        vost::OpenOptions opts;
-        opts.create = false;
-        auto store = vost::GitStore::open(repo_path, opts);
-
-        if (spec.contains("commits")) {
-            failures += check_history(store, branch, spec, name);
+            if (spec.contains("commits")) {
+                failures += check_history(store, branch, spec, name);
+            } else {
+                auto snapshot = store.branches()[branch];
+                failures += check_basic(snapshot, spec, name);
+            }
+            if (spec.contains("notes")) {
+                failures += check_notes(store, branch, spec, name);
+            }
         } else {
-            auto snapshot = store.branches()[branch];
-            failures += check_basic(snapshot, spec, name);
-        }
+            std::string repo_path = repo_dir + "/" + prefix + "_" + name + ".git";
+            if (!fs::exists(repo_path)) {
+                std::cout << "  FAIL " << name << ": repo not found at "
+                          << repo_path << "\n";
+                failures++;
+                continue;
+            }
+            vost::OpenOptions opts;
+            opts.create = false;
+            auto store = vost::GitStore::open(repo_path, opts);
 
-        if (spec.contains("notes")) {
-            failures += check_notes(store, branch, spec, name);
+            if (spec.contains("commits")) {
+                failures += check_history(store, branch, spec, name);
+            } else {
+                auto snapshot = store.branches()[branch];
+                failures += check_basic(snapshot, spec, name);
+            }
+            if (spec.contains("notes")) {
+                failures += check_notes(store, branch, spec, name);
+            }
         }
+    }
+
+    for (auto& tmp : temp_dirs) {
+        fs::remove_all(tmp);
     }
 
     if (failures > 0) {

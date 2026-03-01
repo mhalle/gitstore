@@ -418,6 +418,40 @@ class GitStore:
         return restore(self, url, dry_run=dry_run, progress=progress,
                         refs=refs, format=format)
 
+    def bundle_export(
+        self,
+        path: str,
+        *,
+        refs: list[str] | None = None,
+        progress: Callable | None = None,
+    ) -> None:
+        """Export refs to a bundle file.
+
+        Args:
+            path: Destination ``.bundle`` file path.
+            refs: Ref names to include (short or full). ``None`` = all refs.
+            progress: Optional progress callback.
+        """
+        from .mirror import bundle_export
+        bundle_export(self, path, refs=refs, progress=progress)
+
+    def bundle_import(
+        self,
+        path: str,
+        *,
+        refs: list[str] | None = None,
+        progress: Callable | None = None,
+    ) -> None:
+        """Import refs from a bundle file (additive — no deletes).
+
+        Args:
+            path: Source ``.bundle`` file path.
+            refs: Ref names to include (short or full). ``None`` = all refs.
+            progress: Optional progress callback.
+        """
+        from .mirror import bundle_import
+        bundle_import(self, path, refs=refs, progress=progress)
+
 
 class RefDict(MutableMapping):
     """Dict-like access to branches or tags.

@@ -84,6 +84,7 @@ async function main() {
       }
     }
 
+    await store.backup(path.join(outputDir, `ts_${name}.bundle`));
     console.log(`  ts_write: ${name} -> ${repoPath}`);
   }
 }

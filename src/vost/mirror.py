@@ -277,10 +277,11 @@ def _additive_fetch(drepo: _DRepo, url: str, *, refs=None, progress=None):
 # Bundle helpers
 # ---------------------------------------------------------------------------
 
-def _bundle_export(drepo: _DRepo, path: str, *, refs=None, progress=None):
+def bundle_export(store: GitStore, path: str, *, refs=None, progress=None):
     """Create a bundle file from local refs."""
     from dulwich.bundle import create_bundle_from_repo, write_bundle
 
+    drepo = store._repo._drepo
     all_local = {r for r in drepo.get_refs() if r != b"HEAD"}
     if refs is not None:
         ref_set = _resolve_ref_names(refs, all_local)
@@ -294,13 +295,20 @@ def _bundle_export(drepo: _DRepo, path: str, *, refs=None, progress=None):
     bundle.close()
 
 
-def _bundle_import(drepo: _DRepo, path: str, *, refs=None, progress=None):
+def bundle_import(store: GitStore, path: str, *, refs=None, progress=None):
     """Import refs from a bundle file (additive — no deletes)."""
     from dulwich.bundle import read_bundle
 
+    drepo = store._repo._drepo
     with open(path, "rb") as f:
         bundle = read_bundle(f)
-        bundle.store_objects(drepo.object_store, progress=progress)
+        # Work around dulwich bug: Bundle.store_objects() uses
+        # iter_unpacked() which doesn't resolve ofs_delta objects,
+        # silently dropping delta-compressed entries.  Import the
+        # pack via add_thin_pack() which resolves deltas correctly.
+        raw = bundle.pack_data._file
+        raw.seek(0)
+        drepo.object_store.add_thin_pack(raw.read, None)
         if refs is not None:
             ref_set = _resolve_ref_names(refs, set(bundle.references.keys()))
         for ref, sha in bundle.references.items():
@@ -309,8 +317,9 @@ def _bundle_import(drepo: _DRepo, path: str, *, refs=None, progress=None):
         bundle.close()
 
 
-def _diff_bundle_export(drepo: _DRepo, path: str, *, refs=None) -> dict:
+def _diff_bundle_export(store: GitStore, path: str, *, refs=None) -> dict:
     """Compute diff for exporting a bundle (all refs are 'create')."""
+    drepo = store._repo._drepo
     local_refs = {
         ref: sha for ref, sha in drepo.get_refs().items()
         if ref != b"HEAD"
@@ -328,10 +337,11 @@ def _diff_bundle_export(drepo: _DRepo, path: str, *, refs=None) -> dict:
     }
 
 
-def _diff_bundle_import(drepo: _DRepo, path: str, *, refs=None) -> dict:
+def _diff_bundle_import(store: GitStore, path: str, *, refs=None) -> dict:
     """Compute diff for importing a bundle (additive — no deletes)."""
     from dulwich.bundle import read_bundle
 
+    drepo = store._repo._drepo
     with open(path, "rb") as f:
         bundle = read_bundle(f)
         bundle_refs = dict(bundle.references)
@@ -405,10 +415,10 @@ def backup(
     use_bundle = (format == "bundle") or _is_bundle_path(url)
 
     if use_bundle:
-        raw = _diff_bundle_export(drepo, url, refs=refs)
+        raw = _diff_bundle_export(store, url, refs=refs)
         diff = _raw_diff_to_sync_diff(raw)
         if not dry_run:
-            _bundle_export(drepo, url, refs=refs, progress=progress)
+            bundle_export(store, url, refs=refs, progress=progress)
         return diff
 
     if refs is not None:
@@ -449,10 +459,10 @@ def restore(
     use_bundle = (format == "bundle") or _is_bundle_path(url)
 
     if use_bundle:
-        raw = _diff_bundle_import(drepo, url, refs=refs)
+        raw = _diff_bundle_import(store, url, refs=refs)
         diff = _raw_diff_to_sync_diff(raw)
         if not dry_run:
-            _bundle_import(drepo, url, refs=refs, progress=progress)
+            bundle_import(store, url, refs=refs, progress=progress)
         return diff
 
     raw = _diff_refs(drepo, url, "pull")

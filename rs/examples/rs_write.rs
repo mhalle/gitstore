@@ -8,7 +8,7 @@ use base64::Engine;
 use serde::Deserialize;
 
 use vost::fs::BatchOptions;
-use vost::{GitStore, OpenOptions, MODE_BLOB_EXEC};
+use vost::{BackupOptions, GitStore, OpenOptions, MODE_BLOB_EXEC};
 
 #[derive(Deserialize)]
 struct Fixture {
@@ -122,6 +122,8 @@ fn main() {
             }
         }
 
+        let bundle_path = format!("{}/rs_{}.bundle", output_dir, name);
+        store.backup(&bundle_path, &BackupOptions::default()).unwrap();
         println!("  rs_write: {} -> {}", name, repo_path.display());
     }
 }

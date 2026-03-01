@@ -138,6 +138,7 @@ int main(int argc, char* argv[]) {
             write_notes(store, branch, spec);
         }
 
+        store.backup(output_dir + "/cpp_" + name + ".bundle");
         std::cout << "  cpp_write: " << name << " -> " << repo_path << "\n";
     }
 

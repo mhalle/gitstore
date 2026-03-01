@@ -84,7 +84,7 @@ export {
 } from './types.js';
 
 // Mirror utilities
-export { resolveCredentials } from './mirror.js';
+export { resolveCredentials, bundleExport, bundleImport } from './mirror.js';
 
 // Copy operations (usable standalone)
 export { diskGlob } from './copy.js';

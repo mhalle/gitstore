@@ -82,6 +82,47 @@ async function getLocalRefsGit(gitdir: string): Promise<Map<string, string>> {
   return refs;
 }
 
+async function getLocalRefsNative(
+  store: GitStore,
+): Promise<Map<string, string>> {
+  const fs = store._fsModule;
+  const gitdir = store._gitdir;
+  const refs = new Map<string, string>();
+
+  // Branches
+  const branches = await git.listBranches({ fs, gitdir });
+  for (const branch of branches) {
+    const oid = await git.resolveRef({ fs, gitdir, ref: `refs/heads/${branch}` });
+    refs.set(`refs/heads/${branch}`, oid);
+  }
+
+  // Tags
+  const tags = await git.listTags({ fs, gitdir });
+  for (const tag of tags) {
+    const oid = await git.resolveRef({ fs, gitdir, ref: `refs/tags/${tag}` });
+    refs.set(`refs/tags/${tag}`, oid);
+  }
+
+  // Notes — no isomorphic-git API for listing note namespaces; read directory
+  const notesDir = `${gitdir}/refs/notes`;
+  try {
+    const entries = await fs.promises.readdir(notesDir);
+    for (const name of entries) {
+      const ref = `refs/notes/${name}`;
+      try {
+        const oid = await git.resolveRef({ fs, gitdir, ref });
+        refs.set(ref, oid);
+      } catch {
+        // skip unresolvable entries
+      }
+    }
+  } catch {
+    // refs/notes/ doesn't exist — no notes
+  }
+
+  return refs;
+}
+
 async function getRemoteRefsGit(
   gitdir: string,
   url: string,
@@ -118,83 +159,242 @@ async function getRemoteRefsGit(
 }
 
 // ---------------------------------------------------------------------------
-// Bundle helpers
+// Object graph walker (for native bundle export)
 // ---------------------------------------------------------------------------
 
-async function bundleExport(
+async function collectReachableOids(
+  fsModule: any,
   gitdir: string,
-  path: string,
-  refs?: string[],
-): Promise<void> {
-  const { execFileSync } = await import('node:child_process');
-  const args = ['bundle', 'create', path];
-  if (refs && refs.length > 0) {
-    const localRefs = await getLocalRefsGit(gitdir);
-    const resolved = resolveRefNames(refs, localRefs);
-    args.push(...resolved);
-  } else {
-    args.push('--all');
+  startOids: string[],
+): Promise<Set<string>> {
+  const visited = new Set<string>();
+  const queue = [...startOids];
+
+  while (queue.length > 0) {
+    const oid = queue.pop()!;
+    if (visited.has(oid)) continue;
+    visited.add(oid);
+
+    const obj = await git.readObject({ fs: fsModule, gitdir, oid, format: 'parsed' });
+
+    switch (obj.type) {
+      case 'commit': {
+        const commit = obj.object as any;
+        queue.push(commit.tree);
+        if (commit.parent) {
+          for (const p of commit.parent) queue.push(p);
+        }
+        break;
+      }
+      case 'tree': {
+        const entries = obj.object as any[];
+        for (const entry of entries) {
+          if (visited.has(entry.oid)) continue;
+          if (entry.type === 'blob') {
+            // Blobs are leaves — add to visited but don't read
+            visited.add(entry.oid);
+          } else if (entry.type === 'tree') {
+            queue.push(entry.oid);
+          }
+          // skip 'commit' entries (submodules)
+        }
+        break;
+      }
+      case 'tag': {
+        const tag = obj.object as any;
+        queue.push(tag.object);
+        break;
+      }
+      // blob: leaf — no children
+    }
   }
-  execFileSync('git', ['-C', gitdir, ...args], {
-    encoding: 'utf-8',
-    stdio: ['pipe', 'pipe', 'pipe'],
-    timeout: 30000,
-  });
+
+  return visited;
 }
 
-async function bundleListHeads(
-  path: string,
-): Promise<Map<string, string>> {
-  const { execFileSync } = await import('node:child_process');
-  let output: string;
-  try {
-    output = execFileSync('git', ['bundle', 'list-heads', path], {
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-  } catch {
-    return new Map();
+// ---------------------------------------------------------------------------
+// Bundle v2 header parser
+// ---------------------------------------------------------------------------
+
+interface BundleHeader {
+  refs: Map<string, string>;
+  prerequisites: string[];
+  packOffset: number;
+}
+
+function parseBundleHeader(data: Uint8Array): BundleHeader {
+  // Find the blank line (\n\n) that separates header from packfile
+  let headerEnd = -1;
+  for (let i = 0; i < data.length - 1; i++) {
+    if (data[i] === 0x0a && data[i + 1] === 0x0a) {
+      headerEnd = i;
+      break;
+    }
   }
+  if (headerEnd < 0) {
+    throw new Error('Invalid bundle: no header/packfile separator found');
+  }
+
+  const headerText = new TextDecoder().decode(data.subarray(0, headerEnd));
+  const lines = headerText.split('\n');
+
+  if (lines[0] !== '# v2 git bundle') {
+    throw new Error(`Invalid bundle signature: ${lines[0]}`);
+  }
+
   const refs = new Map<string, string>();
-  for (const line of output.trim().split('\n')) {
+  const prerequisites: string[] = [];
+
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i];
     if (!line) continue;
+    if (line.startsWith('-')) {
+      prerequisites.push(line.slice(1));
+      continue;
+    }
     const space = line.indexOf(' ');
     if (space < 0) continue;
     const sha = line.slice(0, space);
-    const name = line.slice(space + 1);
-    if (name === 'HEAD' || name.endsWith('^{}')) continue;
-    refs.set(name, sha);
+    const refName = line.slice(space + 1);
+    refs.set(refName, sha);
   }
+
+  return { refs, prerequisites, packOffset: headerEnd + 2 };
+}
+
+// ---------------------------------------------------------------------------
+// Bundle helpers (native — no git CLI)
+// ---------------------------------------------------------------------------
+
+export async function bundleExport(
+  store: GitStore,
+  destPath: string,
+  refs?: string[],
+): Promise<void> {
+  const fsModule = store._fsModule;
+  const gitdir = store._gitdir;
+
+  // Get all local refs
+  const localRefs = await getLocalRefsNative(store);
+
+  // Filter if requested
+  let filtered: Map<string, string>;
+  if (refs && refs.length > 0) {
+    const resolved = resolveRefNames(refs, localRefs);
+    filtered = new Map();
+    for (const [k, v] of localRefs) {
+      if (resolved.has(k)) filtered.set(k, v);
+    }
+  } else {
+    filtered = localRefs;
+  }
+
+  if (filtered.size === 0) {
+    throw new Error('Nothing to bundle: no matching refs');
+  }
+
+  // Collect all reachable OIDs
+  const startOids = [...new Set(filtered.values())];
+  const allOids = await collectReachableOids(fsModule, gitdir, startOids);
+
+  // Create packfile
+  const { packfile } = await git.packObjects({
+    fs: fsModule as any,
+    gitdir,
+    oids: [...allOids],
+  });
+
+  if (!packfile) {
+    throw new Error('packObjects returned no data');
+  }
+
+  // Build bundle v2 header
+  let header = '# v2 git bundle\n';
+  for (const [refName, sha] of filtered) {
+    header += `${sha} ${refName}\n`;
+  }
+  header += '\n';
+
+  // Concatenate header + packfile
+  const headerBytes = new TextEncoder().encode(header);
+  const bundle = new Uint8Array(headerBytes.length + packfile.length);
+  bundle.set(headerBytes, 0);
+  bundle.set(packfile, headerBytes.length);
+
+  await fsModule.promises.writeFile(destPath, bundle);
+}
+
+async function bundleListHeads(
+  store: GitStore,
+  bundlePath: string,
+): Promise<Map<string, string>> {
+  const raw = await store._fsModule.promises.readFile(bundlePath);
+  const data = raw instanceof Uint8Array ? raw : new TextEncoder().encode(raw);
+  const { refs } = parseBundleHeader(data);
   return refs;
 }
 
-async function bundleImport(
-  gitdir: string,
-  path: string,
+export async function bundleImport(
+  store: GitStore,
+  bundlePath: string,
   refs?: string[],
 ): Promise<void> {
-  const { execFileSync } = await import('node:child_process');
-  const bundleRefs = await bundleListHeads(path);
+  const fsModule = store._fsModule;
+  const gitdir = store._gitdir;
 
-  let refsToImport: Map<string, string>;
-  if (refs && refs.length > 0) {
-    const resolved = resolveRefNames(refs, bundleRefs);
-    refsToImport = new Map<string, string>();
-    for (const [k, v] of bundleRefs) {
-      if (resolved.has(k)) refsToImport.set(k, v);
-    }
-  } else {
-    refsToImport = bundleRefs;
+  // Read bundle file
+  const raw = await fsModule.promises.readFile(bundlePath);
+  const data = raw instanceof Uint8Array ? raw : new TextEncoder().encode(raw);
+  const { refs: bundleRefs, packOffset } = parseBundleHeader(data);
+
+  // Extract packfile bytes
+  const packData = data.subarray(packOffset);
+
+  // Ensure objects/pack directory exists
+  const packDir = `${gitdir}/objects/pack`;
+  try {
+    await fsModule.promises.mkdir(packDir, { recursive: true });
+  } catch {
+    // already exists
   }
 
-  if (refsToImport.size === 0) return;
+  // Write packfile — use checksum from last 20 bytes for git-conventional naming
+  const checksum = Array.from(packData.subarray(-20))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+  const packRelPath = `objects/pack/pack-${checksum}.pack`;
+  await fsModule.promises.writeFile(`${gitdir}/${packRelPath}`, packData);
 
-  const refspecs = [...refsToImport.keys()].map((r) => `+${r}:${r}`);
-  execFileSync('git', ['-C', gitdir, 'fetch', path, ...refspecs], {
-    encoding: 'utf-8',
-    stdio: ['pipe', 'pipe', 'pipe'],
-    timeout: 30000,
+  // Index the packfile (creates .idx alongside .pack)
+  await git.indexPack({
+    fs: fsModule as any,
+    dir: gitdir,
+    gitdir,
+    filepath: packRelPath,
   });
+
+  // Determine which refs to set
+  let refsToSet: Map<string, string>;
+  if (refs && refs.length > 0) {
+    const resolved = resolveRefNames(refs, bundleRefs);
+    refsToSet = new Map();
+    for (const [k, v] of bundleRefs) {
+      if (resolved.has(k)) refsToSet.set(k, v);
+    }
+  } else {
+    refsToSet = bundleRefs;
+  }
+
+  // Set each ref
+  for (const [ref, oid] of refsToSet) {
+    await git.writeRef({
+      fs: fsModule as any,
+      gitdir,
+      ref,
+      value: oid,
+      force: true,
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -413,7 +613,7 @@ export async function backup(
 
   if (useBundle) {
     // Bundle export
-    const localRefs = await getLocalRefsGit(gitdir);
+    const localRefs = await getLocalRefsNative(store);
     let filtered: Map<string, string>;
     if (opts.refs && opts.refs.length > 0) {
       const resolved = resolveRefNames(opts.refs, localRefs);
@@ -432,7 +632,7 @@ export async function backup(
     const diff: MirrorDiff = { add, update: [], delete: [] };
 
     if (!opts.dryRun) {
-      await bundleExport(gitdir, url, opts.refs);
+      await bundleExport(store, url, opts.refs);
     }
     return diff;
   }
@@ -560,7 +760,7 @@ export async function restore(
 
   if (useBundle) {
     // Bundle import
-    const bundleRefs = await bundleListHeads(url);
+    const bundleRefs = await bundleListHeads(store, url);
     let filtered: Map<string, string>;
     if (opts.refs && opts.refs.length > 0) {
       const resolved = resolveRefNames(opts.refs, bundleRefs);
@@ -571,12 +771,12 @@ export async function restore(
     } else {
       filtered = bundleRefs;
     }
-    const localRefs = await getLocalRefsGit(gitdir);
+    const localRefs = await getLocalRefsNative(store);
     const diff = diffRefsMap(filtered, localRefs);
     diff.delete = []; // additive: no deletes
 
     if (!opts.dryRun) {
-      await bundleImport(gitdir, url, opts.refs);
+      await bundleImport(store, url, opts.refs);
     }
     return diff;
   }

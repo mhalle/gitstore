@@ -29,6 +29,8 @@ object KtWrite {
                 if (spec.has("notes")) {
                     writeNotes(it, branch, spec)
                 }
+
+                it.backup("$outputDir/kt_$name.bundle")
             }
 
             println("  kt_write: $name -> $repoPath")

@@ -1,5 +1,5 @@
 from .repo import GitStore, RefDict, ReflogEntry, Signature
-from .mirror import MirrorDiff, RefChange, resolve_credentials
+from .mirror import MirrorDiff, RefChange, resolve_credentials, bundle_export, bundle_import
 from .notes import NoteDict, NoteNamespace, NotesBatch
 from .fs import FS, StatResult, WriteEntry, retry_write
 from .tree import BlobOid, GitError, WalkEntry
@@ -10,7 +10,7 @@ from .copy import ChangeReport, ChangeAction, ChangeActionKind, ChangeError, Fil
 
 __all__ = [
     "GitStore", "RefDict", "ReflogEntry", "Signature",
-    "MirrorDiff", "RefChange", "resolve_credentials",
+    "MirrorDiff", "RefChange", "resolve_credentials", "bundle_export", "bundle_import",
     "NoteDict", "NoteNamespace", "NotesBatch",
     "FS", "StatResult", "WriteEntry", "retry_write", "StaleSnapshotError",
     "Batch", "BlobOid", "GitError",

@@ -148,6 +148,100 @@ if $HAS_KOTLIN; then
     fi
 fi
 
+# --- Bundle cross-read phase ---
+
+echo ""
+echo "--- TypeScript imports Python bundles ---"
+cd ts && npx tsx ../interop/ts_read.test.ts "../$FIXTURES" "$TMPDIR" py bundle && cd ..
+
+echo ""
+echo "--- Python imports TypeScript bundles ---"
+uv run python interop/py_read_test.py "$FIXTURES" "$TMPDIR" ts bundle
+
+if $HAS_RUST; then
+    echo ""
+    echo "--- Rust imports Python bundles ---"
+    cargo run --manifest-path rs/Cargo.toml --example rs_read -- "$FIXTURES" "$TMPDIR" py bundle
+
+    echo ""
+    echo "--- Rust imports TypeScript bundles ---"
+    cargo run --manifest-path rs/Cargo.toml --example rs_read -- "$FIXTURES" "$TMPDIR" ts bundle
+
+    echo ""
+    echo "--- Python imports Rust bundles ---"
+    uv run python interop/py_read_test.py "$FIXTURES" "$TMPDIR" rs bundle
+
+    echo ""
+    echo "--- TypeScript imports Rust bundles ---"
+    cd ts && npx tsx ../interop/ts_read.test.ts "../$FIXTURES" "$TMPDIR" rs bundle && cd ..
+fi
+
+if $HAS_CPP; then
+    echo ""
+    echo "--- C++ imports Python bundles ---"
+    cpp/build/cpp_read "$FIXTURES" "$TMPDIR" py bundle
+
+    echo ""
+    echo "--- C++ imports TypeScript bundles ---"
+    cpp/build/cpp_read "$FIXTURES" "$TMPDIR" ts bundle
+
+    echo ""
+    echo "--- Python imports C++ bundles ---"
+    uv run python interop/py_read_test.py "$FIXTURES" "$TMPDIR" cpp bundle
+
+    echo ""
+    echo "--- TypeScript imports C++ bundles ---"
+    cd ts && npx tsx ../interop/ts_read.test.ts "../$FIXTURES" "$TMPDIR" cpp bundle && cd ..
+
+    if $HAS_RUST; then
+        echo ""
+        echo "--- Rust imports C++ bundles ---"
+        cargo run --manifest-path rs/Cargo.toml --example rs_read -- "$FIXTURES" "$TMPDIR" cpp bundle
+
+        echo ""
+        echo "--- C++ imports Rust bundles ---"
+        cpp/build/cpp_read "$FIXTURES" "$TMPDIR" rs bundle
+    fi
+fi
+
+if $HAS_KOTLIN; then
+    echo ""
+    echo "--- Kotlin imports Python bundles ---"
+    java -jar "$KT_JAR" read "$FIXTURES" "$TMPDIR" py bundle
+
+    echo ""
+    echo "--- Kotlin imports TypeScript bundles ---"
+    java -jar "$KT_JAR" read "$FIXTURES" "$TMPDIR" ts bundle
+
+    echo ""
+    echo "--- Python imports Kotlin bundles ---"
+    uv run python interop/py_read_test.py "$FIXTURES" "$TMPDIR" kt bundle
+
+    echo ""
+    echo "--- TypeScript imports Kotlin bundles ---"
+    cd ts && npx tsx ../interop/ts_read.test.ts "../$FIXTURES" "$TMPDIR" kt bundle && cd ..
+
+    if $HAS_RUST; then
+        echo ""
+        echo "--- Rust imports Kotlin bundles ---"
+        cargo run --manifest-path rs/Cargo.toml --example rs_read -- "$FIXTURES" "$TMPDIR" kt bundle
+
+        echo ""
+        echo "--- Kotlin imports Rust bundles ---"
+        java -jar "$KT_JAR" read "$FIXTURES" "$TMPDIR" rs bundle
+    fi
+
+    if $HAS_CPP; then
+        echo ""
+        echo "--- C++ imports Kotlin bundles ---"
+        cpp/build/cpp_read "$FIXTURES" "$TMPDIR" kt bundle
+
+        echo ""
+        echo "--- Kotlin imports C++ bundles ---"
+        java -jar "$KT_JAR" read "$FIXTURES" "$TMPDIR" cpp bundle
+    fi
+fi
+
 # --- git CLI validates all ports ---
 
 PREFIXES="py ts"

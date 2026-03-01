@@ -58,6 +58,7 @@ def main(fixtures_path: str, output_dir: str) -> None:
         if "notes" in spec:
             write_notes(store, branch, spec)
 
+        store.backup(str(Path(output_dir) / f"py_{name}.bundle"))
         print(f"  py_write: {name} -> {repo_path}")
 
 

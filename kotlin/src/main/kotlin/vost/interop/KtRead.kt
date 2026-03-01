@@ -5,27 +5,44 @@ import com.google.gson.JsonObject
 import vost.FileType
 import vost.GitStore
 import java.io.File
+import java.nio.file.Files
 import java.util.Base64
 
 object KtRead {
 
-    fun main(fixturesPath: String, repoDir: String, prefix: String) {
+    fun main(fixturesPath: String, repoDir: String, prefix: String, mode: String = "repo") {
         val gson = Gson()
         val fixtures = gson.fromJson(File(fixturesPath).readText(), JsonObject::class.java)
         var failures = 0
+        val tempDirs = mutableListOf<File>()
 
         for ((name, specElement) in fixtures.entrySet()) {
             val spec = specElement.asJsonObject
             val branch = spec.get("branch")?.asString ?: "main"
-            val repoPath = "$repoDir/${prefix}_$name.git"
 
-            if (!File(repoPath).exists()) {
-                println("  FAIL $name: repo not found at $repoPath")
-                failures++
-                continue
+            val store: GitStore
+            if (mode == "bundle") {
+                val bundlePath = "$repoDir/${prefix}_$name.bundle"
+                if (!File(bundlePath).exists()) {
+                    println("  FAIL $name: bundle not found at $bundlePath")
+                    failures++
+                    continue
+                }
+                val tmpDir = Files.createTempDirectory("vost-bundle-").toFile()
+                tempDirs.add(tmpDir)
+                val storePath = File(tmpDir, "store.git").absolutePath
+                store = GitStore.open(storePath, branch = branch)
+                store.restore(bundlePath)
+            } else {
+                val repoPath = "$repoDir/${prefix}_$name.git"
+                if (!File(repoPath).exists()) {
+                    println("  FAIL $name: repo not found at $repoPath")
+                    failures++
+                    continue
+                }
+                store = GitStore.open(repoPath, create = false)
             }
 
-            val store = GitStore.open(repoPath, create = false)
             store.use {
                 if (spec.has("commits")) {
                     failures += checkHistory(it, branch, spec, name)
@@ -38,6 +55,10 @@ object KtRead {
                     failures += checkNotes(it, branch, spec, name)
                 }
             }
+        }
+
+        for (tmp in tempDirs) {
+            tmp.deleteRecursively()
         }
 
         if (failures > 0) {

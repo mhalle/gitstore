@@ -2,7 +2,9 @@
 
 import base64
 import json
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 from vost import GitStore, FileType
@@ -162,20 +164,31 @@ def check_notes(store, branch, spec, name):
     return failures
 
 
-def main(fixtures_path: str, repo_dir: str, prefix: str = "ts") -> None:
+def main(fixtures_path: str, repo_dir: str, prefix: str = "ts", mode: str = "repo") -> None:
     fixtures = json.loads(Path(fixtures_path).read_text())
     failures = 0
+    temp_dirs = []
 
     for name, spec in fixtures.items():
-        repo_path = Path(repo_dir) / f"{prefix}_{name}.git"
         branch = spec.get("branch", "main")
 
-        if not repo_path.exists():
-            print(f"  FAIL {name}: repo not found at {repo_path}")
-            failures += 1
-            continue
-
-        store = GitStore.open(repo_path, create=False)
+        if mode == "bundle":
+            bundle_path = Path(repo_dir) / f"{prefix}_{name}.bundle"
+            if not bundle_path.exists():
+                print(f"  FAIL {name}: bundle not found at {bundle_path}")
+                failures += 1
+                continue
+            tmp = tempfile.mkdtemp()
+            temp_dirs.append(tmp)
+            store = GitStore.open(str(Path(tmp) / "store.git"), branch=branch)
+            store.restore(str(bundle_path))
+        else:
+            repo_path = Path(repo_dir) / f"{prefix}_{name}.git"
+            if not repo_path.exists():
+                print(f"  FAIL {name}: repo not found at {repo_path}")
+                failures += 1
+                continue
+            store = GitStore.open(repo_path, create=False)
 
         if "commits" in spec:
             failures += check_history(store, branch, spec, name)
@@ -186,6 +199,9 @@ def main(fixtures_path: str, repo_dir: str, prefix: str = "ts") -> None:
         if "notes" in spec:
             failures += check_notes(store, branch, spec, name)
 
+    for tmp in temp_dirs:
+        shutil.rmtree(tmp, ignore_errors=True)
+
     if failures:
         print(f"\n{failures} failure(s)")
         sys.exit(1)
@@ -195,4 +211,5 @@ def main(fixtures_path: str, repo_dir: str, prefix: str = "ts") -> None:
 
 if __name__ == "__main__":
     prefix = sys.argv[3] if len(sys.argv) > 3 else "ts"
-    main(sys.argv[1], sys.argv[2], prefix)
+    mode = sys.argv[4] if len(sys.argv) > 4 else "repo"
+    main(sys.argv[1], sys.argv[2], prefix, mode)
