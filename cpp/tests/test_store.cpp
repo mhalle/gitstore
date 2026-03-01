@@ -388,3 +388,57 @@ TEST_CASE("RefDict: reflog non-empty after writes", "[store][refdict]") {
 
     fs::remove_all(path);
 }
+
+// ---------------------------------------------------------------------------
+// RefDict::set — ref name validation
+// ---------------------------------------------------------------------------
+
+TEST_CASE("RefDict::set rejects double-dot in name", "[store][refdict]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches().get("main");
+
+    REQUIRE_THROWS_AS(store.branches().set("bad..name", snap),
+                      vost::InvalidRefNameError);
+    fs::remove_all(path);
+}
+
+TEST_CASE("RefDict::set rejects @{ in name", "[store][refdict]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches().get("main");
+
+    REQUIRE_THROWS_AS(store.branches().set("a@{1}", snap),
+                      vost::InvalidRefNameError);
+    fs::remove_all(path);
+}
+
+TEST_CASE("RefDict::set rejects .lock suffix", "[store][refdict]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches().get("main");
+
+    REQUIRE_THROWS_AS(store.branches().set("foo.lock", snap),
+                      vost::InvalidRefNameError);
+    fs::remove_all(path);
+}
+
+TEST_CASE("RefDict::set rejects star in name", "[store][refdict]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches().get("main");
+
+    REQUIRE_THROWS_AS(store.branches().set("has*star", snap),
+                      vost::InvalidRefNameError);
+    fs::remove_all(path);
+}
+
+TEST_CASE("RefDict::set rejects trailing dot", "[store][refdict]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches().get("main");
+
+    REQUIRE_THROWS_AS(store.branches().set("trail.", snap),
+                      vost::InvalidRefNameError);
+    fs::remove_all(path);
+}

@@ -512,7 +512,7 @@ impl Fs {
         let data = self.read(path)?;
         let start = offset.min(data.len());
         let end = match size {
-            Some(s) => (start + s).min(data.len()),
+            Some(s) => start.saturating_add(s).min(data.len()),
             None => data.len(),
         };
         Ok(data[start..end].to_vec())
@@ -532,7 +532,7 @@ impl Fs {
             let data = blob.content();
             let start = offset.min(data.len());
             let end = match size {
-                Some(s) => (start + s).min(data.len()),
+                Some(s) => start.saturating_add(s).min(data.len()),
                 None => data.len(),
             };
             Ok(data[start..end].to_vec())

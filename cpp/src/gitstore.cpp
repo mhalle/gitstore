@@ -235,10 +235,7 @@ Fs RefDict::set_and_get(const std::string& name, const Fs& fs) {
 
 void RefDict::set(const std::string& name, const Fs& fs) {
     // Validate ref name
-    {
-        // Simple validation — delegate to paths module
-        if (name.empty()) throw InvalidRefNameError("ref name must not be empty");
-    }
+    paths::validate_ref_name(name);
 
     // Same-repo check
     if (inner_.get() != fs.inner().get()) {

@@ -370,4 +370,79 @@ class FsReadTest {
             assertTrue("main" in str)
         }
     }
+
+    // ── Root-path handling ──────────────────────────────────────────────
+
+    @Test
+    fun `exists returns true for root paths`() {
+        val store = createStore()
+        store.use {
+            val fs = it.branches["main"]
+            assertTrue(fs.exists(""))
+            assertTrue(fs.exists("/"))
+        }
+    }
+
+    @Test
+    fun `isDir returns true for root`() {
+        val store = createStore()
+        store.use {
+            val fs = it.branches["main"]
+            assertTrue(fs.isDir(""))
+        }
+    }
+
+    @Test
+    fun `fileType returns TREE for root`() {
+        val store = createStore()
+        store.use {
+            val fs = it.branches["main"]
+            assertEquals(FileType.TREE, fs.fileType(""))
+        }
+    }
+
+    @Test
+    fun `size on root throws IsADirectoryError`() {
+        val store = createStore()
+        store.use {
+            val fs = it.branches["main"]
+            assertThrows<IsADirectoryError> {
+                fs.size("")
+            }
+        }
+    }
+
+    @Test
+    fun `objectHash on root returns treeHash`() {
+        val store = createStore()
+        store.use {
+            val fs = it.branches["main"]
+            assertEquals(fs.treeHash, fs.objectHash(""))
+        }
+    }
+
+    // ── Ranged read overflow ────────────────────────────────────────────
+
+    @Test
+    fun `read with large offset and size does not overflow`() {
+        val store = createStore()
+        store.use {
+            var fs = it.branches["main"]
+            fs = fs.write("file.txt", "hello".toByteArray())
+            val data = fs.read("file.txt", offset = Int.MAX_VALUE - 10, size = 100)
+            assertEquals(0, data.size)
+        }
+    }
+
+    @Test
+    fun `readByHash with large offset and size does not overflow`() {
+        val store = createStore()
+        store.use {
+            var fs = it.branches["main"]
+            fs = fs.write("file.txt", "hello".toByteArray())
+            val hash = fs.objectHash("file.txt")
+            val data = fs.readByHash(hash, offset = Int.MAX_VALUE - 10, size = 100)
+            assertEquals(0, data.size)
+        }
+    }
 }

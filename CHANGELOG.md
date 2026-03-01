@@ -4,6 +4,21 @@ All notable changes to vost are documented in this file.
 
 ## Unreleased
 
+## Rust v0.9.5 / C++ v0.8.6 / Kotlin v0.9.8 (2026-03-01)
+
+**Fixed (Kotlin):**
+
+- Root-path handling: `exists("")`, `isDir("")`, `fileType("")`, `size("")`, `objectHash("")` now behave correctly instead of throwing or returning wrong results
+
+**Fixed (C++):**
+
+- `RefDict::set()` now validates ref names using the full `validate_ref_name()` validator (rejects `..`, `@{`, `.lock`, trailing `.`, special characters) instead of only checking for empty names
+- `Fs::apply()` now validates `WriteEntry` fields before processing — rejects entries with inconsistent data/target/mode (e.g. blob without data, symlink without target)
+
+**Fixed (Rust, C++, Kotlin):**
+
+- Integer overflow protection in ranged reads (`read_range` / `read_by_hash`): `offset + size` now uses saturating arithmetic to prevent wrap-around on large values
+
 ## v0.71.0 / TS v0.9.6 (2026-03-01)
 
 **Added (Python, TypeScript):**

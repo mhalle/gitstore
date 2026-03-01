@@ -6,6 +6,8 @@
 #include <vector>
 #include <filesystem>
 
+#include "vost/error.h"
+
 namespace vost {
 
 // ---------------------------------------------------------------------------
@@ -127,6 +129,19 @@ struct WriteEntry {
     /// Create a symlink entry.
     static WriteEntry symlink(std::string t) {
         return WriteEntry{std::nullopt, std::move(t), MODE_LINK};
+    }
+
+    /// Validate that data/target/mode are consistent.
+    void validate() const {
+        if (mode == MODE_LINK) {
+            if (!target) throw InvalidPathError("symlink entry requires a target");
+            if (data)    throw InvalidPathError("symlink entry must not have data");
+        } else if (mode == MODE_BLOB || mode == MODE_BLOB_EXEC) {
+            if (!data)   throw InvalidPathError("blob entry requires data");
+            if (target)  throw InvalidPathError("blob entry must not have a symlink target");
+        } else {
+            throw InvalidPathError("unsupported mode: " + std::to_string(mode));
+        }
     }
 };
 

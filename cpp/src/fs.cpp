@@ -281,7 +281,9 @@ std::vector<uint8_t> Fs::read_range(const std::string& path,
                                      std::optional<size_t> sz) const {
     auto data = read(path);
     size_t start = std::min(offset, data.size());
-    size_t end   = sz ? std::min(start + *sz, data.size()) : data.size();
+    size_t end   = sz ? std::min(start <= SIZE_MAX - *sz ? start + *sz : SIZE_MAX,
+                                 data.size())
+                      : data.size();
     return std::vector<uint8_t>(data.begin() + static_cast<ptrdiff_t>(start),
                                 data.begin() + static_cast<ptrdiff_t>(end));
 }
@@ -305,7 +307,9 @@ std::vector<uint8_t> Fs::read_by_hash(const std::string& hash,
     git_blob_free(blob);
 
     size_t start = std::min(offset, data.size());
-    size_t end   = sz ? std::min(start + *sz, data.size()) : data.size();
+    size_t end   = sz ? std::min(start <= SIZE_MAX - *sz ? start + *sz : SIZE_MAX,
+                                 data.size())
+                      : data.size();
     return std::vector<uint8_t>(data.begin() + static_cast<ptrdiff_t>(start),
                                 data.begin() + static_cast<ptrdiff_t>(end));
 }
@@ -544,6 +548,7 @@ Fs Fs::apply(const std::vector<std::pair<std::string, WriteEntry>>& writes,
                           std::pair<std::vector<uint8_t>, uint32_t>>> internal;
     internal.reserve(writes.size());
     for (auto& [p, we] : writes) {
+        we.validate();
         std::string norm = paths::normalize(p);
         std::vector<uint8_t> data;
         if (we.data) data = *we.data;

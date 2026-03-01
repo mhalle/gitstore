@@ -142,8 +142,8 @@ class Fs internal constructor(
     fun read(path: String, offset: Int = 0, size: Int? = null): ByteArray {
         val data = readBlobAtPath(store.repo, treeId, path)
         if (offset > 0 || size != null) {
-            val end = if (size != null) minOf(offset + size, data.size) else data.size
             val start = minOf(offset, data.size)
+            val end = if (size != null) minOf((offset.toLong() + size.toLong()).coerceAtMost(Int.MAX_VALUE.toLong()).toInt(), data.size) else data.size
             return data.copyOfRange(start, end)
         }
         return data
@@ -188,13 +188,16 @@ class Fs internal constructor(
     /**
      * Return true if [path] exists (file, directory, or symlink).
      */
-    fun exists(path: String): Boolean =
-        existsAtPath(store.repo, treeId, path)
+    fun exists(path: String): Boolean {
+        if (isRootPath(path)) return true
+        return existsAtPath(store.repo, treeId, path)
+    }
 
     /**
      * Return true if [path] is a directory (tree) in the repo.
      */
     fun isDir(path: String): Boolean {
+        if (isRootPath(path)) return true
         val normalized = normalizePath(path)
         val entry = entryAtPath(store.repo, treeId, normalized) ?: return false
         return entry.second == FileMode.TREE.bits
@@ -206,6 +209,7 @@ class Fs internal constructor(
      * @throws java.io.FileNotFoundException If the path does not exist.
      */
     fun fileType(path: String): FileType {
+        if (isRootPath(path)) return FileType.TREE
         val normalized = normalizePath(path)
         val entry = entryAtPath(store.repo, treeId, normalized)
             ?: throw java.io.FileNotFoundException(normalized)
@@ -218,6 +222,7 @@ class Fs internal constructor(
      * @throws java.io.FileNotFoundException If the path does not exist.
      */
     fun size(path: String): Long {
+        if (isRootPath(path)) throw IsADirectoryError(path)
         val normalized = normalizePath(path)
         val entry = entryAtPath(store.repo, treeId, normalized)
             ?: throw java.io.FileNotFoundException(normalized)
@@ -231,6 +236,7 @@ class Fs internal constructor(
      * @throws java.io.FileNotFoundException If the path does not exist.
      */
     fun objectHash(path: String): String {
+        if (isRootPath(path)) return treeId.name
         val normalized = normalizePath(path)
         val entry = entryAtPath(store.repo, treeId, normalized)
             ?: throw java.io.FileNotFoundException(normalized)
@@ -302,8 +308,8 @@ class Fs internal constructor(
         val loader = store.repo.open(oid, Constants.OBJ_BLOB)
         val data = loader.bytes
         if (offset > 0 || size != null) {
-            val end = if (size != null) minOf(offset + size, data.size) else data.size
             val start = minOf(offset, data.size)
+            val end = if (size != null) minOf((offset.toLong() + size.toLong()).coerceAtMost(Int.MAX_VALUE.toLong()).toInt(), data.size) else data.size
             return data.copyOfRange(start, end)
         }
         return data

@@ -350,3 +350,58 @@ TEST_CASE("apply: operation keyword in message", "[apply]") {
     CHECK(msg.substr(0, 6) == "import");
     fs::remove_all(path);
 }
+
+// ---------------------------------------------------------------------------
+// apply: WriteEntry validation
+// ---------------------------------------------------------------------------
+
+TEST_CASE("apply: WriteEntry with both null data and target throws", "[apply]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches().get("main");
+
+    vost::WriteEntry bad;
+    bad.data   = std::nullopt;
+    bad.target = std::nullopt;
+    bad.mode   = vost::MODE_BLOB;
+
+    std::vector<std::pair<std::string, vost::WriteEntry>> writes;
+    writes.push_back({"file.txt", bad});
+
+    REQUIRE_THROWS_AS(snap.apply(writes), vost::InvalidPathError);
+    fs::remove_all(path);
+}
+
+TEST_CASE("apply: WriteEntry symlink without target throws", "[apply]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches().get("main");
+
+    vost::WriteEntry bad;
+    bad.data   = std::nullopt;
+    bad.target = std::nullopt;
+    bad.mode   = vost::MODE_LINK;
+
+    std::vector<std::pair<std::string, vost::WriteEntry>> writes;
+    writes.push_back({"link", bad});
+
+    REQUIRE_THROWS_AS(snap.apply(writes), vost::InvalidPathError);
+    fs::remove_all(path);
+}
+
+TEST_CASE("apply: WriteEntry blob with target throws", "[apply]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches().get("main");
+
+    vost::WriteEntry bad;
+    bad.data   = std::vector<uint8_t>{'h', 'i'};
+    bad.target = "somewhere";
+    bad.mode   = vost::MODE_BLOB;
+
+    std::vector<std::pair<std::string, vost::WriteEntry>> writes;
+    writes.push_back({"file.txt", bad});
+
+    REQUIRE_THROWS_AS(snap.apply(writes), vost::InvalidPathError);
+    fs::remove_all(path);
+}
