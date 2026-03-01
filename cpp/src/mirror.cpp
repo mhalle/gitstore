@@ -266,22 +266,39 @@ void bundle_export_impl(git_repository* repo, const std::string& path,
         throw GitError("bundle_export: no refs to export");
     }
 
-    // Build packfile with git_packbuilder
+    // Build packfile containing all commits and their objects.
+    // Use revwalk + insert_walk to include full ancestry (insert_commit
+    // only adds a single commit and its tree, not parent commits).
     git_packbuilder* pb = nullptr;
     if (git_packbuilder_new(&pb, repo) != 0)
         throw_git("git_packbuilder_new");
 
+    git_revwalk* walk = nullptr;
+    if (git_revwalk_new(&walk, repo) != 0) {
+        git_packbuilder_free(pb);
+        throw_git("git_revwalk_new");
+    }
+
     for (const auto& [name, sha] : to_export) {
         git_oid oid;
         if (git_oid_fromstr(&oid, sha.c_str()) != 0) {
+            git_revwalk_free(walk);
             git_packbuilder_free(pb);
             throw_git("git_oid_fromstr");
         }
-        if (git_packbuilder_insert_commit(pb, &oid) != 0) {
+        if (git_revwalk_push(walk, &oid) != 0) {
+            git_revwalk_free(walk);
             git_packbuilder_free(pb);
-            throw_git("git_packbuilder_insert_commit");
+            throw_git("git_revwalk_push");
         }
     }
+
+    if (git_packbuilder_insert_walk(pb, walk) != 0) {
+        git_revwalk_free(walk);
+        git_packbuilder_free(pb);
+        throw_git("git_packbuilder_insert_walk");
+    }
+    git_revwalk_free(walk);
 
     git_buf buf = GIT_BUF_INIT;
     if (git_packbuilder_write_buf(&buf, pb) != 0) {

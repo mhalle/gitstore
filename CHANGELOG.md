@@ -4,6 +4,24 @@ All notable changes to vost are documented in this file.
 
 ## Unreleased
 
+## C++ v0.8.9 (2026-03-01)
+
+**Fixed (C++):**
+
+- `bundle_export` now uses `git_revwalk` + `git_packbuilder_insert_walk` to include full commit ancestry in bundles (consistent with Rust v0.9.6 fix; `git_packbuilder_insert_commit` only packs a single commit and its tree)
+
+## C++ v0.8.8 (2026-03-01)
+
+**Added (C++):**
+
+- `bundle_export()` / `bundle_import()` — public API methods on `GitStore` for creating and importing bundle files directly
+
+## C++ v0.8.7 (2026-03-01)
+
+**Changed (C++):**
+
+- Bundle export/import now uses native libgit2 (`git_packbuilder`, `git_indexer`, bundle v2 header parsing) instead of shelling out to `git bundle` CLI
+
 ## Rust v0.9.6 (2026-03-01)
 
 **Changed (Rust):**
