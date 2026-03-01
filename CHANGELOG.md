@@ -4,6 +4,12 @@ All notable changes to vost are documented in this file.
 
 ## Unreleased
 
+## TS v0.9.7 (2026-03-01)
+
+**Changed (TS):**
+
+- `autoCreateBareRepo` now uses isomorphic-git `init({ bare: true })` instead of shelling out to `git init --bare`
+
 ## C++ v0.8.9 (2026-03-01)
 
 **Fixed (C++):**

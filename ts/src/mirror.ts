@@ -406,11 +406,8 @@ async function autoCreateBareRepo(url: string): Promise<void> {
   const localPath = url.startsWith('file://') ? url.slice(7) : url;
   const { existsSync } = await import('node:fs');
   if (existsSync(localPath)) return;
-  const { execFileSync } = await import('node:child_process');
-  execFileSync('git', ['init', '--bare', localPath], {
-    encoding: 'utf-8',
-    stdio: ['pipe', 'pipe', 'pipe'],
-  });
+  const fs = (await import('node:fs')).default;
+  await git.init({ fs, dir: localPath, bare: true });
 }
 
 async function mirrorPushGit(
