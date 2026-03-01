@@ -197,4 +197,28 @@ impl GitStore {
     pub fn restore(&self, src: &str, opts: &RestoreOptions) -> Result<MirrorDiff> {
         crate::mirror::restore(&self.inner.path, src, opts)
     }
+
+    /// Export a bundle file containing the specified refs (or all refs).
+    ///
+    /// Creates a self-contained v2 git bundle at `path` that can be
+    /// imported with [`bundle_import`](Self::bundle_import).
+    ///
+    /// # Arguments
+    /// * `path` - Destination file path for the bundle.
+    /// * `refs` - Optional list of ref names to include. `None` exports all refs.
+    pub fn bundle_export(&self, path: &str, refs: Option<&[String]>) -> Result<()> {
+        crate::mirror::bundle_export(&self.inner.path, path, refs)
+    }
+
+    /// Import refs from a bundle file (additive — no deletes).
+    ///
+    /// Reads a v2 git bundle created by [`bundle_export`](Self::bundle_export)
+    /// and adds its objects and refs to this repository.
+    ///
+    /// # Arguments
+    /// * `path` - Source bundle file path.
+    /// * `refs` - Optional list of ref names to import. `None` imports all refs.
+    pub fn bundle_import(&self, path: &str, refs: Option<&[String]>) -> Result<()> {
+        crate::mirror::bundle_import(&self.inner.path, path, refs)
+    }
 }

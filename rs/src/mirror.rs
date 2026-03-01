@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::io::Write as IoWrite;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
@@ -58,7 +59,6 @@ pub fn resolve_credentials(url: &str) -> String {
         .spawn()
     {
         if let Some(ref mut stdin) = child.stdin {
-            use std::io::Write;
             let _ = write!(stdin, "protocol=https\nhost={}\n\n", hostname);
         }
         // Drop stdin to signal EOF
@@ -244,7 +244,7 @@ fn get_local_refs(repo_path: &Path) -> Result<HashMap<String, String>> {
 
 /// Get all remote refs, filtering HEAD and `^{}` markers.
 ///
-/// For local paths, opens the repo directly.  For URLs, runs `git ls-remote`.
+/// For local paths, opens the repo directly.  For URLs, uses git2 remote API.
 fn get_remote_refs(repo_path: &Path, url: &str) -> Result<HashMap<String, String>> {
     // Local path — open directly
     if is_local_path(url) || url.starts_with("file://") {
@@ -255,36 +255,29 @@ fn get_remote_refs(repo_path: &Path, url: &str) -> Result<HashMap<String, String
         return get_local_refs(path);
     }
 
-    // Remote URL — shell out to git ls-remote
-    let output = Command::new("git")
-        .arg("ls-remote")
-        .arg(url)
-        .current_dir(repo_path)
-        .output()
-        .map_err(|e| Error::git_msg(format!("failed to run git ls-remote: {}", e)))?;
+    // Remote URL — use git2 remote API
+    let repo = git2::Repository::open_bare(repo_path).map_err(Error::git)?;
+    let mut remote = match repo.remote_anonymous(url) {
+        Ok(r) => r,
+        Err(_) => return Ok(HashMap::new()),
+    };
 
-    if !output.status.success() {
+    if remote.connect(git2::Direction::Fetch).is_err() {
         return Ok(HashMap::new());
     }
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
     let mut refs = HashMap::new();
-    for line in stdout.lines() {
-        let mut parts = line.splitn(2, '\t');
-        let sha = match parts.next() {
-            Some(s) if !s.is_empty() => s,
-            _ => continue,
-        };
-        let name = match parts.next() {
-            Some(s) => s,
-            None => continue,
-        };
-        if name == "HEAD" || name.ends_with("^{}") {
-            continue;
+    if let Ok(heads) = remote.list() {
+        for head in heads {
+            let name = head.name();
+            if name == "HEAD" || name.ends_with("^{}") {
+                continue;
+            }
+            refs.insert(name.to_string(), head.oid().to_string());
         }
-        refs.insert(name.to_string(), sha.to_string());
     }
 
+    let _ = remote.disconnect();
     Ok(refs)
 }
 
@@ -337,46 +330,44 @@ fn diff_refs(
 // Transport
 // ---------------------------------------------------------------------------
 
-/// Push all local refs to `url` via `git push --mirror`.
-fn mirror_push(repo_path: &Path, url: &str) -> Result<()> {
-    let output = Command::new("git")
-        .arg("push")
-        .arg("--mirror")
-        .arg(url)
-        .current_dir(repo_path)
-        .output()
-        .map_err(|e| Error::git_msg(format!("failed to run git push: {}", e)))?;
+/// Push all local refs to `url` via native git2 remote API (mirror mode).
+///
+/// Force-pushes all local refs and deletes any remote-only refs.
+fn mirror_push(
+    repo_path: &Path,
+    url: &str,
+    local_refs: &HashMap<String, String>,
+    remote_refs: &HashMap<String, String>,
+) -> Result<()> {
+    let repo = git2::Repository::open_bare(repo_path).map_err(Error::git)?;
+    let mut remote = repo.remote_anonymous(url).map_err(Error::git)?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(Error::git_msg(format!(
-            "git push --mirror failed: {}",
-            stderr.trim()
-        )));
+    // Build refspecs: force-push all local refs + delete remote-only refs
+    let mut refspecs: Vec<String> = local_refs
+        .keys()
+        .map(|r| format!("+{}:{}", r, r))
+        .collect();
+    for name in remote_refs.keys() {
+        if !local_refs.contains_key(name) {
+            refspecs.push(format!(":{}", name));
+        }
     }
+
+    let refspec_strs: Vec<&str> = refspecs.iter().map(|s| s.as_str()).collect();
+    remote.push(&refspec_strs, None).map_err(Error::git)?;
 
     Ok(())
 }
 
 /// Push only refs in `ref_filter` to `url` (no deletes).
 fn targeted_push(repo_path: &Path, url: &str, ref_filter: &HashSet<String>) -> Result<()> {
+    let repo = git2::Repository::open_bare(repo_path).map_err(Error::git)?;
+    let mut remote = repo.remote_anonymous(url).map_err(Error::git)?;
+
     let refspecs: Vec<String> = ref_filter.iter().map(|r| format!("+{}:{}", r, r)).collect();
-    let mut args = vec!["push".to_string(), url.to_string()];
-    args.extend(refspecs);
+    let refspec_strs: Vec<&str> = refspecs.iter().map(|s| s.as_str()).collect();
+    remote.push(&refspec_strs, None).map_err(Error::git)?;
 
-    let output = Command::new("git")
-        .args(&args)
-        .current_dir(repo_path)
-        .output()
-        .map_err(|e| Error::git_msg(format!("failed to run git push: {}", e)))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(Error::git_msg(format!(
-            "git push failed: {}",
-            stderr.trim()
-        )));
-    }
     Ok(())
 }
 
@@ -390,6 +381,9 @@ fn additive_fetch(repo_path: &Path, url: &str, refs: Option<&[String]>) -> Resul
         return Ok(());
     }
 
+    let repo = git2::Repository::open_bare(repo_path).map_err(Error::git)?;
+    let mut remote = repo.remote_anonymous(url).map_err(Error::git)?;
+
     if let Some(filter) = refs {
         // Targeted fetch: build refspecs for only the matching refs
         let resolved = resolve_ref_names(filter, &remote_refs);
@@ -402,40 +396,16 @@ fn additive_fetch(repo_path: &Path, url: &str, refs: Option<&[String]>) -> Resul
         }
 
         let refspecs: Vec<String> = refs_to_fetch.iter().map(|r| format!("+{}:{}", r, r)).collect();
-        let mut args = vec!["fetch".to_string(), url.to_string()];
-        args.extend(refspecs);
-
-        let output = Command::new("git")
-            .args(&args)
-            .current_dir(repo_path)
-            .output()
-            .map_err(|e| Error::git_msg(format!("failed to run git fetch: {}", e)))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(Error::git_msg(format!(
-                "git fetch failed: {}",
-                stderr.trim()
-            )));
-        }
+        let refspec_strs: Vec<&str> = refspecs.iter().map(|s| s.as_str()).collect();
+        remote.fetch(&refspec_strs, None, None).map_err(Error::git)?;
     } else {
         // Fetch all refs
-        let output = Command::new("git")
-            .arg("fetch")
-            .arg(url)
-            .arg("+refs/*:refs/*")
-            .arg("--force")
-            .current_dir(repo_path)
-            .output()
-            .map_err(|e| Error::git_msg(format!("failed to run git fetch: {}", e)))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(Error::git_msg(format!(
-                "git fetch failed: {}",
-                stderr.trim()
-            )));
-        }
+        let refspecs: Vec<String> = remote_refs
+            .keys()
+            .map(|r| format!("+{}:{}", r, r))
+            .collect();
+        let refspec_strs: Vec<&str> = refspecs.iter().map(|s| s.as_str()).collect();
+        remote.fetch(&refspec_strs, None, None).map_err(Error::git)?;
     }
 
     // No deletes — that's what makes it additive
@@ -446,55 +416,32 @@ fn additive_fetch(repo_path: &Path, url: &str, refs: Option<&[String]>) -> Resul
 // Bundle helpers
 // ---------------------------------------------------------------------------
 
-/// Create a bundle file from local refs.
-fn bundle_export(repo_path: &Path, path: &str, refs: Option<&[String]>) -> Result<()> {
-    let mut args = vec!["bundle".to_string(), "create".to_string(), path.to_string()];
+/// Parse a v2 git bundle header.
+///
+/// Returns `(refs_map, pack_data_byte_offset)`.
+/// Skips prerequisite lines (starting with `-`) and `HEAD`.
+fn parse_bundle_header(data: &[u8]) -> Result<(HashMap<String, String>, usize)> {
+    let sig = b"# v2 git bundle\n";
 
-    if let Some(refs) = refs {
-        // Get local refs to resolve short names
-        let local_refs = get_local_refs(repo_path)?;
-        let resolved = resolve_ref_names(refs, &local_refs);
-        for r in &resolved {
-            args.push(r.clone());
-        }
-    } else {
-        args.push("--all".to_string());
+    if data.len() < sig.len() || &data[..sig.len()] != sig {
+        return Err(Error::git_msg("not a valid v2 git bundle"));
     }
 
-    let output = Command::new("git")
-        .args(&args)
-        .current_dir(repo_path)
-        .output()
-        .map_err(|e| Error::git_msg(format!("failed to run git bundle create: {}", e)))?;
+    // Find the blank-line separator (\n\n) that marks end of header
+    let header_end = data
+        .windows(2)
+        .position(|w| w == b"\n\n")
+        .ok_or_else(|| Error::git_msg("bundle header: missing blank-line separator"))?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(Error::git_msg(format!(
-            "git bundle create failed: {}",
-            stderr.trim()
-        )));
-    }
-    Ok(())
-}
+    // Parse ref lines between signature and separator
+    let header_section = &data[sig.len()..header_end];
+    let header_str = String::from_utf8_lossy(header_section);
 
-/// List refs in a bundle file.
-fn bundle_list_heads(path: &str) -> Result<HashMap<String, String>> {
-    let output = Command::new("git")
-        .args(["bundle", "list-heads", path])
-        .output()
-        .map_err(|e| Error::git_msg(format!("failed to run git bundle list-heads: {}", e)))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(Error::git_msg(format!(
-            "git bundle list-heads failed: {}",
-            stderr.trim()
-        )));
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
     let mut refs = HashMap::new();
-    for line in stdout.lines() {
+    for line in header_str.lines() {
+        if line.is_empty() || line.starts_with('-') {
+            continue; // Skip empty and prerequisite lines
+        }
         let mut parts = line.splitn(2, ' ');
         let sha = match parts.next() {
             Some(s) if !s.is_empty() => s,
@@ -509,44 +456,111 @@ fn bundle_list_heads(path: &str) -> Result<HashMap<String, String>> {
         }
         refs.insert(name.to_string(), sha.to_string());
     }
-    Ok(refs)
+
+    // Pack data starts after the second newline of \n\n
+    let pack_offset = header_end + 2;
+    Ok((refs, pack_offset))
 }
 
-/// Import refs from a bundle file (additive -- no deletes).
-fn bundle_import(repo_path: &Path, path: &str, refs: Option<&[String]>) -> Result<()> {
-    let bundle_refs = bundle_list_heads(path)?;
+/// Create a bundle file from local refs using native git2 PackBuilder.
+pub fn bundle_export(repo_path: &Path, path: &str, refs: Option<&[String]>) -> Result<()> {
+    let repo = git2::Repository::open_bare(repo_path).map_err(Error::git)?;
+    let local_refs = get_local_refs(repo_path)?;
 
-    let refs_to_set: HashMap<String, String> = if let Some(filter) = refs {
-        let resolved = resolve_ref_names(filter, &bundle_refs);
-        bundle_refs
+    // Determine which refs to export
+    let to_export: HashMap<String, String> = if let Some(filter) = refs {
+        let resolved = resolve_ref_names(filter, &local_refs);
+        local_refs
             .into_iter()
             .filter(|(k, _)| resolved.contains(k))
             .collect()
     } else {
-        bundle_refs
+        local_refs
+    };
+
+    if to_export.is_empty() {
+        return Err(Error::git_msg("no refs to export"));
+    }
+
+    // Build packfile containing all commits and their objects
+    let mut pb = repo.packbuilder().map_err(Error::git)?;
+    for sha in to_export.values() {
+        let oid = git2::Oid::from_str(sha).map_err(Error::git)?;
+        pb.insert_commit(oid).map_err(Error::git)?;
+    }
+
+    let mut buf = git2::Buf::new();
+    pb.write_buf(&mut buf).map_err(Error::git)?;
+
+    // Build v2 bundle header
+    let mut header = String::from("# v2 git bundle\n");
+    for (name, sha) in &to_export {
+        header.push_str(sha);
+        header.push(' ');
+        header.push_str(name);
+        header.push('\n');
+    }
+    header.push('\n'); // Blank line separator
+
+    // Write header + pack data to file
+    let mut file = std::fs::File::create(path)
+        .map_err(|e| Error::io(Path::new(path), e))?;
+    file.write_all(header.as_bytes())
+        .map_err(|e| Error::io(Path::new(path), e))?;
+    file.write_all(&buf)
+        .map_err(|e| Error::io(Path::new(path), e))?;
+
+    Ok(())
+}
+
+/// List refs in a bundle file by parsing the v2 bundle header.
+fn bundle_list_heads(path: &str) -> Result<HashMap<String, String>> {
+    let data = std::fs::read(path)
+        .map_err(|e| Error::io(Path::new(path), e))?;
+    let (refs, _) = parse_bundle_header(&data)?;
+    Ok(refs)
+}
+
+/// Import refs from a bundle file using native git2 Indexer (additive -- no deletes).
+pub fn bundle_import(repo_path: &Path, path: &str, refs: Option<&[String]>) -> Result<()> {
+    let data = std::fs::read(path)
+        .map_err(|e| Error::io(Path::new(path), e))?;
+    let (all_refs, pack_offset) = parse_bundle_header(&data)?;
+
+    // Filter which refs to import
+    let refs_to_set: HashMap<String, String> = if let Some(filter) = refs {
+        let resolved = resolve_ref_names(filter, &all_refs);
+        all_refs
+            .into_iter()
+            .filter(|(k, _)| resolved.contains(k))
+            .collect()
+    } else {
+        all_refs
     };
 
     if refs_to_set.is_empty() {
         return Ok(());
     }
 
-    // Build refspecs for the specific refs we want
-    let refspecs: Vec<String> = refs_to_set.keys().map(|r| format!("+{}:{}", r, r)).collect();
-    let mut args = vec!["fetch".to_string(), path.to_string()];
-    args.extend(refspecs);
+    // Index the pack data into the repo's object store
+    let pack_data = &data[pack_offset..];
+    let odb_pack = repo_path.join("objects").join("pack");
+    std::fs::create_dir_all(&odb_pack)
+        .map_err(|e| Error::io(&odb_pack, e))?;
 
-    let output = Command::new("git")
-        .args(&args)
-        .current_dir(repo_path)
-        .output()
-        .map_err(|e| Error::git_msg(format!("failed to run git fetch from bundle: {}", e)))?;
+    let mut indexer = git2::Indexer::new(None, &odb_pack, 0, false)
+        .map_err(Error::git)?;
+    indexer.write_all(pack_data)
+        .map_err(|e| Error::git_msg(format!("indexer write failed: {}", e)))?;
+    indexer.commit()
+        .map_err(Error::git)?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(Error::git_msg(format!(
-            "git fetch from bundle failed: {}",
-            stderr.trim()
-        )));
+    // Create/update refs in the repo
+    let repo = git2::Repository::open_bare(repo_path).map_err(Error::git)?;
+    for (name, sha) in &refs_to_set {
+        let oid = git2::Oid::from_str(sha).map_err(Error::git)?;
+        repo.reference(name, oid, true, "bundle import")
+            .map_err(Error::git)?;
     }
 
     Ok(())
@@ -660,7 +674,7 @@ pub fn backup(repo_path: &Path, dest: &str, opts: &BackupOptions) -> Result<Mirr
     let diff = diff_refs(&local_refs, &remote_refs);
 
     if !opts.dry_run && !diff.in_sync() {
-        mirror_push(repo_path, dest)?;
+        mirror_push(repo_path, dest, &local_refs, &remote_refs)?;
     }
 
     Ok(diff)

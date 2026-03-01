@@ -4,6 +4,16 @@ All notable changes to vost are documented in this file.
 
 ## Unreleased
 
+## Rust v0.9.6 (2026-03-01)
+
+**Changed (Rust):**
+
+- Mirror module now uses native git2 (libgit2) for all transport and bundle operations instead of shelling out to `git` CLI. Converted: `bundle_export`, `bundle_import`, `bundle_list_heads`, `mirror_push`, `targeted_push`, `additive_fetch`, `get_remote_refs`. Only `resolve_credentials` still uses external CLI (`git credential fill`, `gh auth token`).
+
+**Added (Rust):**
+
+- `bundle_export()` / `bundle_import()` — public API methods on `GitStore` and standalone functions in `vost::mirror` for creating and importing bundle files directly
+
 ## Rust v0.9.5 / C++ v0.8.6 / Kotlin v0.9.8 (2026-03-01)
 
 **Fixed (Kotlin):**
