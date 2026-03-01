@@ -6,8 +6,8 @@
 
 #include <algorithm>
 #include <cstdio>
-#include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <map>
 #include <mutex>
 #include <set>
@@ -89,25 +89,6 @@ void auto_create_bare_repo(const std::string& url) {
         throw_git("git_repository_init (auto-create)");
     }
     git_repository_free(repo);
-}
-
-// ---------------------------------------------------------------------------
-// Shell quoting helper
-// ---------------------------------------------------------------------------
-
-/// Escape a string for use inside single quotes in a shell command.
-/// The strategy: replace each ' with '\'' (end quote, escaped quote, resume).
-std::string shell_quote(const std::string& s) {
-    std::string out = "'";
-    for (char c : s) {
-        if (c == '\'') {
-            out += "'\\''";
-        } else {
-            out += c;
-        }
-    }
-    out += "'";
-    return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -266,110 +247,176 @@ bool is_bundle_path(const std::string& path) {
 }
 
 // ---------------------------------------------------------------------------
-// Shell command helpers (for bundle operations)
-// ---------------------------------------------------------------------------
-
-/// Run a shell command and return its stdout, or empty string on failure.
-std::string run_cmd_output(const std::string& cmd) {
-    FILE* fp = popen(cmd.c_str(), "r");
-    if (!fp) return {};
-    char buf[4096];
-    std::string output;
-    while (std::fgets(buf, sizeof(buf), fp)) output += buf;
-    int status = pclose(fp);
-    if (status != 0) return {};
-    return output;
-}
-
-/// Trim trailing whitespace/newlines.
-std::string rtrim_str(std::string s) {
-    while (!s.empty() && (s.back() == '\n' || s.back() == '\r' || s.back() == ' '))
-        s.pop_back();
-    return s;
-}
-
-// ---------------------------------------------------------------------------
 // Bundle helpers
 // ---------------------------------------------------------------------------
 
-void bundle_export(const std::string& repo_path, const std::string& path,
+void bundle_export(git_repository* repo, const std::string& path,
                    const std::vector<std::string>& refs, const RefMap& local_refs) {
-    std::string cmd = "git -C " + shell_quote(repo_path) +
-                      " bundle create " + shell_quote(path);
+    // Determine which refs to include
+    RefMap to_export;
     if (refs.empty()) {
-        cmd += " --all";
+        to_export = local_refs;
     } else {
         auto resolved = resolve_ref_names(refs, local_refs);
-        for (const auto& r : resolved) {
-            cmd += " " + shell_quote(r);
+        for (const auto& [k, v] : local_refs) {
+            if (resolved.count(k)) to_export[k] = v;
         }
     }
-    cmd += " 2>/dev/null";
-    int rc = std::system(cmd.c_str());
-    if (rc != 0) {
-        throw GitError("git bundle create failed");
+    if (to_export.empty()) {
+        throw GitError("bundle_export: no refs to export");
+    }
+
+    // Build packfile with git_packbuilder
+    git_packbuilder* pb = nullptr;
+    if (git_packbuilder_new(&pb, repo) != 0)
+        throw_git("git_packbuilder_new");
+
+    for (const auto& [name, sha] : to_export) {
+        git_oid oid;
+        if (git_oid_fromstr(&oid, sha.c_str()) != 0) {
+            git_packbuilder_free(pb);
+            throw_git("git_oid_fromstr");
+        }
+        if (git_packbuilder_insert_commit(pb, &oid) != 0) {
+            git_packbuilder_free(pb);
+            throw_git("git_packbuilder_insert_commit");
+        }
+    }
+
+    git_buf buf = GIT_BUF_INIT;
+    if (git_packbuilder_write_buf(&buf, pb) != 0) {
+        git_packbuilder_free(pb);
+        throw_git("git_packbuilder_write_buf");
+    }
+    git_packbuilder_free(pb);
+
+    // Build bundle v2 header
+    std::string header = "# v2 git bundle\n";
+    for (const auto& [name, sha] : to_export) {
+        header += sha + " " + name + "\n";
+    }
+    header += "\n"; // blank line separates header from pack data
+
+    // Write to file
+    std::ofstream out(path, std::ios::binary);
+    if (!out) {
+        git_buf_dispose(&buf);
+        throw GitError("bundle_export: cannot open " + path);
+    }
+    out.write(header.data(), static_cast<std::streamsize>(header.size()));
+    out.write(buf.ptr, static_cast<std::streamsize>(buf.size));
+    git_buf_dispose(&buf);
+    if (!out) {
+        throw GitError("bundle_export: write failed");
     }
 }
 
-RefMap bundle_list_heads(const std::string& path) {
-    std::string cmd = "git bundle list-heads " + shell_quote(path) + " 2>/dev/null";
-    auto output = run_cmd_output(cmd);
-    if (output.empty()) {
-        // Try running again to distinguish empty output from error
-        FILE* fp = popen(cmd.c_str(), "r");
-        if (!fp) throw GitError("failed to run git bundle list-heads");
-        char buf[4096];
-        std::string out2;
-        while (std::fgets(buf, sizeof(buf), fp)) out2 += buf;
-        int status = pclose(fp);
-        if (status != 0) throw GitError("git bundle list-heads failed");
-        output = out2;
+/// Parse bundle v2 header, returning (refs, pack_offset).
+/// pack_offset is the byte position where the packfile data starts.
+std::pair<RefMap, size_t> parse_bundle_header(const std::string& data) {
+    const std::string sig = "# v2 git bundle\n";
+    if (data.size() < sig.size() || data.compare(0, sig.size(), sig) != 0) {
+        throw GitError("not a valid v2 git bundle");
+    }
+
+    // Find the blank line that separates header from pack data
+    auto sep = data.find("\n\n", sig.size());
+    if (sep == std::string::npos) {
+        throw GitError("bundle header: missing blank-line separator");
     }
 
     RefMap refs;
-    std::istringstream iss(output);
-    std::string line;
-    while (std::getline(iss, line)) {
-        line = rtrim_str(line);
+    size_t pos = sig.size();
+    while (pos < sep) {
+        auto eol = data.find('\n', pos);
+        if (eol == std::string::npos || eol > sep) break;
+        auto line = data.substr(pos, eol - pos);
+        pos = eol + 1;
+
+        if (line.empty()) continue;
+        // Skip prerequisite lines (start with '-')
+        if (line[0] == '-') continue;
+
         auto space = line.find(' ');
         if (space == std::string::npos) continue;
         auto sha = line.substr(0, space);
         auto name = line.substr(space + 1);
         if (name == "HEAD") continue;
-        if (name.size() >= 3 && name.compare(name.size() - 3, 3, "^{}") == 0)
-            continue;
         refs[name] = sha;
     }
-    return refs;
+
+    return {refs, sep + 2}; // +2 to skip the two newlines
 }
 
-void bundle_import(const std::string& repo_path, const std::string& path,
+RefMap bundle_list_heads(const std::string& path) {
+    std::ifstream in(path, std::ios::binary);
+    if (!in) throw GitError("bundle_list_heads: cannot open " + path);
+    std::string data((std::istreambuf_iterator<char>(in)),
+                      std::istreambuf_iterator<char>());
+    return parse_bundle_header(data).first;
+}
+
+void bundle_import(git_repository* repo, const std::string& path,
                    const std::vector<std::string>& refs) {
-    auto bundle_refs = bundle_list_heads(path);
+    // Read entire bundle file
+    std::ifstream in(path, std::ios::binary);
+    if (!in) throw GitError("bundle_import: cannot open " + path);
+    std::string data((std::istreambuf_iterator<char>(in)),
+                      std::istreambuf_iterator<char>());
+
+    // Parse header
+    auto [all_refs, pack_offset] = parse_bundle_header(data);
 
     RefMap refs_to_import;
     if (refs.empty()) {
-        refs_to_import = bundle_refs;
+        refs_to_import = all_refs;
     } else {
-        auto resolved = resolve_ref_names(refs, bundle_refs);
-        for (const auto& [k, v] : bundle_refs) {
+        auto resolved = resolve_ref_names(refs, all_refs);
+        for (const auto& [k, v] : all_refs) {
             if (resolved.count(k)) refs_to_import[k] = v;
         }
     }
 
     if (refs_to_import.empty()) return;
 
-    // Build fetch command with specific refspecs
-    std::string cmd = "git -C " + shell_quote(repo_path) +
-                      " fetch " + shell_quote(path);
-    for (const auto& [name, sha] : refs_to_import) {
-        cmd += " " + shell_quote("+" + name + ":" + name);
-    }
-    cmd += " 2>/dev/null";
+    // Index the packfile into the ODB
+    const char* pack_data = data.data() + pack_offset;
+    size_t pack_size = data.size() - pack_offset;
 
-    int rc = std::system(cmd.c_str());
-    if (rc != 0) {
-        throw GitError("git fetch from bundle failed");
+    // Get ODB pack directory
+    std::string repo_path_str = git_repository_path(repo);
+    std::filesystem::path odb_pack = std::filesystem::path(repo_path_str) / "objects" / "pack";
+    std::filesystem::create_directories(odb_pack);
+
+    git_indexer* idx = nullptr;
+#if LIBGIT2_VER_MAJOR > 1 || (LIBGIT2_VER_MAJOR == 1 && LIBGIT2_VER_MINOR >= 4)
+    git_indexer_options idx_opts = GIT_INDEXER_OPTIONS_INIT;
+    if (git_indexer_new(&idx, odb_pack.string().c_str(), 0, nullptr, &idx_opts) != 0)
+#else
+    if (git_indexer_new(&idx, odb_pack.string().c_str(), 0, nullptr, nullptr) != 0)
+#endif
+        throw_git("git_indexer_new");
+
+    git_indexer_progress stats = {};
+    if (git_indexer_append(idx, pack_data, pack_size, &stats) != 0) {
+        git_indexer_free(idx);
+        throw_git("git_indexer_append");
+    }
+    if (git_indexer_commit(idx, &stats) != 0) {
+        git_indexer_free(idx);
+        throw_git("git_indexer_commit");
+    }
+    git_indexer_free(idx);
+
+    // Set refs
+    for (const auto& [name, sha] : refs_to_import) {
+        git_oid oid;
+        if (git_oid_fromstr(&oid, sha.c_str()) != 0)
+            throw_git("git_oid_fromstr");
+        git_reference* ref_out = nullptr;
+        if (git_reference_create(&ref_out, repo, name.c_str(), &oid, 1, nullptr) != 0)
+            throw_git("git_reference_create");
+        git_reference_free(ref_out);
     }
 }
 
@@ -553,7 +600,7 @@ MirrorDiff backup(const std::shared_ptr<GitStoreInner>& inner,
         auto diff = diff_bundle_export(inner->repo, opts.refs);
         if (!opts.dry_run) {
             auto local_refs = get_local_refs(inner->repo);
-            bundle_export(inner->path.string(), dest, opts.refs, local_refs);
+            bundle_export(inner->repo, dest, opts.refs, local_refs);
         }
         return diff;
     }
@@ -606,7 +653,7 @@ MirrorDiff restore(const std::shared_ptr<GitStoreInner>& inner,
     if (use_bundle) {
         auto diff = diff_bundle_import(inner->repo, src, opts.refs);
         if (!opts.dry_run) {
-            bundle_import(inner->path.string(), src, opts.refs);
+            bundle_import(inner->repo, src, opts.refs);
         }
         return diff;
     }
