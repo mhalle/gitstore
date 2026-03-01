@@ -364,6 +364,9 @@ println(ns.size())                            // number of notes
 val diff = store.backup("/path/to/backup.git")             // MirrorDiff
 val diff = store.restore("/path/to/backup.git")            // MirrorDiff
 val diff = store.backup(url, dryRun = true)                // preview only
+val diff = store.backup("backup.bundle")                   // bundle file
+val diff = store.restore("backup.bundle")                  // import bundle
+val diff = store.backup(url, refs = listOf("main", "v1.0"))// specific refs
 
 println(diff.inSync)                                        // true if no changes
 println(diff.add)                                           // List<RefChange>

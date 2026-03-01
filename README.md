@@ -22,7 +22,7 @@ uv tool install "vost[cli]"       # or install as a persistent tool
 
 Requires Python 3.10+.
 
-> **Note:** The `gc` and `backup`/`restore` CLI commands shell out to an installed `git` executable. All other commands and the entire Python API are self-contained (pure dulwich).
+> **Note:** The `gc` CLI command shells out to an installed `git` executable. All other commands and the entire Python API are self-contained (pure dulwich).
 
 ## Quick start
 
@@ -271,6 +271,18 @@ fs.changes               # ChangeReport | None -- changes from last operation
 diff = repo.backup("https://github.com/user/repo.git")    # MirrorDiff
 diff = repo.restore("https://github.com/user/repo.git")   # MirrorDiff
 diff = repo.backup(url, dry_run=True)                      # preview only
+diff = repo.backup("/backups/store.git")                   # local path
+diff = repo.backup("backup.bundle")                        # bundle file
+diff = repo.backup(url, refs=["main", "v1.0"])             # specific refs only
+```
+
+### Bundle export and import
+
+```python
+repo.bundle_export("backup.bundle")                        # export all refs
+repo.bundle_export("backup.bundle", refs=["main"])         # export specific refs
+repo.bundle_import("backup.bundle")                        # import all refs (additive)
+repo.bundle_import("backup.bundle", refs=["main"])         # import specific refs
 ```
 
 ## Concurrency safety

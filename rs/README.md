@@ -401,11 +401,36 @@ let note = ns.get_for_current_branch(&store)?;
 Mirror all refs to or from a remote repository:
 
 ```rust
-let diff = store.backup("https://github.com/user/repo.git", false)?;   // MirrorDiff
-let diff = store.restore("https://github.com/user/repo.git", false)?;  // MirrorDiff
-let diff = store.backup("/path/to/backup.git", true)?;                 // dry_run = true
+use vost::types::{BackupOptions, RestoreOptions};
+
+let diff = store.backup("https://github.com/user/repo.git", &BackupOptions::default())?;
+let diff = store.restore("https://github.com/user/repo.git", &RestoreOptions::default())?;
+
+// Dry run
+let diff = store.backup(url, &BackupOptions { dry_run: true, ..Default::default() })?;
+
+// Bundle file (auto-detected from .bundle extension)
+let diff = store.backup("backup.bundle", &BackupOptions::default())?;
+let diff = store.restore("backup.bundle", &RestoreOptions::default())?;
+
+// Specific refs only
+let diff = store.backup(url, &BackupOptions {
+    refs: Some(vec!["main".into(), "v1.0".into()]),
+    ..Default::default()
+})?;
 
 println!("added: {}, updated: {}, deleted: {}", diff.add.len(), diff.update.len(), diff.delete.len());
+```
+
+### Bundle export and import
+
+Create and import bundle files directly:
+
+```rust
+store.bundle_export("backup.bundle", None)?;                                  // all refs
+store.bundle_export("backup.bundle", Some(&["main".into()]))?;                // specific refs
+store.bundle_import("backup.bundle", None)?;                                  // import all (additive)
+store.bundle_import("backup.bundle", Some(&["main".into()]))?;                // specific refs
 ```
 
 ## Concurrency safety

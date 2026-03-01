@@ -21,6 +21,8 @@ from vost import ExcludeFilter, BlobOid, StatResult, disk_glob
         - notes
         - backup
         - restore
+        - bundle_export
+        - bundle_import
 
 ---
 
@@ -33,7 +35,7 @@ vost has four ways to move data. They differ in **what** they transfer and **how
 | **copy** | Individual files and directories | Additive — existing files are kept unless `--delete` is passed | Selected paths |
 | **sync** | A directory tree | Exact mirror — destination matches source, extras are deleted | One directory tree |
 | **archive** | A snapshot as a single file | Exports to (or imports from) a `.zip`/`.tar` archive | One branch or tag |
-| **backup / restore** | The entire repository | All branches, tags, and history are pushed to (or fetched from) a remote git repo | Whole repo |
+| **backup / restore** | The entire repository | All branches, tags, and history are pushed to (or fetched from) a remote git repo or bundle file | Whole repo |
 
 **copy** and **sync** work with individual files between disk and repo (or within the repo). The difference is that copy is additive by default — it only adds or updates files — while sync makes the destination an exact replica of the source, deleting anything extra.
 
@@ -47,6 +49,7 @@ vost has four ways to move data. They differ in **what** they transfer and **how
 | Make a repo directory match a local directory | `sync_in` / `sync_out` (`sync`) |
 | Export a snapshot as a zip/tar | `archive_out` / `archive_in` |
 | Replicate the entire repo to another location | `backup` / `restore` |
+| Create a portable bundle file | `bundle_export` / `bundle_import` |
 
 ---
 
@@ -202,6 +205,8 @@ vost has four ways to move data. They differ in **what** they transfer and **how
 ## Backup & Restore
 
 See `GitStore.backup()` and `GitStore.restore()`.
+
+For direct bundle file operations without the full backup/restore logic, see `GitStore.bundle_export()` and `GitStore.bundle_import()`.
 
 ---
 

@@ -285,6 +285,18 @@ for (const hash of await ns.list()) {
 const diff = await store.backup('https://github.com/user/repo.git');   // MirrorDiff
 const diff = await store.restore('https://github.com/user/repo.git');  // MirrorDiff
 const diff = await store.backup(url, { dryRun: true });                // preview only
+const diff = await store.backup('/backups/store.git');                  // local path
+const diff = await store.backup('backup.bundle');                      // bundle file
+const diff = await store.backup(url, { refs: ['main', 'v1.0'] });     // specific refs
+```
+
+### Bundle export and import
+
+```typescript
+await store.bundleExport('backup.bundle');                             // all refs
+await store.bundleExport('backup.bundle', { refs: ['main'] });        // specific refs
+await store.bundleImport('backup.bundle');                             // import all (additive)
+await store.bundleImport('backup.bundle', { refs: ['main'] });        // specific refs
 ```
 
 ## Concurrency safety

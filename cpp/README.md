@@ -444,13 +444,31 @@ auto diff = store.backup("https://github.com/user/repo.git");
 auto diff = store.restore("https://github.com/user/repo.git");
 
 // Dry run (preview without pushing/fetching)
-auto diff = store.backup(dest, true);
+auto diff = store.backup(dest, {.dry_run = true});
 
 // Local path
 auto diff = store.backup("/backups/store.git");
 
+// Bundle file (auto-detected from .bundle extension)
+auto diff = store.backup("backup.bundle");
+auto diff = store.restore("backup.bundle");
+
+// Specific refs only
+auto diff = store.backup(url, {.refs = {"main", "v1.0"}});
+
 // Resolve credentials for HTTPS URLs
 auto url = vost::resolve_credentials("https://github.com/user/repo.git");
+```
+
+### Bundle export and import
+
+Create and import bundle files directly:
+
+```cpp
+store.bundle_export("backup.bundle");                     // all refs
+store.bundle_export("backup.bundle", {"main", "v1.0"});   // specific refs
+store.bundle_import("backup.bundle");                     // import all (additive)
+store.bundle_import("backup.bundle", {"main"});           // specific refs
 ```
 
 ## Concurrency safety
