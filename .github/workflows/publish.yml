@@ -13,5 +13,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - run: uv build
-      - uses: pypa/gh-action-pypi-publish@release/v1
+      - name: Check if version is already on PyPI
+        id: check
+        run: |
+          VERSION=$(grep '^version' pyproject.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
+          STATUS=$(curl -s -o /dev/null -w '%{http_code}' "https://pypi.org/pypi/vost/${VERSION}/json")
+          if [ "$STATUS" = "200" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Version ${VERSION} already on PyPI — skipping"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "Version ${VERSION} not on PyPI — publishing"
+          fi
+      - if: steps.check.outputs.skip == 'false'
+        run: uv build
+      - if: steps.check.outputs.skip == 'false'
+        uses: pypa/gh-action-pypi-publish@release/v1
