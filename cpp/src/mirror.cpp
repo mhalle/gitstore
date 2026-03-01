@@ -250,8 +250,8 @@ bool is_bundle_path(const std::string& path) {
 // Bundle helpers
 // ---------------------------------------------------------------------------
 
-void bundle_export(git_repository* repo, const std::string& path,
-                   const std::vector<std::string>& refs, const RefMap& local_refs) {
+void bundle_export_impl(git_repository* repo, const std::string& path,
+                        const std::vector<std::string>& refs, const RefMap& local_refs) {
     // Determine which refs to include
     RefMap to_export;
     if (refs.empty()) {
@@ -356,8 +356,8 @@ RefMap bundle_list_heads(const std::string& path) {
     return parse_bundle_header(data).first;
 }
 
-void bundle_import(git_repository* repo, const std::string& path,
-                   const std::vector<std::string>& refs) {
+void bundle_import_impl(git_repository* repo, const std::string& path,
+                        const std::vector<std::string>& refs) {
     // Read entire bundle file
     std::ifstream in(path, std::ios::binary);
     if (!in) throw GitError("bundle_import: cannot open " + path);
@@ -600,7 +600,7 @@ MirrorDiff backup(const std::shared_ptr<GitStoreInner>& inner,
         auto diff = diff_bundle_export(inner->repo, opts.refs);
         if (!opts.dry_run) {
             auto local_refs = get_local_refs(inner->repo);
-            bundle_export(inner->repo, dest, opts.refs, local_refs);
+            bundle_export_impl(inner->repo, dest, opts.refs, local_refs);
         }
         return diff;
     }
@@ -653,7 +653,7 @@ MirrorDiff restore(const std::shared_ptr<GitStoreInner>& inner,
     if (use_bundle) {
         auto diff = diff_bundle_import(inner->repo, src, opts.refs);
         if (!opts.dry_run) {
-            bundle_import(inner->repo, src, opts.refs);
+            bundle_import_impl(inner->repo, src, opts.refs);
         }
         return diff;
     }
@@ -681,6 +681,21 @@ MirrorDiff restore(const std::shared_ptr<GitStoreInner>& inner,
     }
 
     return diff;
+}
+
+void bundle_export(const std::shared_ptr<GitStoreInner>& inner,
+                   const std::string& path,
+                   const std::vector<std::string>& refs) {
+    std::lock_guard<std::mutex> lk(inner->mutex);
+    auto local_refs = get_local_refs(inner->repo);
+    bundle_export_impl(inner->repo, path, refs, local_refs);
+}
+
+void bundle_import(const std::shared_ptr<GitStoreInner>& inner,
+                   const std::string& path,
+                   const std::vector<std::string>& refs) {
+    std::lock_guard<std::mutex> lk(inner->mutex);
+    bundle_import_impl(inner->repo, path, refs);
 }
 
 } // namespace mirror

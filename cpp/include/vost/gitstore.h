@@ -105,6 +105,20 @@ public:
     MirrorDiff restore(const std::string& src,
                        const RestoreOptions& opts = {});
 
+    /// Export refs to a git bundle file.
+    ///
+    /// @param path  Path to the bundle file to write.
+    /// @param refs  Ref names to export (empty = all refs).
+    void bundle_export(const std::string& path,
+                       const std::vector<std::string>& refs = {});
+
+    /// Import refs from a git bundle file.
+    ///
+    /// @param path  Path to the bundle file to read.
+    /// @param refs  Ref names to import (empty = all refs).
+    void bundle_import(const std::string& path,
+                       const std::vector<std::string>& refs = {});
+
     // -- Metadata -----------------------------------------------------------
 
     /// Path to the bare repository on disk.
