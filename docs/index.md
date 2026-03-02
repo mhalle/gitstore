@@ -27,6 +27,7 @@ print(fs.read("hello.txt"))  # b'Hello, world!'
 - [CLI Reference](cli.md) -- the `vost` command-line tool
 - [CLI Tutorial](cli-tutorial.md) -- learn the CLI step by step
 - [Path Syntax](paths.md) -- how `ref:path` works across commands
+- [fsspec Integration](fsspec.md) -- use vost with pandas, xarray, dask
 
 ## More
 

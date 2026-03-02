@@ -6,13 +6,13 @@ How to cut a new vost release.
 
 Each port has its own version number. Bump only the ports that changed:
 
-| Port | Version file | Field |
-|------|-------------|-------|
-| Python | `pyproject.toml` | `version = "0.70.0"` |
-| TypeScript | `ts/package.json` | `"version": "0.9.5"` |
-| Rust | `rs/Cargo.toml` | `version = "0.9.3"` |
-| C++ | `cpp/CMakeLists.txt` | `project(vost VERSION 0.8.5 ...)` |
-| Kotlin | `kotlin/build.gradle.kts` | `version = "0.9.7"` |
+| Port | Version file | Field (example) |
+|------|-------------|-----------------|
+| Python | `pyproject.toml` | `version = "X.Y.Z"` |
+| TypeScript | `ts/package.json` | `"version": "X.Y.Z"` |
+| Rust | `rs/Cargo.toml` | `version = "X.Y.Z"` |
+| C++ | `cpp/CMakeLists.txt` | `project(vost VERSION X.Y.Z ...)` |
+| Kotlin | `kotlin/build.gradle.kts` | `version = "X.Y.Z"` |
 
 The git tag (`v0.68.4`) tracks the Python version since that's the primary package.
 
