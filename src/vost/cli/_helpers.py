@@ -135,9 +135,14 @@ def _store_repo(ctx, param, value):
 
 
 def _repo_option(f):
-    """Shared --repo/-r option decorator for all commands."""
+    """Shared --repo/-r option decorator for all commands.
+
+    The envvar is intentionally omitted here — it is handled by the
+    group-level ``--repo`` option.  Having it in both places caused the
+    env var to overwrite an explicit ``--repo`` flag on the group.
+    """
     return click.option(
-        "--repo", "-r", type=click.Path(), envvar="VOST_REPO",
+        "--repo", "-r", type=click.Path(),
         help="Path to bare git repository (or set VOST_REPO).",
         expose_value=False, callback=_store_repo, is_eager=True,
     )(f)

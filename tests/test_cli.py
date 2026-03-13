@@ -374,6 +374,14 @@ class TestErrorPaths:
         result = runner.invoke(main, ["ls"], env={"VOST_REPO": initialized_repo})
         assert result.exit_code == 0
 
+    def test_repo_flag_overrides_env_var(self, runner, initialized_repo):
+        """Explicit --repo flag must win over VOST_REPO env var."""
+        result = runner.invoke(
+            main, ["--repo", initialized_repo, "ls"],
+            env={"VOST_REPO": "/nonexistent/bogus.git"},
+        )
+        assert result.exit_code == 0
+
 
 # ---------------------------------------------------------------------------
 # TestSync
