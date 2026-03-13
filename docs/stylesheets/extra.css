@@ -2,18 +2,54 @@
 
 /* Light mode */
 [data-md-color-scheme="default"] {
-  --md-default-fg-color: #1a1a1a;
-  --md-default-fg-color--light: #333;
-  --md-default-fg-color--lighter: #555;
-  --md-typeset-color: #1a1a1a;
+  --md-default-fg-color: rgba(0, 0, 0, 0.9);
+  --md-default-fg-color--light: rgba(0, 0, 0, 0.7);
+  --md-default-fg-color--lighter: rgba(0, 0, 0, 0.5);
+  --md-typeset-color: rgba(0, 0, 0, 0.9);
+  --md-code-fg-color: #1a1a1a;
   --md-code-bg-color: #f0f0f0;
+}
+
+/* Body text, paragraphs, list items */
+[data-md-color-scheme="default"] .md-typeset {
+  color: #111;
+}
+
+/* Code blocks */
+[data-md-color-scheme="default"] .md-typeset code {
+  color: #111;
+}
+
+[data-md-color-scheme="default"] .md-typeset pre code {
+  color: #1a1a1a;
+}
+
+/* Headings */
+[data-md-color-scheme="default"] .md-typeset h1,
+[data-md-color-scheme="default"] .md-typeset h2,
+[data-md-color-scheme="default"] .md-typeset h3,
+[data-md-color-scheme="default"] .md-typeset h4 {
+  color: #000;
+}
+
+/* Table text */
+[data-md-color-scheme="default"] .md-typeset table:not([class]) td,
+[data-md-color-scheme="default"] .md-typeset table:not([class]) th {
+  color: #111;
+}
+
+/* mkdocstrings: function signatures, attribute labels */
+[data-md-color-scheme="default"] .doc-label,
+[data-md-color-scheme="default"] .doc-class .doc-children .md-typeset {
+  color: #111;
 }
 
 /* Dark mode */
 [data-md-color-scheme="slate"] {
-  --md-default-fg-color: #e8e8e8;
-  --md-default-fg-color--light: #ccc;
-  --md-default-fg-color--lighter: #aaa;
-  --md-typeset-color: #e8e8e8;
-  --md-code-bg-color: #1e1e1e;
+  --md-default-fg-color: rgba(255, 255, 255, 0.9);
+  --md-default-fg-color--light: rgba(255, 255, 255, 0.7);
+  --md-default-fg-color--lighter: rgba(255, 255, 255, 0.5);
+  --md-typeset-color: rgba(255, 255, 255, 0.9);
+  --md-code-fg-color: #e0e0e0;
+  --md-code-bg-color: #1a1a1a;
 }
