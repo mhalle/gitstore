@@ -1,6 +1,9 @@
 """Tests for the vost CLI — core commands (init, destroy, rm, write, log, sync, diff, undo, redo, reflog)."""
 
 import os
+import signal
+import subprocess
+import sys
 import time
 import pytest
 from click.testing import CliRunner
@@ -1011,4 +1014,46 @@ class TestSnapshotFilterCombined:
         lines = [l for l in r.output.strip().split("\n") if l.strip()]
         assert len(lines) == 1
         assert "deploy v1" in lines[0]
+
+
+# ---------------------------------------------------------------------------
+# TestSIGPIPE
+# ---------------------------------------------------------------------------
+
+@pytest.mark.skipif(
+    not hasattr(signal, "SIGPIPE"),
+    reason="SIGPIPE not available on this platform",
+)
+class TestSIGPIPE:
+    def test_broken_pipe_no_stderr_noise(self, tmp_path):
+        """vost cat piped to a process that closes early should not print exceptions."""
+        from vost import GitStore
+
+        repo_path = str(tmp_path / "test.git")
+        store = GitStore.open(repo_path)
+        fs = store.branches["main"]
+        # Write enough data that the pipe buffer matters
+        fs.write("big.txt", b"x" * 100_000)
+
+        # Run: vost cat big.txt | head -c 1
+        # head closes the pipe after 1 byte; vost should exit silently.
+        import shutil
+        vost_bin = shutil.which("vost")
+        assert vost_bin is not None, "vost CLI not found on PATH"
+        cat_proc = subprocess.Popen(
+            [vost_bin, "--repo", repo_path, "cat", "big.txt"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        head_proc = subprocess.Popen(
+            ["head", "-c", "1"],
+            stdin=cat_proc.stdout,
+            stdout=subprocess.PIPE,
+        )
+        cat_proc.stdout.close()  # allow SIGPIPE to reach cat_proc
+        head_proc.communicate()
+        _, stderr = cat_proc.communicate()
+
+        assert b"Exception" not in stderr
+        assert b"BrokenPipe" not in stderr
 

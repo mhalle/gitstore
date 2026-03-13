@@ -543,6 +543,14 @@ def _expand_sources_disk(sources: list[str]) -> list[str]:
 # Main group
 # ---------------------------------------------------------------------------
 
+import signal
+
+# Restore default SIGPIPE handling so piped commands like
+# ``ls <(vost cat file)`` don't print a noisy exception on exit.
+if hasattr(signal, "SIGPIPE"):
+    signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+
+
 @click.group()
 @click.version_option(package_name="vost")
 @click.option("--repo", "-r", type=click.Path(), envvar="VOST_REPO",
