@@ -7,6 +7,7 @@ on:
       - "docs/**"
       - "mkdocs.yml"
       - "src/vost/**"
+      - ".github/workflows/docs.yml"
 
   workflow_dispatch:
 
@@ -24,9 +25,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - run: uv pip install --system mkdocs-material mkdocstrings[python]
-      - run: uv pip install --system -e .
-      - run: mkdocs build --strict
+      - run: uv venv .venv
+      - run: uv pip install mkdocs-material "mkdocstrings[python]" -e .
+      - run: .venv/bin/mkdocs build --strict
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site/
