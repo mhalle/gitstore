@@ -277,6 +277,16 @@ vost cat main:f.txt dev:f.txt             # files from different refs
 | `-b`, `--branch` | Branch (default: current branch). |
 | `--ref`, `--path`, `--match`, `--before`, `--back` | Snapshot filters. |
 
+#### Diffing with process substitution
+
+Use shell process substitution (`<(...)`) to diff any two snapshots with standard `diff`:
+
+```bash
+diff <(vost cat :file.py) <(vost cat ~1:file.py)        # vs previous commit
+diff <(vost cat :file.py) <(vost cat tag-name:file.py)   # vs any tag
+diff <(vost cat ~3:file.py) <(vost cat ~0:file.py)       # any two snapshots
+```
+
 ### hash
 
 Print the SHA hash of a commit, tree, or blob. An optional `TARGET` argument is interpreted as a ref (bare string) or `ref:path` (with colon).
