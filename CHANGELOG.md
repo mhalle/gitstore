@@ -4,6 +4,21 @@ All notable changes to vost are documented in this file.
 
 ## Unreleased
 
+## v0.74.0 (2026-03-12)
+
+**Fixed:**
+
+- CLI `--repo` flag now correctly overrides `VOST_REPO` env var (previously the env var could silently win)
+- Broken pipe no longer prints `Exception ignored in: <stdout>` when piping CLI output to `head`, `less`, etc.
+
+**Changed:**
+
+- CLI tests no longer leak the host `VOST_REPO` environment variable
+
+**Docs:**
+
+- Added process substitution diff examples to `cat` CLI docs
+
 ## v0.73.0 (2026-03-02)
 
 **Added:**
