@@ -20,7 +20,7 @@ def bare_repo(tmp_path):
 
 @pytest.fixture
 def runner():
-    return CliRunner()
+    return CliRunner(env={"VOST_REPO": ""})
 
 
 @pytest.fixture
