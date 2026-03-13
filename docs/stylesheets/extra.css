@@ -1,48 +1,45 @@
 /* High-contrast overrides for Material for MkDocs */
 
-/* Light mode */
+/* Light mode — force black text on white background */
 [data-md-color-scheme="default"] {
   --md-default-bg-color: #fff;
-  --md-default-fg-color: rgba(0, 0, 0, 0.9);
-  --md-default-fg-color--light: rgba(0, 0, 0, 0.7);
-  --md-default-fg-color--lighter: rgba(0, 0, 0, 0.5);
-  --md-typeset-color: rgba(0, 0, 0, 0.9);
-  --md-code-fg-color: #1a1a1a;
+  --md-default-fg-color: #000;
+  --md-default-fg-color--light: #222;
+  --md-default-fg-color--lighter: #444;
+  --md-typeset-color: #000;
+  --md-code-fg-color: #000;
   --md-code-bg-color: #f0f0f0;
 }
 
-/* Body text, paragraphs, list items */
-[data-md-color-scheme="default"] .md-typeset {
-  color: #111;
+[data-md-color-scheme="default"] .md-typeset,
+[data-md-color-scheme="default"] .md-typeset p,
+[data-md-color-scheme="default"] .md-typeset li,
+[data-md-color-scheme="default"] .md-typeset td,
+[data-md-color-scheme="default"] .md-typeset th,
+[data-md-color-scheme="default"] .md-typeset dt,
+[data-md-color-scheme="default"] .md-typeset dd {
+  color: #000 !important;
 }
 
-/* Code blocks */
-[data-md-color-scheme="default"] .md-typeset code {
-  color: #111;
-}
-
-[data-md-color-scheme="default"] .md-typeset pre code {
-  color: #1a1a1a;
-}
-
-/* Headings */
 [data-md-color-scheme="default"] .md-typeset h1,
 [data-md-color-scheme="default"] .md-typeset h2,
 [data-md-color-scheme="default"] .md-typeset h3,
-[data-md-color-scheme="default"] .md-typeset h4 {
-  color: #000;
+[data-md-color-scheme="default"] .md-typeset h4,
+[data-md-color-scheme="default"] .md-typeset h5,
+[data-md-color-scheme="default"] .md-typeset h6 {
+  color: #000 !important;
 }
 
-/* Table text */
-[data-md-color-scheme="default"] .md-typeset table:not([class]) td,
-[data-md-color-scheme="default"] .md-typeset table:not([class]) th {
-  color: #111;
+[data-md-color-scheme="default"] .md-typeset code:not(.highlight code) {
+  color: #000 !important;
 }
 
-/* mkdocstrings: function signatures, attribute labels */
-[data-md-color-scheme="default"] .doc-label,
-[data-md-color-scheme="default"] .doc-class .doc-children .md-typeset {
-  color: #111;
+[data-md-color-scheme="default"] .md-content {
+  background-color: #fff;
+}
+
+[data-md-color-scheme="default"] .md-main {
+  background-color: #fff;
 }
 
 /* Dark mode */
