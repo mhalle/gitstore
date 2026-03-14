@@ -35,6 +35,33 @@ def _print_diff(diff, direction: str) -> None:
     click.echo(f"{diff.total} ref(s) would be changed.")
 
 
+def _parse_refs(ref_tuple):
+    """Parse --ref values into a list or dict.
+
+    If any value contains ``:``, all values are parsed as ``src:dst``
+    and a dict is returned.  Otherwise a plain list is returned.
+    ``None`` is returned when the tuple is empty.
+    """
+    if not ref_tuple:
+        return None
+    has_rename = any(":" in r for r in ref_tuple)
+    if not has_rename:
+        return list(ref_tuple)
+    result = {}
+    for r in ref_tuple:
+        if ":" in r:
+            src, _, dst = r.partition(":")
+            if not src or not dst:
+                raise click.BadParameter(
+                    f"Invalid ref rename {r!r} — expected src:dst",
+                    param_hint="'--ref'",
+                )
+            result[src] = dst
+        else:
+            result[r] = r
+    return result
+
+
 def _progress_cb(ctx):
     """Return a progress callback if verbose mode is on, else None."""
     if not ctx.obj.get("verbose"):
@@ -54,7 +81,7 @@ def _progress_cb(ctx):
 @_repo_option
 @click.argument("url")
 @_dry_run_option
-@click.option("--ref", multiple=True, help="Ref to include (repeatable). Omit for all refs.")
+@click.option("--ref", multiple=True, help="Ref to include (repeatable). Use src:dst to rename. Omit for all refs.")
 @click.option("--format", "fmt", type=click.Choice(["bundle"]), default=None,
               help="Force output format (auto-detected from .bundle extension).")
 @click.pass_context
@@ -63,13 +90,14 @@ def backup_cmd(ctx, url, dry_run, ref, fmt):
 
     Without --ref this is a full mirror: remote-only refs are deleted.
     With --ref only the specified refs are pushed (no deletes).
+    Use --ref src:dst to rename refs on the remote side.
 
     If URL ends with .bundle, a portable bundle file is written.
     """
     from ..mirror import _is_bundle_path, resolve_credentials
 
     store = _open_store(_require_repo(ctx))
-    refs = list(ref) if ref else None
+    refs = _parse_refs(ref)
     use_bundle = (fmt == "bundle") or _is_bundle_path(url)
     auth_url = url if use_bundle else resolve_credentials(url)
     diff = store.backup(auth_url, dry_run=dry_run, progress=_progress_cb(ctx),
@@ -89,7 +117,7 @@ def backup_cmd(ctx, url, dry_run, ref, fmt):
 @click.argument("url")
 @_dry_run_option
 @_no_create_option
-@click.option("--ref", multiple=True, help="Ref to include (repeatable). Omit for all refs.")
+@click.option("--ref", multiple=True, help="Ref to include (repeatable). Use src:dst to rename. Omit for all refs.")
 @click.option("--format", "fmt", type=click.Choice(["bundle"]), default=None,
               help="Force input format (auto-detected from .bundle extension).")
 @click.pass_context
@@ -97,14 +125,15 @@ def restore_cmd(ctx, url, dry_run, no_create, ref, fmt):
     """Fetch refs from a remote URL or import a bundle file.
 
     Restore is additive: refs are added and updated but local-only
-    refs are never deleted. HEAD (the current branch) is not restored;
+    refs are never deleted. Use --ref src:dst to rename refs locally.
+    HEAD (the current branch) is not restored;
     use 'vost branch current -b NAME' afterwards if needed.
     """
     from ..mirror import _is_bundle_path, resolve_credentials
 
     repo_path = _require_repo(ctx)
     store = _open_store(repo_path) if no_create else _open_or_create_bare(repo_path)
-    refs = list(ref) if ref else None
+    refs = _parse_refs(ref)
     use_bundle = (fmt == "bundle") or _is_bundle_path(url)
     auth_url = url if use_bundle else resolve_credentials(url)
     diff = store.restore(auth_url, dry_run=dry_run, progress=_progress_cb(ctx),

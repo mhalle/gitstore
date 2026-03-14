@@ -115,11 +115,14 @@ internal object MirrorOps {
      *
      * Without [refs] this is a full mirror: remote-only refs are deleted.
      * With [refs] only the specified refs are pushed (no deletes).
+     * With [refMap] refs are renamed during push (keys=source, values=dest);
+     * takes precedence over [refs].
      *
      * @param store The GitStore to back up.
      * @param url Destination URL (local path or remote URL), or bundle file path.
      * @param dryRun If true, compute diff but don't push.
      * @param refs Optional list of ref names to limit the backup to.
+     * @param refMap Optional mapping of source ref names to dest ref names.
      * @param format Optional format string; "bundle" forces bundle output.
      * @return MirrorDiff describing what changed (or would change).
      */
@@ -128,12 +131,22 @@ internal object MirrorOps {
         url: String,
         dryRun: Boolean = false,
         refs: List<String>? = null,
+        refMap: Map<String, String>? = null,
         format: String? = null,
     ): MirrorDiff {
         val repo = store.repo
         val useBundle = format == "bundle" || isBundlePath(url)
 
         if (useBundle) {
+            if (refMap != null) {
+                val localRefs = getLocalRefs(repo)
+                val resolved = resolveRefMap(refMap, localRefs)
+                val diff = diffBundleExportMapped(repo, resolved)
+                if (!dryRun) {
+                    bundleExportMapped(repo, url, resolved)
+                }
+                return diff
+            }
             val diff = diffBundleExport(repo, refs)
             if (!dryRun) {
                 bundleExport(repo, url, refs)
@@ -143,6 +156,18 @@ internal object MirrorOps {
 
         // Auto-create bare repo for local push targets
         autoCreateBareRepo(url)
+
+        if (refMap != null) {
+            val localRefs = getLocalRefs(repo)
+            val remoteRefs = getRemoteRefs(repo, url)
+            val resolved = resolveRefMap(refMap, localRefs)
+            // Build diff: compare mapped dest names against remote
+            val diff = diffRefsMapped(localRefs, remoteRefs, resolved)
+            if (!dryRun && !diff.inSync) {
+                targetedPushMapped(repo, url, localRefs, resolved)
+            }
+            return diff
+        }
 
         if (refs != null) {
             val localRefs = getLocalRefs(repo)
@@ -177,11 +202,14 @@ internal object MirrorOps {
      *
      * Restore is **additive**: it adds and updates refs but never deletes
      * local-only refs.
+     * With [refMap] refs are renamed when written locally (keys=source,
+     * values=dest); takes precedence over [refs].
      *
      * @param store The GitStore to restore into.
      * @param url Source URL (local path or remote), or bundle file path.
      * @param dryRun If true, compute diff but don't fetch.
      * @param refs Optional list of ref names to limit the restore to.
+     * @param refMap Optional mapping of source ref names to dest ref names.
      * @param format Optional format string; "bundle" forces bundle input.
      * @return MirrorDiff describing what changed (or would change).
      */
@@ -190,12 +218,22 @@ internal object MirrorOps {
         url: String,
         dryRun: Boolean = false,
         refs: List<String>? = null,
+        refMap: Map<String, String>? = null,
         format: String? = null,
     ): MirrorDiff {
         val repo = store.repo
         val useBundle = format == "bundle" || isBundlePath(url)
 
         if (useBundle) {
+            if (refMap != null) {
+                val bundleRefs = bundleListHeads(repo, url)
+                val resolved = resolveRefMap(refMap, bundleRefs)
+                val diff = diffBundleImportMapped(repo, url, resolved)
+                if (!dryRun) {
+                    bundleImportMapped(repo, url, resolved)
+                }
+                return diff
+            }
             val diff = diffBundleImport(repo, url, refs)
             if (!dryRun) {
                 bundleImport(repo, url, refs)
@@ -205,6 +243,17 @@ internal object MirrorOps {
 
         val localRefs = getLocalRefs(repo)
         val remoteRefs = getRemoteRefs(repo, url)
+
+        if (refMap != null) {
+            val resolved = resolveRefMap(refMap, remoteRefs)
+            // Diff: for each mapped ref, compare source SHA against local dest ref
+            val diff = diffRefsMappedRestore(remoteRefs, localRefs, resolved)
+            if (!dryRun && !diff.inSync) {
+                additiveFetchMapped(repo, url, remoteRefs, resolved)
+            }
+            return diff
+        }
+
         // For restore, remote is source, local is destination
         var diff = diffRefs(remoteRefs, localRefs)
 
@@ -452,6 +501,156 @@ internal object MirrorOps {
         // No deletes — additive
     }
 
+    // ── Ref-map helpers ─────────────────────────────────────────────────
+
+    /**
+     * Resolve a short-name ref map to full ref paths.
+     *
+     * Keys are resolved against [available]; values inherit the same
+     * prefix as the resolved key (e.g. "main"->"copy" becomes
+     * "refs/heads/main"->"refs/heads/copy").
+     */
+    private fun resolveRefMap(
+        map: Map<String, String>,
+        available: Map<String, String>,
+    ): Map<String, String> {
+        val result = mutableMapOf<String, String>()
+        for ((src, dst) in map) {
+            val srcFull = resolveOneRef(src, available.keys)
+            val dstFull = if (dst.startsWith("refs/")) {
+                dst
+            } else {
+                // Infer prefix from resolved source
+                val prefix = PREFIXES.firstOrNull { srcFull.startsWith(it) } ?: "refs/heads/"
+                "$prefix$dst"
+            }
+            result[srcFull] = dstFull
+        }
+        return result
+    }
+
+    /**
+     * Resolve a single short ref name against available refs.
+     */
+    private fun resolveOneRef(name: String, available: Set<String>): String {
+        if (name.startsWith("refs/")) return name
+        for (prefix in PREFIXES) {
+            val candidate = "$prefix$name"
+            if (candidate in available) return candidate
+        }
+        return "refs/heads/$name"
+    }
+
+    private val PREFIXES = listOf("refs/heads/", "refs/tags/", "refs/notes/")
+
+    /**
+     * Compute diff for a mapped backup (push with renaming).
+     *
+     * For each src->dst mapping, compare the local SHA at src against
+     * the remote SHA at dst.  The diff uses dst ref names.
+     */
+    private fun diffRefsMapped(
+        localRefs: Map<String, String>,
+        remoteRefs: Map<String, String>,
+        resolved: Map<String, String>,
+    ): MirrorDiff {
+        val add = mutableListOf<RefChange>()
+        val update = mutableListOf<RefChange>()
+        for ((src, dst) in resolved) {
+            val sha = localRefs[src] ?: continue
+            val remoteSha = remoteRefs[dst]
+            if (remoteSha == null) {
+                add.add(RefChange(refName = dst, oldTarget = null, newTarget = sha))
+            } else if (remoteSha != sha) {
+                update.add(RefChange(refName = dst, oldTarget = remoteSha, newTarget = sha))
+            }
+        }
+        return MirrorDiff(add = add, update = update, delete = emptyList())
+    }
+
+    /**
+     * Push mapped refs (src->dst renaming) to url.
+     */
+    private fun targetedPushMapped(
+        repo: Repository,
+        url: String,
+        localRefs: Map<String, String>,
+        resolved: Map<String, String>,
+    ) {
+        val transport = Transport.open(repo, URIish(url))
+        try {
+            val commands = mutableListOf<RemoteRefUpdate>()
+            for ((src, dst) in resolved) {
+                val sha = localRefs[src] ?: continue
+                val oid = ObjectId.fromString(sha)
+                commands.add(
+                    RemoteRefUpdate(
+                        repo,
+                        null as String?,
+                        oid,
+                        dst,   // remote ref name is the mapped dest
+                        true,
+                        null,
+                        null,
+                    )
+                )
+            }
+            if (commands.isNotEmpty()) {
+                transport.push(NullProgressMonitor.INSTANCE, commands)
+            }
+        } finally {
+            transport.close()
+        }
+    }
+
+    /**
+     * Compute diff for a mapped restore (fetch with renaming).
+     *
+     * For each src->dst mapping, compare the remote SHA at src against
+     * the local SHA at dst.  The diff uses dst ref names.
+     */
+    private fun diffRefsMappedRestore(
+        remoteRefs: Map<String, String>,
+        localRefs: Map<String, String>,
+        resolved: Map<String, String>,
+    ): MirrorDiff {
+        val add = mutableListOf<RefChange>()
+        val update = mutableListOf<RefChange>()
+        for ((src, dst) in resolved) {
+            val sha = remoteRefs[src] ?: continue
+            val localSha = localRefs[dst]
+            if (localSha == null) {
+                add.add(RefChange(refName = dst, oldTarget = null, newTarget = sha))
+            } else if (localSha != sha) {
+                update.add(RefChange(refName = dst, oldTarget = localSha, newTarget = sha))
+            }
+        }
+        return MirrorDiff(add = add, update = update, delete = emptyList())
+    }
+
+    /**
+     * Fetch mapped refs (src->dst renaming) from url additively.
+     */
+    private fun additiveFetchMapped(
+        repo: Repository,
+        url: String,
+        remoteRefs: Map<String, String>,
+        resolved: Map<String, String>,
+    ) {
+        // Fetch src refs, writing them to dst ref names
+        val refSpecs = resolved.filter { (src, _) -> src in remoteRefs }
+            .map { (src, dst) -> RefSpec("+$src:$dst") }
+
+        if (refSpecs.isNotEmpty()) {
+            val transport = Transport.open(repo, URIish(url))
+            try {
+                transport.fetch(NullProgressMonitor.INSTANCE, refSpecs)
+            } finally {
+                transport.close()
+            }
+        }
+    }
+
     // ── Bundle helpers ──────────────────────────────────────────────────
 
     /**
@@ -593,6 +792,88 @@ internal object MirrorOps {
         val diff = diffRefs(filtered, localRefs)
         // Additive: no deletes
         return diff.copy(delete = emptyList())
+    }
+
+    /**
+     * Export a bundle with mapped (renamed) refs.
+     */
+    private fun bundleExportMapped(
+        repo: Repository,
+        path: String,
+        resolved: Map<String, String>,
+    ) {
+        val allRefs = getLocalRefs(repo)
+        val writer = BundleWriter(repo)
+        for ((src, dst) in resolved) {
+            val sha = allRefs[src] ?: continue
+            writer.include(dst, ObjectId.fromString(sha))
+        }
+        FileOutputStream(path).use { fos ->
+            writer.writeBundle(NullProgressMonitor.INSTANCE, fos)
+        }
+    }
+
+    /**
+     * Import refs from a bundle with mapping (src->dst renaming).
+     */
+    private fun bundleImportMapped(
+        repo: Repository,
+        path: String,
+        resolved: Map<String, String>,
+    ) {
+        val bundleRefs = bundleListHeads(repo, path)
+        val refsToImport = resolved.filter { (src, _) -> src in bundleRefs }
+        if (refsToImport.isEmpty()) return
+
+        val refSpecs = refsToImport.map { (src, dst) -> RefSpec("+$src:$dst") }
+        val uri = URIish(File(path).toURI().toString())
+        val transport = Transport.open(repo, uri)
+        try {
+            transport.fetch(NullProgressMonitor.INSTANCE, refSpecs)
+        } finally {
+            transport.close()
+        }
+    }
+
+    /**
+     * Compute diff for exporting a bundle with mapped refs.
+     * Uses dest ref names in the diff.
+     */
+    private fun diffBundleExportMapped(
+        repo: Repository,
+        resolved: Map<String, String>,
+    ): MirrorDiff {
+        val localRefs = getLocalRefs(repo)
+        val add = mutableListOf<RefChange>()
+        for ((src, dst) in resolved) {
+            val sha = localRefs[src] ?: continue
+            add.add(RefChange(refName = dst, oldTarget = null, newTarget = sha))
+        }
+        return MirrorDiff(add = add)
+    }
+
+    /**
+     * Compute diff for importing a bundle with mapped refs.
+     */
+    private fun diffBundleImportMapped(
+        repo: Repository,
+        path: String,
+        resolved: Map<String, String>,
+    ): MirrorDiff {
+        val bundleRefs = bundleListHeads(repo, path)
+        val localRefs = getLocalRefs(repo)
+        val add = mutableListOf<RefChange>()
+        val update = mutableListOf<RefChange>()
+        for ((src, dst) in resolved) {
+            val sha = bundleRefs[src] ?: continue
+            val localSha = localRefs[dst]
+            if (localSha == null) {
+                add.add(RefChange(refName = dst, oldTarget = null, newTarget = sha))
+            } else if (localSha != sha) {
+                update.add(RefChange(refName = dst, oldTarget = localSha, newTarget = sha))
+            }
+        }
+        return MirrorDiff(add = add, update = update, delete = emptyList())
     }
 
     /**

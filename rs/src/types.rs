@@ -508,6 +508,10 @@ pub struct BackupOptions {
     pub refs: Option<Vec<String>>,
     /// Force format: "bundle" for bundle file output. Auto-detected from `.bundle` extension.
     pub format: Option<String>,
+    /// Rename refs during backup.  Keys are source ref names, values are
+    /// destination ref names (both may be short or full).  When set, takes
+    /// precedence over `refs`.
+    pub ref_map: Option<std::collections::HashMap<String, String>>,
 }
 
 /// Options for [`GitStore::restore`].
@@ -519,4 +523,8 @@ pub struct RestoreOptions {
     pub refs: Option<Vec<String>>,
     /// Force format: "bundle" for bundle file input. Auto-detected from `.bundle` extension.
     pub format: Option<String>,
+    /// Rename refs during restore.  Keys are source ref names, values are
+    /// destination ref names (both may be short or full).  When set, takes
+    /// precedence over `refs`.
+    pub ref_map: Option<std::collections::HashMap<String, String>>,
 }

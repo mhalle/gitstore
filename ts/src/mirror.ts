@@ -11,6 +11,22 @@ import type { MirrorDiff, RefChange, HttpClient } from './types.js';
 import type { GitStore } from './gitstore.js';
 
 // ---------------------------------------------------------------------------
+// RefSpec type — string[] or Record<string, string> for ref renaming
+// ---------------------------------------------------------------------------
+
+/**
+ * Ref specification for backup/restore/bundle operations.
+ *
+ * - `string[]` — identity mapping (source name = destination name).
+ * - `Record<string, string>` — keys are source ref names, values are
+ *   destination ref names (allows renaming on transfer).
+ *
+ * Short names (e.g. `"main"`) are resolved against available refs using
+ * the standard branches → tags → notes precedence.
+ */
+export type RefSpec = string[] | Record<string, string>;
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -42,6 +58,70 @@ function resolveRefNames(
     }
   }
   return result;
+}
+
+/**
+ * Resolve a short ref name to its full form using the available refs.
+ */
+function resolveOneRef(name: string, available: Map<string, string>): string {
+  if (name.startsWith('refs/')) return name;
+  for (const prefix of ['refs/heads/', 'refs/tags/', 'refs/notes/']) {
+    const candidate = `${prefix}${name}`;
+    if (available.has(candidate)) return candidate;
+  }
+  return `refs/heads/${name}`;
+}
+
+/**
+ * Normalize a RefSpec into a Map<srcFullRef, destFullRef>.
+ *
+ * For string arrays, destination = source (identity mapping).
+ * For Record<string, string>, keys are source names and values are
+ * destination names; both are resolved against `available`.
+ */
+function normalizeRefSpec(
+  spec: RefSpec,
+  available: Map<string, string>,
+): Map<string, string> {
+  const result = new Map<string, string>();
+  if (Array.isArray(spec)) {
+    for (const name of spec) {
+      const resolved = resolveOneRef(name, available);
+      result.set(resolved, resolved);
+    }
+  } else {
+    for (const [src, dest] of Object.entries(spec)) {
+      const resolvedSrc = resolveOneRef(src, available);
+      // Destination: resolve using the same prefix as the source
+      // If dest starts with refs/, use as-is; otherwise use same prefix as src
+      let resolvedDest: string;
+      if (dest.startsWith('refs/')) {
+        resolvedDest = dest;
+      } else {
+        // Use the same prefix as the resolved source
+        for (const prefix of ['refs/heads/', 'refs/tags/', 'refs/notes/']) {
+          if (resolvedSrc.startsWith(prefix)) {
+            resolvedDest = `${prefix}${dest}`;
+            break;
+          }
+        }
+        resolvedDest = resolvedDest! ?? `refs/heads/${dest}`;
+      }
+      result.set(resolvedSrc, resolvedDest);
+    }
+  }
+  return result;
+}
+
+/**
+ * Return true if the RefSpec contains any renaming (src !== dest).
+ */
+function refSpecHasRenaming(spec: RefSpec): boolean {
+  if (Array.isArray(spec)) return false;
+  for (const [src, dest] of Object.entries(spec)) {
+    if (src !== dest) return true;
+  }
+  return false;
 }
 
 function isLocalPath(url: string): boolean {
@@ -269,7 +349,7 @@ function parseBundleHeader(data: Uint8Array): BundleHeader {
 export async function bundleExport(
   store: GitStore,
   destPath: string,
-  refs?: string[],
+  refs?: RefSpec,
 ): Promise<void> {
   const fsModule = store._fsModule;
   const gitdir = store._gitdir;
@@ -277,24 +357,31 @@ export async function bundleExport(
   // Get all local refs
   const localRefs = await getLocalRefsNative(store);
 
-  // Filter if requested
-  let filtered: Map<string, string>;
-  if (refs && refs.length > 0) {
-    const resolved = resolveRefNames(refs, localRefs);
-    filtered = new Map();
-    for (const [k, v] of localRefs) {
-      if (resolved.has(k)) filtered.set(k, v);
+  // Filter and optionally rename refs
+  // srcToDestMap: localRefName → destRefName in the bundle header
+  let srcToDestMap: Map<string, string>;
+  if (refs && (Array.isArray(refs) ? refs.length > 0 : Object.keys(refs).length > 0)) {
+    const mapping = normalizeRefSpec(refs, localRefs);
+    srcToDestMap = new Map();
+    for (const [src, dest] of mapping) {
+      if (localRefs.has(src)) {
+        srcToDestMap.set(src, dest);
+      }
     }
   } else {
-    filtered = localRefs;
+    // Identity mapping for all refs
+    srcToDestMap = new Map();
+    for (const k of localRefs.keys()) {
+      srcToDestMap.set(k, k);
+    }
   }
 
-  if (filtered.size === 0) {
+  if (srcToDestMap.size === 0) {
     throw new Error('Nothing to bundle: no matching refs');
   }
 
-  // Collect all reachable OIDs
-  const startOids = [...new Set(filtered.values())];
+  // Collect all reachable OIDs (from source refs)
+  const startOids = [...new Set([...srcToDestMap.keys()].map(k => localRefs.get(k)!))];
   const allOids = await collectReachableOids(fsModule, gitdir, startOids);
 
   // Create packfile
@@ -308,10 +395,11 @@ export async function bundleExport(
     throw new Error('packObjects returned no data');
   }
 
-  // Build bundle v2 header
+  // Build bundle v2 header — use dest names
   let header = '# v2 git bundle\n';
-  for (const [refName, sha] of filtered) {
-    header += `${sha} ${refName}\n`;
+  for (const [srcRef, destRef] of srcToDestMap) {
+    const sha = localRefs.get(srcRef)!;
+    header += `${sha} ${destRef}\n`;
   }
   header += '\n';
 
@@ -337,7 +425,7 @@ async function bundleListHeads(
 export async function bundleImport(
   store: GitStore,
   bundlePath: string,
-  refs?: string[],
+  refs?: RefSpec,
 ): Promise<void> {
   const fsModule = store._fsModule;
   const gitdir = store._gitdir;
@@ -373,20 +461,22 @@ export async function bundleImport(
     filepath: packRelPath,
   });
 
-  // Determine which refs to set
-  let refsToSet: Map<string, string>;
-  if (refs && refs.length > 0) {
-    const resolved = resolveRefNames(refs, bundleRefs);
-    refsToSet = new Map();
-    for (const [k, v] of bundleRefs) {
-      if (resolved.has(k)) refsToSet.set(k, v);
+  // Determine which refs to set, with optional renaming
+  let refsToWrite: Map<string, string>; // destRef → oid
+  if (refs && (Array.isArray(refs) ? refs.length > 0 : Object.keys(refs).length > 0)) {
+    const mapping = normalizeRefSpec(refs, bundleRefs);
+    refsToWrite = new Map();
+    for (const [src, dest] of mapping) {
+      if (bundleRefs.has(src)) {
+        refsToWrite.set(dest, bundleRefs.get(src)!);
+      }
     }
   } else {
-    refsToSet = bundleRefs;
+    refsToWrite = bundleRefs;
   }
 
-  // Set each ref
-  for (const [ref, oid] of refsToSet) {
+  // Set each ref (using dest name)
+  for (const [ref, oid] of refsToWrite) {
     await git.writeRef({
       fs: fsModule as any,
       gitdir,
@@ -436,29 +526,43 @@ async function targetedPushGit(
   });
 }
 
+async function targetedPushGitRefspecs(
+  gitdir: string,
+  url: string,
+  refspecs: string[],
+): Promise<void> {
+  const { execFileSync } = await import('node:child_process');
+  execFileSync('git', ['-C', gitdir, 'push', url, ...refspecs], {
+    encoding: 'utf-8',
+    stdio: ['pipe', 'pipe', 'pipe'],
+    timeout: 60000,
+  });
+}
+
 async function additiveFetchGit(
   gitdir: string,
   url: string,
-  refs?: string[],
+  refs?: RefSpec,
 ): Promise<void> {
   const remoteRefs = await getRemoteRefsGit(gitdir, url);
   if (remoteRefs.size === 0) return;
 
-  let refsToFetch: Map<string, string>;
-  if (refs && refs.length > 0) {
-    const resolved = resolveRefNames(refs, remoteRefs);
-    refsToFetch = new Map();
-    for (const [k, v] of remoteRefs) {
-      if (resolved.has(k)) refsToFetch.set(k, v);
+  let refspecs: string[];
+  if (refs && (Array.isArray(refs) ? refs.length > 0 : Object.keys(refs).length > 0)) {
+    const mapping = normalizeRefSpec(refs, remoteRefs);
+    refspecs = [];
+    for (const [src, dest] of mapping) {
+      if (remoteRefs.has(src)) {
+        refspecs.push(`+${src}:${dest}`);
+      }
     }
   } else {
-    refsToFetch = remoteRefs;
+    refspecs = [...remoteRefs.keys()].map((r) => `+${r}:${r}`);
   }
 
-  if (refsToFetch.size === 0) return;
+  if (refspecs.length === 0) return;
 
   const { execFileSync } = await import('node:child_process');
-  const refspecs = [...refsToFetch.keys()].map((r) => `+${r}:${r}`);
   execFileSync('git', ['-C', gitdir, 'fetch', url, ...refspecs, '--force'], {
     encoding: 'utf-8',
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -601,7 +705,7 @@ export async function backup(
     http?: HttpClient;
     dryRun?: boolean;
     onAuth?: Function;
-    refs?: string[];
+    refs?: RefSpec;
     format?: string;
   } = {},
 ): Promise<MirrorDiff> {
@@ -611,20 +715,22 @@ export async function backup(
   if (useBundle) {
     // Bundle export
     const localRefs = await getLocalRefsNative(store);
-    let filtered: Map<string, string>;
-    if (opts.refs && opts.refs.length > 0) {
-      const resolved = resolveRefNames(opts.refs, localRefs);
-      filtered = new Map();
-      for (const [k, v] of localRefs) {
-        if (resolved.has(k)) filtered.set(k, v);
+    let srcToDestMap: Map<string, string>;
+    if (opts.refs && (Array.isArray(opts.refs) ? opts.refs.length > 0 : Object.keys(opts.refs).length > 0)) {
+      const mapping = normalizeRefSpec(opts.refs, localRefs);
+      srcToDestMap = new Map();
+      for (const [src, dest] of mapping) {
+        if (localRefs.has(src)) srcToDestMap.set(src, dest);
       }
     } else {
-      filtered = localRefs;
+      srcToDestMap = new Map();
+      for (const k of localRefs.keys()) srcToDestMap.set(k, k);
     }
-    // All refs are "add" for bundle export
+    // All refs are "add" for bundle export — use dest names in the diff
     const add: RefChange[] = [];
-    for (const [ref, sha] of filtered) {
-      add.push({ ref, newTarget: sha });
+    for (const [srcRef, destRef] of srcToDestMap) {
+      const sha = localRefs.get(srcRef)!;
+      add.push({ ref: destRef, newTarget: sha });
     }
     const diff: MirrorDiff = { add, update: [], delete: [] };
 
@@ -642,8 +748,32 @@ export async function backup(
     const localRefs = await getLocalRefsGit(gitdir);
     const remoteRefs = await getRemoteRefsGit(gitdir, url);
 
-    if (opts.refs && opts.refs.length > 0) {
-      const refSet = resolveRefNames(opts.refs, localRefs);
+    if (opts.refs && (Array.isArray(opts.refs) ? opts.refs.length > 0 : Object.keys(opts.refs).length > 0)) {
+      const mapping = normalizeRefSpec(opts.refs, localRefs);
+      const hasRenaming = refSpecHasRenaming(opts.refs);
+
+      if (hasRenaming) {
+        // With renaming: build renamed local refs map, then diff against remote
+        const renamedLocal = new Map<string, string>();
+        for (const [src, dest] of mapping) {
+          if (localRefs.has(src)) renamedLocal.set(dest, localRefs.get(src)!);
+        }
+        const diff = diffRefsMap(renamedLocal, remoteRefs);
+        diff.delete = []; // no deletes with --refs
+        if (!opts.dryRun && (diff.add.length || diff.update.length)) {
+          // Build refspecs with renaming: +src:dest
+          const refspecs = [...mapping.entries()]
+            .filter(([src]) => localRefs.has(src))
+            .map(([src, dest]) => `+${src}:${dest}`);
+          await targetedPushGitRefspecs(gitdir, url, refspecs);
+        }
+        return diff;
+      }
+
+      const refSet = resolveRefNames(
+        Array.isArray(opts.refs) ? opts.refs : Object.keys(opts.refs),
+        localRefs,
+      );
       const diff = diffRefsMap(localRefs, remoteRefs);
       diff.add = diff.add.filter((r) => refSet.has(r.ref));
       diff.update = diff.update.filter((r) => refSet.has(r.ref));
@@ -748,7 +878,7 @@ export async function restore(
     http?: HttpClient;
     dryRun?: boolean;
     onAuth?: Function;
-    refs?: string[];
+    refs?: RefSpec;
     format?: string;
   } = {},
 ): Promise<MirrorDiff> {
@@ -758,18 +888,20 @@ export async function restore(
   if (useBundle) {
     // Bundle import
     const bundleRefs = await bundleListHeads(store, url);
-    let filtered: Map<string, string>;
-    if (opts.refs && opts.refs.length > 0) {
-      const resolved = resolveRefNames(opts.refs, bundleRefs);
-      filtered = new Map();
-      for (const [k, v] of bundleRefs) {
-        if (resolved.has(k)) filtered.set(k, v);
+    let destToOid: Map<string, string>; // dest ref name → oid
+    if (opts.refs && (Array.isArray(opts.refs) ? opts.refs.length > 0 : Object.keys(opts.refs).length > 0)) {
+      const mapping = normalizeRefSpec(opts.refs, bundleRefs);
+      destToOid = new Map();
+      for (const [src, dest] of mapping) {
+        if (bundleRefs.has(src)) {
+          destToOid.set(dest, bundleRefs.get(src)!);
+        }
       }
     } else {
-      filtered = bundleRefs;
+      destToOid = bundleRefs;
     }
     const localRefs = await getLocalRefsNative(store);
-    const diff = diffRefsMap(filtered, localRefs);
+    const diff = diffRefsMap(destToOid, localRefs);
     diff.delete = []; // additive: no deletes
 
     if (!opts.dryRun) {
@@ -784,13 +916,40 @@ export async function restore(
   if (useGit) {
     const localRefs = await getLocalRefsGit(gitdir);
     const remoteRefs = await getRemoteRefsGit(gitdir, url);
-    const diff = diffRefsMap(remoteRefs, localRefs);
 
-    if (opts.refs && opts.refs.length > 0) {
-      const refSet = resolveRefNames(opts.refs, remoteRefs);
+    if (opts.refs && (Array.isArray(opts.refs) ? opts.refs.length > 0 : Object.keys(opts.refs).length > 0)) {
+      const hasRenaming = refSpecHasRenaming(opts.refs);
+      const mapping = normalizeRefSpec(opts.refs, remoteRefs);
+
+      if (hasRenaming) {
+        // Build renamed remote refs map (dest → oid), then diff against local
+        const renamedRemote = new Map<string, string>();
+        for (const [src, dest] of mapping) {
+          if (remoteRefs.has(src)) renamedRemote.set(dest, remoteRefs.get(src)!);
+        }
+        const diff = diffRefsMap(renamedRemote, localRefs);
+        diff.delete = []; // additive: never delete
+        if (!opts.dryRun && (diff.add.length || diff.update.length)) {
+          await additiveFetchGit(gitdir, url, opts.refs);
+        }
+        return diff;
+      }
+
+      const diff = diffRefsMap(remoteRefs, localRefs);
+      const refSet = resolveRefNames(
+        Array.isArray(opts.refs) ? opts.refs : Object.keys(opts.refs),
+        remoteRefs,
+      );
       diff.add = diff.add.filter((r) => refSet.has(r.ref));
       diff.update = diff.update.filter((r) => refSet.has(r.ref));
+      diff.delete = []; // additive: never delete
+      if (!opts.dryRun && (diff.add.length || diff.update.length)) {
+        await additiveFetchGit(gitdir, url, opts.refs);
+      }
+      return diff;
     }
+
+    const diff = diffRefsMap(remoteRefs, localRefs);
     diff.delete = []; // additive: never delete
 
     if (!opts.dryRun && (diff.add.length || diff.update.length)) {
@@ -805,13 +964,16 @@ export async function restore(
   }
   const diff = await diffRefs(store, url, 'pull', opts as any);
 
-  if (opts.refs && opts.refs.length > 0) {
+  if (opts.refs && (Array.isArray(opts.refs) ? opts.refs.length > 0 : Object.keys(opts.refs).length > 0)) {
     // Build available refs set from the remote
     const remoteRefMap = new Map<string, string>();
     for (const rc of [...diff.add, ...diff.update]) {
       if (rc.newTarget) remoteRefMap.set(rc.ref, rc.newTarget);
     }
-    const refSet = resolveRefNames(opts.refs, remoteRefMap);
+    const refSet = resolveRefNames(
+      Array.isArray(opts.refs) ? opts.refs : Object.keys(opts.refs),
+      remoteRefMap,
+    );
     diff.add = diff.add.filter((r) => refSet.has(r.ref));
     diff.update = diff.update.filter((r) => refSet.has(r.ref));
   }
@@ -843,12 +1005,14 @@ export async function restore(
       }
     }
 
-    let refsToSet: Map<string, string>;
-    if (opts.refs && opts.refs.length > 0) {
-      const refSet = resolveRefNames(opts.refs, remoteRefMap);
+    let refsToSet: Map<string, string>; // destRef → oid
+    if (opts.refs && (Array.isArray(opts.refs) ? opts.refs.length > 0 : Object.keys(opts.refs).length > 0)) {
+      const mapping = normalizeRefSpec(opts.refs, remoteRefMap);
       refsToSet = new Map();
-      for (const [k, v] of remoteRefMap) {
-        if (refSet.has(k)) refsToSet.set(k, v);
+      for (const [src, dest] of mapping) {
+        if (remoteRefMap.has(src)) {
+          refsToSet.set(dest, remoteRefMap.get(src)!);
+        }
       }
     } else {
       refsToSet = remoteRefMap;

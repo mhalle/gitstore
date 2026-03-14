@@ -236,6 +236,54 @@ std::set<std::string> resolve_ref_names(
 }
 
 // ---------------------------------------------------------------------------
+// Ref map resolution
+// ---------------------------------------------------------------------------
+
+/// Resolve a single short ref name against available refs.
+std::string resolve_one_ref(const std::string& name, const RefMap& available) {
+    if (name.compare(0, 5, "refs/") == 0) return name;
+    for (const char* prefix : {"refs/heads/", "refs/tags/", "refs/notes/"}) {
+        auto candidate = std::string(prefix) + name;
+        if (available.find(candidate) != available.end()) {
+            return candidate;
+        }
+    }
+    return "refs/heads/" + name;
+}
+
+/// Resolve a src->dst ref map to full ref paths on both sides.
+/// Returns map<full_src, full_dst>.
+/// For destination names not starting with "refs/", use the same prefix
+/// as the resolved source (e.g. if source resolves to refs/tags/v1.0,
+/// then dest "v2.0" becomes refs/tags/v2.0).
+RefMap resolve_ref_map(
+    const std::map<std::string, std::string>& map,
+    const RefMap& src_available,
+    const RefMap& /*dst_available*/)
+{
+    RefMap result;
+    for (const auto& [src, dst] : map) {
+        auto full_src = resolve_one_ref(src, src_available);
+        std::string full_dst;
+        if (dst.compare(0, 5, "refs/") == 0) {
+            full_dst = dst;
+        } else {
+            // Infer the prefix from the resolved source
+            // e.g. "refs/heads/main" -> "refs/heads/"
+            //      "refs/tags/v1.0"  -> "refs/tags/"
+            auto last_slash = full_src.rfind('/');
+            if (last_slash != std::string::npos) {
+                full_dst = full_src.substr(0, last_slash + 1) + dst;
+            } else {
+                full_dst = "refs/heads/" + dst;
+            }
+        }
+        result[full_src] = full_dst;
+    }
+    return result;
+}
+
+// ---------------------------------------------------------------------------
 // Bundle detection
 // ---------------------------------------------------------------------------
 
@@ -251,7 +299,8 @@ bool is_bundle_path(const std::string& path) {
 // ---------------------------------------------------------------------------
 
 void bundle_export_impl(git_repository* repo, const std::string& path,
-                        const std::vector<std::string>& refs, const RefMap& local_refs) {
+                        const std::vector<std::string>& refs, const RefMap& local_refs,
+                        const RefMap& rename = {}) {
     // Determine which refs to include
     RefMap to_export;
     if (refs.empty()) {
@@ -307,10 +356,12 @@ void bundle_export_impl(git_repository* repo, const std::string& path,
     }
     git_packbuilder_free(pb);
 
-    // Build bundle v2 header
+    // Build bundle v2 header (use destination names if rename map provided)
     std::string header = "# v2 git bundle\n";
     for (const auto& [name, sha] : to_export) {
-        header += sha + " " + name + "\n";
+        auto it = rename.find(name);
+        const auto& dest_name = (it != rename.end()) ? it->second : name;
+        header += sha + " " + dest_name + "\n";
     }
     header += "\n"; // blank line separates header from pack data
 
@@ -374,7 +425,8 @@ RefMap bundle_list_heads(const std::string& path) {
 }
 
 void bundle_import_impl(git_repository* repo, const std::string& path,
-                        const std::vector<std::string>& refs) {
+                        const std::vector<std::string>& refs,
+                        const RefMap& rename = {}) {
     // Read entire bundle file
     std::ifstream in(path, std::ios::binary);
     if (!in) throw GitError("bundle_import: cannot open " + path);
@@ -425,13 +477,15 @@ void bundle_import_impl(git_repository* repo, const std::string& path,
     }
     git_indexer_free(idx);
 
-    // Set refs
+    // Set refs (apply rename map if provided)
     for (const auto& [name, sha] : refs_to_import) {
+        auto it = rename.find(name);
+        const auto& dest_name = (it != rename.end()) ? it->second : name;
         git_oid oid;
         if (git_oid_fromstr(&oid, sha.c_str()) != 0)
             throw_git("git_oid_fromstr");
         git_reference* ref_out = nullptr;
-        if (git_reference_create(&ref_out, repo, name.c_str(), &oid, 1, nullptr) != 0)
+        if (git_reference_create(&ref_out, repo, dest_name.c_str(), &oid, 1, nullptr) != 0)
             throw_git("git_reference_create");
         git_reference_free(ref_out);
     }
@@ -442,7 +496,8 @@ void bundle_import_impl(git_repository* repo, const std::string& path,
 // ---------------------------------------------------------------------------
 
 MirrorDiff diff_bundle_export(git_repository* repo,
-                               const std::vector<std::string>& refs) {
+                               const std::vector<std::string>& refs,
+                               const RefMap& rename = {}) {
     auto local_refs = get_local_refs(repo);
     RefMap filtered;
     if (refs.empty()) {
@@ -456,13 +511,16 @@ MirrorDiff diff_bundle_export(git_repository* repo,
 
     MirrorDiff diff;
     for (const auto& [name, sha] : filtered) {
-        diff.add.push_back({name, std::nullopt, sha});
+        auto it = rename.find(name);
+        const auto& dest_name = (it != rename.end()) ? it->second : name;
+        diff.add.push_back({dest_name, std::nullopt, sha});
     }
     return diff;
 }
 
 MirrorDiff diff_bundle_import(git_repository* repo, const std::string& path,
-                               const std::vector<std::string>& refs) {
+                               const std::vector<std::string>& refs,
+                               const RefMap& rename = {}) {
     auto bundle_refs = bundle_list_heads(path);
     RefMap filtered;
     if (refs.empty()) {
@@ -474,8 +532,16 @@ MirrorDiff diff_bundle_import(git_repository* repo, const std::string& path,
         }
     }
 
+    // Apply rename to get destination ref names for diff
+    RefMap dest_filtered;
+    for (const auto& [name, sha] : filtered) {
+        auto it = rename.find(name);
+        const auto& dest_name = (it != rename.end()) ? it->second : name;
+        dest_filtered[dest_name] = sha;
+    }
+
     auto local_refs = get_local_refs(repo);
-    auto diff = diff_refs(filtered, local_refs);
+    auto diff = diff_refs(dest_filtered, local_refs);
     diff.del.clear(); // additive: no deletes
     return diff;
 }
@@ -521,8 +587,10 @@ void mirror_push(git_repository* repo, const std::string& url,
 }
 
 /// Push only refs in ref_filter (no deletes on remote).
+/// If rename is non-empty, maps source ref names to destination ref names.
 void targeted_push(git_repository* repo, const std::string& url,
-                   const RefMap& local_refs, const std::set<std::string>& ref_filter) {
+                   const RefMap& local_refs, const std::set<std::string>& ref_filter,
+                   const RefMap& rename = {}) {
     git_remote* remote = nullptr;
     if (git_remote_create_anonymous(&remote, repo, url.c_str()) != 0) {
         throw_git("git_remote_create_anonymous");
@@ -531,7 +599,9 @@ void targeted_push(git_repository* repo, const std::string& url,
     std::vector<std::string> refspec_strs;
     for (const auto& name : ref_filter) {
         if (local_refs.find(name) != local_refs.end()) {
-            refspec_strs.push_back("+" + name + ":" + name);
+            auto it = rename.find(name);
+            const auto& dest = (it != rename.end()) ? it->second : name;
+            refspec_strs.push_back("+" + name + ":" + dest);
         }
     }
 
@@ -555,8 +625,10 @@ void targeted_push(git_repository* repo, const std::string& url,
 
 /// Fetch refs additively (no deletes).  If refs_filter is non-empty,
 /// only fetches refs that match the filter.
+/// If rename is non-empty, maps source ref names to local ref names.
 void additive_fetch(git_repository* repo, const std::string& url,
-                    const RefMap& remote_refs, const std::vector<std::string>& refs) {
+                    const RefMap& remote_refs, const std::vector<std::string>& refs,
+                    const RefMap& rename = {}) {
     RefMap to_fetch;
     if (refs.empty()) {
         to_fetch = remote_refs;
@@ -576,7 +648,9 @@ void additive_fetch(git_repository* repo, const std::string& url,
 
     std::vector<std::string> refspec_strs;
     for (auto& [name, sha] : to_fetch) {
-        refspec_strs.push_back("+" + name + ":" + name);
+        auto it = rename.find(name);
+        const auto& dest = (it != rename.end()) ? it->second : name;
+        refspec_strs.push_back("+" + name + ":" + dest);
     }
 
     std::vector<char*> refspec_ptrs;
@@ -612,6 +686,53 @@ MirrorDiff backup(const std::shared_ptr<GitStoreInner>& inner,
     bool use_bundle = opts.format == "bundle" || is_bundle_path(dest);
 
     std::lock_guard<std::mutex> lk(inner->mutex);
+
+    // ref_map takes precedence over refs
+    if (!opts.ref_map.empty()) {
+        auto local_refs = get_local_refs(inner->repo);
+        RefMap empty_dst;
+        auto resolved = resolve_ref_map(opts.ref_map, local_refs, empty_dst);
+
+        // Build refs list from map keys for filtering
+        std::vector<std::string> src_refs;
+        std::set<std::string> src_set;
+        for (const auto& [src, dst] : resolved) {
+            src_refs.push_back(src);
+            src_set.insert(src);
+        }
+
+        if (use_bundle) {
+            auto diff = diff_bundle_export(inner->repo, src_refs, resolved);
+            if (!opts.dry_run) {
+                bundle_export_impl(inner->repo, dest, src_refs, local_refs, resolved);
+            }
+            return diff;
+        }
+
+        auto_create_bare_repo(dest);
+        auto remote_refs = get_remote_refs(inner->repo, dest);
+
+        // Build diff using destination names
+        RefMap src_filtered;
+        for (const auto& [k, v] : local_refs) {
+            if (src_set.count(k)) src_filtered[k] = v;
+        }
+
+        // Compute diff with renamed refs
+        RefMap renamed_local;
+        for (const auto& [src, sha] : src_filtered) {
+            auto it = resolved.find(src);
+            const auto& dst = (it != resolved.end()) ? it->second : src;
+            renamed_local[dst] = sha;
+        }
+        auto diff = diff_refs(renamed_local, remote_refs);
+        diff.del.clear(); // no deletes with ref_map
+
+        if (!opts.dry_run && !diff.in_sync()) {
+            targeted_push(inner->repo, dest, local_refs, src_set, resolved);
+        }
+        return diff;
+    }
 
     if (use_bundle) {
         auto diff = diff_bundle_export(inner->repo, opts.refs);
@@ -667,9 +788,55 @@ MirrorDiff restore(const std::shared_ptr<GitStoreInner>& inner,
 
     std::lock_guard<std::mutex> lk(inner->mutex);
 
+    // ref_map takes precedence over refs
+    if (!opts.ref_map.empty()) {
+        if (use_bundle) {
+            auto bundle_refs = bundle_list_heads(src);
+            RefMap empty_dst;
+            auto resolved = resolve_ref_map(opts.ref_map, bundle_refs, empty_dst);
+            // Build refs list from map keys for filtering
+            std::vector<std::string> src_refs;
+            for (const auto& [s, d] : resolved) {
+                src_refs.push_back(s);
+            }
+            auto diff = diff_bundle_import(inner->repo, src, src_refs, resolved);
+            if (!opts.dry_run && !diff.in_sync()) {
+                bundle_import_impl(inner->repo, src, src_refs, resolved);
+            }
+            return diff;
+        }
+
+        auto remote_refs = get_remote_refs(inner->repo, src);
+        auto local_refs = get_local_refs(inner->repo);
+        RefMap empty_dst;
+        auto resolved = resolve_ref_map(opts.ref_map, remote_refs, empty_dst);
+
+        // Build filtered remote refs with renamed destinations
+        RefMap renamed_remote;
+        for (const auto& [src_ref, dst_ref] : resolved) {
+            auto it = remote_refs.find(src_ref);
+            if (it != remote_refs.end()) {
+                renamed_remote[dst_ref] = it->second;
+            }
+        }
+
+        auto diff = diff_refs(renamed_remote, local_refs);
+        diff.del.clear(); // additive: never delete
+
+        if (!opts.dry_run && !diff.in_sync()) {
+            // Build refs list from map keys
+            std::vector<std::string> src_refs;
+            for (const auto& [s, d] : resolved) {
+                src_refs.push_back(s);
+            }
+            additive_fetch(inner->repo, src, remote_refs, src_refs, resolved);
+        }
+        return diff;
+    }
+
     if (use_bundle) {
         auto diff = diff_bundle_import(inner->repo, src, opts.refs);
-        if (!opts.dry_run) {
+        if (!opts.dry_run && !diff.in_sync()) {
             bundle_import_impl(inner->repo, src, opts.refs);
         }
         return diff;
@@ -702,17 +869,47 @@ MirrorDiff restore(const std::shared_ptr<GitStoreInner>& inner,
 
 void bundle_export(const std::shared_ptr<GitStoreInner>& inner,
                    const std::string& path,
-                   const std::vector<std::string>& refs) {
+                   const std::vector<std::string>& refs,
+                   const std::map<std::string, std::string>& ref_map) {
     std::lock_guard<std::mutex> lk(inner->mutex);
     auto local_refs = get_local_refs(inner->repo);
-    bundle_export_impl(inner->repo, path, refs, local_refs);
+    if (!ref_map.empty()) {
+        RefMap empty_dst;
+        auto resolved = resolve_ref_map(ref_map, local_refs, empty_dst);
+        // Build refs list from map keys for filtering
+        std::vector<std::string> src_refs;
+        for (const auto& [s, d] : resolved) {
+            src_refs.push_back(s);
+        }
+        bundle_export_impl(inner->repo, path, src_refs, local_refs, resolved);
+    } else {
+        bundle_export_impl(inner->repo, path, refs, local_refs);
+    }
 }
 
 void bundle_import(const std::shared_ptr<GitStoreInner>& inner,
                    const std::string& path,
-                   const std::vector<std::string>& refs) {
+                   const std::vector<std::string>& refs,
+                   const std::map<std::string, std::string>& ref_map) {
     std::lock_guard<std::mutex> lk(inner->mutex);
-    bundle_import_impl(inner->repo, path, refs);
+    if (!ref_map.empty()) {
+        // Parse bundle to get its refs for resolving the map
+        std::ifstream in_file(path, std::ios::binary);
+        if (!in_file) throw GitError("bundle_import: cannot open " + path);
+        std::string data((std::istreambuf_iterator<char>(in_file)),
+                          std::istreambuf_iterator<char>());
+        auto bundle_refs = parse_bundle_header(data).first;
+        RefMap empty_dst;
+        auto resolved = resolve_ref_map(ref_map, bundle_refs, empty_dst);
+        // Build refs list from map keys
+        std::vector<std::string> src_refs;
+        for (const auto& [s, d] : resolved) {
+            src_refs.push_back(s);
+        }
+        bundle_import_impl(inner->repo, path, src_refs, resolved);
+    } else {
+        bundle_import_impl(inner->repo, path, refs);
+    }
 }
 
 } // namespace mirror

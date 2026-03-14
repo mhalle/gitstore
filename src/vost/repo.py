@@ -397,7 +397,7 @@ class GitStore:
         *,
         dry_run: bool = False,
         progress: Callable | None = None,
-        refs: list[str] | None = None,
+        refs: list[str] | dict[str, str] | None = None,
         format: str | None = None,
     ) -> MirrorDiff:
         """Push refs to *url*, or write a bundle file.
@@ -407,11 +407,15 @@ class GitStore:
         If *url* ends with ``.bundle`` (or *format* is ``"bundle"``), a
         portable bundle file is written instead of pushing to a remote.
 
+        *refs* may be a list of names (identity mapping) or a dict mapping
+        source names to destination names for renaming on the remote side.
+
         Args:
             url: Remote URL, local path, or ``.bundle`` file path.
             dry_run: Compute diff without pushing.
             progress: Optional progress callback.
-            refs: Ref names to include (short or full). ``None`` = all refs.
+            refs: Ref names to include (short or full), or a dict mapping
+                source to destination names. ``None`` = all refs.
             format: ``"bundle"`` to force bundle format.
 
         Returns:
@@ -427,7 +431,7 @@ class GitStore:
         *,
         dry_run: bool = False,
         progress: Callable | None = None,
-        refs: list[str] | None = None,
+        refs: list[str] | dict[str, str] | None = None,
         format: str | None = None,
     ) -> MirrorDiff:
         """Fetch refs from *url*, or import a bundle file.
@@ -437,11 +441,15 @@ class GitStore:
         restored — use ``store.branches.current = "name"`` afterwards if
         needed.
 
+        *refs* may be a list of names (identity mapping) or a dict mapping
+        source names to destination names for renaming locally.
+
         Args:
             url: Remote URL, local path, or ``.bundle`` file path.
             dry_run: Compute diff without fetching.
             progress: Optional progress callback.
-            refs: Ref names to include (short or full). ``None`` = all refs.
+            refs: Ref names to include (short or full), or a dict mapping
+                source to destination names. ``None`` = all refs.
             format: ``"bundle"`` to force bundle format.
 
         Returns:
@@ -455,14 +463,18 @@ class GitStore:
         self,
         path: str,
         *,
-        refs: list[str] | None = None,
+        refs: list[str] | dict[str, str] | None = None,
         progress: Callable | None = None,
     ) -> None:
         """Export refs to a bundle file.
 
+        *refs* may be a list of names (identity mapping) or a dict mapping
+        source names to destination names for renaming in the bundle.
+
         Args:
             path: Destination ``.bundle`` file path.
-            refs: Ref names to include (short or full). ``None`` = all refs.
+            refs: Ref names to include (short or full), or a dict mapping
+                source to destination names. ``None`` = all refs.
             progress: Optional progress callback.
         """
         from .mirror import bundle_export
@@ -472,14 +484,18 @@ class GitStore:
         self,
         path: str,
         *,
-        refs: list[str] | None = None,
+        refs: list[str] | dict[str, str] | None = None,
         progress: Callable | None = None,
     ) -> None:
         """Import refs from a bundle file (additive — no deletes).
 
+        *refs* may be a list of names (identity mapping) or a dict mapping
+        source names to destination names for renaming on import.
+
         Args:
             path: Source ``.bundle`` file path.
-            refs: Ref names to include (short or full). ``None`` = all refs.
+            refs: Ref names to include (short or full), or a dict mapping
+                source to destination names. ``None`` = all refs.
             progress: Optional progress callback.
         """
         from .mirror import bundle_import

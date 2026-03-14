@@ -216,6 +216,38 @@ fn resolve_ref_names(names: &[String], available: &HashMap<String, String>) -> H
     result
 }
 
+/// Resolve a single short ref name to a full ref path.
+fn resolve_one_ref(name: &str, available: &HashMap<String, String>) -> String {
+    if name.starts_with("refs/") {
+        return name.to_string();
+    }
+    for prefix in &["refs/heads/", "refs/tags/", "refs/notes/"] {
+        let candidate = format!("{}{}", prefix, name);
+        if available.contains_key(&candidate) {
+            return candidate;
+        }
+    }
+    format!("refs/heads/{}", name)
+}
+
+/// Resolve a `ref_map` (short names → short names) to full ref paths.
+///
+/// Returns `HashMap<full_src, full_dst>` where both keys and values are
+/// resolved against their respective available-refs sets.
+fn resolve_ref_map(
+    map: &HashMap<String, String>,
+    src_available: &HashMap<String, String>,
+    dst_available: &HashMap<String, String>,
+) -> HashMap<String, String> {
+    let mut result = HashMap::new();
+    for (src, dst) in map {
+        let full_src = resolve_one_ref(src, src_available);
+        let full_dst = resolve_one_ref(dst, dst_available);
+        result.insert(full_src, full_dst);
+    }
+    result
+}
+
 // ---------------------------------------------------------------------------
 // Ref enumeration
 // ---------------------------------------------------------------------------
@@ -360,11 +392,24 @@ fn mirror_push(
 }
 
 /// Push only refs in `ref_filter` to `url` (no deletes).
-fn targeted_push(repo_path: &Path, url: &str, ref_filter: &HashSet<String>) -> Result<()> {
+///
+/// If `rename` is provided, maps source ref names to destination ref names.
+fn targeted_push(
+    repo_path: &Path,
+    url: &str,
+    ref_filter: &HashSet<String>,
+    rename: Option<&HashMap<String, String>>,
+) -> Result<()> {
     let repo = git2::Repository::open_bare(repo_path).map_err(Error::git)?;
     let mut remote = repo.remote_anonymous(url).map_err(Error::git)?;
 
-    let refspecs: Vec<String> = ref_filter.iter().map(|r| format!("+{}:{}", r, r)).collect();
+    let refspecs: Vec<String> = ref_filter
+        .iter()
+        .map(|r| {
+            let dst = rename.and_then(|m| m.get(r)).unwrap_or(r);
+            format!("+{}:{}", r, dst)
+        })
+        .collect();
     let refspec_strs: Vec<&str> = refspecs.iter().map(|s| s.as_str()).collect();
     remote.push(&refspec_strs, None).map_err(Error::git)?;
 
@@ -375,7 +420,15 @@ fn targeted_push(repo_path: &Path, url: &str, ref_filter: &HashSet<String>) -> R
 ///
 /// If `refs` is given, only those refs are fetched via targeted refspecs.
 /// Otherwise fetches all refs with `+refs/*:refs/*`.
-fn additive_fetch(repo_path: &Path, url: &str, refs: Option<&[String]>) -> Result<()> {
+///
+/// If `rename` is provided, maps source (remote) ref names to destination
+/// (local) ref names.
+fn additive_fetch(
+    repo_path: &Path,
+    url: &str,
+    refs: Option<&[String]>,
+    rename: Option<&HashMap<String, String>>,
+) -> Result<()> {
     let remote_refs = get_remote_refs(repo_path, url)?;
     if remote_refs.is_empty() {
         return Ok(());
@@ -395,14 +448,23 @@ fn additive_fetch(repo_path: &Path, url: &str, refs: Option<&[String]>) -> Resul
             return Ok(());
         }
 
-        let refspecs: Vec<String> = refs_to_fetch.iter().map(|r| format!("+{}:{}", r, r)).collect();
+        let refspecs: Vec<String> = refs_to_fetch
+            .iter()
+            .map(|r| {
+                let dst = rename.and_then(|m| m.get(r.as_str())).unwrap_or(r);
+                format!("+{}:{}", r, dst)
+            })
+            .collect();
         let refspec_strs: Vec<&str> = refspecs.iter().map(|s| s.as_str()).collect();
         remote.fetch(&refspec_strs, None, None).map_err(Error::git)?;
     } else {
         // Fetch all refs
         let refspecs: Vec<String> = remote_refs
             .keys()
-            .map(|r| format!("+{}:{}", r, r))
+            .map(|r| {
+                let dst = rename.and_then(|m| m.get(r.as_str())).unwrap_or(r);
+                format!("+{}:{}", r, dst)
+            })
             .collect();
         let refspec_strs: Vec<&str> = refspecs.iter().map(|s| s.as_str()).collect();
         remote.fetch(&refspec_strs, None, None).map_err(Error::git)?;
@@ -463,7 +525,15 @@ fn parse_bundle_header(data: &[u8]) -> Result<(HashMap<String, String>, usize)> 
 }
 
 /// Create a bundle file from local refs using native git2 PackBuilder.
-pub fn bundle_export(repo_path: &Path, path: &str, refs: Option<&[String]>) -> Result<()> {
+///
+/// If `rename` is provided, maps source ref names to destination ref names
+/// in the bundle header.
+pub fn bundle_export(
+    repo_path: &Path,
+    path: &str,
+    refs: Option<&[String]>,
+    rename: Option<&HashMap<String, String>>,
+) -> Result<()> {
     let repo = git2::Repository::open_bare(repo_path).map_err(Error::git)?;
     let local_refs = get_local_refs(repo_path)?;
 
@@ -496,12 +566,13 @@ pub fn bundle_export(repo_path: &Path, path: &str, refs: Option<&[String]>) -> R
     let mut buf = git2::Buf::new();
     pb.write_buf(&mut buf).map_err(Error::git)?;
 
-    // Build v2 bundle header
+    // Build v2 bundle header (use destination names if rename map provided)
     let mut header = String::from("# v2 git bundle\n");
     for (name, sha) in &to_export {
+        let dest_name = rename.and_then(|m| m.get(name)).unwrap_or(name);
         header.push_str(sha);
         header.push(' ');
-        header.push_str(name);
+        header.push_str(dest_name);
         header.push('\n');
     }
     header.push('\n'); // Blank line separator
@@ -526,7 +597,14 @@ fn bundle_list_heads(path: &str) -> Result<HashMap<String, String>> {
 }
 
 /// Import refs from a bundle file using native git2 Indexer (additive -- no deletes).
-pub fn bundle_import(repo_path: &Path, path: &str, refs: Option<&[String]>) -> Result<()> {
+///
+/// If `rename` is provided, maps bundle ref names to local ref names.
+pub fn bundle_import(
+    repo_path: &Path,
+    path: &str,
+    refs: Option<&[String]>,
+    rename: Option<&HashMap<String, String>>,
+) -> Result<()> {
     let data = std::fs::read(path)
         .map_err(|e| Error::io(Path::new(path), e))?;
     let (all_refs, pack_offset) = parse_bundle_header(&data)?;
@@ -559,11 +637,12 @@ pub fn bundle_import(repo_path: &Path, path: &str, refs: Option<&[String]>) -> R
     indexer.commit()
         .map_err(Error::git)?;
 
-    // Create/update refs in the repo
+    // Create/update refs in the repo (apply rename map if provided)
     let repo = git2::Repository::open_bare(repo_path).map_err(Error::git)?;
     for (name, sha) in &refs_to_set {
+        let dest_name = rename.and_then(|m| m.get(name)).unwrap_or(name);
         let oid = git2::Oid::from_str(sha).map_err(Error::git)?;
-        repo.reference(name, oid, true, "bundle import")
+        repo.reference(dest_name, oid, true, "bundle import")
             .map_err(Error::git)?;
     }
 
@@ -575,7 +654,13 @@ pub fn bundle_import(repo_path: &Path, path: &str, refs: Option<&[String]>) -> R
 // ---------------------------------------------------------------------------
 
 /// Compute diff for exporting a bundle (all local refs are "add").
-fn diff_bundle_export(repo_path: &Path, refs: Option<&[String]>) -> Result<MirrorDiff> {
+///
+/// If `rename` is provided, the diff uses destination ref names.
+fn diff_bundle_export(
+    repo_path: &Path,
+    refs: Option<&[String]>,
+    rename: Option<&HashMap<String, String>>,
+) -> Result<MirrorDiff> {
     let local_refs = get_local_refs(repo_path)?;
     let filtered: HashMap<String, String> = if let Some(filter) = refs {
         let resolved = resolve_ref_names(filter, &local_refs);
@@ -589,10 +674,16 @@ fn diff_bundle_export(repo_path: &Path, refs: Option<&[String]>) -> Result<Mirro
 
     let add = filtered
         .into_iter()
-        .map(|(ref_name, sha)| RefChange {
-            ref_name,
-            old_target: None,
-            new_target: Some(sha),
+        .map(|(ref_name, sha)| {
+            let dest_name = rename
+                .and_then(|m| m.get(&ref_name))
+                .cloned()
+                .unwrap_or(ref_name);
+            RefChange {
+                ref_name: dest_name,
+                old_target: None,
+                new_target: Some(sha),
+            }
         })
         .collect();
 
@@ -604,10 +695,14 @@ fn diff_bundle_export(repo_path: &Path, refs: Option<&[String]>) -> Result<Mirro
 }
 
 /// Compute diff for importing a bundle (additive -- no deletes).
+///
+/// If `rename` is provided, maps bundle ref names to local ref names
+/// in the resulting diff.
 fn diff_bundle_import(
     repo_path: &Path,
     path: &str,
     refs: Option<&[String]>,
+    rename: Option<&HashMap<String, String>>,
 ) -> Result<MirrorDiff> {
     let bundle_refs = bundle_list_heads(path)?;
     let filtered: HashMap<String, String> = if let Some(filter) = refs {
@@ -620,8 +715,21 @@ fn diff_bundle_import(
         bundle_refs
     };
 
+    // Apply rename: remap keys from source names to destination names
+    let mapped: HashMap<String, String> = if let Some(rmap) = rename {
+        filtered
+            .into_iter()
+            .map(|(k, v)| {
+                let dst = rmap.get(&k).cloned().unwrap_or(k);
+                (dst, v)
+            })
+            .collect()
+    } else {
+        filtered
+    };
+
     let local_refs = get_local_refs(repo_path)?;
-    let mut diff = diff_refs(&filtered, &local_refs);
+    let mut diff = diff_refs(&mapped, &local_refs);
     diff.delete.clear(); // additive: no deletes
     Ok(diff)
 }
@@ -647,10 +755,68 @@ pub fn backup(repo_path: &Path, dest: &str, opts: &BackupOptions) -> Result<Mirr
 
     let use_bundle = opts.format.as_deref() == Some("bundle") || is_bundle_path(dest);
 
+    // When ref_map is set, derive refs list and build rename map
+    if let Some(ref map) = opts.ref_map {
+        let local_refs = get_local_refs(repo_path)?;
+        // Use an empty map for dst resolution (destination repo may not exist yet)
+        let empty: HashMap<String, String> = HashMap::new();
+        let resolved = resolve_ref_map(map, &local_refs, &empty);
+
+        if use_bundle {
+            // For bundles, filter to the source refs and pass the rename map
+            let src_keys: Vec<String> = resolved.keys().cloned().collect();
+            let diff = diff_bundle_export(repo_path, Some(&src_keys), Some(&resolved))?;
+            if !opts.dry_run {
+                bundle_export(repo_path, dest, Some(&src_keys), Some(&resolved))?;
+            }
+            return Ok(diff);
+        }
+
+        auto_create_bare_repo(dest)?;
+
+        let remote_refs = get_remote_refs(repo_path, dest)?;
+
+        // Build diff using destination names
+        let mut add = Vec::new();
+        let mut update = Vec::new();
+        for (src, dst) in &resolved {
+            if let Some(src_sha) = local_refs.get(src) {
+                match remote_refs.get(dst) {
+                    None => {
+                        add.push(RefChange {
+                            ref_name: dst.clone(),
+                            old_target: None,
+                            new_target: Some(src_sha.clone()),
+                        });
+                    }
+                    Some(dest_sha) if dest_sha != src_sha => {
+                        update.push(RefChange {
+                            ref_name: dst.clone(),
+                            old_target: Some(dest_sha.clone()),
+                            new_target: Some(src_sha.clone()),
+                        });
+                    }
+                    _ => {}
+                }
+            }
+        }
+        let diff = MirrorDiff {
+            add,
+            update,
+            delete: vec![],
+        };
+
+        if !opts.dry_run && !diff.in_sync() {
+            let ref_set: HashSet<String> = resolved.keys().cloned().collect();
+            targeted_push(repo_path, dest, &ref_set, Some(&resolved))?;
+        }
+        return Ok(diff);
+    }
+
     if use_bundle {
-        let diff = diff_bundle_export(repo_path, opts.refs.as_deref())?;
+        let diff = diff_bundle_export(repo_path, opts.refs.as_deref(), None)?;
         if !opts.dry_run {
-            bundle_export(repo_path, dest, opts.refs.as_deref())?;
+            bundle_export(repo_path, dest, opts.refs.as_deref(), None)?;
         }
         return Ok(diff);
     }
@@ -668,7 +834,7 @@ pub fn backup(repo_path: &Path, dest: &str, opts: &BackupOptions) -> Result<Mirr
         diff.delete.clear(); // no deletes when using --ref
 
         if !opts.dry_run && !diff.in_sync() {
-            targeted_push(repo_path, dest, &ref_set)?;
+            targeted_push(repo_path, dest, &ref_set, None)?;
         }
         return Ok(diff);
     }
@@ -700,10 +866,66 @@ pub fn restore(repo_path: &Path, src: &str, opts: &RestoreOptions) -> Result<Mir
 
     let use_bundle = opts.format.as_deref() == Some("bundle") || is_bundle_path(src);
 
-    if use_bundle {
-        let diff = diff_bundle_import(repo_path, src, opts.refs.as_deref())?;
+    // When ref_map is set, derive refs list and build rename map
+    if let Some(ref map) = opts.ref_map {
+        if use_bundle {
+            let bundle_refs = bundle_list_heads(src)?;
+            let local_refs = get_local_refs(repo_path)?;
+            let resolved = resolve_ref_map(map, &bundle_refs, &local_refs);
+
+            let src_keys: Vec<String> = resolved.keys().cloned().collect();
+            let diff = diff_bundle_import(repo_path, src, Some(&src_keys), Some(&resolved))?;
+            if !opts.dry_run && !diff.in_sync() {
+                bundle_import(repo_path, src, Some(&src_keys), Some(&resolved))?;
+            }
+            return Ok(diff);
+        }
+
+        let local_refs = get_local_refs(repo_path)?;
+        let remote_refs = get_remote_refs(repo_path, src)?;
+        let resolved = resolve_ref_map(map, &remote_refs, &local_refs);
+
+        // Build diff using destination names
+        let mut add = Vec::new();
+        let mut update = Vec::new();
+        for (src_ref, dst_ref) in &resolved {
+            if let Some(src_sha) = remote_refs.get(src_ref) {
+                match local_refs.get(dst_ref) {
+                    None => {
+                        add.push(RefChange {
+                            ref_name: dst_ref.clone(),
+                            old_target: None,
+                            new_target: Some(src_sha.clone()),
+                        });
+                    }
+                    Some(local_sha) if local_sha != src_sha => {
+                        update.push(RefChange {
+                            ref_name: dst_ref.clone(),
+                            old_target: Some(local_sha.clone()),
+                            new_target: Some(src_sha.clone()),
+                        });
+                    }
+                    _ => {}
+                }
+            }
+        }
+        let diff = MirrorDiff {
+            add,
+            update,
+            delete: vec![],
+        };
+
         if !opts.dry_run && !diff.in_sync() {
-            bundle_import(repo_path, src, opts.refs.as_deref())?;
+            let src_keys: Vec<String> = resolved.keys().cloned().collect();
+            additive_fetch(repo_path, src, Some(&src_keys), Some(&resolved))?;
+        }
+        return Ok(diff);
+    }
+
+    if use_bundle {
+        let diff = diff_bundle_import(repo_path, src, opts.refs.as_deref(), None)?;
+        if !opts.dry_run && !diff.in_sync() {
+            bundle_import(repo_path, src, opts.refs.as_deref(), None)?;
         }
         return Ok(diff);
     }
@@ -721,7 +943,7 @@ pub fn restore(repo_path: &Path, src: &str, opts: &RestoreOptions) -> Result<Mir
     diff.delete.clear(); // additive: never delete
 
     if !opts.dry_run && !diff.in_sync() {
-        additive_fetch(repo_path, src, opts.refs.as_deref())?;
+        additive_fetch(repo_path, src, opts.refs.as_deref(), None)?;
     }
 
     Ok(diff)

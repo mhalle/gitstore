@@ -76,10 +76,13 @@ class GitStore private constructor(
      *
      * Without [refs] this is a full mirror: remote-only refs are deleted.
      * With [refs] only the specified refs are pushed (no deletes).
+     * With [refMap] refs are renamed during push (keys=source, values=dest);
+     * takes precedence over [refs].
      *
      * @param url Destination URL (local path or remote), or bundle file path.
      * @param dryRun If true, compute diff but don't push.
      * @param refs Optional list of ref names to limit the backup to.
+     * @param refMap Optional mapping of source ref names to dest ref names.
      * @param format Optional format string; "bundle" forces bundle output.
      * @return MirrorDiff describing what changed (or would change).
      */
@@ -87,8 +90,9 @@ class GitStore private constructor(
         url: String,
         dryRun: Boolean = false,
         refs: List<String>? = null,
+        refMap: Map<String, String>? = null,
         format: String? = null,
-    ): MirrorDiff = MirrorOps.backup(this, url, dryRun, refs, format)
+    ): MirrorDiff = MirrorOps.backup(this, url, dryRun, refs, refMap, format)
 
     /**
      * Fetch refs from url (or import a bundle file).
@@ -96,10 +100,13 @@ class GitStore private constructor(
      * Restore is **additive**: it adds and updates refs but never deletes
      * local-only refs.  HEAD (the current branch pointer) is not changed —
      * use `store.branches.setCurrent("name")` afterwards if needed.
+     * With [refMap] refs are renamed when written locally (keys=source,
+     * values=dest); takes precedence over [refs].
      *
      * @param url Source URL (local path or remote), or bundle file path.
      * @param dryRun If true, compute diff but don't fetch.
      * @param refs Optional list of ref names to limit the restore to.
+     * @param refMap Optional mapping of source ref names to dest ref names.
      * @param format Optional format string; "bundle" forces bundle input.
      * @return MirrorDiff describing what changed (or would change).
      */
@@ -107,8 +114,9 @@ class GitStore private constructor(
         url: String,
         dryRun: Boolean = false,
         refs: List<String>? = null,
+        refMap: Map<String, String>? = null,
         format: String? = null,
-    ): MirrorDiff = MirrorOps.restore(this, url, dryRun, refs, format)
+    ): MirrorDiff = MirrorOps.restore(this, url, dryRun, refs, refMap, format)
 
     companion object {
         /**

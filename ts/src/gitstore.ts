@@ -5,6 +5,7 @@
 import * as nodeFs from 'node:fs';
 import git from 'isomorphic-git';
 import type { FsModule, Signature, MirrorDiff, HttpClient } from './types.js';
+import type { RefSpec } from './mirror.js';
 import { RefDict } from './refdict.js';
 import { NoteDict } from './notes.js';
 import { FS } from './fs.js';
@@ -167,7 +168,9 @@ export class GitStore {
    * @param opts.http - HTTP client (required for HTTP URLs only).
    * @param opts.dryRun - Compute diff without pushing.
    * @param opts.onAuth - Optional authentication callback.
-   * @param opts.refs - Only backup these refs (short names resolved automatically).
+   * @param opts.refs - Only backup these refs. Pass a `string[]` for identity
+   *   mapping or a `Record<string, string>` to rename refs on transfer
+   *   (keys = source names, values = destination names).
    * @param opts.format - Force format: `'bundle'` for git bundle output.
    * @returns A MirrorDiff describing what changed (or would change).
    */
@@ -177,7 +180,7 @@ export class GitStore {
       http?: HttpClient;
       dryRun?: boolean;
       onAuth?: Function;
-      refs?: string[];
+      refs?: RefSpec;
       format?: string;
     } = {},
   ): Promise<MirrorDiff> {
@@ -199,7 +202,9 @@ export class GitStore {
    * @param opts.http - HTTP client (required for HTTP URLs only).
    * @param opts.dryRun - Compute diff without fetching.
    * @param opts.onAuth - Optional authentication callback.
-   * @param opts.refs - Only restore these refs (short names resolved automatically).
+   * @param opts.refs - Only restore these refs. Pass a `string[]` for identity
+   *   mapping or a `Record<string, string>` to rename refs on transfer
+   *   (keys = source names, values = destination names).
    * @param opts.format - Force format: `'bundle'` for git bundle input.
    * @returns A MirrorDiff describing what changed (or would change).
    */
@@ -209,7 +214,7 @@ export class GitStore {
       http?: HttpClient;
       dryRun?: boolean;
       onAuth?: Function;
-      refs?: string[];
+      refs?: RefSpec;
       format?: string;
     } = {},
   ): Promise<MirrorDiff> {
@@ -221,11 +226,13 @@ export class GitStore {
    * Export refs to a bundle file.
    *
    * @param path - Destination `.bundle` file path.
-   * @param opts.refs - Only export these refs (short names resolved automatically).
+   * @param opts.refs - Only export these refs. Pass a `string[]` for identity
+   *   mapping or a `Record<string, string>` to rename refs in the bundle
+   *   (keys = local names, values = bundle names).
    */
   async bundleExport(
     path: string,
-    opts: { refs?: string[] } = {},
+    opts: { refs?: RefSpec } = {},
   ): Promise<void> {
     const { bundleExport } = await import('./mirror.js');
     return bundleExport(this, path, opts.refs);
@@ -235,11 +242,13 @@ export class GitStore {
    * Import refs from a bundle file (additive — no deletes).
    *
    * @param path - Source `.bundle` file path.
-   * @param opts.refs - Only import these refs (short names resolved automatically).
+   * @param opts.refs - Only import these refs. Pass a `string[]` for identity
+   *   mapping or a `Record<string, string>` to rename refs on import
+   *   (keys = bundle names, values = local names).
    */
   async bundleImport(
     path: string,
-    opts: { refs?: string[] } = {},
+    opts: { refs?: RefSpec } = {},
   ): Promise<void> {
     const { bundleImport } = await import('./mirror.js');
     return bundleImport(this, path, opts.refs);

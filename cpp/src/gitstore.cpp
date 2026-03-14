@@ -192,13 +192,15 @@ MirrorDiff GitStore::restore(const std::string& src, const RestoreOptions& opts)
 }
 
 void GitStore::bundle_export(const std::string& path,
-                             const std::vector<std::string>& refs) {
-    mirror::bundle_export(inner_, path, refs);
+                             const std::vector<std::string>& refs,
+                             const std::map<std::string, std::string>& ref_map) {
+    mirror::bundle_export(inner_, path, refs, ref_map);
 }
 
 void GitStore::bundle_import(const std::string& path,
-                             const std::vector<std::string>& refs) {
-    mirror::bundle_import(inner_, path, refs);
+                             const std::vector<std::string>& refs,
+                             const std::map<std::string, std::string>& ref_map) {
+    mirror::bundle_import(inner_, path, refs, ref_map);
 }
 
 const std::filesystem::path& GitStore::path() const {

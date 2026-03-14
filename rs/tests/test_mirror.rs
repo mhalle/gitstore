@@ -1,5 +1,6 @@
 mod common;
 
+use std::collections::HashMap;
 use std::path::Path;
 use vost::fs::WriteOptions;
 use vost::types::{BackupOptions, RestoreOptions};
@@ -648,4 +649,365 @@ fn backup_bundle_with_refs() {
     assert!(branches.contains(&"main".to_string()));
     let tags = store2.tags().list().unwrap();
     assert!(!tags.contains(&"v1.0".to_string()));
+}
+
+// ---------------------------------------------------------------------------
+// ref_map (rename refs)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn backup_with_ref_map_renames_branch() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.branches().get("main").unwrap();
+    let _fs = fs.write("a.txt", b"hello", WriteOptions::default()).unwrap();
+
+    let remote_url = create_remote_path(dir.path());
+    let mut ref_map = HashMap::new();
+    ref_map.insert("main".to_string(), "renamed".to_string());
+
+    let diff = store
+        .backup(
+            &remote_url,
+            &BackupOptions {
+                ref_map: Some(ref_map),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+    assert!(!diff.in_sync());
+    // Diff should report the destination name
+    assert!(diff.add.iter().any(|r| r.ref_name.contains("renamed")));
+
+    // Remote should have "renamed" but NOT "main"
+    let remote = GitStore::open(
+        &remote_url,
+        OpenOptions {
+            create: false,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let branches = remote.branches().list().unwrap();
+    assert!(branches.contains(&"renamed".to_string()));
+    assert!(!branches.contains(&"main".to_string()));
+    assert_eq!(
+        remote
+            .branches()
+            .get("renamed")
+            .unwrap()
+            .read_text("a.txt")
+            .unwrap(),
+        "hello"
+    );
+}
+
+#[test]
+fn restore_with_ref_map_renames_branch() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.branches().get("main").unwrap();
+    let _fs = fs.write("a.txt", b"hello", WriteOptions::default()).unwrap();
+
+    let remote_url = create_remote_path(dir.path());
+    store
+        .backup(&remote_url, &BackupOptions::default())
+        .unwrap();
+
+    // Create new store and restore with rename
+    let store2 = GitStore::open(
+        dir.path().join("restored.git"),
+        OpenOptions {
+            create: true,
+            branch: None,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    let mut ref_map = HashMap::new();
+    ref_map.insert("main".to_string(), "imported".to_string());
+
+    let diff = store2
+        .restore(
+            &remote_url,
+            &RestoreOptions {
+                ref_map: Some(ref_map),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+    assert!(!diff.in_sync());
+    // Diff should report the destination name
+    assert!(diff.add.iter().any(|r| r.ref_name.contains("imported")));
+
+    let branches = store2.branches().list().unwrap();
+    assert!(branches.contains(&"imported".to_string()));
+    assert!(!branches.contains(&"main".to_string()));
+    assert_eq!(
+        store2
+            .branches()
+            .get("imported")
+            .unwrap()
+            .read_text("a.txt")
+            .unwrap(),
+        "hello"
+    );
+}
+
+#[test]
+fn bundle_export_import_with_ref_map() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.branches().get("main").unwrap();
+    let _fs = fs.write("a.txt", b"hello", WriteOptions::default()).unwrap();
+
+    // Export bundle with rename: main → exported
+    let bundle_path = dir
+        .path()
+        .join("renamed.bundle")
+        .to_string_lossy()
+        .to_string();
+
+    let mut export_map = HashMap::new();
+    export_map.insert("refs/heads/main".to_string(), "refs/heads/exported".to_string());
+
+    store
+        .bundle_export(&bundle_path, None, Some(&export_map))
+        .unwrap();
+
+    // Import into new store — bundle contains "exported", import as-is
+    let store2 = GitStore::open(
+        dir.path().join("restored.git"),
+        OpenOptions {
+            create: true,
+            branch: None,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    store2.bundle_import(&bundle_path, None, None).unwrap();
+
+    let branches = store2.branches().list().unwrap();
+    assert!(branches.contains(&"exported".to_string()));
+    assert!(!branches.contains(&"main".to_string()));
+    assert_eq!(
+        store2
+            .branches()
+            .get("exported")
+            .unwrap()
+            .read_text("a.txt")
+            .unwrap(),
+        "hello"
+    );
+}
+
+#[test]
+fn bundle_import_with_ref_map() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.branches().get("main").unwrap();
+    let _fs = fs.write("a.txt", b"hello", WriteOptions::default()).unwrap();
+
+    // Export normal bundle
+    let bundle_path = dir
+        .path()
+        .join("normal.bundle")
+        .to_string_lossy()
+        .to_string();
+    store.bundle_export(&bundle_path, None, None).unwrap();
+
+    // Import with rename: main → local-main
+    let store2 = GitStore::open(
+        dir.path().join("restored.git"),
+        OpenOptions {
+            create: true,
+            branch: None,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    let mut import_map = HashMap::new();
+    import_map.insert(
+        "refs/heads/main".to_string(),
+        "refs/heads/local-main".to_string(),
+    );
+
+    store2
+        .bundle_import(&bundle_path, None, Some(&import_map))
+        .unwrap();
+
+    let branches = store2.branches().list().unwrap();
+    assert!(branches.contains(&"local-main".to_string()));
+    assert!(!branches.contains(&"main".to_string()));
+    assert_eq!(
+        store2
+            .branches()
+            .get("local-main")
+            .unwrap()
+            .read_text("a.txt")
+            .unwrap(),
+        "hello"
+    );
+}
+
+#[test]
+fn backup_bundle_with_ref_map() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.branches().get("main").unwrap();
+    let _fs = fs.write("a.txt", b"hello", WriteOptions::default()).unwrap();
+
+    let bundle_path = dir
+        .path()
+        .join("backup-renamed.bundle")
+        .to_string_lossy()
+        .to_string();
+
+    let mut ref_map = HashMap::new();
+    ref_map.insert("main".to_string(), "archive".to_string());
+
+    let diff = store
+        .backup(
+            &bundle_path,
+            &BackupOptions {
+                ref_map: Some(ref_map),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+    assert!(!diff.in_sync());
+    assert!(diff.add.iter().any(|r| r.ref_name.contains("archive")));
+
+    // Restore the bundle and verify it has "archive" not "main"
+    let store2 = GitStore::open(
+        dir.path().join("restored.git"),
+        OpenOptions {
+            create: true,
+            branch: None,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    store2
+        .restore(&bundle_path, &RestoreOptions::default())
+        .unwrap();
+
+    let branches = store2.branches().list().unwrap();
+    assert!(branches.contains(&"archive".to_string()));
+    assert!(!branches.contains(&"main".to_string()));
+}
+
+#[test]
+fn restore_bundle_with_ref_map() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.branches().get("main").unwrap();
+    let _fs = fs.write("a.txt", b"hello", WriteOptions::default()).unwrap();
+
+    // Create a normal bundle
+    let bundle_path = dir
+        .path()
+        .join("normal.bundle")
+        .to_string_lossy()
+        .to_string();
+    store
+        .backup(&bundle_path, &BackupOptions::default())
+        .unwrap();
+
+    // Restore with ref_map rename
+    let store2 = GitStore::open(
+        dir.path().join("restored.git"),
+        OpenOptions {
+            create: true,
+            branch: None,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    let mut ref_map = HashMap::new();
+    ref_map.insert("main".to_string(), "restored-main".to_string());
+
+    let diff = store2
+        .restore(
+            &bundle_path,
+            &RestoreOptions {
+                ref_map: Some(ref_map),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+    assert!(!diff.in_sync());
+    assert!(diff
+        .add
+        .iter()
+        .any(|r| r.ref_name.contains("restored-main")));
+
+    let branches = store2.branches().list().unwrap();
+    assert!(branches.contains(&"restored-main".to_string()));
+    assert!(!branches.contains(&"main".to_string()));
+    assert_eq!(
+        store2
+            .branches()
+            .get("restored-main")
+            .unwrap()
+            .read_text("a.txt")
+            .unwrap(),
+        "hello"
+    );
+}
+
+#[test]
+fn refs_list_backward_compatible() {
+    // Verify that the old refs-list approach still works unchanged
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.branches().get("main").unwrap();
+    let fs = fs.write("a.txt", b"hello", WriteOptions::default()).unwrap();
+    store.tags().set("v1.0", &fs).unwrap();
+
+    let remote_url = create_remote_path(dir.path());
+    let opts = BackupOptions {
+        refs: Some(vec!["main".to_string()]),
+        ..Default::default()
+    };
+    store.backup(&remote_url, &opts).unwrap();
+
+    let remote = GitStore::open(
+        &remote_url,
+        OpenOptions {
+            create: false,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let branches = remote.branches().list().unwrap();
+    assert!(branches.contains(&"main".to_string()));
+    let tags = remote.tags().list().unwrap();
+    assert!(!tags.contains(&"v1.0".to_string()));
+
+    // Now restore with refs list
+    let store2 = GitStore::open(
+        dir.path().join("restored.git"),
+        OpenOptions {
+            create: true,
+            branch: None,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let opts = RestoreOptions {
+        refs: Some(vec!["main".to_string()]),
+        ..Default::default()
+    };
+    store2.restore(&remote_url, &opts).unwrap();
+
+    let branches = store2.branches().list().unwrap();
+    assert!(branches.contains(&"main".to_string()));
 }

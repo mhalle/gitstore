@@ -229,8 +229,15 @@ impl GitStore {
     /// # Arguments
     /// * `path` - Destination file path for the bundle.
     /// * `refs` - Optional list of ref names to include. `None` exports all refs.
-    pub fn bundle_export(&self, path: &str, refs: Option<&[String]>) -> Result<()> {
-        crate::mirror::bundle_export(&self.inner.path, path, refs)
+    /// * `rename` - Optional map of source→destination ref names for renaming refs
+    ///   in the bundle header.
+    pub fn bundle_export(
+        &self,
+        path: &str,
+        refs: Option<&[String]>,
+        rename: Option<&std::collections::HashMap<String, String>>,
+    ) -> Result<()> {
+        crate::mirror::bundle_export(&self.inner.path, path, refs, rename)
     }
 
     /// Import refs from a bundle file (additive — no deletes).
@@ -241,7 +248,14 @@ impl GitStore {
     /// # Arguments
     /// * `path` - Source bundle file path.
     /// * `refs` - Optional list of ref names to import. `None` imports all refs.
-    pub fn bundle_import(&self, path: &str, refs: Option<&[String]>) -> Result<()> {
-        crate::mirror::bundle_import(&self.inner.path, path, refs)
+    /// * `rename` - Optional map of bundle ref names→local ref names for renaming
+    ///   refs during import.
+    pub fn bundle_import(
+        &self,
+        path: &str,
+        refs: Option<&[String]>,
+        rename: Option<&std::collections::HashMap<String, String>>,
+    ) -> Result<()> {
+        crate::mirror::bundle_import(&self.inner.path, path, refs, rename)
     }
 }

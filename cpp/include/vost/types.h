@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
@@ -442,6 +443,10 @@ struct BackupOptions {
     bool dry_run = false;                  ///< Compute diff without pushing.
     std::vector<std::string> refs;         ///< Limit to specific refs (empty = all).
     std::string format;                    ///< Force format: "bundle" or empty.
+    /// Rename refs during backup.  Keys are source ref names, values are
+    /// destination ref names (both may be short or full).  When set, takes
+    /// precedence over `refs`.
+    std::map<std::string, std::string> ref_map;
 };
 
 /// Options for restore operations.
@@ -449,6 +454,10 @@ struct RestoreOptions {
     bool dry_run = false;                  ///< Compute diff without fetching.
     std::vector<std::string> refs;         ///< Limit to specific refs (empty = all).
     std::string format;                    ///< Force format: "bundle" or empty.
+    /// Rename refs during restore.  Keys are source ref names, values are
+    /// destination ref names (both may be short or full).  When set, takes
+    /// precedence over `refs`.
+    std::map<std::string, std::string> ref_map;
 };
 
 } // namespace vost

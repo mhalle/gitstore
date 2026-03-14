@@ -102,6 +102,64 @@ def _resolve_ref_names(names, available_refs):
     return result
 
 
+def _resolve_one_ref_name(name, available_refs):
+    """Resolve a single short ref name to a full byte ref path.
+
+    Like ``_resolve_ref_names`` but for one name.  Returns bytes.
+    """
+    name_b = name.encode() if isinstance(name, str) else name
+    if name_b.startswith(b"refs/"):
+        return name_b
+    for prefix in (b"refs/heads/", b"refs/tags/", b"refs/notes/"):
+        candidate = prefix + name_b
+        if candidate in available_refs:
+            return candidate
+    return b"refs/heads/" + name_b
+
+
+def _normalize_refs(refs):
+    """Convert refs to a dict mapping source -> dest.
+
+    - ``None`` -> ``None`` (all refs, identity)
+    - ``list`` -> ``{name: name for name in list}``
+    - ``dict`` -> as-is
+
+    Returns:
+        ``None`` or ``dict[str, str]``.
+    """
+    if refs is None:
+        return None
+    if isinstance(refs, dict):
+        return refs
+    return {name: name for name in refs}
+
+
+def _resolve_ref_map(ref_map, available_refs):
+    """Resolve a src->dst ref map to full byte ref paths on both sides.
+
+    *ref_map* is ``dict[str, str]`` from ``_normalize_refs``.
+    *available_refs* is the set of bytes refs to resolve source names against.
+
+    Returns:
+        ``dict[bytes, bytes]`` mapping resolved-source to resolved-dest.
+    """
+    result = {}
+    for src, dst in ref_map.items():
+        src_full = _resolve_one_ref_name(src, available_refs)
+        # For the dest, infer the same prefix as the resolved source
+        dst_b = dst.encode() if isinstance(dst, str) else dst
+        if not dst_b.startswith(b"refs/"):
+            # Use the prefix from the resolved source
+            for prefix in (b"refs/heads/", b"refs/tags/", b"refs/notes/"):
+                if src_full.startswith(prefix):
+                    dst_b = prefix + dst_b
+                    break
+            else:
+                dst_b = b"refs/heads/" + dst_b
+        result[src_full] = dst_b
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Transport helpers (operate on raw dulwich Repo)
 # ---------------------------------------------------------------------------
@@ -225,8 +283,13 @@ def _mirror_fetch(drepo: _DRepo, url: str, *, progress=None):
     return result
 
 
-def _targeted_push(drepo: _DRepo, url: str, ref_filter: set, *, progress=None):
-    """Push only refs in *ref_filter* to *url* (no deletes)."""
+def _targeted_push(drepo: _DRepo, url: str, ref_filter: set, *,
+                   ref_map: dict | None = None, progress=None):
+    """Push only refs in *ref_filter* to *url* (no deletes).
+
+    If *ref_map* is given (``{src_bytes: dst_bytes}``), refs are renamed
+    on the remote side.
+    """
     client, path = _get_transport_and_path(url)
     local_refs = {
         ref: sha
@@ -238,7 +301,8 @@ def _targeted_push(drepo: _DRepo, url: str, ref_filter: set, *, progress=None):
         # Preserve all existing remote refs, only add/update targeted ones
         new_refs = dict(remote_refs)
         for ref, sha in local_refs.items():
-            new_refs[ref] = sha
+            dst = ref_map.get(ref, ref) if ref_map else ref
+            new_refs[dst] = sha
         return new_refs
 
     def gen_pack(have, want, *, ofs_delta=False, progress=progress):
@@ -249,10 +313,13 @@ def _targeted_push(drepo: _DRepo, url: str, ref_filter: set, *, progress=None):
     return client.send_pack(path, update_refs, gen_pack, progress=progress)
 
 
-def _additive_fetch(drepo: _DRepo, url: str, *, refs=None, progress=None):
+def _additive_fetch(drepo: _DRepo, url: str, *, refs=None, ref_map=None,
+                    progress=None):
     """Fetch refs from *url* additively (no deletes).
 
     If *refs* is given (list of str), only those refs are set locally.
+    If *ref_map* is given (``{src_bytes: dst_bytes}``), refs are renamed
+    when written locally.
     """
     client, path = _get_transport_and_path(url)
     result = client.fetch(path, drepo, progress=progress)
@@ -263,12 +330,15 @@ def _additive_fetch(drepo: _DRepo, url: str, *, refs=None, progress=None):
         if ref != b"HEAD" and not ref.endswith(b"^{}")
     }
 
-    if refs is not None:
+    if ref_map is not None:
+        remote_refs = {r: s for r, s in remote_refs.items() if r in ref_map}
+    elif refs is not None:
         ref_set = _resolve_ref_names(refs, set(remote_refs.keys()))
         remote_refs = {r: s for r, s in remote_refs.items() if r in ref_set}
 
     for ref, sha in remote_refs.items():
-        drepo.refs[ref] = sha
+        dst = ref_map.get(ref, ref) if ref_map else ref
+        drepo.refs[dst] = sha
 
     return result
 
@@ -283,13 +353,22 @@ def bundle_export(store: GitStore, path: str, *, refs=None, progress=None):
 
     drepo = store._repo._drepo
     all_local = {r for r in drepo.get_refs() if r != b"HEAD"}
-    if refs is not None:
-        ref_set = _resolve_ref_names(refs, all_local)
-        bundle_refs = sorted(ref_set)
+    ref_map_normalized = _normalize_refs(refs)
+
+    if ref_map_normalized is not None:
+        ref_map = _resolve_ref_map(ref_map_normalized, all_local)
+        bundle_refs = sorted(ref_map.keys())
     else:
+        ref_map = None
         bundle_refs = sorted(all_local)
 
     bundle = create_bundle_from_repo(drepo, refs=bundle_refs, progress=progress)
+    # Rename refs in the bundle header if a mapping is provided
+    if ref_map is not None:
+        bundle.references = {
+            ref_map.get(r, r): sha
+            for r, sha in bundle.references.items()
+        }
     with open(path, "wb") as f:
         write_bundle(f, bundle)
     bundle.close()
@@ -300,6 +379,8 @@ def bundle_import(store: GitStore, path: str, *, refs=None, progress=None):
     from dulwich.bundle import read_bundle
 
     drepo = store._repo._drepo
+    ref_map_normalized = _normalize_refs(refs)
+
     with open(path, "rb") as f:
         bundle = read_bundle(f)
         # Work around dulwich bug: Bundle.store_objects() uses
@@ -309,11 +390,14 @@ def bundle_import(store: GitStore, path: str, *, refs=None, progress=None):
         raw = bundle.pack_data._file
         raw.seek(0)
         drepo.object_store.add_thin_pack(raw.read, None)
-        if refs is not None:
-            ref_set = _resolve_ref_names(refs, set(bundle.references.keys()))
+        if ref_map_normalized is not None:
+            ref_map = _resolve_ref_map(ref_map_normalized,
+                                       set(bundle.references.keys()))
         for ref, sha in bundle.references.items():
-            if refs is None or ref in ref_set:
+            if ref_map_normalized is None:
                 drepo.refs[ref] = sha
+            elif ref in ref_map:
+                drepo.refs[ref_map[ref]] = sha
         bundle.close()
 
 
@@ -324,9 +408,15 @@ def _diff_bundle_export(store: GitStore, path: str, *, refs=None) -> dict:
         ref: sha for ref, sha in drepo.get_refs().items()
         if ref != b"HEAD"
     }
-    if refs is not None:
-        ref_set = _resolve_ref_names(refs, set(local_refs.keys()))
-        local_refs = {r: s for r, s in local_refs.items() if r in ref_set}
+    ref_map_normalized = _normalize_refs(refs)
+    if ref_map_normalized is not None:
+        ref_map = _resolve_ref_map(ref_map_normalized, set(local_refs.keys()))
+        # Filter to only matched sources, then rename to dest names
+        filtered = {}
+        for src, dst in ref_map.items():
+            if src in local_refs:
+                filtered[dst] = local_refs[src]
+        local_refs = filtered
 
     return {
         "create": list(local_refs.keys()),
@@ -347,9 +437,16 @@ def _diff_bundle_import(store: GitStore, path: str, *, refs=None) -> dict:
         bundle_refs = dict(bundle.references)
         bundle.close()
 
-    if refs is not None:
-        ref_set = _resolve_ref_names(refs, set(bundle_refs.keys()))
-        bundle_refs = {r: s for r, s in bundle_refs.items() if r in ref_set}
+    ref_map_normalized = _normalize_refs(refs)
+    if ref_map_normalized is not None:
+        ref_map = _resolve_ref_map(ref_map_normalized,
+                                   set(bundle_refs.keys()))
+        # Remap: keep only matched sources, rename to dest
+        remapped = {}
+        for src, dst in ref_map.items():
+            if src in bundle_refs:
+                remapped[dst] = bundle_refs[src]
+        bundle_refs = remapped
 
     local_refs = {r: s for r, s in drepo.get_refs().items() if r != b"HEAD"}
 
@@ -401,13 +498,16 @@ def backup(
     *,
     dry_run: bool = False,
     progress=None,
-    refs: list[str] | None = None,
+    refs: list[str] | dict[str, str] | None = None,
     format: str | None = None,
 ) -> MirrorDiff:
     """Push refs to *url* (or write a bundle file).
 
     Without ``--ref`` this is a full mirror: remote-only refs are deleted.
     With ``--ref`` only the specified refs are pushed (no deletes).
+
+    *refs* may be a list of names (identity mapping) or a dict mapping
+    source names to destination names for renaming on the remote side.
 
     Returns a `MirrorDiff` describing what changed (or would change).
     """
@@ -422,14 +522,45 @@ def backup(
         return diff
 
     if refs is not None:
+        ref_map_normalized = _normalize_refs(refs)
         raw = _diff_refs(drepo, url, "push")
-        ref_set = _resolve_ref_names(refs, set(raw["src"].keys()))
-        raw["create"] = [r for r in raw["create"] if r in ref_set]
-        raw["update"] = [r for r in raw["update"] if r in ref_set]
-        raw["delete"] = []  # no deletes when using --ref
-        diff = _raw_diff_to_sync_diff(raw)
+        ref_map = _resolve_ref_map(ref_map_normalized, set(raw["src"].keys()))
+        has_rename = any(s != d for s, d in ref_map.items())
+        ref_set = set(ref_map.keys())
+        if has_rename:
+            # For renaming, we need to compute the diff using dest names
+            # against the remote, and filter sources
+            filtered_src = {ref_map[r]: raw["src"][r] for r in raw["create"]
+                            if r in ref_set}
+            filtered_src.update({ref_map[r]: raw["src"][r] for r in raw["update"]
+                                 if r in ref_set})
+            # Also include refs in ref_set that are in src but not in create/update
+            # (i.e. already in sync under old name — but dest name may be new)
+            for src_ref in ref_set:
+                dst_ref = ref_map[src_ref]
+                if src_ref in raw["src"] and dst_ref not in filtered_src:
+                    filtered_src[dst_ref] = raw["src"][src_ref]
+            # Recompute create/update against remote using dest names
+            create, update = [], []
+            for dst_ref, sha in filtered_src.items():
+                if dst_ref not in raw["dest"]:
+                    create.append(dst_ref)
+                elif raw["dest"][dst_ref] != sha:
+                    update.append(dst_ref)
+            renamed_raw = {
+                "create": create, "update": update, "delete": [],
+                "src": filtered_src, "dest": raw["dest"],
+            }
+            diff = _raw_diff_to_sync_diff(renamed_raw)
+        else:
+            raw["create"] = [r for r in raw["create"] if r in ref_set]
+            raw["update"] = [r for r in raw["update"] if r in ref_set]
+            raw["delete"] = []  # no deletes when using --ref
+            diff = _raw_diff_to_sync_diff(raw)
         if not dry_run:
-            _targeted_push(drepo, url, ref_set, progress=progress)
+            _targeted_push(drepo, url, ref_set,
+                           ref_map=ref_map if has_rename else None,
+                           progress=progress)
         return diff
 
     raw = _diff_refs(drepo, url, "push")
@@ -445,13 +576,16 @@ def restore(
     *,
     dry_run: bool = False,
     progress=None,
-    refs: list[str] | None = None,
+    refs: list[str] | dict[str, str] | None = None,
     format: str | None = None,
 ) -> MirrorDiff:
     """Fetch refs from *url* (or import a bundle file).
 
     Restore is **additive**: it adds and updates refs but never deletes
     local-only refs.
+
+    *refs* may be a list of names (identity mapping) or a dict mapping
+    source names to destination names for renaming locally.
 
     Returns a `MirrorDiff` describing what changed (or would change).
     """
@@ -466,14 +600,45 @@ def restore(
         return diff
 
     raw = _diff_refs(drepo, url, "pull")
-    if refs is not None:
-        ref_set = _resolve_ref_names(refs, set(raw["src"].keys()))
-        raw["create"] = [r for r in raw["create"] if r in ref_set]
-        raw["update"] = [r for r in raw["update"] if r in ref_set]
-    raw["delete"] = []  # additive: never delete
-    diff = _raw_diff_to_sync_diff(raw)
-    if not dry_run:
-        _additive_fetch(drepo, url, refs=refs, progress=progress)
+    ref_map_normalized = _normalize_refs(refs)
+    if ref_map_normalized is not None:
+        ref_map = _resolve_ref_map(ref_map_normalized, set(raw["src"].keys()))
+        has_rename = any(s != d for s, d in ref_map.items())
+        ref_set = set(ref_map.keys())
+        if has_rename:
+            # Compute diff using dest names against local refs
+            local_refs = raw["dest"]
+            filtered_src = {}
+            for src_ref in ref_set:
+                if src_ref in raw["src"]:
+                    dst_ref = ref_map[src_ref]
+                    filtered_src[dst_ref] = raw["src"][src_ref]
+            create, update = [], []
+            for dst_ref, sha in filtered_src.items():
+                if dst_ref not in local_refs:
+                    create.append(dst_ref)
+                elif local_refs[dst_ref] != sha:
+                    update.append(dst_ref)
+            renamed_raw = {
+                "create": create, "update": update, "delete": [],
+                "src": filtered_src, "dest": local_refs,
+            }
+            diff = _raw_diff_to_sync_diff(renamed_raw)
+        else:
+            raw["create"] = [r for r in raw["create"] if r in ref_set]
+            raw["update"] = [r for r in raw["update"] if r in ref_set]
+            raw["delete"] = []
+            diff = _raw_diff_to_sync_diff(raw)
+        if not dry_run:
+            _additive_fetch(drepo, url,
+                            ref_map=ref_map if has_rename else None,
+                            refs=refs if not has_rename else None,
+                            progress=progress)
+    else:
+        raw["delete"] = []  # additive: never delete
+        diff = _raw_diff_to_sync_diff(raw)
+        if not dry_run:
+            _additive_fetch(drepo, url, refs=refs, progress=progress)
     return diff
 
 

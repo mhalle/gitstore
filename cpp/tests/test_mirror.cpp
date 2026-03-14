@@ -515,3 +515,201 @@ TEST_CASE("Mirror: backup ref preserves existing remote refs", "[mirror]") {
     fs::remove_all(path);
     fs::remove_all(remote_path);
 }
+
+// ---------------------------------------------------------------------------
+// ref_map (renaming)
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Mirror: backup with ref_map renames branch", "[mirror]") {
+    auto path = make_temp_mirror_dir();
+    auto store = open_mirror_store(path);
+    auto f = store.branches()["main"];
+    f = f.write_text("a.txt", "hello");
+
+    auto remote_path = path.parent_path() / (path.filename().string() + "_remote.git");
+    auto remote_url = remote_path.string();
+
+    vost::BackupOptions bo;
+    bo.ref_map = {{"main", "renamed"}};
+    auto diff = store.backup(remote_url, bo);
+
+    CHECK_FALSE(diff.in_sync());
+    CHECK(any_ref_contains(diff.add, "renamed"));
+
+    auto remote = vost::GitStore::open(remote_path);
+    CHECK(contains(remote.branches().keys(), "renamed"));
+    CHECK_FALSE(contains(remote.branches().keys(), "main"));
+    CHECK(remote.branches()["renamed"].read_text("a.txt") == "hello");
+
+    fs::remove_all(path);
+    fs::remove_all(remote_path);
+}
+
+TEST_CASE("Mirror: restore with ref_map renames branch", "[mirror]") {
+    auto path = make_temp_mirror_dir();
+    auto store = open_mirror_store(path);
+    auto f = store.branches()["main"];
+    f = f.write_text("a.txt", "hello");
+
+    auto remote_path = path.parent_path() / (path.filename().string() + "_remote.git");
+    auto remote_url = remote_path.string();
+    store.backup(remote_url);
+
+    // Create new store and restore with renaming
+    auto restore_path = path.parent_path() / (path.filename().string() + "_restored.git");
+    vost::OpenOptions oo;
+    oo.create = true;
+    auto store2 = vost::GitStore::open(restore_path, oo);
+
+    vost::RestoreOptions ro;
+    ro.ref_map = {{"main", "imported"}};
+    auto diff = store2.restore(remote_url, ro);
+
+    CHECK_FALSE(diff.in_sync());
+    CHECK(any_ref_contains(diff.add, "imported"));
+
+    CHECK(contains(store2.branches().keys(), "imported"));
+    CHECK_FALSE(contains(store2.branches().keys(), "main"));
+    CHECK(store2.branches()["imported"].read_text("a.txt") == "hello");
+
+    fs::remove_all(path);
+    fs::remove_all(remote_path);
+    fs::remove_all(restore_path);
+}
+
+TEST_CASE("Mirror: bundle export with ref_map renames refs", "[mirror]") {
+    auto path = make_temp_mirror_dir();
+    auto store = open_mirror_store(path);
+    auto f = store.branches()["main"];
+    f = f.write_text("a.txt", "hello");
+
+    auto bundle = (path.parent_path() / "renamed.bundle").string();
+    store.bundle_export(bundle, {}, {{"refs/heads/main", "refs/heads/exported"}});
+
+    // Import into new store and verify renamed ref
+    auto restore_path = path.parent_path() / (path.filename().string() + "_restored.git");
+    vost::OpenOptions oo;
+    oo.create = true;
+    auto store2 = vost::GitStore::open(restore_path, oo);
+    store2.bundle_import(bundle);
+
+    CHECK(contains(store2.branches().keys(), "exported"));
+    CHECK_FALSE(contains(store2.branches().keys(), "main"));
+    CHECK(store2.branches()["exported"].read_text("a.txt") == "hello");
+
+    fs::remove_all(path);
+    fs::remove(bundle);
+    fs::remove_all(restore_path);
+}
+
+TEST_CASE("Mirror: bundle import with ref_map renames refs", "[mirror]") {
+    auto path = make_temp_mirror_dir();
+    auto store = open_mirror_store(path);
+    auto f = store.branches()["main"];
+    f = f.write_text("a.txt", "hello");
+
+    auto bundle = (path.parent_path() / "import_rename.bundle").string();
+    store.bundle_export(bundle);
+
+    // Import with renaming
+    auto restore_path = path.parent_path() / (path.filename().string() + "_restored.git");
+    vost::OpenOptions oo;
+    oo.create = true;
+    auto store2 = vost::GitStore::open(restore_path, oo);
+    store2.bundle_import(bundle, {}, {{"refs/heads/main", "refs/heads/local-main"}});
+
+    CHECK(contains(store2.branches().keys(), "local-main"));
+    CHECK_FALSE(contains(store2.branches().keys(), "main"));
+    CHECK(store2.branches()["local-main"].read_text("a.txt") == "hello");
+
+    fs::remove_all(path);
+    fs::remove(bundle);
+    fs::remove_all(restore_path);
+}
+
+TEST_CASE("Mirror: backup bundle with ref_map", "[mirror]") {
+    auto path = make_temp_mirror_dir();
+    auto store = open_mirror_store(path);
+    auto f = store.branches()["main"];
+    f = f.write_text("a.txt", "hello");
+    store.tags().set("v1.0", f);
+
+    auto bundle = (path.parent_path() / "refmap.bundle").string();
+    vost::BackupOptions bo;
+    bo.ref_map = {{"main", "backup-main"}};
+    auto diff = store.backup(bundle, bo);
+
+    CHECK_FALSE(diff.in_sync());
+    CHECK(any_ref_contains(diff.add, "backup-main"));
+
+    // Import and verify
+    auto restore_path = path.parent_path() / (path.filename().string() + "_restored.git");
+    vost::OpenOptions oo;
+    oo.create = true;
+    auto store2 = vost::GitStore::open(restore_path, oo);
+    store2.restore(bundle);
+
+    CHECK(contains(store2.branches().keys(), "backup-main"));
+    CHECK_FALSE(contains(store2.branches().keys(), "main"));
+    // v1.0 should NOT be in the bundle (ref_map only included main)
+    CHECK_FALSE(contains(store2.tags().keys(), "v1.0"));
+
+    fs::remove_all(path);
+    fs::remove(bundle);
+    fs::remove_all(restore_path);
+}
+
+TEST_CASE("Mirror: restore bundle with ref_map", "[mirror]") {
+    auto path = make_temp_mirror_dir();
+    auto store = open_mirror_store(path);
+    auto f = store.branches()["main"];
+    f = f.write_text("a.txt", "hello");
+
+    auto bundle = (path.parent_path() / "restore_refmap.bundle").string();
+    store.backup(bundle);
+
+    auto restore_path = path.parent_path() / (path.filename().string() + "_restored.git");
+    vost::OpenOptions oo;
+    oo.create = true;
+    auto store2 = vost::GitStore::open(restore_path, oo);
+
+    vost::RestoreOptions ro;
+    ro.ref_map = {{"main", "restored-main"}};
+    auto diff = store2.restore(bundle, ro);
+
+    CHECK_FALSE(diff.in_sync());
+    CHECK(any_ref_contains(diff.add, "restored-main"));
+
+    CHECK(contains(store2.branches().keys(), "restored-main"));
+    CHECK_FALSE(contains(store2.branches().keys(), "main"));
+    CHECK(store2.branches()["restored-main"].read_text("a.txt") == "hello");
+
+    fs::remove_all(path);
+    fs::remove(bundle);
+    fs::remove_all(restore_path);
+}
+
+TEST_CASE("Mirror: ref_map with short names resolves correctly", "[mirror]") {
+    auto path = make_temp_mirror_dir();
+    auto store = open_mirror_store(path);
+    auto f = store.branches()["main"];
+    f = f.write_text("a.txt", "hello");
+    store.tags().set("v1.0", f);
+
+    auto remote_path = path.parent_path() / (path.filename().string() + "_remote.git");
+    auto remote_url = remote_path.string();
+
+    // Use short names in the ref_map
+    vost::BackupOptions bo;
+    bo.ref_map = {{"main", "copy-of-main"}, {"v1.0", "v2.0"}};
+    store.backup(remote_url, bo);
+
+    auto remote = vost::GitStore::open(remote_path);
+    CHECK(contains(remote.branches().keys(), "copy-of-main"));
+    CHECK(contains(remote.tags().keys(), "v2.0"));
+    CHECK_FALSE(contains(remote.branches().keys(), "main"));
+    CHECK_FALSE(contains(remote.tags().keys(), "v1.0"));
+
+    fs::remove_all(path);
+    fs::remove_all(remote_path);
+}

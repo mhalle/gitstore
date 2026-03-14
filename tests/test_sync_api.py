@@ -167,3 +167,129 @@ class TestScpStyleUrl:
         target = str(tmp_path / "remote.git")
         # Should not raise ValueError — will auto-create for push
         _diff_refs(store._repo._drepo,f"file://{target}", "push")
+
+
+# ---------------------------------------------------------------------------
+# TestRefRenaming
+# ---------------------------------------------------------------------------
+
+class TestRefRenaming:
+    """Tests for ref renaming in backup/restore/bundle operations."""
+
+    def test_restore_with_rename(self, tmp_path):
+        """Restore with ref renaming via dict."""
+        src = GitStore.open(str(tmp_path / "src.git"))
+        src.branches["main"].write("f.txt", b"data")
+
+        dst = GitStore.open(str(tmp_path / "dst.git"), branch=None)
+        dst.restore(str(tmp_path / "src.git"), refs={"main": "imported-main"})
+
+        assert "imported-main" in dst.branches
+        assert "main" not in dst.branches
+        assert dst.branches["imported-main"].read("f.txt") == b"data"
+
+    def test_backup_with_rename(self, tmp_path):
+        """Backup with ref renaming via dict."""
+        src = GitStore.open(str(tmp_path / "src.git"))
+        src.branches["main"].write("f.txt", b"data")
+
+        dst_path = str(tmp_path / "dst.git")
+        GitStore.open(dst_path, branch=None)
+        src.backup(dst_path, refs={"main": "their-main"})
+
+        dst = GitStore.open(dst_path, create=False)
+        assert "their-main" in dst.branches
+        assert "main" not in dst.branches
+
+    def test_bundle_export_with_rename(self, tmp_path):
+        """Bundle export renames refs in the bundle."""
+        src = GitStore.open(str(tmp_path / "src.git"))
+        src.branches["main"].write("f.txt", b"data")
+
+        bundle_path = str(tmp_path / "test.bundle")
+        src.bundle_export(bundle_path, refs={"main": "renamed"})
+
+        dst = GitStore.open(str(tmp_path / "dst.git"), branch=None)
+        dst.bundle_import(bundle_path)
+        assert "renamed" in dst.branches
+        assert "main" not in dst.branches
+        assert dst.branches["renamed"].read("f.txt") == b"data"
+
+    def test_bundle_import_with_rename(self, tmp_path):
+        """Bundle import renames refs on import."""
+        src = GitStore.open(str(tmp_path / "src.git"))
+        src.branches["main"].write("f.txt", b"data")
+
+        bundle_path = str(tmp_path / "test.bundle")
+        src.bundle_export(bundle_path)
+
+        dst = GitStore.open(str(tmp_path / "dst.git"), branch=None)
+        dst.bundle_import(bundle_path, refs={"main": "local-main"})
+        assert "local-main" in dst.branches
+        assert "main" not in dst.branches
+        assert dst.branches["local-main"].read("f.txt") == b"data"
+
+    def test_refs_list_backward_compatible(self, tmp_path):
+        """List form still works (no renaming)."""
+        src = GitStore.open(str(tmp_path / "src.git"))
+        src.branches["main"].write("f.txt", b"data")
+
+        dst = GitStore.open(str(tmp_path / "dst.git"), branch=None)
+        dst.restore(str(tmp_path / "src.git"), refs=["main"])
+        assert "main" in dst.branches
+        assert dst.branches["main"].read("f.txt") == b"data"
+
+    def test_backup_list_backward_compatible(self, tmp_path):
+        """Backup with list form still works."""
+        src = GitStore.open(str(tmp_path / "src.git"))
+        src.branches["main"].write("f.txt", b"data")
+
+        dst_path = str(tmp_path / "dst.git")
+        GitStore.open(dst_path, branch=None)
+        src.backup(dst_path, refs=["main"])
+
+        dst = GitStore.open(dst_path, create=False)
+        assert "main" in dst.branches
+
+    def test_rename_multiple_refs(self, tmp_path):
+        """Rename multiple refs at once."""
+        src = GitStore.open(str(tmp_path / "src.git"))
+        src.branches["main"].write("f.txt", b"data1")
+        src.branches["dev"] = src.branches["main"]
+        src.branches["dev"].write("g.txt", b"data2")
+
+        dst = GitStore.open(str(tmp_path / "dst.git"), branch=None)
+        dst.restore(str(tmp_path / "src.git"),
+                     refs={"main": "their-main", "dev": "their-dev"})
+
+        assert "their-main" in dst.branches
+        assert "their-dev" in dst.branches
+        assert "main" not in dst.branches
+        assert "dev" not in dst.branches
+
+    def test_backup_bundle_with_rename(self, tmp_path):
+        """Backup to bundle with ref renaming."""
+        src = GitStore.open(str(tmp_path / "src.git"))
+        src.branches["main"].write("f.txt", b"data")
+
+        bundle_path = str(tmp_path / "out.bundle")
+        src.backup(bundle_path, refs={"main": "exported"})
+
+        dst = GitStore.open(str(tmp_path / "dst.git"), branch=None)
+        dst.restore(bundle_path)
+        assert "exported" in dst.branches
+        assert "main" not in dst.branches
+
+    def test_restore_bundle_with_rename(self, tmp_path):
+        """Restore from bundle with ref renaming."""
+        src = GitStore.open(str(tmp_path / "src.git"))
+        src.branches["main"].write("f.txt", b"data")
+
+        bundle_path = str(tmp_path / "out.bundle")
+        src.backup(bundle_path)
+
+        dst = GitStore.open(str(tmp_path / "dst.git"), branch=None)
+        dst.restore(bundle_path, refs={"main": "imported"})
+        assert "imported" in dst.branches
+        assert "main" not in dst.branches
+        assert dst.branches["imported"].read("f.txt") == b"data"

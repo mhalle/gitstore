@@ -346,3 +346,189 @@ describe('Mirror: refs filtering', () => {
     expect(await store2.tags.has('v1.0')).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// ref renaming (Record<string, string>)
+// ---------------------------------------------------------------------------
+
+describe('Mirror: ref renaming', () => {
+  it('backup to local with ref renaming', async () => {
+    const { store, tmpDir } = await freshStore();
+    cleanups.push(tmpDir);
+    let snap = await store.branches.get('main');
+    snap = await snap.writeText('a.txt', 'hello');
+
+    const remoteDir = makeTmpDir();
+    cleanups.push(remoteDir);
+    const remoteUrl = path.join(remoteDir, 'remote.git');
+
+    const diff = await store.backup(remoteUrl, {
+      refs: { main: 'production' },
+    });
+    expect(diff.add.length).toBeGreaterThan(0);
+    expect(diff.add.some((r) => r.ref.includes('production'))).toBe(true);
+
+    const remote = await GitStore.open(remoteUrl, { fs });
+    expect(await remote.branches.has('production')).toBe(true);
+    expect(await remote.branches.has('main')).toBe(false);
+    expect(
+      await (await remote.branches.get('production')).readText('a.txt'),
+    ).toBe('hello');
+  });
+
+  it('restore from local with ref renaming', async () => {
+    const { store, tmpDir } = await freshStore();
+    cleanups.push(tmpDir);
+    let snap = await store.branches.get('main');
+    snap = await snap.writeText('a.txt', 'hello');
+
+    const remoteDir = makeTmpDir();
+    cleanups.push(remoteDir);
+    const remoteUrl = path.join(remoteDir, 'remote.git');
+    await store.backup(remoteUrl);
+
+    const { store: store2, tmpDir: td2 } = await freshStore({ branch: null });
+    cleanups.push(td2);
+
+    const diff = await store2.restore(remoteUrl, {
+      refs: { main: 'imported' },
+    });
+    expect(diff.add.length).toBeGreaterThan(0);
+    expect(await store2.branches.has('imported')).toBe(true);
+    expect(await store2.branches.has('main')).toBe(false);
+    expect(
+      await (await store2.branches.get('imported')).readText('a.txt'),
+    ).toBe('hello');
+  });
+
+  it('bundle export with ref renaming', async () => {
+    const { store, tmpDir } = await freshStore();
+    cleanups.push(tmpDir);
+    let snap = await store.branches.get('main');
+    snap = await snap.writeText('a.txt', 'hello');
+
+    const bundlePath = path.join(tmpDir, 'renamed.bundle');
+    await store.bundleExport(bundlePath, {
+      refs: { main: 'archived' },
+    });
+
+    // Import without renaming — should get the renamed ref
+    const { store: store2, tmpDir: td2 } = await freshStore({ branch: null });
+    cleanups.push(td2);
+    await store2.bundleImport(bundlePath);
+
+    expect(await store2.branches.has('archived')).toBe(true);
+    expect(await store2.branches.has('main')).toBe(false);
+    expect(
+      await (await store2.branches.get('archived')).readText('a.txt'),
+    ).toBe('hello');
+  });
+
+  it('bundle import with ref renaming', async () => {
+    const { store, tmpDir } = await freshStore();
+    cleanups.push(tmpDir);
+    let snap = await store.branches.get('main');
+    snap = await snap.writeText('a.txt', 'hello');
+
+    const bundlePath = path.join(tmpDir, 'plain.bundle');
+    await store.bundleExport(bundlePath);
+
+    // Import with renaming
+    const { store: store2, tmpDir: td2 } = await freshStore({ branch: null });
+    cleanups.push(td2);
+    await store2.bundleImport(bundlePath, {
+      refs: { main: 'restored' },
+    });
+
+    expect(await store2.branches.has('restored')).toBe(true);
+    expect(await store2.branches.has('main')).toBe(false);
+    expect(
+      await (await store2.branches.get('restored')).readText('a.txt'),
+    ).toBe('hello');
+  });
+
+  it('backup bundle with ref renaming via backup()', async () => {
+    const { store, tmpDir } = await freshStore();
+    cleanups.push(tmpDir);
+    let snap = await store.branches.get('main');
+    snap = await snap.writeText('a.txt', 'hello');
+    await store.tags.set('v1.0', snap);
+
+    const bundlePath = path.join(tmpDir, 'renamed-backup.bundle');
+    const diff = await store.backup(bundlePath, {
+      refs: { main: 'release' },
+    });
+    expect(diff.add.length).toBe(1);
+    expect(diff.add[0].ref).toBe('refs/heads/release');
+
+    const { store: store2, tmpDir: td2 } = await freshStore({ branch: null });
+    cleanups.push(td2);
+    await store2.restore(bundlePath);
+
+    expect(await store2.branches.has('release')).toBe(true);
+    expect(await store2.branches.has('main')).toBe(false);
+    expect(await store2.tags.has('v1.0')).toBe(false);
+  });
+
+  it('restore bundle with ref renaming via restore()', async () => {
+    const { store, tmpDir } = await freshStore();
+    cleanups.push(tmpDir);
+    let snap = await store.branches.get('main');
+    snap = await snap.writeText('a.txt', 'hello');
+
+    const bundlePath = path.join(tmpDir, 'plain2.bundle');
+    await store.backup(bundlePath);
+
+    const { store: store2, tmpDir: td2 } = await freshStore({ branch: null });
+    cleanups.push(td2);
+    const diff = await store2.restore(bundlePath, {
+      refs: { main: 'incoming' },
+    });
+    expect(diff.add.length).toBeGreaterThan(0);
+    expect(await store2.branches.has('incoming')).toBe(true);
+    expect(await store2.branches.has('main')).toBe(false);
+  });
+
+  it('round-trip with double renaming (export + import)', async () => {
+    const { store, tmpDir } = await freshStore();
+    cleanups.push(tmpDir);
+    let snap = await store.branches.get('main');
+    snap = await snap.writeText('data.txt', 'payload');
+
+    const bundlePath = path.join(tmpDir, 'double.bundle');
+    // Export main → archived
+    await store.bundleExport(bundlePath, { refs: { main: 'archived' } });
+
+    // Import archived → final
+    const { store: store2, tmpDir: td2 } = await freshStore({ branch: null });
+    cleanups.push(td2);
+    await store2.bundleImport(bundlePath, {
+      refs: { archived: 'final' },
+    });
+
+    expect(await store2.branches.has('final')).toBe(true);
+    expect(await store2.branches.has('archived')).toBe(false);
+    expect(await store2.branches.has('main')).toBe(false);
+    expect(
+      await (await store2.branches.get('final')).readText('data.txt'),
+    ).toBe('payload');
+  });
+
+  it('refs array still works (backward compat)', async () => {
+    const { store, tmpDir } = await freshStore();
+    cleanups.push(tmpDir);
+    let snap = await store.branches.get('main');
+    snap = await snap.writeText('a.txt', 'hello');
+    await store.tags.set('v1.0', snap);
+
+    const bundlePath = path.join(tmpDir, 'compat.bundle');
+    await store.bundleExport(bundlePath, { refs: ['main'] });
+
+    const { store: store2, tmpDir: td2 } = await freshStore({ branch: null });
+    cleanups.push(td2);
+    await store2.bundleImport(bundlePath);
+
+    expect(await store2.branches.has('main')).toBe(true);
+    expect(await store2.tags.has('v1.0')).toBe(false);
+  });
+});

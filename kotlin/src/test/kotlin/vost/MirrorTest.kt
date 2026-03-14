@@ -356,6 +356,207 @@ class MirrorTest {
         }
     }
 
+    // ── Ref-map (renaming) tests ─────────────────────────────────────────
+
+    @Test
+    fun `backup with refMap renames refs`(@TempDir tempDir: Path) {
+        val store = createStore()
+        store.use {
+            var fs = it.branches["main"]
+            fs = fs.write("a.txt", "hello".toByteArray())
+
+            val remoteUrl = createRemoteDir(tempDir)
+            val diff = it.backup(remoteUrl, refMap = mapOf("main" to "copy"))
+
+            assertFalse(diff.inSync)
+            // Diff should use the dest ref name
+            assertTrue(diff.add.any { r -> r.refName == "refs/heads/copy" })
+
+            val remote = GitStore.open(remoteUrl, create = false)
+            remote.use { r ->
+                assertTrue("copy" in r.branches.list())
+                assertFalse("main" in r.branches.list())
+                assertEquals("hello", r.branches["copy"].readText("a.txt"))
+            }
+        }
+    }
+
+    @Test
+    fun `restore with refMap renames refs`(@TempDir tempDir: Path) {
+        val store = createStore()
+        store.use {
+            var fs = it.branches["main"]
+            fs = fs.write("a.txt", "hello".toByteArray())
+
+            val remoteUrl = createRemoteDir(tempDir)
+            it.backup(remoteUrl)
+
+            val store2Dir = tempDir.resolve("restored.git").toFile()
+            val store2 = GitStore.open(store2Dir.absolutePath, branch = null)
+            store2.use { s2 ->
+                val diff = s2.restore(remoteUrl, refMap = mapOf("main" to "imported"))
+
+                assertFalse(diff.inSync)
+                assertTrue(diff.add.any { r -> r.refName == "refs/heads/imported" })
+
+                assertTrue("imported" in s2.branches.list())
+                assertEquals("hello", s2.branches["imported"].readText("a.txt"))
+            }
+        }
+    }
+
+    @Test
+    fun `backup bundle with refMap renames refs`(@TempDir tempDir: Path) {
+        val store = createStore()
+        store.use {
+            var fs = it.branches["main"]
+            fs = fs.write("a.txt", "hello".toByteArray())
+
+            val bundle = tempDir.resolve("mapped.bundle").toFile().absolutePath
+            val diff = it.backup(bundle, refMap = mapOf("main" to "renamed"))
+
+            assertFalse(diff.inSync)
+            assertTrue(diff.add.any { r -> r.refName == "refs/heads/renamed" })
+
+            // Restore from the bundle and verify the renamed ref
+            val store2Dir = tempDir.resolve("restored.git").toFile()
+            val store2 = GitStore.open(store2Dir.absolutePath, branch = null)
+            store2.use { s2 ->
+                s2.restore(bundle)
+                assertTrue("renamed" in s2.branches.list())
+                assertFalse("main" in s2.branches.list())
+                assertEquals("hello", s2.branches["renamed"].readText("a.txt"))
+            }
+        }
+    }
+
+    @Test
+    fun `restore bundle with refMap renames refs`(@TempDir tempDir: Path) {
+        val store = createStore()
+        store.use {
+            var fs = it.branches["main"]
+            fs = fs.write("a.txt", "hello".toByteArray())
+
+            val bundle = tempDir.resolve("backup.bundle").toFile().absolutePath
+            it.backup(bundle)
+
+            val store2Dir = tempDir.resolve("restored.git").toFile()
+            val store2 = GitStore.open(store2Dir.absolutePath, branch = null)
+            store2.use { s2 ->
+                val diff = s2.restore(bundle, refMap = mapOf("main" to "imported"))
+
+                assertFalse(diff.inSync)
+                assertTrue(diff.add.any { r -> r.refName == "refs/heads/imported" })
+                assertTrue("imported" in s2.branches.list())
+                assertEquals("hello", s2.branches["imported"].readText("a.txt"))
+            }
+        }
+    }
+
+    @Test
+    fun `refMap with tags`(@TempDir tempDir: Path) {
+        val store = createStore()
+        store.use {
+            var fs = it.branches["main"]
+            fs = fs.write("a.txt", "hello".toByteArray())
+            it.tags["v1.0"] = fs
+
+            val remoteUrl = createRemoteDir(tempDir)
+            // Rename tag v1.0 to v2.0 (using full ref paths)
+            val diff = it.backup(
+                remoteUrl,
+                refMap = mapOf("refs/tags/v1.0" to "refs/tags/v2.0"),
+            )
+
+            assertFalse(diff.inSync)
+
+            val remote = GitStore.open(remoteUrl, create = false)
+            remote.use { r ->
+                assertTrue("v2.0" in r.tags.list())
+                assertFalse("v1.0" in r.tags.list())
+                assertEquals("hello", r.tags["v2.0"].readText("a.txt"))
+            }
+        }
+    }
+
+    @Test
+    fun `refMap short tag names infer prefix`(@TempDir tempDir: Path) {
+        val store = createStore()
+        store.use {
+            var fs = it.branches["main"]
+            fs = fs.write("a.txt", "hello".toByteArray())
+            it.tags["v1.0"] = fs
+
+            val remoteUrl = createRemoteDir(tempDir)
+            // Short name "v1.0" should resolve to refs/tags/v1.0, and
+            // dest "v2.0" should inherit the refs/tags/ prefix
+            val diff = it.backup(
+                remoteUrl,
+                refMap = mapOf("v1.0" to "v2.0"),
+            )
+
+            assertFalse(diff.inSync)
+            assertTrue(diff.add.any { r -> r.refName == "refs/tags/v2.0" })
+
+            val remote = GitStore.open(remoteUrl, create = false)
+            remote.use { r ->
+                assertTrue("v2.0" in r.tags.list())
+            }
+        }
+    }
+
+    @Test
+    fun `backup refMap dry-run makes no changes`(@TempDir tempDir: Path) {
+        val store = createStore()
+        store.use {
+            var fs = it.branches["main"]
+            fs = fs.write("a.txt", "hello".toByteArray())
+
+            val remoteUrl = createRemoteDir(tempDir)
+            val diff = it.backup(remoteUrl, dryRun = true, refMap = mapOf("main" to "copy"))
+
+            assertFalse(diff.inSync)
+            // Remote should not exist (auto-create only happens when not dry-run...
+            // actually autoCreateBareRepo runs before the dryRun check)
+            // But no refs should have been pushed
+            val remote = GitStore.open(remoteUrl, create = false)
+            remote.use { r ->
+                assertTrue(r.branches.list().isEmpty())
+            }
+        }
+    }
+
+    @Test
+    fun `refMap multiple refs`(@TempDir tempDir: Path) {
+        val store = createStore()
+        store.use {
+            var fs = it.branches["main"]
+            fs = fs.write("a.txt", "hello".toByteArray())
+            it.branches["feature"] = fs
+            var feat = it.branches["feature"]
+            feat = feat.write("b.txt", "world".toByteArray())
+
+            val remoteUrl = createRemoteDir(tempDir)
+            val diff = it.backup(
+                remoteUrl,
+                refMap = mapOf("main" to "main-copy", "feature" to "feat-copy"),
+            )
+
+            assertFalse(diff.inSync)
+            assertEquals(2, diff.add.size)
+
+            val remote = GitStore.open(remoteUrl, create = false)
+            remote.use { r ->
+                assertTrue("main-copy" in r.branches.list())
+                assertTrue("feat-copy" in r.branches.list())
+                assertFalse("main" in r.branches.list())
+                assertFalse("feature" in r.branches.list())
+                assertEquals("hello", r.branches["main-copy"].readText("a.txt"))
+                assertEquals("world", r.branches["feat-copy"].readText("b.txt"))
+            }
+        }
+    }
+
     @Test
     fun `backup bundle with refs`(@TempDir tempDir: Path) {
         val store = createStore()

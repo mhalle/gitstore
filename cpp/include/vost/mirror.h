@@ -49,23 +49,29 @@ MirrorDiff restore(const std::shared_ptr<GitStoreInner>& inner,
 
 /// Export refs to a git bundle file.
 ///
-/// @param inner  Shared inner state of the GitStore.
-/// @param path   Path to the bundle file to write.
-/// @param refs   Ref names to export (empty = all refs).
+/// @param inner    Shared inner state of the GitStore.
+/// @param path     Path to the bundle file to write.
+/// @param refs     Ref names to export (empty = all refs).
+/// @param ref_map  Rename map: source ref -> destination ref name in bundle
+///                 (empty = no renaming).
 /// @throws GitError on failures.
 void bundle_export(const std::shared_ptr<GitStoreInner>& inner,
                    const std::string& path,
-                   const std::vector<std::string>& refs = {});
+                   const std::vector<std::string>& refs = {},
+                   const std::map<std::string, std::string>& ref_map = {});
 
 /// Import refs from a git bundle file.
 ///
-/// @param inner  Shared inner state of the GitStore.
-/// @param path   Path to the bundle file to read.
-/// @param refs   Ref names to import (empty = all refs).
+/// @param inner    Shared inner state of the GitStore.
+/// @param path     Path to the bundle file to read.
+/// @param refs     Ref names to import (empty = all refs).
+/// @param ref_map  Rename map: bundle ref name -> local ref name
+///                 (empty = no renaming).
 /// @throws GitError on failures.
 void bundle_import(const std::shared_ptr<GitStoreInner>& inner,
                    const std::string& path,
-                   const std::vector<std::string>& refs = {});
+                   const std::vector<std::string>& refs = {},
+                   const std::map<std::string, std::string>& ref_map = {});
 
 } // namespace mirror
 
