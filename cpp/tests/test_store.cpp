@@ -442,3 +442,68 @@ TEST_CASE("RefDict::set rejects trailing dot", "[store][refdict]") {
                       vost::InvalidRefNameError);
     fs::remove_all(path);
 }
+
+// ---------------------------------------------------------------------------
+// GitStore::fs — branch / tag / hash resolution
+// ---------------------------------------------------------------------------
+
+TEST_CASE("store.fs resolves branch", "[store][fs]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches()["main"];
+    snap = snap.write_text("hello.txt", "hello");
+
+    auto result = store.fs("main");
+    REQUIRE(result.read_text("hello.txt") == "hello");
+    REQUIRE(result.writable() == true);
+
+    fs::remove_all(path);
+}
+
+TEST_CASE("store.fs resolves tag", "[store][fs]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches()["main"];
+    snap = snap.write_text("data.txt", "data");
+    store.tags().set("v1", snap);
+
+    auto result = store.fs("v1");
+    REQUIRE(result.read_text("data.txt") == "data");
+    REQUIRE(result.writable() == false);
+
+    fs::remove_all(path);
+}
+
+TEST_CASE("store.fs resolves commit hash", "[store][fs]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches()["main"];
+    snap = snap.write_text("file.txt", "content");
+    auto hash = *snap.commit_hash();
+
+    auto result = store.fs(hash);
+    REQUIRE(result.read_text("file.txt") == "content");
+    REQUIRE(result.writable() == false);
+
+    fs::remove_all(path);
+}
+
+TEST_CASE("store.fs throws on missing ref", "[store][fs]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    REQUIRE_THROWS_AS(store.fs("nonexistent"), vost::NotFoundError);
+    fs::remove_all(path);
+}
+
+TEST_CASE("store.fs branch priority over tag", "[store][fs]") {
+    auto path = make_temp_repo();
+    auto store = open_store(path);
+    auto snap = store.branches()["main"];
+    snap = snap.write_text("x.txt", "x");
+    store.tags().set("main", snap);
+
+    auto result = store.fs("main");
+    REQUIRE(result.writable() == true);  // branch wins
+
+    fs::remove_all(path);
+}

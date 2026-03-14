@@ -373,26 +373,13 @@ def _detect_archive_format(filename: str) -> str:
 
 def _resolve_ref(store: GitStore, ref_str: str):
     """Try branches, then tags, then commit hash."""
-    if ref_str in store.branches:
-        return store.branches[ref_str]
-    if ref_str in store.tags:
-        return store.tags[ref_str]
-    # Try as commit hash
     try:
-        repo = store._repo
-        obj = repo.get(ref_str)
-        if obj is not None:
-            if obj.type_num != 1:  # GIT_OBJECT_COMMIT
-                raise click.ClickException(
-                    f"Object {ref_str} is not a commit"
-                )
-            from ..fs import FS
-            return FS(store, obj.id, writable=False)
-    except click.ClickException:
-        raise
-    except (ValueError, KeyError):
-        pass
-    raise click.ClickException(f"Unknown ref: {ref_str}")
+        return store.fs(ref_str)
+    except KeyError as exc:
+        msg = str(exc)
+        if "not a commit" in msg.lower():
+            raise click.ClickException(f"Object {ref_str} is not a commit")
+        raise click.ClickException(f"Unknown ref: {ref_str}")
 
 
 def _resolve_ref_path(store: GitStore, rp: RefPath, default_ref: str | None, default_branch: str, *,

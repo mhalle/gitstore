@@ -154,24 +154,33 @@ NoteDict GitStore::notes() {
     return NoteDict(inner_);
 }
 
-Fs GitStore::fs(const std::string& hash) {
-    // Validate hex
+Fs GitStore::fs(const std::string& ref) {
+    // Try branch first
+    auto br = branches();
+    if (br.contains(ref)) {
+        return br.get(ref);
+    }
+    // Try tag
+    auto tg = tags();
+    if (tg.contains(ref)) {
+        return tg.get(ref);
+    }
+    // Fall back to commit hash
     git_oid oid;
-    if (git_oid_fromstr(&oid, hash.c_str()) != 0)
-        throw InvalidHashError(hash);
+    if (git_oid_fromstr(&oid, ref.c_str()) != 0)
+        throw NotFoundError("ref not found: " + ref);
 
-    // Resolve tree from commit
     git_commit* commit = nullptr;
     {
         std::lock_guard<std::mutex> lk(inner_->mutex);
         if (git_commit_lookup(&commit, inner_->repo, &oid) != 0)
-            throw_git("git_commit_lookup");
+            throw NotFoundError("ref not found: " + ref);
     }
     const git_oid* tid = git_commit_tree_id(commit);
     std::string tree_hex = oid_hex(tid);
     git_commit_free(commit);
 
-    return Fs(inner_, hash, tree_hex, std::nullopt, false);
+    return Fs(inner_, ref, tree_hex, std::nullopt, false);
 }
 
 MirrorDiff GitStore::backup(const std::string& dest, const BackupOptions& opts) {

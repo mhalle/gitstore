@@ -561,7 +561,72 @@ fn fs_on_back_batch_is_readonly() {
 }
 
 // ---------------------------------------------------------------------------
-// store.fs(hash) — open by commit hash
+// store.fs(ref_str) — branch / tag / hash resolution
+// ---------------------------------------------------------------------------
+
+#[test]
+fn fs_resolves_branch() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.branches().get("main").unwrap();
+    fs.write("hello.txt", b"hello", Default::default()).unwrap();
+
+    let result = store.fs("main").unwrap();
+    assert_eq!(result.read("hello.txt").unwrap(), b"hello");
+    assert!(result.writable());
+}
+
+#[test]
+fn fs_resolves_tag() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.branches().get("main").unwrap();
+    fs.write("data.txt", b"data", Default::default()).unwrap();
+    let fs = store.branches().get("main").unwrap();
+    store.tags().set("v1", &fs).unwrap();
+
+    let result = store.fs("v1").unwrap();
+    assert_eq!(result.read("data.txt").unwrap(), b"data");
+    assert!(!result.writable());
+}
+
+#[test]
+fn fs_resolves_hash() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.branches().get("main").unwrap();
+    fs.write("file.txt", b"content", Default::default()).unwrap();
+    let fs = store.branches().get("main").unwrap();
+    let hash = fs.commit_hash().unwrap();
+
+    let result = store.fs(&hash).unwrap();
+    assert_eq!(result.read("file.txt").unwrap(), b"content");
+    assert!(!result.writable());
+}
+
+#[test]
+fn fs_missing_ref_errors() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    assert!(store.fs("nonexistent").is_err());
+}
+
+#[test]
+fn fs_branch_takes_priority_over_tag() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = common::create_store(dir.path(), "main");
+    let fs = store.branches().get("main").unwrap();
+    fs.write("x.txt", b"x", Default::default()).unwrap();
+    let fs = store.branches().get("main").unwrap();
+    store.tags().set("main", &fs).unwrap();
+
+    // Branch should win — writable
+    let result = store.fs("main").unwrap();
+    assert!(result.writable());
+}
+
+// ---------------------------------------------------------------------------
+// store.fs(hash) — open by commit hash (legacy)
 // ---------------------------------------------------------------------------
 
 #[test]

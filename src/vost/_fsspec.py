@@ -32,18 +32,12 @@ class VostFileSystem(AbstractFileSystem):
             fs = self._store.branches.current
             if fs is None:
                 raise ValueError("no current branch and no ref specified")
-        elif ref in self._store.branches:
-            fs = self._store.branches[ref]
-        elif ref in self._store.tags:
-            fs = self._store.tags[ref]
         else:
-            # Treat as commit hash
-            from .fs import FS
-
-            obj = self._store._repo.get(ref)
-            if obj is None or obj.type_num != 1:
+            try:
+                fs = self._store.fs(ref, back=back)
+            except KeyError:
                 raise ValueError(f"ref not found: {ref!r}")
-            fs = FS(self._store, obj.id, writable=False)
+            back = 0  # already applied
 
         if back:
             fs = fs.back(back)

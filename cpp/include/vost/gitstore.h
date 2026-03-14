@@ -72,8 +72,12 @@ public:
     /// Return a RefDict for tags (refs/tags/).
     RefDict tags();
 
-    /// Return a detached (read-only) Fs for a commit identified by hex SHA.
-    Fs fs(const std::string& hash);
+    /// Return an Fs for any ref (branch, tag, or commit hash).
+    ///
+    /// Resolution: branches → tags → commit hash.
+    /// Writable for branches, read-only for tags and hashes.
+    /// @throws NotFoundError if the ref cannot be resolved.
+    Fs fs(const std::string& ref);
 
     /// Return a NoteDict for accessing git notes.
     NoteDict notes();

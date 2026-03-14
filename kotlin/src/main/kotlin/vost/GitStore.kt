@@ -27,6 +27,44 @@ class GitStore private constructor(
     /** Git notes namespaces. */
     val notes = NoteDict(this)
 
+    /**
+     * Get an Fs snapshot for any ref (branch, tag, or commit hash).
+     *
+     * Resolution order: branches -> tags -> commit hash.
+     * Writable for branches, read-only for tags and hashes.
+     *
+     * @param ref Branch name, tag name, or commit hash.
+     * @param back Walk back N ancestor commits (default 0).
+     * @return Fs snapshot for the resolved ref.
+     * @throws NoSuchElementException If the ref cannot be resolved.
+     */
+    fun fs(ref: String, back: Int = 0): Fs {
+        val result = when {
+            ref in branches -> branches[ref]
+            ref in tags -> tags[ref]
+            else -> {
+                // Try as commit hash
+                val objectId = try {
+                    ObjectId.fromString(ref)
+                } catch (e: Exception) {
+                    throw NoSuchElementException("ref not found: '$ref'")
+                }
+                val revWalk = org.eclipse.jgit.revwalk.RevWalk(repo)
+                try {
+                    try {
+                        revWalk.parseCommit(objectId)
+                    } catch (e: Exception) {
+                        throw NoSuchElementException("ref not found: '$ref'")
+                    }
+                    Fs(this, objectId, writable = false)
+                } finally {
+                    revWalk.close()
+                }
+            }
+        }
+        return if (back > 0) result.back(back) else result
+    }
+
     override fun toString(): String = "GitStore(${repo.directory})"
 
     override fun close() {

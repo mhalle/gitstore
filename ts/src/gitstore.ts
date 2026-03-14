@@ -7,6 +7,7 @@ import git from 'isomorphic-git';
 import type { FsModule, Signature, MirrorDiff, HttpClient } from './types.js';
 import { RefDict } from './refdict.js';
 import { NoteDict } from './notes.js';
+import { FS } from './fs.js';
 
 /**
  * A versioned filesystem backed by a bare git repository.
@@ -33,6 +34,39 @@ export class GitStore {
     this.branches = new RefDict(this, 'refs/heads/');
     this.tags = new RefDict(this, 'refs/tags/');
     this.notes = new NoteDict(this);
+  }
+
+  /**
+   * Get an FS snapshot for any ref (branch, tag, or commit hash).
+   *
+   * Resolution order: branches → tags → commit hash.
+   * Writable for branches, read-only for tags and hashes.
+   *
+   * @param ref - Branch name, tag name, or commit hash.
+   * @param opts.back - Walk back N ancestor commits (default 0).
+   * @returns FS snapshot for the resolved ref.
+   * @throws {KeyNotFoundError} If the ref cannot be resolved.
+   */
+  async fs(ref: string, opts?: { back?: number }): Promise<FS> {
+    let result: FS;
+    if (await this.branches.has(ref)) {
+      result = await this.branches.get(ref);
+    } else if (await this.tags.has(ref)) {
+      result = await this.tags.get(ref);
+    } else {
+      // Try as commit hash
+      try {
+        result = await FS._fromCommit(this, ref, null, false);
+      } catch {
+        const { KeyNotFoundError } = await import('./types.js');
+        throw new KeyNotFoundError(`ref not found: '${ref}'`);
+      }
+    }
+    const back = opts?.back ?? 0;
+    if (back) {
+      result = await result.back(back);
+    }
+    return result;
   }
 
   toString(): string {

@@ -282,10 +282,10 @@ TEST_CASE("GitStore::fs returns read-only snapshot for commit hash", "[fs][write
     fs::remove_all(path);
 }
 
-TEST_CASE("GitStore::fs throws InvalidHashError for bad hash", "[fs][write]") {
+TEST_CASE("GitStore::fs throws NotFoundError for bad ref", "[fs][write]") {
     auto path  = make_temp_repo();
     auto store = open_store(path);
-    REQUIRE_THROWS_AS(store.fs("notahex"), vost::InvalidHashError);
+    REQUIRE_THROWS_AS(store.fs("notahex"), vost::NotFoundError);
     fs::remove_all(path);
 }
 

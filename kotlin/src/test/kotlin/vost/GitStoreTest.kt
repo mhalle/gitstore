@@ -285,4 +285,79 @@ class GitStoreTest {
             assertEquals(listOf("v1", "v2"), names)
         }
     }
+
+    // ── fs() method tests ────────────────────────────────────────────
+
+    @Test
+    fun `fs resolves branch`() {
+        val store = createStore()
+        store.use {
+            it.branches["main"].write("hello.txt", "hello".toByteArray())
+
+            val result = it.fs("main")
+            assertEquals("hello", String(result.read("hello.txt")))
+            assertTrue(result.writable)
+        }
+    }
+
+    @Test
+    fun `fs resolves tag`() {
+        val store = createStore()
+        store.use {
+            val fs = it.branches["main"].write("data.txt", "data".toByteArray())
+            it.tags["v1"] = fs
+
+            val result = it.fs("v1")
+            assertEquals("data", String(result.read("data.txt")))
+            assertFalse(result.writable)
+        }
+    }
+
+    @Test
+    fun `fs resolves commit hash`() {
+        val store = createStore()
+        store.use {
+            val fs = it.branches["main"].write("file.txt", "content".toByteArray())
+            val hash = fs.commitHash
+
+            val result = it.fs(hash)
+            assertEquals("content", String(result.read("file.txt")))
+            assertFalse(result.writable)
+        }
+    }
+
+    @Test
+    fun `fs with back parameter`() {
+        val store = createStore()
+        store.use {
+            val fs1 = it.branches["main"].write("a.txt", "a".toByteArray())
+            fs1.write("b.txt", "b".toByteArray())
+
+            val result = it.fs("main", back = 1)
+            assertTrue(result.exists("a.txt"))
+            assertFalse(result.exists("b.txt"))
+        }
+    }
+
+    @Test
+    fun `fs throws on missing ref`() {
+        val store = createStore()
+        store.use {
+            assertThrows<NoSuchElementException> {
+                it.fs("nonexistent")
+            }
+        }
+    }
+
+    @Test
+    fun `fs branch priority over tag`() {
+        val store = createStore()
+        store.use {
+            val fs = it.branches["main"].write("x.txt", "x".toByteArray())
+            it.tags["main"] = fs
+
+            val result = it.fs("main")
+            assertTrue(result.writable)  // branch wins
+        }
+    }
 }

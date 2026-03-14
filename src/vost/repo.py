@@ -310,6 +310,39 @@ class GitStore:
     def __repr__(self) -> str:
         return f"GitStore({self._repo.path!r})"
 
+    def fs(self, ref: str, *, back: int = 0) -> FS:
+        """Get an FS snapshot for any ref (branch, tag, or commit hash).
+
+        Resolution order: branches → tags → commit hash.
+        Writable for branches, read-only for tags and commit hashes.
+
+        Args:
+            ref: Branch name, tag name, or commit hash (full or short).
+            back: Walk back N ancestor commits (default 0).
+
+        Returns:
+            FS snapshot for the resolved ref.
+
+        Raises:
+            KeyError: If ref cannot be resolved.
+        """
+        from .fs import FS
+
+        if ref in self.branches:
+            result = self.branches[ref]
+        elif ref in self.tags:
+            result = self.tags[ref]
+        else:
+            obj = self._repo.get(ref)
+            if obj is None:
+                raise KeyError(f"ref not found: {ref!r}")
+            if obj.type_num != 1:
+                raise KeyError(f"not a commit: {ref!r}")
+            result = FS(self, obj.id, writable=False)
+        if back:
+            result = result.back(back)
+        return result
+
     @classmethod
     def open(
         cls,

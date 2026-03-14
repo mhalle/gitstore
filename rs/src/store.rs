@@ -127,12 +127,35 @@ impl GitStore {
         Ok(())
     }
 
-    /// Return a detached (read-only) [`Fs`] for a commit identified by hex SHA.
+    /// Return an [`Fs`] for any ref string (branch, tag, or commit hash).
     ///
-    /// The returned snapshot is not bound to any branch and cannot be written to.
-    pub fn fs(&self, hash: &str) -> Result<Fs> {
-        let oid = git2::Oid::from_str(hash)
-            .map_err(|e| Error::git_msg(format!("invalid hash: {}", e)))?;
+    /// Resolution order: branches → tags → commit hash.
+    /// Branches return a writable `Fs`; tags and hashes return read-only.
+    ///
+    /// # Errors
+    /// Returns [`Error::NotFound`] if the ref cannot be resolved.
+    pub fn fs(&self, ref_str: &str) -> Result<Fs> {
+        // Try branch first
+        if let Ok(fs) = self.branches().get(ref_str) {
+            return Ok(fs);
+        }
+        // Try tag
+        if let Ok(fs) = self.tags().get(ref_str) {
+            return Ok(fs);
+        }
+        // Fall back to commit hash
+        let oid = git2::Oid::from_str(ref_str)
+            .map_err(|_| Error::not_found(format!("ref not found: '{}'", ref_str)))?;
+        {
+            let repo = self.inner.repo.lock()
+                .map_err(|e| Error::git_msg(e.to_string()))?;
+            // Verify it's a commit
+            let obj = repo.find_object(oid, None)
+                .map_err(|_| Error::not_found(format!("ref not found: '{}'", ref_str)))?;
+            if obj.kind() != Some(git2::ObjectType::Commit) {
+                return Err(Error::not_found(format!("ref not found: '{}'", ref_str)));
+            }
+        }
         Fs::from_commit(Arc::clone(&self.inner), oid, None, Some(false))
     }
 
