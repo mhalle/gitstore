@@ -158,6 +158,32 @@ class TestBranchSet:
         ])
         assert result.exit_code == 0, result.output
 
+    def test_set_squash(self, runner, repo_with_files):
+        """branch set --squash creates a single-commit branch."""
+        from vost import GitStore
+        result = runner.invoke(main, [
+            "branch", "--repo", repo_with_files, "set", "squashed",
+            "--ref", "main", "--squash"
+        ])
+        assert result.exit_code == 0, result.output
+        store = GitStore.open(repo_with_files, create=False)
+        fs = store.branches["squashed"]
+        assert fs.read("hello.txt") == b"hello world\n"
+        assert fs.parent is None  # squashed = root commit
+
+    def test_set_squash_in_place(self, runner, repo_with_files):
+        """branch set --squash -f squashes a branch in place."""
+        result = runner.invoke(main, [
+            "branch", "--repo", repo_with_files, "set", "main",
+            "--squash", "-f"
+        ])
+        assert result.exit_code == 0, result.output
+        from vost import GitStore
+        store = GitStore.open(repo_with_files, create=False)
+        fs = store.branches["main"]
+        assert fs.read("hello.txt") == b"hello world\n"
+        assert fs.parent is None
+
     def test_set_unknown_ref_error(self, runner, initialized_repo):
         result = runner.invoke(main, [
             "branch", "--repo", initialized_repo, "set", "bad", "--ref", "nonexistent"
