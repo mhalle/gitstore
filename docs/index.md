@@ -18,8 +18,8 @@ from vost import GitStore
 
 repo = GitStore.open("data.git")
 fs = repo.branches["main"]
-fs = fs.write("hello.txt", b"Hello, world!")
-print(fs.read("hello.txt"))  # b'Hello, world!'
+fs = fs.write_text("hello.txt", "Hello, world!")
+print(fs.read_text("hello.txt"))  # 'Hello, world!'
 ```
 
 ## Hello world (CLI)
