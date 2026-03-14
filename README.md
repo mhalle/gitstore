@@ -1,5 +1,7 @@
 # vost
 
+**[Documentation](https://mhalle.github.io/vost/)**
+
 vost is a versioned filesystem backed by bare Git repositories. Store, retrieve, and version directory trees of files with text and binary data using an immutable-snapshot API. Unlike Git, every write (or batch of writes and deletes) produces a new commit. Old snapshots remain accessible forever.
 
 The repositories are standard Git repositories that can be manipulated with Git tools as well.
@@ -352,7 +354,7 @@ main~3:file.txt        3 commits back on main
 
 This applies to `cp`, `sync`, `rm`, `mv`, `ls`, `cat`, and other commands. For `ls`, `cat`, `rm`, and `write` the `:` is optional (arguments are always repo paths), but it is **required** for `cp`, `sync`, and `mv` to distinguish repo paths from local paths.
 
-For full details on path parsing, ancestor syntax (`~N`), and interaction with flags, see [Path Syntax](https://github.com/mhalle/vost/blob/master/docs/paths.md).
+For full details on path parsing, ancestor syntax (`~N`), and interaction with flags, see [Path Syntax](https://mhalle.github.io/vost/paths/).
 
 ```bash
 # Repository management
@@ -419,7 +421,7 @@ vost serve --all --cors                           # all refs with CORS
 vost gitserve
 ```
 
-For full CLI documentation, see [CLI Reference](https://github.com/mhalle/vost/blob/master/docs/cli.md).
+For full CLI documentation, see [CLI Reference](https://mhalle.github.io/vost/cli/).
 
 ## Git notes
 
@@ -460,11 +462,12 @@ for commit_hash, text in ns.items():
 
 ## Documentation
 
-- [Documentation hub](https://github.com/mhalle/vost/blob/master/docs/index.md) -- quick start and navigation
-- [Python API Reference](https://github.com/mhalle/vost/blob/master/docs/api.md) -- classes, methods, and data types
-- [CLI Reference](https://github.com/mhalle/vost/blob/master/docs/cli.md) -- the `vost` command-line tool
-- [CLI Tutorial](https://github.com/mhalle/vost/blob/master/docs/cli-tutorial.md) -- learn the CLI step by step
-- [Path Syntax](https://github.com/mhalle/vost/blob/master/docs/paths.md) -- how `ref:path` works across commands
+- [Documentation](https://mhalle.github.io/vost/) -- quick start and navigation
+- [Python API Reference](https://mhalle.github.io/vost/api/) -- classes, methods, and data types
+- [CLI Reference](https://mhalle.github.io/vost/cli/) -- the `vost` command-line tool
+- [CLI Tutorial](https://mhalle.github.io/vost/cli-tutorial/) -- learn the CLI step by step
+- [Path Syntax](https://mhalle.github.io/vost/paths/) -- how `ref:path` works across commands
+- [fsspec Integration](https://mhalle.github.io/vost/fsspec/) -- use vost with pandas, xarray, dask
 - [GitHub Repository](https://github.com/mhalle/vost) -- source code, issues, and releases
 
 ## Language ports
