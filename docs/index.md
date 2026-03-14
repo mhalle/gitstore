@@ -5,12 +5,13 @@ vost is a versioned key-value filesystem backed by bare Git repositories. Every 
 ## Quick install
 
 ```
-pip install vost
+pip install vost            # core library
+pip install "vost[cli]"    # adds the vost command-line tool
 ```
 
 Requires Python 3.10+ and [dulwich](https://www.dulwich.io/).
 
-## Hello world
+## Hello world (Python)
 
 ```python
 from vost import GitStore
@@ -19,6 +20,18 @@ repo = GitStore.open("data.git")
 fs = repo.branches["main"]
 fs = fs.write("hello.txt", b"Hello, world!")
 print(fs.read("hello.txt"))  # b'Hello, world!'
+```
+
+## Hello world (CLI)
+
+```bash
+export VOST_REPO=data.git
+vost init
+echo "Hello, world!" | vost write hello.txt
+vost cat hello.txt                # Hello, world!
+vost ls                           # hello.txt
+vost cp local-dir/ :backup        # copy a directory into the repo
+vost log                          # commit history
 ```
 
 ## Reference docs
