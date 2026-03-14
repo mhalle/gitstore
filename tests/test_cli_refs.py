@@ -171,7 +171,7 @@ class TestBranchSet:
 
         result = runner.invoke(main, [
             "branch", "--repo", repo_with_files, "set", "main",
-            "--append", "--ref", "feature"
+            "--append", "--squash", "--ref", "feature"
         ])
         assert result.exit_code == 0, result.output
 
@@ -181,11 +181,20 @@ class TestBranchSet:
         assert fs.parent is not None
         assert fs.parent.commit_hash == main_before
 
+    def test_set_append_without_squash_not_implemented(self, runner, repo_with_files):
+        """--append without --squash is not yet implemented."""
+        result = runner.invoke(main, [
+            "branch", "--repo", repo_with_files, "set", "main",
+            "--append", "--ref", "main"
+        ])
+        assert result.exit_code != 0
+        assert "not yet implemented" in result.output.lower()
+
     def test_set_append_requires_existing_branch(self, runner, repo_with_files):
         """--append on a nonexistent branch fails."""
         result = runner.invoke(main, [
             "branch", "--repo", repo_with_files, "set", "nonexistent",
-            "--append", "--ref", "main"
+            "--append", "--squash", "--ref", "main"
         ])
         assert result.exit_code != 0
         assert "existing branch" in result.output.lower()

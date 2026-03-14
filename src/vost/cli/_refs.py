@@ -61,6 +61,9 @@ def branch_set(ctx, name, branch, force, empty, squash, append, ref, at_path, ma
     if append:
         if empty:
             raise click.ClickException("--append cannot be combined with --empty")
+        if not squash:
+            raise click.ClickException(
+                "--append without --squash (replay full commit chain) is not yet implemented")
         if name not in store.branches:
             raise click.ClickException(f"--append requires existing branch: {name}")
         branch = branch or _current_branch(store)
