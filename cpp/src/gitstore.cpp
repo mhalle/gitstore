@@ -183,6 +183,83 @@ Fs GitStore::fs(const std::string& ref) {
     return Fs(inner_, ref, tree_hex, std::nullopt, false);
 }
 
+size_t GitStore::pack() {
+    std::lock_guard<std::mutex> lk(inner_->mutex);
+
+    git_odb* odb = nullptr;
+    if (git_repository_odb(&odb, inner_->repo) != 0)
+        throw_git("git_repository_odb");
+
+    // Collect all object OIDs
+    struct OidCollector {
+        std::vector<git_oid> oids;
+    };
+    OidCollector collector;
+
+    int rc = git_odb_foreach(odb, [](const git_oid* oid, void* payload) -> int {
+        auto* c = static_cast<OidCollector*>(payload);
+        c->oids.push_back(*oid);
+        return 0;
+    }, &collector);
+
+    if (rc != 0) {
+        git_odb_free(odb);
+        throw_git("git_odb_foreach");
+    }
+
+    if (collector.oids.empty()) {
+        git_odb_free(odb);
+        return 0;
+    }
+
+    // Create pack builder and insert all objects
+    git_packbuilder* pb = nullptr;
+    if (git_packbuilder_new(&pb, inner_->repo) != 0) {
+        git_odb_free(odb);
+        throw_git("git_packbuilder_new");
+    }
+
+    size_t count = 0;
+    for (auto& oid : collector.oids) {
+        if (git_packbuilder_insert(pb, &oid, nullptr) == 0)
+            ++count;
+    }
+
+    if (count > 0) {
+        // Write packfile to objects/pack/
+        auto pack_dir = inner_->path / "objects" / "pack";
+        std::filesystem::create_directories(pack_dir);
+        if (git_packbuilder_write(pb, pack_dir.string().c_str(), 0644, nullptr, nullptr) != 0) {
+            git_packbuilder_free(pb);
+            git_odb_free(odb);
+            throw_git("git_packbuilder_write");
+        }
+
+        // Remove loose object files
+        auto objects_dir = inner_->path / "objects";
+        for (auto& oid : collector.oids) {
+            char hex[GIT_OID_HEXSZ + 1];
+            git_oid_tostr(hex, sizeof(hex), &oid);
+            auto fan = objects_dir / std::string(hex, 2);
+            auto loose = fan / std::string(hex + 2);
+            if (std::filesystem::exists(loose)) {
+                std::filesystem::remove(loose);
+                // Remove empty fan-out directory (ignore errors)
+                std::error_code ec;
+                std::filesystem::remove(fan, ec);
+            }
+        }
+    }
+
+    git_packbuilder_free(pb);
+    git_odb_free(odb);
+    return count;
+}
+
+size_t GitStore::gc() {
+    return pack();
+}
+
 MirrorDiff GitStore::backup(const std::string& dest, const BackupOptions& opts) {
     return mirror::backup(inner_, dest, opts);
 }

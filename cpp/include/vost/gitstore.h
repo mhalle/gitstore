@@ -82,6 +82,24 @@ public:
     /// Return a NoteDict for accessing git notes.
     NoteDict notes();
 
+    // -- Maintenance --------------------------------------------------------
+
+    /// Pack loose objects into a packfile.
+    ///
+    /// Consolidates loose git objects into a single packfile for better
+    /// performance and disk usage.  Implementations may also perform
+    /// additional housekeeping as a side effect.
+    ///
+    /// @return Number of objects packed.
+    size_t pack();
+
+    /// Run garbage collection: clean up and pack loose objects.
+    ///
+    /// Equivalent to pack() in the current implementation.
+    ///
+    /// @return Number of objects packed.
+    size_t gc();
+
     // -- Mirror -------------------------------------------------------------
 
     /// Push local refs to @p dest, creating a mirror or bundle.

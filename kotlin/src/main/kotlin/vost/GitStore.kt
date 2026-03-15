@@ -119,6 +119,42 @@ class GitStore private constructor(
         format: String? = null,
     ): MirrorDiff = MirrorOps.restore(this, url, dryRun, refs, refMap, format)
 
+    /**
+     * Pack loose objects into a packfile.
+     *
+     * Consolidates loose git objects into a single packfile for better
+     * performance and disk usage.  This implementation uses JGit's GC
+     * repack which may also perform additional housekeeping.
+     *
+     * @return Number of objects packed (as reported by the repacker).
+     */
+    fun pack(): Int {
+        val fileRepo = repo as org.eclipse.jgit.internal.storage.file.FileRepository
+        val jgitGc = org.eclipse.jgit.internal.storage.file.GC(fileRepo)
+        jgitGc.setExpireAgeMillis(Long.MAX_VALUE)  // don't prune
+        jgitGc.setPackExpireAgeMillis(Long.MAX_VALUE)
+        val looseCount = jgitGc.getStatistics().numberOfLooseObjects
+        jgitGc.repack()
+        jgitGc.prunePacked()
+        return looseCount.toInt()
+    }
+
+    /**
+     * Run garbage collection: clean up and pack loose objects.
+     *
+     * Uses JGit's built-in GC which packs loose objects and may
+     * prune unreachable objects.
+     *
+     * @return Number of objects packed.
+     */
+    fun gc(): Int {
+        val fileRepo = repo as org.eclipse.jgit.internal.storage.file.FileRepository
+        val jgitGc = org.eclipse.jgit.internal.storage.file.GC(fileRepo)
+        val looseCount = jgitGc.getStatistics().numberOfLooseObjects
+        jgitGc.gc().get()  // blocking call
+        return looseCount.toInt()
+    }
+
     companion object {
         /**
          * Open or create a bare git repository.

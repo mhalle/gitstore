@@ -4,6 +4,19 @@ All notable changes to vost are documented in this file.
 
 ## Unreleased
 
+## v0.75.2 / TS v0.9.9 / Rust v0.9.8 / C++ v0.9.1 / Kotlin v0.9.10 (2026-03-15)
+
+**Added (all ports):**
+
+- `store.pack()` — pack loose objects into a packfile. Returns number of objects packed.
+- `store.gc()` — native garbage collection (clean up + pack). No longer requires `git` to be installed.
+- TypeScript: `pack()` and `gc()` throw "not implemented" (isomorphic-git lacks ODB API).
+
+**Changed (Python CLI):**
+
+- `vost gc` now uses native `store.gc()` instead of shelling out to `git gc`. No longer requires `git`.
+- Added `vost pack` CLI command for pack-only operation.
+
 ## v0.75.1 (2026-03-14)
 
 **Added:**

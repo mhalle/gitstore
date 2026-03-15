@@ -117,35 +117,35 @@ def destroy(ctx, force):
 @_repo_option
 @click.pass_context
 def gc(ctx):
-    """Run garbage collection on the repository.
+    """Clean up temporary files and pack loose objects.
 
-    Removes unreachable objects (orphaned blobs, etc.) and repacks
-    the object store.  Requires git to be installed.
+    Cleans up incomplete temporary pack files, then consolidates
+    loose objects into packfiles.  Does not require git.
     """
-    import shutil
-    import subprocess
-
     repo_path = _require_repo(ctx)
-    if not os.path.exists(repo_path):
-        raise click.ClickException(f"Repository not found: {repo_path}")
+    store = _open_store(repo_path)
+    count = store.gc()
+    _status(ctx, f"gc: packed {count} object(s)")
 
-    git = shutil.which("git")
-    if git is None:
-        raise click.ClickException(
-            "git is not installed or not on PATH — gc requires git"
-        )
 
-    result = subprocess.run(
-        [git, "gc"],
-        cwd=repo_path,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        msg = result.stderr.strip() or result.stdout.strip() or "unknown error"
-        raise click.ClickException(f"git gc failed: {msg}")
+# ---------------------------------------------------------------------------
+# pack
+# ---------------------------------------------------------------------------
 
-    _status(ctx, f"gc: {repo_path}")
+@main.command()
+@_repo_option
+@click.pass_context
+def pack(ctx):
+    """Pack loose objects into a packfile.
+
+    Consolidates loose git objects into a single packfile for better
+    I/O performance and disk usage.  Does not prune unreachable objects
+    or consolidate existing packfiles.  Does not require git.
+    """
+    repo_path = _require_repo(ctx)
+    store = _open_store(repo_path)
+    count = store.pack()
+    _status(ctx, f"pack: packed {count} object(s)")
 
 
 # ---------------------------------------------------------------------------

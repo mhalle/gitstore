@@ -243,6 +243,87 @@ impl GitStore {
         crate::mirror::bundle_export(&self.inner.path, path, refs, rename, squash)
     }
 
+    /// Pack loose objects into a packfile.
+    ///
+    /// Consolidates loose git objects into a single packfile for better
+    /// performance and disk usage.  Implementations may also perform
+    /// additional housekeeping (e.g. garbage collection) as a side effect.
+    ///
+    /// # Returns
+    /// The number of objects packed.
+    pub fn pack(&self) -> Result<usize> {
+        // Find loose objects by scanning objects/?? directories
+        let objects_dir = self.inner.path.join("objects");
+        let mut loose_oids = Vec::new();
+
+        for fan in 0..=0xffu8 {
+            let fan_dir = objects_dir.join(format!("{:02x}", fan));
+            if !fan_dir.is_dir() {
+                continue;
+            }
+            let entries = match std::fs::read_dir(&fan_dir) {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+            for entry in entries.flatten() {
+                let name = entry.file_name();
+                let name_str = name.to_string_lossy();
+                if name_str.len() == 38 && name_str.chars().all(|c| c.is_ascii_hexdigit()) {
+                    let hex = format!("{:02x}{}", fan, name_str);
+                    if let Ok(oid) = git2::Oid::from_str(&hex) {
+                        loose_oids.push(oid);
+                    }
+                }
+            }
+        }
+
+        if loose_oids.is_empty() {
+            return Ok(0);
+        }
+
+        let repo = self.inner.repo.lock()
+            .map_err(|e| Error::git_msg(e.to_string()))?;
+        let mut pb = repo.packbuilder().map_err(Error::git)?;
+
+        for oid in &loose_oids {
+            pb.insert_object(*oid, None).map_err(Error::git)?;
+        }
+
+        // Write pack data to a buffer, then to files
+        let mut buf = git2::Buf::new();
+        pb.write_buf(&mut buf).map_err(Error::git)?;
+
+        // Use OdbPackwriter to write pack + index atomically
+        let odb = repo.odb().map_err(Error::git)?;
+        let mut indexer = odb.packwriter().map_err(Error::git)?;
+        use std::io::Write;
+        indexer.write_all(&*buf).map_err(|e| Error::Io(e))?;
+        indexer.commit().map_err(Error::git)?;
+
+        // Remove loose object files that are now packed
+        let count = loose_oids.len();
+        for oid in &loose_oids {
+            let hex = oid.to_string();
+            let loose_path = objects_dir.join(&hex[..2]).join(&hex[2..]);
+            let _ = std::fs::remove_file(&loose_path);
+            let fan_dir = objects_dir.join(&hex[..2]);
+            let _ = std::fs::remove_dir(&fan_dir); // only succeeds if empty
+        }
+
+        Ok(count)
+    }
+
+    /// Run garbage collection: clean up and pack loose objects.
+    ///
+    /// This is equivalent to [`pack`](Self::pack) in the current implementation.
+    /// Future versions may add pruning of unreachable objects.
+    ///
+    /// # Returns
+    /// The number of objects packed.
+    pub fn gc(&self) -> Result<usize> {
+        self.pack()
+    }
+
     /// Import refs from a bundle file (additive — no deletes).
     ///
     /// Reads a v2 git bundle created by [`bundle_export`](Self::bundle_export)

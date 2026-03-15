@@ -16,7 +16,7 @@ Pass `-v` before any command for status messages on stderr.
 
 | Category | Commands |
 |----------|----------|
-| [Repository Management](#repository-management) | [init](#init), [destroy](#destroy), [gc](#gc) |
+| [Repository Management](#repository-management) | [init](#init), [destroy](#destroy), [gc](#gc), [pack](#pack) |
 | [Everyday Commands](#everyday-commands) | [cp](#cp), [sync](#sync), [ls](#ls), [cat](#cat), [hash](#hash), [rm](#rm), [mv](#mv), [write](#write) |
 | [History](#history) | [log](#log), [diff](#diff), [cmp](#cmp), [undo](#undo), [redo](#redo), [reflog](#reflog) |
 | [Refs](#refs) | [branch](#branch), [tag](#tag), [note](#note) |
@@ -101,10 +101,18 @@ vost destroy -f              # force
 
 ### gc
 
-Run garbage collection on the repository. Removes unreachable objects (orphaned blobs, etc.) and repacks the object store. Requires `git` to be installed.
+Clean up temporary files and pack loose objects. Does not require `git`.
 
 ```bash
 vost gc
+```
+
+### pack
+
+Pack loose objects into a packfile. Consolidates loose git objects for better I/O performance and disk usage. Does not require `git`.
+
+```bash
+vost pack
 ```
 
 ---

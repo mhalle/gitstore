@@ -492,6 +492,41 @@ class GitStore:
         from .mirror import bundle_export
         bundle_export(self, path, refs=refs, squash=squash, progress=progress)
 
+    def pack(self, *, progress=None) -> int:
+        """Pack loose objects into a packfile.
+
+        Consolidates loose git objects into a single packfile for better
+        performance and disk usage.  Implementations may also perform
+        additional housekeeping (e.g. garbage collection) as a side effect.
+
+        Args:
+            progress: Optional progress callback.
+
+        Returns:
+            Number of objects packed.
+        """
+        return self._repo._drepo.object_store.pack_loose_objects(progress=progress)
+
+    def gc(self, *, progress=None) -> int:
+        """Run garbage collection: clean up temporary files and pack loose objects.
+
+        Cleans up incomplete temporary pack files, then consolidates loose
+        objects into packfiles.  This is a native implementation — it does
+        not require ``git`` to be installed.
+
+        Note: this does not prune unreachable objects. For full GC with
+        pruning, use ``git gc`` directly on the repository.
+
+        Args:
+            progress: Optional progress callback.
+
+        Returns:
+            Number of objects packed.
+        """
+        store = self._repo._drepo.object_store
+        store.prune()
+        return store.pack_loose_objects(progress=progress)
+
     def bundle_import(
         self,
         path: str,

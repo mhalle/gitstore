@@ -70,6 +70,30 @@ export class GitStore {
     return result;
   }
 
+  /**
+   * Pack loose objects into a packfile.
+   *
+   * Not implemented in the TypeScript port — isomorphic-git does not
+   * expose object database or packing APIs.
+   *
+   * @throws {Error} Always throws "not implemented".
+   */
+  async pack(): Promise<number> {
+    throw new Error('pack() is not implemented in the TypeScript port');
+  }
+
+  /**
+   * Run garbage collection.
+   *
+   * Not implemented in the TypeScript port — isomorphic-git does not
+   * expose object database or packing APIs.
+   *
+   * @throws {Error} Always throws "not implemented".
+   */
+  async gc(): Promise<number> {
+    throw new Error('gc() is not implemented in the TypeScript port');
+  }
+
   toString(): string {
     return `GitStore('${this._gitdir}')`;
   }
