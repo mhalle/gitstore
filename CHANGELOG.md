@@ -4,6 +4,14 @@ All notable changes to vost are documented in this file.
 
 ## Unreleased
 
+## v0.77.1 / Rust v0.10.4 (2026-03-16)
+
+**Fixed (Python + Rust CLI):**
+
+- `serve`: directory entries in listings now show trailing `/` (HTML and JSON)
+- `serve`: ~100+ source code, config, and data file extensions (`.py`, `.rs`, `.toml`, `.sh`, etc.) now served as `text/plain` so browsers display rather than download
+- `serve`: well-known extensionless filenames (`Makefile`, `Dockerfile`, `LICENSE`, etc.) also served as text
+
 ## v0.77.0 / Rust v0.10.3 (2026-03-16)
 
 **Added (Python + Rust CLI):**
