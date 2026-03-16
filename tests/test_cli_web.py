@@ -1124,3 +1124,62 @@ class TestServeCLI:
             assert b"hello.txt" in body
         finally:
             _stop_server(proc)
+
+    def test_serve_log_file(self, serve_repo, tmp_path):
+        log_path = str(tmp_path / "access.log")
+        proc, port = _start_server(serve_repo, ["--log-file", log_path])
+        try:
+            _http_get(port, "/hello.txt")
+            time.sleep(0.2)  # let log flush
+            log_content = open(log_path).read()
+            # CLF line should contain method, path, status, size
+            assert "GET /hello.txt HTTP/1.1" in log_content
+            assert " 200 " in log_content
+        finally:
+            _stop_server(proc)
+
+    def test_serve_quiet_still_logs_to_file(self, serve_repo, tmp_path):
+        """--quiet suppresses stderr but --log-file still receives entries.
+
+        Note: _start_server already passes -q, so --quiet is already active.
+        """
+        log_path = str(tmp_path / "access.log")
+        proc, port = _start_server(serve_repo, ["--log-file", log_path])
+        try:
+            _http_get(port, "/hello.txt")
+            time.sleep(0.2)
+            log_content = open(log_path).read()
+            assert "GET /hello.txt HTTP/1.1" in log_content
+        finally:
+            _stop_server(proc)
+
+    def test_serve_log_file_404(self, serve_repo, tmp_path):
+        log_path = str(tmp_path / "access.log")
+        proc, port = _start_server(serve_repo, ["--log-file", log_path])
+        try:
+            _http_get(port, "/nonexistent.txt")
+            time.sleep(0.2)
+            log_content = open(log_path).read()
+            assert "GET /nonexistent.txt HTTP/1.1" in log_content
+            assert " 404 " in log_content
+        finally:
+            _stop_server(proc)
+
+    def test_serve_log_clf_format(self, serve_repo, tmp_path):
+        """Verify the access log line matches CLF format."""
+        log_path = str(tmp_path / "access.log")
+        proc, port = _start_server(serve_repo, ["--log-file", log_path])
+        try:
+            _http_get(port, "/hello.txt")
+            time.sleep(0.2)
+            log_content = open(log_path).read().strip()
+            # CLF: <ip> - - [<timestamp>] "<method> <path> HTTP/1.1" <status> <size>
+            clf_pattern = re.compile(
+                r'^[\d.]+ - - \[\d{2}/\w{3}/\d{4}:\d{2}:\d{2}:\d{2} [+\-]\d{4}\] '
+                r'"GET /hello\.txt HTTP/1\.1" 200 \d+$'
+            )
+            lines = [l for l in log_content.split("\n") if "/hello.txt" in l]
+            assert len(lines) >= 1
+            assert clf_pattern.match(lines[0]), f"CLF mismatch: {lines[0]!r}"
+        finally:
+            _stop_server(proc)

@@ -1,7 +1,7 @@
 use clap::Args;
+use std::io::Write;
 
 use crate::store::GitStore;
-use crate::types::FileType;
 
 use super::error::CliError;
 use super::helpers::*;
@@ -34,9 +34,12 @@ pub struct ServeArgs {
     /// Open the URL in the default browser on start.
     #[arg(long = "open")]
     pub open_browser: bool,
-    /// Suppress per-request log output.
+    /// Suppress access log on stderr (errors still logged; --log-file still writes).
     #[arg(short, long)]
     pub quiet: bool,
+    /// Append access log to file (CLF format).
+    #[arg(long)]
+    pub log_file: Option<String>,
     /// Maximum file size to serve in MB (default: 250, 0 = unlimited).
     #[arg(long, default_value_t = 250)]
     pub max_file_size: u64,
@@ -181,6 +184,85 @@ fn respond_404(request: tiny_http::Request, message: &str) {
 }
 
 // ---------------------------------------------------------------------------
+// Access logging (CLF)
+// ---------------------------------------------------------------------------
+
+struct AccessLogger {
+    quiet: bool,
+    file: Option<std::fs::File>,
+}
+
+impl AccessLogger {
+    fn new(quiet: bool, log_file: Option<&str>) -> std::io::Result<Self> {
+        let file = match log_file {
+            Some(p) => Some(
+                std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(p)?,
+            ),
+            None => None,
+        };
+        Ok(Self { quiet, file })
+    }
+
+    fn log(&mut self, client_ip: &str, method: &str, path: &str, status: u16, size: usize) {
+        let now = chrono::Utc::now().format("%d/%b/%Y:%H:%M:%S %z");
+        let line = format!(
+            "{} - - [{}] \"{} {} HTTP/1.1\" {} {}\n",
+            client_ip, now, method, path, status, size
+        );
+        if !self.quiet {
+            eprint!("{}", line);
+        }
+        if let Some(ref mut f) = self.file {
+            let _ = f.write_all(line.as_bytes());
+            let _ = f.flush();
+        }
+    }
+}
+
+struct ResponseInfo {
+    status: u16,
+    size: usize,
+}
+
+fn respond_tracked(
+    request: tiny_http::Request,
+    status: u16,
+    content_type: &str,
+    body: &[u8],
+    extra_headers: &[(&str, &str)],
+) -> ResponseInfo {
+    let size = body.len();
+    respond(request, status, content_type, body, extra_headers);
+    ResponseInfo { status, size }
+}
+
+fn respond_owned_tracked(
+    request: tiny_http::Request,
+    status: u16,
+    content_type: &str,
+    body: Vec<u8>,
+    extra_headers: &[(&str, &str)],
+) -> ResponseInfo {
+    let size = body.len();
+    respond_owned(request, status, content_type, body, extra_headers);
+    ResponseInfo { status, size }
+}
+
+fn respond_304_tracked(request: tiny_http::Request, etag: &str) -> ResponseInfo {
+    respond_304(request, etag);
+    ResponseInfo { status: 304, size: 0 }
+}
+
+fn respond_404_tracked(request: tiny_http::Request, message: &str) -> ResponseInfo {
+    let size = message.len();
+    respond_404(request, message);
+    ResponseInfo { status: 404, size }
+}
+
+// ---------------------------------------------------------------------------
 // Serving logic
 // ---------------------------------------------------------------------------
 
@@ -194,7 +276,7 @@ fn serve_file(
     no_cache: bool,
     ref_label: &str,
     max_file_size: u64,
-) {
+) -> ResponseInfo {
     // Check size before reading
     if max_file_size > 0 {
         if let Ok(file_size) = fs.size(path) {
@@ -203,14 +285,14 @@ fn serve_file(
                     "File too large: {} ({} bytes, limit {} bytes)",
                     path, file_size, max_file_size
                 );
-                return respond(request, 413, "text/plain", msg.as_bytes(), &[]);
+                return respond_tracked(request, 413, "text/plain", msg.as_bytes(), &[]);
             }
         }
     }
 
     let data = match fs.read(path) {
         Ok(d) => d,
-        Err(_) => return respond_404(request, &format!("Not found: {}", path)),
+        Err(_) => return respond_404_tracked(request, &format!("Not found: {}", path)),
     };
 
     let mut headers: Vec<(&str, &str)> = vec![
@@ -232,10 +314,10 @@ fn serve_file(
             "type": "file",
         });
         let body = json.to_string();
-        respond(request, 200, "application/json", body.as_bytes(), &headers);
+        respond_tracked(request, 200, "application/json", body.as_bytes(), &headers)
     } else {
         let mime = guess_mime(path);
-        respond_owned(request, 200, mime, data, &headers);
+        respond_owned_tracked(request, 200, mime, data, &headers)
     }
 }
 
@@ -249,10 +331,10 @@ fn serve_dir(
     want_json: bool,
     cors: bool,
     no_cache: bool,
-) {
+) -> ResponseInfo {
     let entries = match fs.ls(path) {
         Ok(e) => e,
-        Err(_) => return respond_404(request, &format!("Not found: {}", path)),
+        Err(_) => return respond_404_tracked(request, &format!("Not found: {}", path)),
     };
 
     let mut headers: Vec<(&str, &str)> = vec![
@@ -280,7 +362,7 @@ fn serve_dir(
             "type": "directory",
         });
         let body = json.to_string();
-        respond(request, 200, "application/json", body.as_bytes(), &headers);
+        respond_tracked(request, 200, "application/json", body.as_bytes(), &headers)
     } else {
         let display_path = if path.is_empty() { "/" } else { path };
         let mut html = format!(
@@ -300,13 +382,13 @@ fn serve_dir(
             ));
         }
         html.push_str("</ul></body></html>");
-        respond(
+        respond_tracked(
             request,
             200,
             "text/html; charset=utf-8",
             html.as_bytes(),
             &headers,
-        );
+        )
     }
 }
 
@@ -316,7 +398,7 @@ fn serve_ref_listing(
     base_path: &str,
     want_json: bool,
     cors: bool,
-) {
+) -> ResponseInfo {
     let branches = store.branches().list().unwrap_or_default();
     let tags = store.tags().list().unwrap_or_default();
 
@@ -331,7 +413,7 @@ fn serve_ref_listing(
             "tags": tags,
         });
         let body = json.to_string();
-        respond(request, 200, "application/json", body.as_bytes(), &headers);
+        respond_tracked(request, 200, "application/json", body.as_bytes(), &headers)
     } else {
         let mut html = String::from("<html><body><h1>Branches</h1><ul>");
         for b in &branches {
@@ -350,13 +432,13 @@ fn serve_ref_listing(
             ));
         }
         html.push_str("</ul></body></html>");
-        respond(
+        respond_tracked(
             request,
             200,
             "text/html; charset=utf-8",
             html.as_bytes(),
             &headers,
-        );
+        )
     }
 }
 
@@ -369,7 +451,7 @@ fn serve_path(
     cors: bool,
     no_cache: bool,
     max_file_size: u64,
-) {
+) -> ResponseInfo {
     let etag = format!(
         "\"{}\"",
         fs.commit_hash().unwrap_or_default()
@@ -383,7 +465,7 @@ fn serve_path(
         .map(|h| h.value.as_str().to_string());
     if let Some(ref inm) = if_none_match {
         if inm == &etag {
-            return respond_304(request, &etag);
+            return respond_304_tracked(request, &etag);
         }
     }
 
@@ -402,7 +484,7 @@ fn serve_path(
     }
 
     if !fs.exists(path).unwrap_or(false) {
-        return respond_404(request, &format!("Not found: {}", path));
+        return respond_404_tracked(request, &format!("Not found: {}", path));
     }
 
     if fs.is_dir(path).unwrap_or(false) {
@@ -419,6 +501,11 @@ fn serve_path(
 // ---------------------------------------------------------------------------
 
 pub fn cmd_serve(repo_path: &str, args: &ServeArgs, _verbose: bool) -> Result<(), CliError> {
+    env_logger::Builder::new()
+        .filter_level(log::LevelFilter::Info)
+        .format_timestamp(None)
+        .init();
+
     let store = open_store(repo_path)?;
 
     if args.all_refs
@@ -468,6 +555,9 @@ pub fn cmd_serve(repo_path: &str, args: &ServeArgs, _verbose: bool) -> Result<()
         0
     };
 
+    let mut access_logger = AccessLogger::new(args.quiet, args.log_file.as_deref())
+        .map_err(|e| CliError::new(format!("Failed to open log file: {}", e)))?;
+
     let addr = format!("{}:{}", args.host, args.port);
     let server = tiny_http::Server::http(&addr)
         .map_err(|e| CliError::new(format!("Failed to bind {}: {}", addr, e)))?;
@@ -478,8 +568,8 @@ pub fn cmd_serve(repo_path: &str, args: &ServeArgs, _verbose: bool) -> Result<()
         .map(|a| a.port())
         .unwrap_or(args.port);
     let url = format!("http://{}:{}{}/", args.host, actual_port, base_path);
-    eprintln!("Serving {} ({}) at {}", repo_path, mode_label, url);
-    eprintln!("Press Ctrl+C to stop.");
+    log::info!("Serving {} ({}) at {}", repo_path, mode_label, url);
+    log::info!("Press Ctrl+C to stop.");
 
     if args.open_browser {
         let _ = open_url(&url);
@@ -491,22 +581,16 @@ pub fn cmd_serve(repo_path: &str, args: &ServeArgs, _verbose: bool) -> Result<()
             Err(_) => break,
         };
 
-        // Log request
-        if !args.quiet {
-            eprintln!(
-                "{} - {} {}",
-                request
-                    .remote_addr()
-                    .map(|a| a.to_string())
-                    .unwrap_or_else(|| "-".to_string()),
-                request.method(),
-                request.url(),
-            );
-        }
+        let client_ip = request
+            .remote_addr()
+            .map(|a| a.ip().to_string())
+            .unwrap_or_else(|| "-".to_string());
+        let method = request.method().as_str().to_string();
+        let url_path = request.url().to_string();
 
         // Handle CORS preflight
-        if args.cors && request.method().as_str() == "OPTIONS" {
-            respond(
+        if args.cors && method == "OPTIONS" {
+            let info = respond_tracked(
                 request,
                 204,
                 "text/plain",
@@ -518,16 +602,18 @@ pub fn cmd_serve(repo_path: &str, args: &ServeArgs, _verbose: bool) -> Result<()
                     ("Access-Control-Expose-Headers", "ETag, Content-Length"),
                 ],
             );
+            access_logger.log(&client_ip, &method, &url_path, info.status, info.size);
             continue;
         }
 
         // Strip base path
-        let raw_path = request.url().to_string();
+        let raw_path = url_path.clone();
         let path = if !base_path.is_empty() {
             if let Some(rest) = raw_path.strip_prefix(&base_path) {
                 rest.to_string()
             } else {
-                respond_404(request, "Not found");
+                let info = respond_404_tracked(request, "Not found");
+                access_logger.log(&client_ip, &method, &url_path, info.status, info.size);
                 continue;
             }
         } else {
@@ -538,7 +624,7 @@ pub fn cmd_serve(repo_path: &str, args: &ServeArgs, _verbose: bool) -> Result<()
         // Percent-decode
         let path = percent_decode(&path);
 
-        if args.all_refs {
+        let info = if args.all_refs {
             // Multi-ref mode
             if path.is_empty() {
                 let want_json = request
@@ -546,48 +632,48 @@ pub fn cmd_serve(repo_path: &str, args: &ServeArgs, _verbose: bool) -> Result<()
                     .iter()
                     .any(|h| (h.field.as_str() == "Accept" || h.field.as_str() == "accept")
                         && h.value.as_str().contains("application/json"));
-                serve_ref_listing(request, &store, &base_path, want_json, args.cors);
-                continue;
-            }
+                serve_ref_listing(request, &store, &base_path, want_json, args.cors)
+            } else {
+                let (ref_name, rest) = match path.find('/') {
+                    Some(i) => (&path[..i], &path[i + 1..]),
+                    None => (path.as_str(), ""),
+                };
 
-            let (ref_name, rest) = match path.find('/') {
-                Some(i) => (&path[..i], &path[i + 1..]),
-                None => (path.as_str(), ""),
-            };
-
-            let fs = match store.fs(ref_name) {
-                Ok(fs) => fs,
-                Err(_) => {
-                    respond_404(request, &format!("Unknown ref: {}", ref_name));
-                    continue;
+                match store.fs(ref_name) {
+                    Ok(fs) => {
+                        let link_pfx = format!("{}/{}", base_path, ref_name);
+                        serve_path(request, &fs, ref_name, &link_pfx, rest, args.cors, args.no_cache, max_file_bytes)
+                    }
+                    Err(_) => {
+                        respond_404_tracked(request, &format!("Unknown ref: {}", ref_name))
+                    }
                 }
-            };
-
-            let link_pfx = format!("{}/{}", base_path, ref_name);
-            serve_path(request, &fs, ref_name, &link_pfx, rest, args.cors, args.no_cache, max_file_bytes);
+            }
         } else {
             // Single-ref mode: resolve fresh FS each request (live)
-            let fs = match resolve_fs(&store, &branch, &args.snap) {
-                Ok(fs) => fs,
-                Err(e) => {
-                    respond_404(request, &e.message);
-                    continue;
+            match resolve_fs(&store, &branch, &args.snap) {
+                Ok(fs) => {
+                    serve_path(
+                        request,
+                        &fs,
+                        &ref_label,
+                        &base_path,
+                        &path,
+                        args.cors,
+                        args.no_cache,
+                        max_file_bytes,
+                    )
                 }
-            };
+                Err(e) => {
+                    respond_404_tracked(request, &e.message)
+                }
+            }
+        };
 
-            serve_path(
-                request,
-                &fs,
-                &ref_label,
-                &base_path,
-                &path,
-                args.cors,
-                args.no_cache,
-                max_file_bytes,
-            );
-        }
+        access_logger.log(&client_ip, &method, &url_path, info.status, info.size);
     }
 
+    log::info!("Stopped.");
     Ok(())
 }
 
