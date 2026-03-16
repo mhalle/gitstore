@@ -90,10 +90,13 @@ jobs:
         with:
           path: artifacts
 
-      - name: Compute checksums
+      - name: Collect binaries and compute checksums
         run: |
-          cd artifacts
-          find . -type f -name 'vost-*' -exec mv {} . \;
+          mkdir -p release
+          for dir in artifacts/*/; do
+            cp "$dir"* release/ 2>/dev/null || true
+          done
+          cd release
           sha256sum vost-* > checksums-sha256.txt
           cat checksums-sha256.txt
 
@@ -116,5 +119,5 @@ jobs:
           name: "Rust CLI ${{ steps.version.outputs.version }}"
           body_path: release_notes.md
           files: |
-            artifacts/vost-*
-            artifacts/checksums-sha256.txt
+            release/vost-*
+            release/checksums-sha256.txt
