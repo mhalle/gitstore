@@ -180,6 +180,9 @@ pub struct HashArgs {
     pub branch: Option<String>,
     #[command(flatten)]
     pub snap: SnapshotArgs,
+    /// Output format.
+    #[arg(long, default_value = "text")]
+    pub format: OutputFormat,
 }
 
 pub fn cmd_hash(repo_path: &str, args: &HashArgs, _verbose: bool) -> Result<(), CliError> {
@@ -232,13 +235,25 @@ pub fn cmd_hash(repo_path: &str, args: &HashArgs, _verbose: bool) -> Result<(), 
             crate::Error::NotFound(_) => CliError::new(format!("Path not found: {}", p)),
             other => CliError::from(other),
         })?;
-        println!("{}", st.hash);
+        match args.format {
+            OutputFormat::Json | OutputFormat::Jsonl => {
+                println!("{}", serde_json::json!({"hash": st.hash, "type": "blob", "path": p}));
+            }
+            OutputFormat::Text => {
+                println!("{}", st.hash);
+            }
+        }
     } else {
-        println!(
-            "{}",
-            fs.commit_hash()
-                .ok_or_else(|| CliError::new("No commit in snapshot"))?
-        );
+        let hash = fs.commit_hash()
+            .ok_or_else(|| CliError::new("No commit in snapshot"))?;
+        match args.format {
+            OutputFormat::Json | OutputFormat::Jsonl => {
+                println!("{}", serde_json::json!({"hash": hash, "type": "commit"}));
+            }
+            OutputFormat::Text => {
+                println!("{}", hash);
+            }
+        }
     }
     Ok(())
 }

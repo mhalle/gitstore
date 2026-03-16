@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import json
+
 import click
 
 from ._helpers import (
     main,
     _repo_option,
+    _format_option,
     _require_repo,
     _status,
     _open_store,
@@ -119,10 +122,18 @@ def note_delete(ctx, target, namespace):
 @_repo_option
 @click.option("-N", "--namespace", default="commits",
               help="Notes namespace (default: commits).")
+@_format_option
 @click.pass_context
-def note_list(ctx, namespace):
+def note_list(ctx, namespace, fmt):
     """List commit hashes that have notes."""
     store = _open_store(_require_repo(ctx))
     ns = store.notes[namespace]
-    for h in sorted(ns):
-        click.echo(h)
+    hashes = sorted(ns)
+    if fmt == "json":
+        click.echo(json.dumps(hashes))
+    elif fmt == "jsonl":
+        for h in hashes:
+            click.echo(json.dumps(h))
+    else:
+        for h in hashes:
+            click.echo(h)

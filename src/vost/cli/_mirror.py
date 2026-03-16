@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import click
 
 from ._helpers import (
@@ -20,9 +22,30 @@ from ._helpers import (
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _print_diff(diff, direction: str) -> None:
+def _print_diff(diff, direction: str, fmt: str = "text") -> None:
     """Pretty-print a MirrorDiff to stdout."""
     verb = "push" if direction == "push" else "pull"
+
+    if fmt == "json":
+        data = {
+            "add": [{"ref": c.ref, "new_target": c.new_target} for c in sorted(diff.add, key=lambda c: c.ref)],
+            "update": [{"ref": c.ref, "old_target": c.old_target, "new_target": c.new_target} for c in sorted(diff.update, key=lambda c: c.ref)],
+            "delete": [{"ref": c.ref, "old_target": c.old_target} for c in sorted(diff.delete, key=lambda c: c.ref)],
+            "total": diff.total,
+            "in_sync": diff.in_sync,
+        }
+        click.echo(json.dumps(data, indent=2))
+        return
+
+    if fmt == "jsonl":
+        for c in sorted(diff.add, key=lambda c: c.ref):
+            click.echo(json.dumps({"action": "create", "ref": c.ref, "new_target": c.new_target}))
+        for c in sorted(diff.update, key=lambda c: c.ref):
+            click.echo(json.dumps({"action": "update", "ref": c.ref, "old_target": c.old_target, "new_target": c.new_target}))
+        for c in sorted(diff.delete, key=lambda c: c.ref):
+            click.echo(json.dumps({"action": "delete", "ref": c.ref, "old_target": c.old_target}))
+        return
+
     if diff.in_sync:
         click.echo(f"Nothing to {verb} — already in sync.")
         return
@@ -86,8 +109,11 @@ def _progress_cb(ctx):
               help="Force output format (auto-detected from .bundle extension).")
 @click.option("--squash", is_flag=True, default=False,
               help="Strip history: each ref becomes a single parentless commit (bundle only).")
+@click.option("--output-format", "output_fmt", default="text",
+              type=click.Choice(["text", "json", "jsonl"]),
+              help="Display format for --dry-run output.")
 @click.pass_context
-def backup_cmd(ctx, url, dry_run, ref, fmt, squash):
+def backup_cmd(ctx, url, dry_run, ref, fmt, squash, output_fmt):
     """Push refs to a remote URL or write a bundle file.
 
     Without --ref this is a full mirror: remote-only refs are deleted.
@@ -106,7 +132,7 @@ def backup_cmd(ctx, url, dry_run, ref, fmt, squash):
     diff = store.backup(auth_url, dry_run=dry_run, progress=_progress_cb(ctx),
                         refs=refs, format=fmt, squash=squash)
     if dry_run:
-        _print_diff(diff, "push")
+        _print_diff(diff, "push", output_fmt)
     else:
         _status(ctx, f"Backed up to {url}")
 
@@ -123,8 +149,11 @@ def backup_cmd(ctx, url, dry_run, ref, fmt, squash):
 @click.option("--ref", multiple=True, help="Ref to include (repeatable). Use src:dst to rename. Omit for all refs.")
 @click.option("--format", "fmt", type=click.Choice(["bundle"]), default=None,
               help="Force input format (auto-detected from .bundle extension).")
+@click.option("--output-format", "output_fmt", default="text",
+              type=click.Choice(["text", "json", "jsonl"]),
+              help="Display format for --dry-run output.")
 @click.pass_context
-def restore_cmd(ctx, url, dry_run, no_create, ref, fmt):
+def restore_cmd(ctx, url, dry_run, no_create, ref, fmt, output_fmt):
     """Fetch refs from a remote URL or import a bundle file.
 
     Restore is additive: refs are added and updated but local-only
@@ -142,6 +171,6 @@ def restore_cmd(ctx, url, dry_run, no_create, ref, fmt):
     diff = store.restore(auth_url, dry_run=dry_run, progress=_progress_cb(ctx),
                          refs=refs, format=fmt)
     if dry_run:
-        _print_diff(diff, "pull")
+        _print_diff(diff, "pull", output_fmt)
     else:
         _status(ctx, f"Restored from {url}")

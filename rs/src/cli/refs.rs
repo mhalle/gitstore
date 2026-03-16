@@ -5,6 +5,7 @@ use crate::store::GitStore;
 
 use super::error::CliError;
 use super::helpers::*;
+use super::output::OutputFormat;
 
 // ---------------------------------------------------------------------------
 // Branch
@@ -13,7 +14,7 @@ use super::helpers::*;
 #[derive(Subcommand, Debug)]
 pub enum BranchCommand {
     /// List all branches.
-    List,
+    List(BranchListArgs),
     /// Create or update a branch.
     Set(BranchSetArgs),
     /// Check if branch exists (exit 0 if yes, 1 if no).
@@ -29,6 +30,13 @@ pub enum BranchCommand {
 #[derive(Args, Debug)]
 pub struct BranchNameArg {
     pub name: String,
+}
+
+#[derive(Args, Debug)]
+pub struct BranchListArgs {
+    /// Output format.
+    #[arg(long, default_value = "text")]
+    pub format: OutputFormat,
 }
 
 #[derive(Args, Debug)]
@@ -68,6 +76,9 @@ pub struct BranchHashArgs {
     /// Use latest commit that changed this path.
     #[arg(long = "path")]
     pub at_path: Option<String>,
+    /// Output format.
+    #[arg(long, default_value = "text")]
+    pub format: OutputFormat,
 }
 
 #[derive(Args, Debug)]
@@ -75,6 +86,9 @@ pub struct BranchCurrentArgs {
     /// Set the current branch to this name.
     #[arg(short, long)]
     pub branch: Option<String>,
+    /// Output format.
+    #[arg(long, default_value = "text")]
+    pub format: OutputFormat,
 }
 
 pub fn cmd_branch(
@@ -83,7 +97,7 @@ pub fn cmd_branch(
     verbose: bool,
 ) -> Result<(), CliError> {
     match cmd {
-        BranchCommand::List => cmd_branch_list(repo_path),
+        BranchCommand::List(args) => cmd_branch_list(repo_path, args),
         BranchCommand::Set(args) => cmd_branch_set(repo_path, args, verbose),
         BranchCommand::Exists(args) => cmd_branch_exists(repo_path, &args.name),
         BranchCommand::Delete(args) => cmd_branch_delete(repo_path, &args.name, verbose),
@@ -92,11 +106,23 @@ pub fn cmd_branch(
     }
 }
 
-fn cmd_branch_list(repo_path: &str) -> Result<(), CliError> {
+fn cmd_branch_list(repo_path: &str, args: &BranchListArgs) -> Result<(), CliError> {
     let store = open_store(repo_path)?;
     let names = store.branches().list().map_err(CliError::from)?;
-    for name in names {
-        println!("{}", name);
+    match args.format {
+        OutputFormat::Json => {
+            println!("{}", serde_json::to_string(&names).unwrap());
+        }
+        OutputFormat::Jsonl => {
+            for name in &names {
+                println!("{}", serde_json::to_string(name).unwrap());
+            }
+        }
+        OutputFormat::Text => {
+            for name in &names {
+                println!("{}", name);
+            }
+        }
     }
     Ok(())
 }
@@ -221,11 +247,21 @@ fn cmd_branch_hash(repo_path: &str, args: &BranchHashArgs) -> Result<(), CliErro
         ..Default::default()
     };
     let fs = apply_snapshot_filters(fs, &snap)?;
-    println!(
-        "{}",
-        fs.commit_hash()
-            .ok_or_else(|| CliError::new("No commit"))?
-    );
+    match args.format {
+        OutputFormat::Json | OutputFormat::Jsonl => {
+            println!("{}", serde_json::json!({
+                "branch": args.name,
+                "hash": fs.commit_hash().ok_or_else(|| CliError::new("No commit"))?
+            }));
+        }
+        OutputFormat::Text => {
+            println!(
+                "{}",
+                fs.commit_hash()
+                    .ok_or_else(|| CliError::new("No commit"))?
+            );
+        }
+    }
     Ok(())
 }
 
@@ -252,7 +288,14 @@ fn cmd_branch_current(
             .ok_or_else(|| {
                 CliError::new("HEAD does not point to an existing branch")
             })?;
-        println!("{}", name);
+        match args.format {
+            OutputFormat::Json | OutputFormat::Jsonl => {
+                println!("{}", serde_json::json!({"name": name}));
+            }
+            OutputFormat::Text => {
+                println!("{}", name);
+            }
+        }
     }
     Ok(())
 }
@@ -264,7 +307,7 @@ fn cmd_branch_current(
 #[derive(Subcommand, Debug)]
 pub enum TagCommand {
     /// List all tags.
-    List,
+    List(TagListArgs),
     /// Create or update a tag.
     Set(TagSetArgs),
     /// Check if tag exists (exit 0 if yes, 1 if no).
@@ -272,12 +315,27 @@ pub enum TagCommand {
     /// Delete a tag.
     Delete(TagNameArg),
     /// Print the commit hash of a tag.
-    Hash(TagNameArg),
+    Hash(TagHashArgs),
 }
 
 #[derive(Args, Debug)]
 pub struct TagNameArg {
     pub name: String,
+}
+
+#[derive(Args, Debug)]
+pub struct TagListArgs {
+    /// Output format.
+    #[arg(long, default_value = "text")]
+    pub format: OutputFormat,
+}
+
+#[derive(Args, Debug)]
+pub struct TagHashArgs {
+    pub name: String,
+    /// Output format.
+    #[arg(long, default_value = "text")]
+    pub format: OutputFormat,
 }
 
 #[derive(Args, Debug)]
@@ -299,19 +357,31 @@ pub fn cmd_tag(
     verbose: bool,
 ) -> Result<(), CliError> {
     match cmd {
-        TagCommand::List => cmd_tag_list(repo_path),
+        TagCommand::List(args) => cmd_tag_list(repo_path, args),
         TagCommand::Set(args) => cmd_tag_set(repo_path, args, verbose),
         TagCommand::Exists(args) => cmd_tag_exists(repo_path, &args.name),
         TagCommand::Delete(args) => cmd_tag_delete(repo_path, &args.name, verbose),
-        TagCommand::Hash(args) => cmd_tag_hash(repo_path, &args.name),
+        TagCommand::Hash(args) => cmd_tag_hash(repo_path, args),
     }
 }
 
-fn cmd_tag_list(repo_path: &str) -> Result<(), CliError> {
+fn cmd_tag_list(repo_path: &str, args: &TagListArgs) -> Result<(), CliError> {
     let store = open_store(repo_path)?;
     let names = store.tags().list().map_err(CliError::from)?;
-    for name in names {
-        println!("{}", name);
+    match args.format {
+        OutputFormat::Json => {
+            println!("{}", serde_json::to_string(&names).unwrap());
+        }
+        OutputFormat::Jsonl => {
+            for name in &names {
+                println!("{}", serde_json::to_string(name).unwrap());
+            }
+        }
+        OutputFormat::Text => {
+            for name in &names {
+                println!("{}", name);
+            }
+        }
     }
     Ok(())
 }
@@ -363,16 +433,21 @@ fn cmd_tag_delete(repo_path: &str, name: &str, verbose: bool) -> Result<(), CliE
     Ok(())
 }
 
-fn cmd_tag_hash(repo_path: &str, name: &str) -> Result<(), CliError> {
+fn cmd_tag_hash(repo_path: &str, args: &TagHashArgs) -> Result<(), CliError> {
     let store = open_store(repo_path)?;
     let fs = store
         .tags()
-        .get(name)
-        .map_err(|_| CliError::new(format!("Tag not found: {}", name)))?;
-    println!(
-        "{}",
-        fs.commit_hash()
-            .ok_or_else(|| CliError::new("No commit"))?
-    );
+        .get(&args.name)
+        .map_err(|_| CliError::new(format!("Tag not found: {}", args.name)))?;
+    let hash = fs.commit_hash()
+        .ok_or_else(|| CliError::new("No commit"))?;
+    match args.format {
+        OutputFormat::Json | OutputFormat::Jsonl => {
+            println!("{}", serde_json::json!({"tag": args.name, "hash": hash}));
+        }
+        OutputFormat::Text => {
+            println!("{}", hash);
+        }
+    }
     Ok(())
 }

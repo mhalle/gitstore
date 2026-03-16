@@ -466,8 +466,9 @@ def _parse_bare_as_ref(raw: str) -> RefPath:
 @click.argument("target", required=False, default=None)
 @_branch_option
 @_snapshot_options
+@_format_option
 @click.pass_context
-def hash_cmd(ctx, target, branch, ref, at_path, match_pattern, before, back):
+def hash_cmd(ctx, target, branch, ref, at_path, match_pattern, before, back, fmt):
     """Print the SHA hash of a commit, tree, or blob.
 
     \b
@@ -505,9 +506,19 @@ def hash_cmd(ctx, target, branch, ref, at_path, match_pattern, before, back):
             st = fs.stat(object_path)
         except FileNotFoundError:
             raise click.ClickException(f"Path not found: {object_path}")
-        click.echo(st.hash)
+        if fmt == "json":
+            click.echo(json.dumps({"hash": st.hash, "type": "blob", "path": object_path}))
+        elif fmt == "jsonl":
+            click.echo(json.dumps({"hash": st.hash, "type": "blob", "path": object_path}))
+        else:
+            click.echo(st.hash)
     else:
-        click.echo(fs.commit_hash)
+        if fmt == "json":
+            click.echo(json.dumps({"hash": fs.commit_hash, "type": "commit"}))
+        elif fmt == "jsonl":
+            click.echo(json.dumps({"hash": fs.commit_hash, "type": "commit"}))
+        else:
+            click.echo(fs.commit_hash)
 
 
 # ---------------------------------------------------------------------------
@@ -834,8 +845,9 @@ def log(ctx, target, at_path, deprecated_at, match_pattern, before, branch, ref,
 @_branch_option
 @_snapshot_options
 @click.option("--reverse", is_flag=True, help="Swap comparison direction.")
+@_format_option
 @click.pass_context
-def diff(ctx, baseline, branch, ref, at_path, match_pattern, before, back, reverse):
+def diff(ctx, baseline, branch, ref, at_path, match_pattern, before, back, reverse, fmt):
     """Show files that differ between HEAD and another snapshot.
 
     \b
@@ -874,13 +886,32 @@ def diff(ctx, baseline, branch, ref, at_path, match_pattern, before, back, rever
     old_files = _walk_repo(other_fs, "")
     if reverse:
         new_files, old_files = old_files, new_files
-    for p in sorted(set(new_files) - set(old_files)):
-        click.echo(f"A  {p}")
-    for p in sorted(set(new_files) & set(old_files)):
-        if new_files[p] != old_files[p]:
+
+    added = sorted(set(new_files) - set(old_files))
+    modified = sorted(p for p in set(new_files) & set(old_files) if new_files[p] != old_files[p])
+    deleted = sorted(set(old_files) - set(new_files))
+
+    if fmt == "json":
+        items = (
+            [{"path": p, "status": "A"} for p in added]
+            + [{"path": p, "status": "M"} for p in modified]
+            + [{"path": p, "status": "D"} for p in deleted]
+        )
+        click.echo(json.dumps(items, indent=2))
+    elif fmt == "jsonl":
+        for p in added:
+            click.echo(json.dumps({"path": p, "status": "A"}))
+        for p in modified:
+            click.echo(json.dumps({"path": p, "status": "M"}))
+        for p in deleted:
+            click.echo(json.dumps({"path": p, "status": "D"}))
+    else:
+        for p in added:
+            click.echo(f"A  {p}")
+        for p in modified:
             click.echo(f"M  {p}")
-    for p in sorted(set(old_files) - set(new_files)):
-        click.echo(f"D  {p}")
+        for p in deleted:
+            click.echo(f"D  {p}")
 
 
 # ---------------------------------------------------------------------------

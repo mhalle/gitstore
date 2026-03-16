@@ -4,6 +4,7 @@ use crate::types::{BackupOptions, MirrorDiff, RestoreOptions};
 
 use super::error::CliError;
 use super::helpers::*;
+use super::output::OutputFormat;
 
 #[derive(Args, Debug)]
 pub struct BackupArgs {
@@ -21,6 +22,9 @@ pub struct BackupArgs {
     /// Strip history from bundle output.
     #[arg(long)]
     pub squash: bool,
+    /// Display format for --dry-run output.
+    #[arg(long = "output-format", default_value = "text")]
+    pub output_format: OutputFormat,
 }
 
 #[derive(Args, Debug)]
@@ -39,6 +43,9 @@ pub struct RestoreArgs {
     /// Force input format.
     #[arg(long, value_parser = ["bundle"])]
     pub format: Option<String>,
+    /// Display format for --dry-run output.
+    #[arg(long = "output-format", default_value = "text")]
+    pub output_format: OutputFormat,
 }
 
 fn parse_refs(
@@ -79,49 +86,79 @@ fn is_bundle_path(url: &str) -> bool {
     url.to_lowercase().ends_with(".bundle")
 }
 
-fn print_diff(diff: &MirrorDiff, direction: &str) {
-    let verb = if direction == "push" {
-        "push"
-    } else {
-        "pull"
-    };
-    if diff.in_sync() {
-        println!("Nothing to {} — already in sync.", verb);
-        return;
-    }
-    let mut changes: Vec<_> = diff.add.iter().map(|c| ("create", c)).collect();
-    changes.extend(diff.update.iter().map(|c| ("update", c)));
-    changes.extend(diff.delete.iter().map(|c| ("delete", c)));
-    changes.sort_by(|a, b| a.1.ref_name.cmp(&b.1.ref_name));
-
-    for (action, c) in &changes {
-        match *action {
-            "create" => {
-                println!(
-                    "  create  {}  {}",
-                    c.ref_name,
-                    &c.new_target.as_deref().unwrap_or("")[..7.min(c.new_target.as_deref().unwrap_or("").len())]
-                );
+fn print_diff(diff: &MirrorDiff, direction: &str, format: &OutputFormat) {
+    match format {
+        OutputFormat::Json => {
+            let data = serde_json::json!({
+                "add": diff.add.iter().map(|c| serde_json::json!({
+                    "ref": c.ref_name,
+                    "new_target": c.new_target
+                })).collect::<Vec<_>>(),
+                "update": diff.update.iter().map(|c| serde_json::json!({
+                    "ref": c.ref_name,
+                    "old_target": c.old_target,
+                    "new_target": c.new_target
+                })).collect::<Vec<_>>(),
+                "delete": diff.delete.iter().map(|c| serde_json::json!({
+                    "ref": c.ref_name,
+                    "old_target": c.old_target
+                })).collect::<Vec<_>>(),
+                "total": diff.total(),
+                "in_sync": diff.in_sync(),
+            });
+            println!("{}", serde_json::to_string_pretty(&data).unwrap());
+        }
+        OutputFormat::Jsonl => {
+            for c in &diff.add {
+                println!("{}", serde_json::json!({"action": "create", "ref": c.ref_name, "new_target": c.new_target}));
             }
-            "update" => {
-                println!(
-                    "  update  {}  {} -> {}",
-                    c.ref_name,
-                    &c.old_target.as_deref().unwrap_or("")[..7.min(c.old_target.as_deref().unwrap_or("").len())],
-                    &c.new_target.as_deref().unwrap_or("")[..7.min(c.new_target.as_deref().unwrap_or("").len())]
-                );
+            for c in &diff.update {
+                println!("{}", serde_json::json!({"action": "update", "ref": c.ref_name, "old_target": c.old_target, "new_target": c.new_target}));
             }
-            "delete" => {
-                println!(
-                    "  delete  {}  {}",
-                    c.ref_name,
-                    &c.old_target.as_deref().unwrap_or("")[..7.min(c.old_target.as_deref().unwrap_or("").len())]
-                );
+            for c in &diff.delete {
+                println!("{}", serde_json::json!({"action": "delete", "ref": c.ref_name, "old_target": c.old_target}));
             }
-            _ => {}
+        }
+        OutputFormat::Text => {
+            let verb = if direction == "push" { "push" } else { "pull" };
+            if diff.in_sync() {
+                println!("Nothing to {} — already in sync.", verb);
+                return;
+            }
+            let mut changes: Vec<_> = diff.add.iter().map(|c| ("create", c)).collect();
+            changes.extend(diff.update.iter().map(|c| ("update", c)));
+            changes.extend(diff.delete.iter().map(|c| ("delete", c)));
+            changes.sort_by(|a, b| a.1.ref_name.cmp(&b.1.ref_name));
+            for (action, c) in &changes {
+                match *action {
+                    "create" => {
+                        println!(
+                            "  create  {}  {}",
+                            c.ref_name,
+                            &c.new_target.as_deref().unwrap_or("")[..7.min(c.new_target.as_deref().unwrap_or("").len())]
+                        );
+                    }
+                    "update" => {
+                        println!(
+                            "  update  {}  {} -> {}",
+                            c.ref_name,
+                            &c.old_target.as_deref().unwrap_or("")[..7.min(c.old_target.as_deref().unwrap_or("").len())],
+                            &c.new_target.as_deref().unwrap_or("")[..7.min(c.new_target.as_deref().unwrap_or("").len())]
+                        );
+                    }
+                    "delete" => {
+                        println!(
+                            "  delete  {}  {}",
+                            c.ref_name,
+                            &c.old_target.as_deref().unwrap_or("")[..7.min(c.old_target.as_deref().unwrap_or("").len())]
+                        );
+                    }
+                    _ => {}
+                }
+            }
+            println!("{} ref(s) would be changed.", diff.total());
         }
     }
-    println!("{} ref(s) would be changed.", diff.total());
 }
 
 pub fn cmd_backup(
@@ -160,7 +197,7 @@ pub fn cmd_backup(
     let diff = store.backup(&url, &opts).map_err(CliError::from)?;
 
     if args.dry_run {
-        print_diff(&diff, "push");
+        print_diff(&diff, "push", &args.output_format);
     } else {
         status(verbose, &format!("Backed up to {}", args.url));
     }
@@ -208,7 +245,7 @@ pub fn cmd_restore(
     let diff = store.restore(&url, &opts).map_err(CliError::from)?;
 
     if args.dry_run {
-        print_diff(&diff, "pull");
+        print_diff(&diff, "pull", &args.output_format);
     } else {
         status(verbose, &format!("Restored from {}", args.url));
     }

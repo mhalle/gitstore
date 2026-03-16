@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import click
 
 from ._helpers import (
@@ -9,6 +11,7 @@ from ._helpers import (
     tag,
     _repo_option,
     _branch_option,
+    _format_option,
     _require_repo,
     _status,
     _open_store,
@@ -27,12 +30,20 @@ import vost.cli._helpers as _helpers
 
 @branch.command("list")
 @_repo_option
+@_format_option
 @click.pass_context
-def branch_list(ctx):
+def branch_list(ctx, fmt):
     """List all branches."""
     store = _open_store(_require_repo(ctx))
-    for name in sorted(store.branches):
-        click.echo(name)
+    names = sorted(store.branches)
+    if fmt == "json":
+        click.echo(json.dumps(names))
+    elif fmt == "jsonl":
+        for name in names:
+            click.echo(json.dumps(name))
+    else:
+        for name in names:
+            click.echo(name)
 
 
 @branch.command("set")
@@ -144,8 +155,9 @@ def branch_delete(ctx, name):
               help="Use latest commit matching this message pattern (* and ?).")
 @click.option("--path", "at_path", default=None,
               help="Use latest commit that changed this path.")
+@_format_option
 @click.pass_context
-def branch_hash(ctx, name, at_path, match_pattern, before, back):
+def branch_hash(ctx, name, at_path, match_pattern, before, back, fmt):
     """Print the commit hash of branch NAME."""
     store = _open_store(_require_repo(ctx))
     try:
@@ -154,7 +166,12 @@ def branch_hash(ctx, name, at_path, match_pattern, before, back):
         raise click.ClickException(f"Branch not found: {name}")
     fs = _apply_snapshot_filters(fs, at_path=at_path, match_pattern=match_pattern,
                                  before=before, back=back)
-    click.echo(fs.commit_hash)
+    if fmt == "json":
+        click.echo(json.dumps({"branch": name, "hash": fs.commit_hash}))
+    elif fmt == "jsonl":
+        click.echo(json.dumps({"branch": name, "hash": fs.commit_hash}))
+    else:
+        click.echo(fs.commit_hash)
 
 
 # ---------------------------------------------------------------------------
@@ -163,12 +180,20 @@ def branch_hash(ctx, name, at_path, match_pattern, before, back):
 
 @tag.command("list")
 @_repo_option
+@_format_option
 @click.pass_context
-def tag_list(ctx):
+def tag_list(ctx, fmt):
     """List all tags."""
     store = _open_store(_require_repo(ctx))
-    for name in sorted(store.tags):
-        click.echo(name)
+    names = sorted(store.tags)
+    if fmt == "json":
+        click.echo(json.dumps(names))
+    elif fmt == "jsonl":
+        for name in names:
+            click.echo(json.dumps(name))
+    else:
+        for name in names:
+            click.echo(name)
 
 
 @tag.command("set")
@@ -228,23 +253,30 @@ def tag_delete(ctx, name):
 @tag.command("hash")
 @_repo_option
 @click.argument("name")
+@_format_option
 @click.pass_context
-def tag_hash(ctx, name):
+def tag_hash(ctx, name, fmt):
     """Print the commit hash of tag NAME."""
     store = _open_store(_require_repo(ctx))
     try:
         fs = store.tags[name]
     except KeyError:
         raise click.ClickException(f"Tag not found: {name}")
-    click.echo(fs.commit_hash)
+    if fmt == "json":
+        click.echo(json.dumps({"tag": name, "hash": fs.commit_hash}))
+    elif fmt == "jsonl":
+        click.echo(json.dumps({"tag": name, "hash": fs.commit_hash}))
+    else:
+        click.echo(fs.commit_hash)
 
 
 @branch.command("current")
 @_repo_option
 @click.option("--branch", "-b", default=None,
               help="Set the current branch to this name.")
+@_format_option
 @click.pass_context
-def branch_current(ctx, branch):
+def branch_current(ctx, branch, fmt):
     """Show or set the repository's current branch.
 
     Without -b, prints the current branch (HEAD).
@@ -255,7 +287,12 @@ def branch_current(ctx, branch):
         name = store.branches.current_name
         if name is None:
             raise click.ClickException("HEAD does not point to an existing branch")
-        click.echo(name)
+        if fmt == "json":
+            click.echo(json.dumps({"name": name}))
+        elif fmt == "jsonl":
+            click.echo(json.dumps({"name": name}))
+        else:
+            click.echo(name)
     else:
         try:
             store.branches.current = branch

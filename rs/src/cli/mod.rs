@@ -190,11 +190,11 @@ pub fn run() -> Result<(), CliError> {
         Commands::Restore(args) => mirror::cmd_restore(&cli.repo, args, v),
         Commands::Branch { command } => {
             let rp = require_repo(&cli.repo)?;
-            refs::cmd_branch(&rp, command.as_ref().unwrap_or(&refs::BranchCommand::List), v)
+            refs::cmd_branch(&rp, command.as_ref().unwrap_or(&refs::BranchCommand::List(refs::BranchListArgs { format: super::cli::output::OutputFormat::Text })), v)
         }
         Commands::Tag { command } => {
             let rp = require_repo(&cli.repo)?;
-            refs::cmd_tag(&rp, command.as_ref().unwrap_or(&refs::TagCommand::List), v)
+            refs::cmd_tag(&rp, command.as_ref().unwrap_or(&refs::TagCommand::List(refs::TagListArgs { format: super::cli::output::OutputFormat::Text })), v)
         }
         Commands::Serve(args) => {
             let rp = require_repo(&cli.repo)?;

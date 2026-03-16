@@ -4,6 +4,13 @@ All notable changes to vost are documented in this file.
 
 ## Unreleased
 
+## v0.77.0 / Rust v0.10.3 (2026-03-16)
+
+**Added (Python + Rust CLI):**
+
+- `--format json|jsonl` on `diff`, `hash`, `branch list`, `branch hash`, `branch current`, `tag list`, `tag hash`, `note list` — all structured output is now programmatically consumable
+- `--output-format json|jsonl` on `backup --dry-run` and `restore --dry-run` (separate from existing `--format bundle`)
+
 ## v0.76.0 / Rust v0.10.0 (2026-03-16)
 
 **Added (Rust CLI):**

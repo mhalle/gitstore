@@ -370,6 +370,9 @@ pub struct DiffArgs {
     /// Swap comparison direction.
     #[arg(long)]
     pub reverse: bool,
+    /// Output format.
+    #[arg(long, default_value = "text")]
+    pub format: OutputFormat,
 }
 
 pub fn cmd_diff(repo_path: &str, args: &DiffArgs, _verbose: bool) -> Result<(), CliError> {
@@ -427,16 +430,50 @@ pub fn cmd_diff(repo_path: &str, args: &DiffArgs, _verbose: bool) -> Result<(), 
     let new_keys: std::collections::BTreeSet<&String> = new_files.keys().collect();
     let old_keys: std::collections::BTreeSet<&String> = old_files.keys().collect();
 
-    for p in new_keys.difference(&old_keys) {
-        println!("A  {}", p);
-    }
-    for p in new_keys.intersection(&old_keys) {
-        if new_files[*p] != old_files[*p] {
-            println!("M  {}", p);
+    let added: Vec<&String> = new_keys.difference(&old_keys).copied().collect();
+    let modified: Vec<&String> = new_keys
+        .intersection(&old_keys)
+        .filter(|p| new_files[**p] != old_files[**p])
+        .copied()
+        .collect();
+    let deleted: Vec<&String> = old_keys.difference(&new_keys).copied().collect();
+
+    match args.format {
+        OutputFormat::Json => {
+            let mut items: Vec<serde_json::Value> = Vec::new();
+            for p in &added {
+                items.push(serde_json::json!({"path": p, "status": "A"}));
+            }
+            for p in &modified {
+                items.push(serde_json::json!({"path": p, "status": "M"}));
+            }
+            for p in &deleted {
+                items.push(serde_json::json!({"path": p, "status": "D"}));
+            }
+            println!("{}", serde_json::to_string_pretty(&items).unwrap());
         }
-    }
-    for p in old_keys.difference(&new_keys) {
-        println!("D  {}", p);
+        OutputFormat::Jsonl => {
+            for p in &added {
+                println!("{}", serde_json::json!({"path": p, "status": "A"}));
+            }
+            for p in &modified {
+                println!("{}", serde_json::json!({"path": p, "status": "M"}));
+            }
+            for p in &deleted {
+                println!("{}", serde_json::json!({"path": p, "status": "D"}));
+            }
+        }
+        OutputFormat::Text => {
+            for p in &added {
+                println!("A  {}", p);
+            }
+            for p in &modified {
+                println!("M  {}", p);
+            }
+            for p in &deleted {
+                println!("D  {}", p);
+            }
+        }
     }
     Ok(())
 }

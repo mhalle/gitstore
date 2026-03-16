@@ -2,6 +2,7 @@ use clap::{Args, Subcommand};
 
 use super::error::CliError;
 use super::helpers::*;
+use super::output::OutputFormat;
 
 #[derive(Subcommand, Debug)]
 pub enum NoteCommand {
@@ -48,6 +49,9 @@ pub struct NoteListArgs {
     /// Notes namespace.
     #[arg(short = 'N', long, default_value = "commits")]
     pub namespace: String,
+    /// Output format.
+    #[arg(long, default_value = "text")]
+    pub format: OutputFormat,
 }
 
 fn resolve_note_target(
@@ -118,8 +122,20 @@ pub fn cmd_note(
             let hashes = ns.list().map_err(CliError::from)?;
             let mut sorted = hashes;
             sorted.sort();
-            for h in sorted {
-                println!("{}", h);
+            match args.format {
+                OutputFormat::Json => {
+                    println!("{}", serde_json::to_string(&sorted).unwrap());
+                }
+                OutputFormat::Jsonl => {
+                    for h in &sorted {
+                        println!("{}", serde_json::to_string(h).unwrap());
+                    }
+                }
+                OutputFormat::Text => {
+                    for h in &sorted {
+                        println!("{}", h);
+                    }
+                }
             }
             Ok(())
         }
