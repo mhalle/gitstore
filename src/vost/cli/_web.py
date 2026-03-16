@@ -4,10 +4,15 @@ from __future__ import annotations
 
 import html
 import json
+import logging
 import mimetypes
+import sys
+from datetime import datetime, timezone
 from urllib.parse import quote
 
 import click
+
+_logger = logging.getLogger("vost.serve")
 
 from ._helpers import (
     main,
@@ -93,6 +98,71 @@ def _no_cache_middleware(app):
     return wrapped
 
 
+class _AccessLogger:
+    """Write CLF access-log lines to stderr and/or a file."""
+
+    def __init__(self, quiet=False, log_file=None):
+        self._quiet = quiet
+        self._file = open(log_file, "a") if log_file else None
+
+    def log(self, client_ip, method, path, status, size):
+        now = datetime.now(timezone.utc).strftime("%d/%b/%Y:%H:%M:%S %z")
+        line = f'{client_ip} - - [{now}] "{method} {path} HTTP/1.1" {status} {size}\n'
+        if not self._quiet:
+            sys.stderr.write(line)
+        if self._file:
+            self._file.write(line)
+            self._file.flush()
+
+    def close(self):
+        if self._file:
+            self._file.close()
+            self._file = None
+
+
+def _logging_middleware(app, access_logger):
+    """WSGI middleware that logs each request in CLF format."""
+
+    def wrapped(environ, start_response):
+        captured = {}
+
+        def logging_start_response(status, headers):
+            captured["status"] = status.split(" ", 1)[0]
+            for k, v in headers:
+                if k.lower() == "content-length":
+                    captured["size"] = v
+                    break
+            return start_response(status, headers)
+
+        try:
+            result = app(environ, logging_start_response)
+        except Exception:
+            _logger.exception(
+                "Internal server error on %s %s",
+                environ.get("REQUEST_METHOD", "GET"),
+                environ.get("PATH_INFO", "/"),
+            )
+            body = b"Internal server error"
+            start_response("500 Internal Server Error", [
+                ("Content-Type", "text/plain"),
+                ("Content-Length", str(len(body))),
+            ])
+            captured["status"] = "500"
+            captured["size"] = str(len(body))
+            result = [body]
+
+        access_logger.log(
+            environ.get("REMOTE_ADDR", "-"),
+            environ.get("REQUEST_METHOD", "GET"),
+            environ.get("PATH_INFO", "/"),
+            captured.get("status", "-"),
+            captured.get("size", "-"),
+        )
+        return result
+
+    return wrapped
+
+
 def _base_path_middleware(app, prefix):
     """WSGI middleware that strips *prefix* from PATH_INFO."""
 
@@ -115,8 +185,13 @@ def _base_path_middleware(app, prefix):
 # WSGI app
 # ---------------------------------------------------------------------------
 
+_DEFAULT_MAX_FILE_SIZE = 250 * 1024 * 1024  # 250 MB
+
+
 def _make_app(store, *, fs=None, resolver=None, ref_label=None,
-              cors=False, no_cache=False, base_path=""):
+              cors=False, no_cache=False, base_path="",
+              max_file_size=_DEFAULT_MAX_FILE_SIZE,
+              access_logger=None):
     """Return a WSGI application serving *store* contents over HTTP.
 
     Single-ref mode (one snapshot per request):
@@ -146,7 +221,8 @@ def _make_app(store, *, fs=None, resolver=None, ref_label=None,
             # --- Single-ref mode ---
             current_fs = _get_fs()
             return _serve_path(environ, start_response, current_fs,
-                               ref_label or "", base_path, path, want_json)
+                               ref_label or "", base_path, path, want_json,
+                               max_file_size)
         else:
             # --- Multi-ref mode ---
             if not path:
@@ -164,7 +240,8 @@ def _make_app(store, *, fs=None, resolver=None, ref_label=None,
 
             resolved = _resolve_fs_for_ref(store, ref_name)
             return _serve_path(environ, start_response, resolved, ref_name,
-                               f"{base_path}/{ref_name}", rest, want_json)
+                               f"{base_path}/{ref_name}", rest, want_json,
+                               max_file_size)
 
     result = app
     if base_path:
@@ -173,6 +250,8 @@ def _make_app(store, *, fs=None, resolver=None, ref_label=None,
         result = _cors_middleware(result)
     if no_cache:
         result = _no_cache_middleware(result)
+    if access_logger is not None:
+        result = _logging_middleware(result, access_logger)
     return result
 
 
@@ -215,7 +294,8 @@ def _serve_ref_listing(start_response, store, base_path, want_json):
     return [body]
 
 
-def _serve_path(environ, start_response, fs, ref_label, link_prefix, path, want_json):
+def _serve_path(environ, start_response, fs, ref_label, link_prefix, path, want_json,
+                max_file_size=_DEFAULT_MAX_FILE_SIZE):
     """Serve a file or directory listing within a resolved FS."""
     etag = f'"{fs.commit_hash}"'
 
@@ -234,11 +314,33 @@ def _serve_path(environ, start_response, fs, ref_label, link_prefix, path, want_
     if fs.is_dir(path):
         return _serve_dir(start_response, fs, ref_label, link_prefix, path, want_json, etag)
 
-    return _serve_file(start_response, fs, ref_label, path, want_json, etag)
+    return _serve_file(start_response, fs, ref_label, path, want_json, etag,
+                       max_file_size)
 
 
-def _serve_file(start_response, fs, ref_label, path, want_json, etag):
+def _send_413(start_response, path, size, limit):
+    """Send a 413 Payload Too Large response."""
+    msg = f"File too large: {path} ({size} bytes, limit {limit} bytes)"
+    body = msg.encode()
+    start_response("413 Payload Too Large", [
+        ("Content-Type", "text/plain"),
+        ("Content-Length", str(len(body))),
+    ])
+    return [body]
+
+
+def _serve_file(start_response, fs, ref_label, path, want_json, etag,
+                max_file_size=_DEFAULT_MAX_FILE_SIZE):
     """Serve file contents or JSON metadata."""
+    # Check size before reading
+    if max_file_size > 0:
+        try:
+            file_size = fs.size(path)
+            if file_size > max_file_size:
+                return _send_413(start_response, path, file_size, max_file_size)
+        except Exception:
+            pass  # fall through to read
+
     data = fs.read(path)
 
     if want_json:
@@ -336,10 +438,15 @@ def _send_404(start_response, message="Not found"):
 @click.option("--open", "open_browser", is_flag=True, default=False,
               help="Open the URL in the default browser on start.")
 @click.option("--quiet", "-q", is_flag=True, default=False,
-              help="Suppress per-request log output.")
+              help="Suppress access log on stderr (errors still logged; --log-file still writes).")
+@click.option("--log-file", "log_file", type=click.Path(), default=None,
+              help="Append access log to file (CLF format).")
+@click.option("--max-file-size", "max_file_size_mb", type=int, default=250,
+              help="Maximum file size to serve in MB (default: 250, 0 = unlimited).")
 @click.pass_context
 def serve(ctx, host, port, branch, ref, at_path, match_pattern, before, back,
-          all_refs, cors, no_cache, base_path, open_browser, quiet):
+          all_refs, cors, no_cache, base_path, open_browser, quiet, log_file,
+          max_file_size_mb):
     """Serve repository files over HTTP.
 
     By default, serves the current branch at /<path>.  Use --ref, --back,
@@ -357,18 +464,29 @@ def serve(ctx, host, port, branch, ref, at_path, match_pattern, before, back,
     """
     from wsgiref.simple_server import make_server, WSGIRequestHandler
 
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(levelname)s: %(message)s",
+        stream=sys.stderr,
+    )
+
     store = _open_store(_require_repo(ctx))
 
     # Normalize base_path: strip trailing slash, ensure leading slash
     if base_path:
         base_path = "/" + base_path.strip("/")
 
+    max_file_size = max_file_size_mb * 1024 * 1024 if max_file_size_mb > 0 else 0
+
+    access_logger = _AccessLogger(quiet=quiet, log_file=log_file)
+
     if all_refs:
         if ref or at_path or match_pattern or before or back:
             raise click.ClickException(
                 "--all cannot be combined with --ref, --path, --match, --before, or --back"
             )
-        app = _make_app(store, cors=cors, no_cache=no_cache, base_path=base_path)
+        app = _make_app(store, cors=cors, no_cache=no_cache, base_path=base_path,
+                        max_file_size=max_file_size, access_logger=access_logger)
         mode = "multi-ref"
     else:
         branch = branch or _current_branch(store)
@@ -380,27 +498,24 @@ def serve(ctx, host, port, branch, ref, at_path, match_pattern, before, back,
                                before=before, back=back)
 
         app = _make_app(store, resolver=_resolve, ref_label=ref_label,
-                        cors=cors, no_cache=no_cache, base_path=base_path)
+                        cors=cors, no_cache=no_cache, base_path=base_path,
+                        max_file_size=max_file_size, access_logger=access_logger)
         mode = f"branch {branch} (live)"
         if back:
             mode += f" ~{back}"
 
-    if quiet:
-        class _Handler(WSGIRequestHandler):
-            def log_request(self, code="-", size="-"):
-                pass
-    else:
-        class _Handler(WSGIRequestHandler):
-            def log_request(self, code="-", size="-"):
-                click.echo(
-                    f"{self.client_address[0]} - {self.command} {self.path} {code}",
-                    err=True,
-                )
+    # Suppress wsgiref's own per-request log — access logger handles it
+    class _Handler(WSGIRequestHandler):
+        def log_request(self, code="-", size="-"):
+            pass
+
+        def log_error(self, format, *args):
+            _logger.error(format, *args)
 
     server = make_server(host, port, app, handler_class=_Handler)
     url = f"http://{host}:{server.server_port}{base_path}/"
-    click.echo(f"Serving {_require_repo(ctx)} ({mode}) at {url}", err=True)
-    click.echo("Press Ctrl+C to stop.", err=True)
+    _logger.info("Serving %s (%s) at %s", _require_repo(ctx), mode, url)
+    _logger.info("Press Ctrl+C to stop.")
 
     if open_browser:
         import webbrowser
@@ -409,6 +524,7 @@ def serve(ctx, host, port, branch, ref, at_path, match_pattern, before, back,
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        click.echo("\nStopped.", err=True)
+        _logger.info("Stopped.")
     finally:
+        access_logger.close()
         server.server_close()
