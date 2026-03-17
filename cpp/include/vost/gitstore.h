@@ -148,6 +148,26 @@ public:
                        const std::vector<std::string>& refs = {},
                        const std::map<std::string, std::string>& ref_map = {});
 
+    // -- Blob access --------------------------------------------------------
+
+    /// Read raw blob data by hash, bypassing tree/ref resolution.
+    /// Direct object store lookup — the fastest path to blob data.
+    ///
+    /// @param hash   40-char hex SHA of the blob.
+    /// @param offset Byte offset to start reading from (default 0).
+    /// @param size   Maximum bytes to return (0 for all, default 0).
+    /// @throws InvalidHashError if the hash is malformed.
+    /// @throws GitError if the blob cannot be found.
+    std::vector<uint8_t> read_blob(const std::string& hash,
+                                    size_t offset = 0,
+                                    size_t size = 0) const;
+
+    /// Check if a blob with the given hash exists in the object store.
+    ///
+    /// @param hash 40-char hex SHA of the blob.
+    /// @returns true if the blob exists, false otherwise.
+    bool has_blob(const std::string& hash) const;
+
     // -- Metadata -----------------------------------------------------------
 
     /// Path to the bare repository on disk.

@@ -767,8 +767,11 @@ vost serve -q                                # suppress per-request log output
 | `--ref`, `--path`, `--match`, `--before`, `--back` | Snapshot filters. |
 | `--all` | Multi-ref mode: expose all branches and tags via `/<ref>/<path>`. |
 | `--cors` | Add `Access-Control-Allow-Origin: *` and related CORS headers. |
+| `--immutable` | Set `Cache-Control: public, immutable, max-age=31536000`. Ideal for content-addressed data. |
+| `--max-age N` | Set `Cache-Control: public, max-age=N` (seconds). Overridden by `--no-cache` or `--immutable`. |
 | `--no-cache` | Send `Cache-Control: no-store` on every response (disables caching entirely). |
 | `--base-path PREFIX` | URL prefix to mount under (e.g. `/data`). |
+| `--upstream URL` | Redirect (302) to upstream server on blob cache miss. Enables CDN-like server hierarchies. |
 | `--open` | Open the URL in the default browser on start. |
 | `-q`, `--quiet` | Suppress per-request log output. |
 
@@ -777,19 +780,37 @@ vost serve -q                                # suppress per-request log output
 - **Single-ref** (default): serves one branch or snapshot. URLs are plain repo paths (`/file.txt`, `/dir/`).
 - **Multi-ref** (`--all`): first URL segment selects the branch or tag (`/main/file.txt`, `/v1/dir/`). The root (`/`) lists all branches and tags.
 
+**Content-addressed blob access:**
+
+Two routes provide direct access to git blobs by SHA hash, bypassing tree/path resolution:
+
+- `/_/blobs/{hash}` — explicit blob access by 40-char hex SHA. Returns `404` if not found (or redirects to `--upstream`).
+- `/{hash}` — shorthand: if the URL path is exactly 40 hex characters, tries blob lookup first, falls back to normal path/ref routing.
+
+Both support `Range` requests, `ETag`/`304`, and `Accept: application/json` (returns `{"hash": "...", "size": N, "type": "blob"}`). Ideal for kerchunk references: `["http://host/_/blobs/abc123...", 0, 1024]`.
+
 **Content negotiation:**
 
-- `Accept: application/json` returns JSON metadata (path, ref, size, type, entries).
+- `Accept: application/json` returns JSON metadata (path, ref, size, hash, type, entries).
 - Otherwise: raw file bytes with MIME types, or HTML directory listings.
 
 **Caching:**
 
-- All 200 responses include `ETag` (commit hash) and `Cache-Control: no-cache`, so browsers always revalidate but get a lightweight **304 Not Modified** when the content hasn't changed.
-- `--no-cache` overrides to `Cache-Control: no-store`, disabling caching entirely.
+- File responses use per-blob ETags (content hash), so caching survives commits to other files.
+- Directory responses use commit-level ETags.
+- Default: `Cache-Control: no-cache` (revalidate on each request, 304 on match).
+- `--immutable`: `Cache-Control: public, immutable, max-age=31536000` (1 year, ideal for content-addressed data).
+- `--max-age N`: `Cache-Control: public, max-age=N`.
+- `--no-cache`: `Cache-Control: no-store` (disable caching entirely).
+- Priority: `--no-cache` > `--immutable` > `--max-age` > default.
+
+**Range requests:**
+
+All file and blob responses include `Accept-Ranges: bytes` and support HTTP `Range` requests (206 Partial Content).
 
 **Response headers:**
 
-- `ETag` is set to the commit hash on all 200 responses.
+- `ETag` is set on all 200 file/directory responses (blob hash for files, commit hash for directories).
 - JSON, XML, GeoJSON, and YAML files are served as `text/plain` so browsers display them inline.
 
 ### gitserve

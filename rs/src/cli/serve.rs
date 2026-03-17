@@ -342,7 +342,7 @@ fn is_hex40(s: &str) -> bool {
 
 fn serve_blob(
     request: tiny_http::Request,
-    fs: &crate::Fs,
+    store: &GitStore,
     hash: &str,
     cache_control: &str,
     cors: bool,
@@ -360,7 +360,7 @@ fn serve_blob(
         }
     }
 
-    let data = match fs.read_by_hash(hash, 0, None) {
+    let data = match store.read_blob(hash, 0, None) {
         Ok(d) => d,
         Err(_) => {
             if let Some(upstream) = upstream {
@@ -856,23 +856,7 @@ pub fn cmd_serve(repo_path: &str, args: &ServeArgs, _verbose: bool) -> Result<()
             let info = if !is_hex40(hash) {
                 respond_404_tracked(request, &format!("Invalid blob hash: {}", hash))
             } else {
-                let fs_opt = if args.all_refs {
-                    store.branches().list().ok()
-                        .and_then(|names| names.first().cloned())
-                        .and_then(|name| store.fs(&name).ok())
-                } else {
-                    resolve_fs(&store, &branch, &args.snap).ok()
-                };
-                match fs_opt {
-                    Some(fs) => serve_blob(request, &fs, hash, &cache_control, args.cors, args.upstream.as_deref()),
-                    None => {
-                        if let Some(ref upstream) = args.upstream {
-                            redirect_upstream(request, upstream, &format!("_/blobs/{}", hash))
-                        } else {
-                            respond_404_tracked(request, "No accessible ref")
-                        }
-                    }
-                }
+                serve_blob(request, &store, hash, &cache_control, args.cors, args.upstream.as_deref())
             };
             access_logger.log(&client_ip, &method, &url_path, info.status, info.size);
             continue;
@@ -880,19 +864,10 @@ pub fn cmd_serve(repo_path: &str, args: &ServeArgs, _verbose: bool) -> Result<()
 
         // /{40-hex} — try blob hash first, fall back to normal routing
         if is_hex40(&path) {
-            let fs_opt = if args.all_refs {
-                store.branches().list().ok()
-                    .and_then(|names| names.first().cloned())
-                    .and_then(|name| store.fs(&name).ok())
-            } else {
-                resolve_fs(&store, &branch, &args.snap).ok()
-            };
-            if let Some(ref fs) = fs_opt {
-                if fs.read_by_hash(&path, 0, Some(0)).is_ok() {
-                    let info = serve_blob(request, fs, &path, &cache_control, args.cors, args.upstream.as_deref());
-                    access_logger.log(&client_ip, &method, &url_path, info.status, info.size);
-                    continue;
-                }
+            if store.has_blob(&path) {
+                let info = serve_blob(request, &store, &path, &cache_control, args.cors, args.upstream.as_deref());
+                access_logger.log(&client_ip, &method, &url_path, info.status, info.size);
+                continue;
             }
             // Blob not found — redirect if upstream set
             if let Some(ref upstream) = args.upstream {

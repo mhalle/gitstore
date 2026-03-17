@@ -94,6 +94,41 @@ export class GitStore {
     throw new Error('gc() is not implemented in the TypeScript port');
   }
 
+  /**
+   * Read raw blob data by hash, bypassing tree/ref resolution.
+   * Direct object store lookup — the fastest path to blob data.
+   *
+   * @param hash - 40-char hex SHA of the blob.
+   * @param opts - Optional read options.
+   * @param opts.offset - Byte offset to start reading from.
+   * @param opts.size - Maximum bytes to return (undefined for all).
+   * @returns Raw blob contents as Uint8Array.
+   */
+  async readBlob(hash: string, opts?: { offset?: number; size?: number }): Promise<Uint8Array> {
+    const { blob } = await git.readBlob({ fs: this._fsModule, gitdir: this._gitdir, oid: hash });
+    if (opts && (opts.offset !== undefined || opts.size !== undefined)) {
+      const offset = opts.offset ?? 0;
+      const end = opts.size !== undefined ? offset + opts.size : blob.length;
+      return blob.subarray(offset, end);
+    }
+    return blob;
+  }
+
+  /**
+   * Check if a blob with the given hash exists in the object store.
+   *
+   * @param hash - 40-char hex SHA of the blob.
+   * @returns true if the blob exists, false otherwise.
+   */
+  async hasBlob(hash: string): Promise<boolean> {
+    try {
+      await this.readBlob(hash, { size: 0 });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   toString(): string {
     return `GitStore('${this._gitdir}')`;
   }

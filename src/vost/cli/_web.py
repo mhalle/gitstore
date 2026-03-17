@@ -249,14 +249,6 @@ def _make_app(store, *, fs=None, resolver=None, ref_label=None,
             return resolver()
         return fs
 
-    def _get_any_fs():
-        """Get any FS for object store access (blobs are ref-independent)."""
-        if single_ref:
-            return _get_fs()
-        for name in sorted(store.branches):
-            return store.branches[name]
-        return None
-
     def app(environ, start_response):
         path_info = environ.get("PATH_INFO", "/")
         path = path_info.strip("/")
@@ -268,25 +260,17 @@ def _make_app(store, *, fs=None, resolver=None, ref_label=None,
             hash_str = path[8:]
             if not _is_hex40(hash_str):
                 return _send_404(start_response, f"Invalid blob hash: {hash_str}")
-            blob_fs = _get_any_fs()
-            if blob_fs is None:
-                if upstream:
-                    return _redirect_upstream(start_response, upstream, f"_/blobs/{hash_str}")
-                return _send_404(start_response, "No accessible ref")
-            return _serve_blob(environ, start_response, blob_fs, hash_str, want_json, cache_control, upstream)
+            return _serve_blob(environ, start_response, store, hash_str, want_json, cache_control, upstream)
 
         if single_ref:
             # --- Single-ref mode ---
             current_fs = _get_fs()
             # /{40-hex} — try blob hash first, fall back to path
             if _is_hex40(path):
-                try:
-                    current_fs.read_by_hash(path)
-                    return _serve_blob(environ, start_response, current_fs, path, want_json, cache_control, upstream)
-                except Exception:
-                    if upstream:
-                        return _redirect_upstream(start_response, upstream, path)
-                    pass  # fall through to normal path lookup
+                if store.has_blob(path):
+                    return _serve_blob(environ, start_response, store, path, want_json, cache_control, upstream)
+                elif upstream:
+                    return _redirect_upstream(start_response, upstream, path)
             return _serve_path(environ, start_response, current_fs,
                                ref_label or "", base_path, path, want_json,
                                max_file_size, cache_control)
@@ -298,18 +282,10 @@ def _make_app(store, *, fs=None, resolver=None, ref_label=None,
 
             # /{40-hex} — try blob hash first (ref-independent)
             if _is_hex40(path):
-                blob_fs = _get_any_fs()
-                if blob_fs is not None:
-                    try:
-                        blob_fs.read_by_hash(path)
-                        return _serve_blob(environ, start_response, blob_fs, path, want_json, cache_control, upstream)
-                    except Exception:
-                        if upstream:
-                            return _redirect_upstream(start_response, upstream, path)
-                        pass  # fall through to ref lookup
-                else:
-                    if upstream:
-                        return _redirect_upstream(start_response, upstream, path)
+                if store.has_blob(path):
+                    return _serve_blob(environ, start_response, store, path, want_json, cache_control, upstream)
+                elif upstream:
+                    return _redirect_upstream(start_response, upstream, path)
 
             # First segment is the ref
             parts = path.split("/", 1)
@@ -545,7 +521,7 @@ def _serve_dir(start_response, fs, ref_label, link_prefix, path, want_json, etag
     return [body]
 
 
-def _serve_blob(environ, start_response, fs, hash_str, want_json, cache_control, upstream=None):
+def _serve_blob(environ, start_response, store, hash_str, want_json, cache_control, upstream=None):
     """Serve raw blob content by git object hash."""
     etag = f'"{hash_str}"'
 
@@ -555,7 +531,7 @@ def _serve_blob(environ, start_response, fs, hash_str, want_json, cache_control,
         return [b""]
 
     try:
-        data = fs.read_by_hash(hash_str)
+        data = store.read_blob(hash_str)
     except Exception:
         if upstream:
             return _redirect_upstream(start_response, upstream, f"_/blobs/{hash_str}")

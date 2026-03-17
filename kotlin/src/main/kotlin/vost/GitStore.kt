@@ -65,6 +65,41 @@ class GitStore private constructor(
         return if (back > 0) result.back(back) else result
     }
 
+    /**
+     * Read raw blob data by hash, bypassing tree/ref resolution.
+     * Direct object store lookup — the fastest path to blob data.
+     *
+     * @param hash 40-char hex SHA of the blob.
+     * @param offset Byte offset to start reading from.
+     * @param size Maximum number of bytes to return (null for all).
+     */
+    fun readBlob(hash: String, offset: Int = 0, size: Int? = null): ByteArray {
+        val oid = ObjectId.fromString(hash)
+        val loader = repo.open(oid, Constants.OBJ_BLOB)
+        val data = loader.bytes
+        if (offset > 0 || size != null) {
+            val start = minOf(offset, data.size)
+            val end = if (size != null) minOf(start.toLong() + size.toLong(), data.size.toLong()).toInt() else data.size
+            return data.copyOfRange(start, end)
+        }
+        return data
+    }
+
+    /**
+     * Check if a blob with the given hash exists in the object store.
+     *
+     * @param hash 40-char hex SHA of the blob.
+     * @return true if the blob exists, false otherwise.
+     */
+    fun hasBlob(hash: String): Boolean {
+        return try {
+            readBlob(hash, size = 0)
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
     override fun toString(): String = "GitStore(${repo.directory})"
 
     override fun close() {

@@ -20,6 +20,8 @@ from vost import ExcludeFilter, BlobOid, StatResult, disk_glob
         - branches
         - tags
         - notes
+        - read_blob
+        - has_blob
         - pack
         - gc
         - backup

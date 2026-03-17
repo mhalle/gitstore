@@ -281,6 +281,41 @@ void GitStore::bundle_import(const std::string& path,
     mirror::bundle_import(inner_, path, refs, ref_map);
 }
 
+std::vector<uint8_t> GitStore::read_blob(const std::string& hash,
+                                          size_t offset,
+                                          size_t size) const {
+    git_oid oid;
+    if (git_oid_fromstr(&oid, hash.c_str()) != 0)
+        throw InvalidHashError(hash);
+
+    std::lock_guard<std::mutex> lk(inner_->mutex);
+    git_blob* blob = nullptr;
+    if (git_blob_lookup(&blob, inner_->repo, &oid) != 0)
+        throw_git("git_blob_lookup");
+
+    const void* raw = git_blob_rawcontent(blob);
+    size_t rawsz = static_cast<size_t>(git_blob_rawsize(blob));
+    auto ptr = static_cast<const uint8_t*>(raw);
+
+    size_t start = std::min(offset, rawsz);
+    size_t end = (size > 0)
+        ? std::min(start <= SIZE_MAX - size ? start + size : SIZE_MAX, rawsz)
+        : rawsz;
+
+    std::vector<uint8_t> result(ptr + start, ptr + end);
+    git_blob_free(blob);
+    return result;
+}
+
+bool GitStore::has_blob(const std::string& hash) const {
+    try {
+        read_blob(hash, 0, 0);
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
 const std::filesystem::path& GitStore::path() const {
     return inner_->path;
 }

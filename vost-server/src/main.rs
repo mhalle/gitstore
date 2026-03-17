@@ -482,14 +482,6 @@ fn is_hex40(s: &str) -> bool {
     s.len() == 40 && s.chars().all(|c| c.is_ascii_hexdigit())
 }
 
-fn get_any_fs(state: &AppState) -> Option<vost::Fs> {
-    if let Some(fs) = state.resolve_single_ref_fs() {
-        return Some(fs);
-    }
-    let branches = state.store.branches().list().unwrap_or_default();
-    branches.first().and_then(|name| state.resolve_fs(name))
-}
-
 fn redirect_upstream(upstream: &str, path: &str) -> Response {
     let location = format!("{}/{}", upstream.trim_end_matches('/'), path.trim_start_matches('/'));
     Response::builder()
@@ -499,7 +491,7 @@ fn redirect_upstream(upstream: &str, path: &str) -> Response {
         .unwrap()
 }
 
-fn serve_blob_response(state: &AppState, fs: &vost::Fs, hash: &str, headers: &HeaderMap) -> Response {
+fn serve_blob_response(state: &AppState, hash: &str, headers: &HeaderMap) -> Response {
     let etag = format!("\"{}\"", hash);
     let cc = state.cache_control();
     let want_json = wants_json(headers);
@@ -515,11 +507,11 @@ fn serve_blob_response(state: &AppState, fs: &vost::Fs, hash: &str, headers: &He
         }
     }
 
-    // Check cache first, then read from git
+    // Check cache first, then read from git via store.read_blob (no Fs needed)
     let data: Bytes = if let Some(cached) = state.blob_cache.get(hash) {
         cached
     } else {
-        match fs.read_by_hash(hash, 0, None) {
+        match state.store.read_blob(hash, 0, None) {
             Ok(d) => {
                 let bytes = Bytes::from(d);
                 state.blob_cache.insert(hash.to_string(), bytes.clone());
@@ -815,8 +807,8 @@ async fn handle_single_ref(
 
         // /{40-hex} — try blob hash first, fall back to path
         if is_hex40(&repo_path) {
-            if fs.read_by_hash(&repo_path, 0, Some(0)).is_ok() {
-                return serve_blob_response(&state, &fs, &repo_path, &headers);
+            if state.store.has_blob(&repo_path) {
+                return serve_blob_response(&state, &repo_path, &headers);
             }
             // Blob not found locally — redirect to upstream if available
             if let Some(ref upstream) = state.upstream {
@@ -905,10 +897,8 @@ async fn handle_multi_ref_root(
     tokio::task::spawn_blocking(move || {
         // /{40-hex} — try blob hash first, fall back to ref lookup
         if is_hex40(&ref_name) {
-            if let Some(fs) = get_any_fs(&state) {
-                if fs.read_by_hash(&ref_name, 0, Some(0)).is_ok() {
-                    return serve_blob_response(&state, &fs, &ref_name, &headers);
-                }
+            if state.store.has_blob(&ref_name) {
+                return serve_blob_response(&state, &ref_name, &headers);
             }
             // Blob not found locally — redirect to upstream if available
             if let Some(ref upstream) = state.upstream {
@@ -940,12 +930,7 @@ async fn handle_blob(
             return not_found(&format!("Invalid blob hash: {}", hash));
         }
 
-        let fs = match get_any_fs(&state) {
-            Some(fs) => fs,
-            None => return not_found("No accessible ref"),
-        };
-
-        serve_blob_response(&state, &fs, &hash, &headers)
+        serve_blob_response(&state, &hash, &headers)
     })
     .await
     .unwrap_or_else(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response())
