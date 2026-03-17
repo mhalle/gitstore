@@ -380,7 +380,8 @@ fn serve_file(
         let json = serde_json::json!({
             "path": path,
             "ref": ref_label,
-            "size": data.len(),
+            "size": st.size,
+            "hash": st.hash,
             "type": "file",
         });
         let body = json.to_string();
@@ -713,9 +714,9 @@ pub fn cmd_serve(repo_path: &str, args: &ServeArgs, _verbose: bool) -> Result<()
                 b"",
                 &[
                     ("Access-Control-Allow-Origin", "*"),
-                    ("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS"),
-                    ("Access-Control-Allow-Headers", "Accept, If-None-Match"),
-                    ("Access-Control-Expose-Headers", "ETag, Content-Length"),
+                    ("Access-Control-Allow-Methods", "*"),
+                    ("Access-Control-Allow-Headers", "*"),
+                    ("Access-Control-Expose-Headers", "*"),
                 ],
             );
             access_logger.log(&client_ip, &method, &url_path, info.status, info.size);

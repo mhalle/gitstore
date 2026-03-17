@@ -113,9 +113,9 @@ def _cors_middleware(app):
     """WSGI middleware that adds permissive CORS headers."""
     _CORS_HEADERS = [
         ("Access-Control-Allow-Origin", "*"),
-        ("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS"),
-        ("Access-Control-Allow-Headers", "Accept, If-None-Match"),
-        ("Access-Control-Expose-Headers", "ETag, Content-Length"),
+        ("Access-Control-Allow-Methods", "*"),
+        ("Access-Control-Allow-Headers", "*"),
+        ("Access-Control-Expose-Headers", "*"),
     ]
 
     def wrapped(environ, start_response):
@@ -394,6 +394,7 @@ def _serve_file(environ, start_response, fs, ref_label, path, want_json,
             "path": path,
             "ref": ref_label,
             "size": len(data),
+            "hash": st.hash,
             "type": "file",
         }).encode()
         start_response("200 OK", [

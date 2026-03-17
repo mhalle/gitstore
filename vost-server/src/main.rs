@@ -396,12 +396,13 @@ fn not_found(msg: &str) -> Response {
 
 fn json_response(value: serde_json::Value, etag: &str, cache_control: &str) -> Response {
     let body = value.to_string();
-    Response::builder()
+    let mut builder = Response::builder()
         .header(header::CONTENT_TYPE, "application/json")
-        .header(header::ETAG, etag)
-        .header(header::CACHE_CONTROL, cache_control)
-        .body(Body::from(body))
-        .unwrap()
+        .header(header::CACHE_CONTROL, cache_control);
+    if !etag.is_empty() {
+        builder = builder.header(header::ETAG, etag);
+    }
+    builder.body(Body::from(body)).unwrap()
 }
 
 fn file_response(
@@ -456,12 +457,13 @@ fn range_response(
 }
 
 fn html_response(html: String, etag: &str, cache_control: &str) -> Response {
-    Response::builder()
+    let mut builder = Response::builder()
         .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
-        .header(header::ETAG, etag)
-        .header(header::CACHE_CONTROL, cache_control)
-        .body(Body::from(html))
-        .unwrap()
+        .header(header::CACHE_CONTROL, cache_control);
+    if !etag.is_empty() {
+        builder = builder.header(header::ETAG, etag);
+    }
+    builder.body(Body::from(html)).unwrap()
 }
 
 // ---------------------------------------------------------------------------

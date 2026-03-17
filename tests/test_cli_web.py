@@ -666,8 +666,8 @@ class TestCORS:
         app = _make_app(store_with_files, fs=fs, ref_label="main", cors=True)
         _, headers, _ = _wsgi_get(app, "/hello.txt")
         assert headers["Access-Control-Allow-Origin"] == "*"
-        assert "GET" in headers["Access-Control-Allow-Methods"]
-        assert "ETag" in headers["Access-Control-Expose-Headers"]
+        assert headers["Access-Control-Allow-Methods"] == "*"
+        assert headers["Access-Control-Expose-Headers"] == "*"
 
     def test_cors_on_json_response(self, store_with_files):
         fs = store_with_files.branches["main"]
