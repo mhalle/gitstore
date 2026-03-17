@@ -7,6 +7,10 @@ description = "High-performance HTTP file server for vost repositories"
 license = "Apache-2.0"
 repository = "https://github.com/mhalle/vost"
 
+[features]
+default = []
+vendored-openssl = ["vost/vendored-openssl"]
+
 [dependencies]
 vost = { path = "../rs" }
 axum = "0.8"
