@@ -22,7 +22,7 @@ from vost.repo import GitStore
 # WSGI test helper
 # ---------------------------------------------------------------------------
 
-def _wsgi_get(app, path="/", accept=None, method="GET", if_none_match=None):
+def _wsgi_get(app, path="/", accept=None, method="GET", if_none_match=None, range=None):
     """Call the WSGI app with a request, return (status, headers, body)."""
     environ = {
         "REQUEST_METHOD": method,
@@ -37,6 +37,8 @@ def _wsgi_get(app, path="/", accept=None, method="GET", if_none_match=None):
         environ["HTTP_ACCEPT"] = accept
     if if_none_match:
         environ["HTTP_IF_NONE_MATCH"] = if_none_match
+    if range:
+        environ["HTTP_RANGE"] = range
 
     captured = {}
 
@@ -1219,3 +1221,158 @@ class TestServeCLI:
             assert clf_pattern.match(lines[0]), f"CLF mismatch: {lines[0]!r}"
         finally:
             _stop_server(proc)
+
+
+# ---------------------------------------------------------------------------
+# Range request tests
+# ---------------------------------------------------------------------------
+
+class TestRangeRequests:
+    def test_range_first_bytes(self, store_with_files):
+        """Range: bytes=0-4 returns first 5 bytes."""
+        fs = store_with_files.branches["main"]
+        app = _make_app(store_with_files, fs=fs, ref_label="main")
+        status, headers, body = _wsgi_get(app, "/hello.txt", range="bytes=0-4")
+        assert status == "206 Partial Content"
+        assert body == b"hello"
+        assert headers["Content-Range"] == f"bytes 0-4/{len(b'hello world\n')}"
+        assert headers["Accept-Ranges"] == "bytes"
+
+    def test_range_middle_bytes(self, store_with_files):
+        """Range: bytes=6-10 returns 'world'."""
+        fs = store_with_files.branches["main"]
+        app = _make_app(store_with_files, fs=fs, ref_label="main")
+        status, _, body = _wsgi_get(app, "/hello.txt", range="bytes=6-10")
+        assert status == "206 Partial Content"
+        assert body == b"world"
+
+    def test_range_open_end(self, store_with_files):
+        """Range: bytes=6- returns from offset to end."""
+        fs = store_with_files.branches["main"]
+        app = _make_app(store_with_files, fs=fs, ref_label="main")
+        status, _, body = _wsgi_get(app, "/hello.txt", range="bytes=6-")
+        assert status == "206 Partial Content"
+        assert body == b"world\n"
+
+    def test_range_suffix(self, store_with_files):
+        """Range: bytes=-5 returns last 5 bytes."""
+        fs = store_with_files.branches["main"]
+        app = _make_app(store_with_files, fs=fs, ref_label="main")
+        status, _, body = _wsgi_get(app, "/hello.txt", range="bytes=-5")
+        assert status == "206 Partial Content"
+        assert body == b"rld\n" or body == b"orld\n"  # last 5 of "hello world\n"
+        assert len(body) == 5
+
+    def test_range_has_etag(self, store_with_files):
+        """206 responses include per-blob ETag."""
+        fs = store_with_files.branches["main"]
+        app = _make_app(store_with_files, fs=fs, ref_label="main")
+        _, headers, _ = _wsgi_get(app, "/hello.txt", range="bytes=0-4")
+        blob_hash = fs.stat("hello.txt").hash
+        assert headers["ETag"] == f'"{blob_hash}"'
+
+    def test_no_range_full_response(self, store_with_files):
+        """Without Range header, normal 200 is returned."""
+        fs = store_with_files.branches["main"]
+        app = _make_app(store_with_files, fs=fs, ref_label="main")
+        status, headers, body = _wsgi_get(app, "/hello.txt")
+        assert status == "200 OK"
+        assert body == b"hello world\n"
+        assert headers.get("Accept-Ranges") == "bytes"
+
+    def test_invalid_range_returns_200(self, store_with_files):
+        """Malformed Range header falls through to full 200."""
+        fs = store_with_files.branches["main"]
+        app = _make_app(store_with_files, fs=fs, ref_label="main")
+        status, _, body = _wsgi_get(app, "/hello.txt", range="bytes=999-9999")
+        assert status == "200 OK"
+        assert body == b"hello world\n"
+
+    def test_range_on_json_ignored(self, store_with_files):
+        """Range is ignored when Accept: application/json is set."""
+        fs = store_with_files.branches["main"]
+        app = _make_app(store_with_files, fs=fs, ref_label="main")
+        status, _, body = _wsgi_get(app, "/hello.txt", accept="application/json", range="bytes=0-4")
+        assert status == "200 OK"
+        data = json.loads(body)
+        assert data["type"] == "file"
+
+    def test_range_on_directory_ignored(self, store_with_files):
+        """Range header is ignored for directory listings."""
+        fs = store_with_files.branches["main"]
+        app = _make_app(store_with_files, fs=fs, ref_label="main")
+        status, _, _ = _wsgi_get(app, "/data", range="bytes=0-10")
+        assert status == "200 OK"
+
+
+# ---------------------------------------------------------------------------
+# Accept-Ranges header tests
+# ---------------------------------------------------------------------------
+
+class TestAcceptRanges:
+    def test_file_has_accept_ranges(self, store_with_files):
+        fs = store_with_files.branches["main"]
+        app = _make_app(store_with_files, fs=fs, ref_label="main")
+        _, headers, _ = _wsgi_get(app, "/hello.txt")
+        assert headers.get("Accept-Ranges") == "bytes"
+
+    def test_dir_no_accept_ranges(self, store_with_files):
+        fs = store_with_files.branches["main"]
+        app = _make_app(store_with_files, fs=fs, ref_label="main")
+        _, headers, _ = _wsgi_get(app, "/data")
+        assert "Accept-Ranges" not in headers
+
+
+# ---------------------------------------------------------------------------
+# Immutable and max-age cache control tests
+# ---------------------------------------------------------------------------
+
+class TestCacheControlModes:
+    def test_default_no_cache(self, store_with_files):
+        fs = store_with_files.branches["main"]
+        app = _make_app(store_with_files, fs=fs, ref_label="main")
+        _, headers, _ = _wsgi_get(app, "/hello.txt")
+        assert headers["Cache-Control"] == "no-cache"
+
+    def test_immutable(self, store_with_files):
+        fs = store_with_files.branches["main"]
+        app = _make_app(store_with_files, fs=fs, ref_label="main",
+                        cache_control="public, immutable, max-age=31536000")
+        _, headers, _ = _wsgi_get(app, "/hello.txt")
+        assert headers["Cache-Control"] == "public, immutable, max-age=31536000"
+
+    def test_immutable_on_dir(self, store_with_files):
+        fs = store_with_files.branches["main"]
+        app = _make_app(store_with_files, fs=fs, ref_label="main",
+                        cache_control="public, immutable, max-age=31536000")
+        _, headers, _ = _wsgi_get(app, "/data")
+        assert headers["Cache-Control"] == "public, immutable, max-age=31536000"
+
+    def test_max_age(self, store_with_files):
+        fs = store_with_files.branches["main"]
+        app = _make_app(store_with_files, fs=fs, ref_label="main",
+                        cache_control="public, max-age=3600")
+        _, headers, _ = _wsgi_get(app, "/hello.txt")
+        assert headers["Cache-Control"] == "public, max-age=3600"
+
+    def test_no_store(self, store_with_files):
+        fs = store_with_files.branches["main"]
+        app = _make_app(store_with_files, fs=fs, ref_label="main",
+                        cache_control="no-store")
+        _, headers, _ = _wsgi_get(app, "/hello.txt")
+        assert headers["Cache-Control"] == "no-store"
+
+    def test_range_response_inherits_cache_control(self, store_with_files):
+        """206 responses use the same cache control as full responses."""
+        fs = store_with_files.branches["main"]
+        app = _make_app(store_with_files, fs=fs, ref_label="main",
+                        cache_control="public, immutable, max-age=31536000")
+        _, headers, _ = _wsgi_get(app, "/hello.txt", range="bytes=0-4")
+        assert headers["Cache-Control"] == "public, immutable, max-age=31536000"
+
+    def test_json_metadata_inherits_cache_control(self, store_with_files):
+        fs = store_with_files.branches["main"]
+        app = _make_app(store_with_files, fs=fs, ref_label="main",
+                        cache_control="public, max-age=600")
+        _, headers, _ = _wsgi_get(app, "/hello.txt", accept="application/json")
+        assert headers["Cache-Control"] == "public, max-age=600"
