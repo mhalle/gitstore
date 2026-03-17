@@ -20,7 +20,6 @@ export class GitStore {
   /** @internal */ _fsModule: FsModule;
   /** @internal */ _gitdir: string;
   /** @internal */ _signature: Signature;
-
   /** Dict-like access to branches. */
   branches: RefDict;
   /** Dict-like access to tags. */
@@ -129,6 +128,26 @@ export class GitStore {
     }
   }
 
+  /** @internal Apply compression and bigFileThreshold config to the repository. */
+  async _applyConfig(compression: number | undefined, bigFileThreshold: number | undefined): Promise<void> {
+    if (compression !== undefined) {
+      await git.setConfig({
+        fs: this._fsModule,
+        gitdir: this._gitdir,
+        path: 'core.compression',
+        value: compression,
+      });
+    }
+    if (bigFileThreshold !== undefined) {
+      await git.setConfig({
+        fs: this._fsModule,
+        gitdir: this._gitdir,
+        path: 'core.bigFileThreshold',
+        value: bigFileThreshold,
+      });
+    }
+  }
+
   toString(): string {
     return `GitStore('${this._gitdir}')`;
   }
@@ -142,6 +161,8 @@ export class GitStore {
    * @param opts.branch - Initial branch when creating (default: "main"). Null for no branch.
    * @param opts.author - Default author name (default: "vost").
    * @param opts.email - Default author email (default: "vost@localhost").
+   * @param opts.compression - Zlib compression level for git objects (0-9). Undefined uses the git default.
+   * @param opts.bigFileThreshold - Blobs larger than this (bytes) skip delta compression. 0 = all blobs skip deltas.
    */
   static async open(
     path: string,
@@ -151,6 +172,8 @@ export class GitStore {
       branch?: string | null;
       author?: string;
       email?: string;
+      compression?: number;
+      bigFileThreshold?: number;
     } = {},
   ): Promise<GitStore> {
     const fsModule = opts.fs ?? nodeFs as unknown as FsModule;
@@ -158,6 +181,8 @@ export class GitStore {
     const branch = opts.branch !== undefined ? opts.branch : 'main';
     const author = opts.author ?? 'vost';
     const email = opts.email ?? 'vost@localhost';
+    const compression = opts.compression;
+    const bigFileThreshold = opts.bigFileThreshold;
 
     // Check if repo exists
     let exists = false;
@@ -167,7 +192,9 @@ export class GitStore {
     } catch { /* not found */ }
 
     if (exists) {
-      return new GitStore(fsModule, path, author, email);
+      const store = new GitStore(fsModule, path, author, email);
+      await store._applyConfig(compression, bigFileThreshold);
+      return store;
     }
 
     if (!create) {
@@ -178,6 +205,7 @@ export class GitStore {
     await git.init({ fs: fsModule, gitdir: path, bare: true });
 
     const store = new GitStore(fsModule, path, author, email);
+    await store._applyConfig(compression, bigFileThreshold);
 
     if (branch !== null) {
       // Create initial empty commit on the branch

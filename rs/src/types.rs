@@ -493,6 +493,11 @@ pub struct OpenOptions {
     pub author: Option<String>,
     /// Default author email.
     pub email: Option<String>,
+    /// Compression level for git objects (0=none, 1-9=zlib). None = git default.
+    pub compression: Option<u32>,
+    /// Blobs larger than this (bytes) skip delta compression during packing.
+    /// 0 = all blobs skip deltas. None = git default (512 MiB).
+    pub big_file_threshold: Option<u64>,
 }
 
 // ---------------------------------------------------------------------------

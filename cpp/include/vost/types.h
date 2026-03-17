@@ -265,6 +265,8 @@ struct OpenOptions {
     std::optional<std::string> branch;         ///< Default branch name.
     std::optional<std::string> author;         ///< Default author name.
     std::optional<std::string> email;          ///< Default author email.
+    std::optional<int>         compression;    ///< Zlib compression level (0-9). Nullopt = git default.
+    std::optional<int64_t>     big_file_threshold; ///< Blobs larger than this (bytes) skip delta compression. 0 = all skip deltas.
 };
 
 // ---------------------------------------------------------------------------

@@ -343,6 +343,19 @@ class GitStore:
             result = result.back(back)
         return result
 
+    def _apply_config(self, *, compression: int | None = None, big_file_threshold: int | None = None):
+        """Apply git config options to the repository."""
+        config = self._repo._drepo.get_config()
+        changed = False
+        if compression is not None:
+            config.set((b"core",), b"compression", str(compression).encode())
+            changed = True
+        if big_file_threshold is not None:
+            config.set((b"core",), b"bigfilethreshold", str(big_file_threshold).encode())
+            changed = True
+        if changed:
+            config.write_to_path()
+
     @classmethod
     def open(
         cls,
@@ -352,6 +365,8 @@ class GitStore:
         branch: str | None = "main",
         author: str = "vost",
         email: str = "vost@localhost",
+        compression: int | None = None,
+        big_file_threshold: int | None = None,
     ) -> GitStore:
         """Open or create a bare git repository.
 
@@ -363,12 +378,20 @@ class GitStore:
                     None to create a bare repo with no branches.
             author: Default author name for commits.
             email: Default author email for commits.
+            compression: Zlib compression level for git objects (0-9).
+                None uses the git default (6). 0 disables compression,
+                which is ideal for pre-compressed data like Zarr chunks.
+            big_file_threshold: Blobs larger than this (bytes) skip delta
+                compression during packing. 0 means all blobs skip deltas.
+                None uses the git default (512 MiB).
         """
         path = Path(path)
 
         if path.exists():
             repo = _Repository(str(path))
-            return cls(repo, author, email)
+            store = cls(repo, author, email)
+            store._apply_config(compression=compression, big_file_threshold=big_file_threshold)
+            return store
 
         if not create:
             raise FileNotFoundError(f"Repository not found: {path}")
@@ -389,6 +412,7 @@ class GitStore:
             )
             repo.set_head_branch(branch)
 
+        store._apply_config(compression=compression, big_file_threshold=big_file_threshold)
         return store
 
     def backup(

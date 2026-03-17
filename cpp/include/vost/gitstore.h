@@ -24,10 +24,10 @@ class RefDict;
 /// Internal state shared via shared_ptr across Fs copies.
 /// Not part of the public API.
 struct GitStoreInner {
-    git_repository*      repo;      ///< Raw libgit2 handle (owned).
-    std::filesystem::path path;     ///< Path to the bare repository.
-    Signature             signature; ///< Default commit signature.
-    std::mutex            mutex;    ///< Thread-level serialization.
+    git_repository*      repo;       ///< Raw libgit2 handle (owned).
+    std::filesystem::path path;      ///< Path to the bare repository.
+    Signature             signature;  ///< Default commit signature.
+    std::mutex            mutex;     ///< Thread-level serialization.
 
     // Non-copyable / non-movable — always accessed via shared_ptr.
     GitStoreInner(const GitStoreInner&) = delete;

@@ -73,6 +73,21 @@ impl GitStore {
             )));
         };
 
+        // Apply git config options
+        {
+            let mut config = repo.config().map_err(Error::git)?;
+            if let Some(level) = options.compression {
+                config
+                    .set_i32("core.compression", level as i32)
+                    .map_err(Error::git)?;
+            }
+            if let Some(threshold) = options.big_file_threshold {
+                config
+                    .set_i64("core.bigFileThreshold", threshold as i64)
+                    .map_err(Error::git)?;
+            }
+        }
+
         #[allow(clippy::arc_with_non_send_sync)]
         Ok(GitStore {
             inner: Arc::new(GitStoreInner {

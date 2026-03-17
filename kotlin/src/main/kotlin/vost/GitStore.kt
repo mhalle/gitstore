@@ -200,6 +200,8 @@ class GitStore private constructor(
          *               Null to create a bare repo with no branches.
          * @param author Default author name for commits.
          * @param email Default author email for commits.
+         * @param compression Zlib compression level for git objects (0-9). Null uses the git default.
+         * @param bigFileThreshold Blobs larger than this (bytes) skip delta compression. 0 = all blobs skip deltas. Null uses the git default.
          */
         fun open(
             path: String,
@@ -207,6 +209,8 @@ class GitStore private constructor(
             branch: String? = "main",
             author: String = "vost",
             email: String = "vost@localhost",
+            compression: Int? = null,
+            bigFileThreshold: Long? = null,
         ): GitStore {
             val dir = File(path)
 
@@ -216,6 +220,7 @@ class GitStore private constructor(
                     .setGitDir(dir)
                     .build()
                 configureForBareRepo(repo)
+                applyConfig(repo, compression, bigFileThreshold)
                 return GitStore(repo, Signature(author, email))
             }
 
@@ -231,6 +236,7 @@ class GitStore private constructor(
                 .build()
             repo.create(true)
             configureForBareRepo(repo)
+            applyConfig(repo, compression, bigFileThreshold)
 
             val store = GitStore(repo, Signature(author, email))
 
@@ -273,6 +279,19 @@ class GitStore private constructor(
         private fun configureForBareRepo(repo: Repository) {
             val config: StoredConfig = repo.config
             config.setString("core", null, "logAllRefUpdates", "always")
+            config.save()
+        }
+
+        /** Apply compression and bigFileThreshold config to the repository. */
+        private fun applyConfig(repo: Repository, compression: Int?, bigFileThreshold: Long?) {
+            if (compression == null && bigFileThreshold == null) return
+            val config: StoredConfig = repo.config
+            if (compression != null) {
+                config.setInt("core", null, "compression", compression)
+            }
+            if (bigFileThreshold != null) {
+                config.setLong("core", null, "bigFileThreshold", bigFileThreshold)
+            }
             config.save()
         }
     }

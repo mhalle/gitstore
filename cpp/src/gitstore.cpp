@@ -131,6 +131,20 @@ GitStore GitStore::open(const std::filesystem::path& path, OpenOptions opts) {
         throw NotFoundError("repository not found: " + path.string());
     }
 
+    // Apply compression and big_file_threshold config
+    if (opts.compression || opts.big_file_threshold) {
+        git_config* cfg = nullptr;
+        if (git_repository_config(&cfg, repo) == 0) {
+            if (opts.compression) {
+                git_config_set_int32(cfg, "core.compression", *opts.compression);
+            }
+            if (opts.big_file_threshold) {
+                git_config_set_int64(cfg, "core.bigFileThreshold", *opts.big_file_threshold);
+            }
+            git_config_free(cfg);
+        }
+    }
+
     auto inner = std::make_shared<GitStoreInner>(repo, path, sig);
     return GitStore(std::move(inner));
 }
