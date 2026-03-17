@@ -4,6 +4,14 @@ All notable changes to vost are documented in this file.
 
 ## Unreleased
 
+## v0.78.1 / Rust v0.10.6 / vost-server v0.2.1 (2026-03-17)
+
+**Added (all five ports — Python, Rust, TypeScript, Kotlin, C++):**
+
+- `GitStore.read_by_hash(hash, offset, size)` — direct blob read on the store, bypassing Fs/tree resolution
+- `GitStore.has_hash(hash)` — check blob existence without reading data
+- `GitStore.open()` options: `compression` (0-9, sets `core.compression`) and `big_file_threshold` (bytes, sets `core.bigFileThreshold`). Use `compression=0, big_file_threshold=0` for pre-compressed data like Zarr chunks.
+
 ## v0.78.0 / Rust v0.10.5 / vost-server v0.2.0 (2026-03-17)
 
 **Added (all three HTTP servers — Python CLI, Rust CLI, vost-server):**
