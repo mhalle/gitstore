@@ -507,11 +507,11 @@ fn serve_blob_response(state: &AppState, hash: &str, headers: &HeaderMap) -> Res
         }
     }
 
-    // Check cache first, then read from git via store.read_blob (no Fs needed)
+    // Check cache first, then read from git via store.read_by_hash (no Fs needed)
     let data: Bytes = if let Some(cached) = state.blob_cache.get(hash) {
         cached
     } else {
-        match state.store.read_blob(hash, 0, None) {
+        match state.store.read_by_hash(hash, 0, None) {
             Ok(d) => {
                 let bytes = Bytes::from(d);
                 state.blob_cache.insert(hash.to_string(), bytes.clone());
@@ -807,7 +807,7 @@ async fn handle_single_ref(
 
         // /{40-hex} — try blob hash first, fall back to path
         if is_hex40(&repo_path) {
-            if state.store.has_blob(&repo_path) {
+            if state.store.has_hash(&repo_path) {
                 return serve_blob_response(&state, &repo_path, &headers);
             }
             // Blob not found locally — redirect to upstream if available
@@ -897,7 +897,7 @@ async fn handle_multi_ref_root(
     tokio::task::spawn_blocking(move || {
         // /{40-hex} — try blob hash first, fall back to ref lookup
         if is_hex40(&ref_name) {
-            if state.store.has_blob(&ref_name) {
+            if state.store.has_hash(&ref_name) {
                 return serve_blob_response(&state, &ref_name, &headers);
             }
             // Blob not found locally — redirect to upstream if available

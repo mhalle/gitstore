@@ -267,7 +267,7 @@ def _make_app(store, *, fs=None, resolver=None, ref_label=None,
             current_fs = _get_fs()
             # /{40-hex} — try blob hash first, fall back to path
             if _is_hex40(path):
-                if store.has_blob(path):
+                if store.has_hash(path):
                     return _serve_blob(environ, start_response, store, path, want_json, cache_control, upstream)
                 elif upstream:
                     return _redirect_upstream(start_response, upstream, path)
@@ -282,7 +282,7 @@ def _make_app(store, *, fs=None, resolver=None, ref_label=None,
 
             # /{40-hex} — try blob hash first (ref-independent)
             if _is_hex40(path):
-                if store.has_blob(path):
+                if store.has_hash(path):
                     return _serve_blob(environ, start_response, store, path, want_json, cache_control, upstream)
                 elif upstream:
                     return _redirect_upstream(start_response, upstream, path)
@@ -531,7 +531,7 @@ def _serve_blob(environ, start_response, store, hash_str, want_json, cache_contr
         return [b""]
 
     try:
-        data = store.read_blob(hash_str)
+        data = store.read_by_hash(hash_str)
     except Exception:
         if upstream:
             return _redirect_upstream(start_response, upstream, f"_/blobs/{hash_str}")

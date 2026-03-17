@@ -281,9 +281,9 @@ void GitStore::bundle_import(const std::string& path,
     mirror::bundle_import(inner_, path, refs, ref_map);
 }
 
-std::vector<uint8_t> GitStore::read_blob(const std::string& hash,
-                                          size_t offset,
-                                          size_t size) const {
+std::vector<uint8_t> GitStore::read_by_hash(const std::string& hash,
+                                             size_t offset,
+                                             size_t size) const {
     git_oid oid;
     if (git_oid_fromstr(&oid, hash.c_str()) != 0)
         throw InvalidHashError(hash);
@@ -307,9 +307,9 @@ std::vector<uint8_t> GitStore::read_blob(const std::string& hash,
     return result;
 }
 
-bool GitStore::has_blob(const std::string& hash) const {
+bool GitStore::has_hash(const std::string& hash) const {
     try {
-        read_blob(hash, 0, 0);
+        read_by_hash(hash, 0, 0);
         return true;
     } catch (...) {
         return false;

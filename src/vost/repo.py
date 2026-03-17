@@ -492,7 +492,7 @@ class GitStore:
         from .mirror import bundle_export
         bundle_export(self, path, refs=refs, squash=squash, progress=progress)
 
-    def read_blob(self, hash: str | bytes, *, offset: int = 0, size: int | None = None) -> bytes:
+    def read_by_hash(self, hash: str | bytes, *, offset: int = 0, size: int | None = None) -> bytes:
         """Read raw blob data by hash, bypassing tree/ref resolution.
 
         This is the fastest path to blob data — no FS, no tree walk, just a
@@ -506,7 +506,7 @@ class GitStore:
             return data[offset:end]
         return data
 
-    def has_blob(self, hash: str | bytes) -> bool:
+    def has_hash(self, hash: str | bytes) -> bool:
         """Check if a blob with the given hash exists in the object store."""
         if isinstance(hash, str):
             hash = hash.encode()

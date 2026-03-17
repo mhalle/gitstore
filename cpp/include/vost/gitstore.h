@@ -158,15 +158,15 @@ public:
     /// @param size   Maximum bytes to return (0 for all, default 0).
     /// @throws InvalidHashError if the hash is malformed.
     /// @throws GitError if the blob cannot be found.
-    std::vector<uint8_t> read_blob(const std::string& hash,
-                                    size_t offset = 0,
-                                    size_t size = 0) const;
+    std::vector<uint8_t> read_by_hash(const std::string& hash,
+                                       size_t offset = 0,
+                                       size_t size = 0) const;
 
     /// Check if a blob with the given hash exists in the object store.
     ///
     /// @param hash 40-char hex SHA of the blob.
     /// @returns true if the blob exists, false otherwise.
-    bool has_blob(const std::string& hash) const;
+    bool has_hash(const std::string& hash) const;
 
     // -- Metadata -----------------------------------------------------------
 

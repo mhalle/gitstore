@@ -73,7 +73,7 @@ class GitStore private constructor(
      * @param offset Byte offset to start reading from.
      * @param size Maximum number of bytes to return (null for all).
      */
-    fun readBlob(hash: String, offset: Int = 0, size: Int? = null): ByteArray {
+    fun readByHash(hash: String, offset: Int = 0, size: Int? = null): ByteArray {
         val oid = ObjectId.fromString(hash)
         val loader = repo.open(oid, Constants.OBJ_BLOB)
         val data = loader.bytes
@@ -91,9 +91,9 @@ class GitStore private constructor(
      * @param hash 40-char hex SHA of the blob.
      * @return true if the blob exists, false otherwise.
      */
-    fun hasBlob(hash: String): Boolean {
+    fun hasHash(hash: String): Boolean {
         return try {
-            readBlob(hash, size = 0)
+            readByHash(hash, size = 0)
             true
         } catch (e: Exception) {
             false

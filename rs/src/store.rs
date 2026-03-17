@@ -364,7 +364,7 @@ impl GitStore {
     ///
     /// This is the fastest path to blob data — no Fs, no tree walk, just a
     /// direct object store lookup. Ideal for content-addressed access.
-    pub fn read_blob(&self, hash: &str, offset: usize, size: Option<usize>) -> Result<Vec<u8>> {
+    pub fn read_by_hash(&self, hash: &str, offset: usize, size: Option<usize>) -> Result<Vec<u8>> {
         let oid = git2::Oid::from_str(hash)
             .map_err(|e| Error::git_msg(format!("invalid hash: {}", e)))?;
         let repo = self.inner.repo.lock()
@@ -380,7 +380,7 @@ impl GitStore {
     }
 
     /// Check if a blob with the given hex hash exists in the object store.
-    pub fn has_blob(&self, hash: &str) -> bool {
+    pub fn has_hash(&self, hash: &str) -> bool {
         let oid = match git2::Oid::from_str(hash) {
             Ok(oid) => oid,
             Err(_) => return false,

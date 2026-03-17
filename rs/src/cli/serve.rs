@@ -360,7 +360,7 @@ fn serve_blob(
         }
     }
 
-    let data = match store.read_blob(hash, 0, None) {
+    let data = match store.read_by_hash(hash, 0, None) {
         Ok(d) => d,
         Err(_) => {
             if let Some(upstream) = upstream {
@@ -864,7 +864,7 @@ pub fn cmd_serve(repo_path: &str, args: &ServeArgs, _verbose: bool) -> Result<()
 
         // /{40-hex} — try blob hash first, fall back to normal routing
         if is_hex40(&path) {
-            if store.has_blob(&path) {
+            if store.has_hash(&path) {
                 let info = serve_blob(request, &store, &path, &cache_control, args.cors, args.upstream.as_deref());
                 access_logger.log(&client_ip, &method, &url_path, info.status, info.size);
                 continue;

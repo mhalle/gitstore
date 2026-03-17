@@ -104,7 +104,7 @@ export class GitStore {
    * @param opts.size - Maximum bytes to return (undefined for all).
    * @returns Raw blob contents as Uint8Array.
    */
-  async readBlob(hash: string, opts?: { offset?: number; size?: number }): Promise<Uint8Array> {
+  async readByHash(hash: string, opts?: { offset?: number; size?: number }): Promise<Uint8Array> {
     const { blob } = await git.readBlob({ fs: this._fsModule, gitdir: this._gitdir, oid: hash });
     if (opts && (opts.offset !== undefined || opts.size !== undefined)) {
       const offset = opts.offset ?? 0;
@@ -120,9 +120,9 @@ export class GitStore {
    * @param hash - 40-char hex SHA of the blob.
    * @returns true if the blob exists, false otherwise.
    */
-  async hasBlob(hash: string): Promise<boolean> {
+  async hasHash(hash: string): Promise<boolean> {
     try {
-      await this.readBlob(hash, { size: 0 });
+      await this.readByHash(hash, { size: 0 });
       return true;
     } catch {
       return false;
